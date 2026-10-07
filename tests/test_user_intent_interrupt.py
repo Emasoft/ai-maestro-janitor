@@ -398,6 +398,78 @@ def test_three_consecutive_old_assistant_records_stop_the_scan(tmp_path: Path) -
     assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
 
 
+
+def _padding(n: int) -> list[dict]:
+    return [
+        {"type": "assistant", "message": {"role": "assistant", "content": f"pad {i}" * 4}, "timestamp": _iso(NOW - i)}
+        for i in range(n)
+    ]
+
+
+def test_damaged_tail_still_finds_the_interrupt_before_it(tmp_path: Path) -> None:
+    """A raw 0xFF line, a non-object line and a half-written last line after a real interrupt
+    must not hide it (guard: passed on the pre-jsonl_walk code too)."""
+    t = tmp_path / "session.jsonl"
+    t.write_bytes(
+        json.dumps(_interrupt_record(30)).encode()
+        + b"\n"
+        + b"{\"type\": \"assistant\", \"text\": \"bad \xff byte\"}\n"
+        + b"[1, 2, 3]\n"
+        + b"{\"type\": \"user\", \"text\": \"half writ"
+    )
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 29.0 <= age <= 31.0
+
+
+def test_window_starting_on_a_line_boundary_keeps_its_first_record(tmp_path: Path, monkeypatch) -> None:
+    """A window that starts exactly at a record boundary must keep that record: the interrupt is
+    the FIRST record of the first window (guard: the old code dropped it and found it only after
+    one growth step, so the answer is the same)."""
+    interrupt = json.dumps(_interrupt_record(30)).encode() + b"\n"
+    pad = json.dumps(_padding(1)[0]).encode() + b"\n"
+    t = tmp_path / "session.jsonl"
+    t.write_bytes(pad + interrupt + pad)
+    monkeypatch.setattr(user_intent, "_INTERRUPT_SCAN_CHUNK_BYTES", len(interrupt) + len(pad))
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 29.0 <= age <= 31.0
+
+
+def test_zero_byte_transcript_returns_none(tmp_path: Path) -> None:
+    """An empty transcript has no interrupt -> None."""
+    t = tmp_path / "session.jsonl"
+    t.write_bytes(b"")
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
+
+
+def test_transcript_shorter_than_the_window_is_read_whole(tmp_path: Path) -> None:
+    """A file far smaller than the 64 KB window is read whole and the interrupt is found."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(12)])
+    assert t.stat().st_size < user_intent._INTERRUPT_SCAN_CHUNK_BYTES
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 11.0 <= age <= 13.0
+
+
+def test_no_marker_anywhere_grows_to_the_whole_file_and_returns_none(tmp_path: Path, monkeypatch) -> None:
+    """With no interrupt and only in-window assistant records the scan widens until the window
+    covers the file, then returns None."""
+    monkeypatch.setattr(user_intent, "_INTERRUPT_SCAN_CHUNK_BYTES", 64)
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, _padding(20))
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
+
+
 # ---------------------------------------------------------------------------------------
 # `record_pane_transcript` / `pane_transcript_path` (TRDD-ECHOKVZC): the TARGET session's own
 # pane -> transcript mapping that lets `pane_actuate.act` find (and cool down against) a
