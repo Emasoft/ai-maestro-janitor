@@ -1059,6 +1059,23 @@ def test_recent_messages_yields_human_turns_in_a_heartbeat_dominated_fixture(tmp
     ], f"heartbeat noise leaked into the tail: {got}"
 
 
+
+def test_recent_messages_keeps_a_heartbeat_reply_that_carries_content(tmp_path):
+    """TRDD-IYNS7H83: only the bare reply is noise; "janitor heartbeat" + a drift line is kept."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {"type": "user", "uuid": "u1",
+         "message": {"role": "user", "content": [{"type": "text", "text": "status?"}]}},
+        {"type": "assistant", "uuid": "a1",
+         "message": {"role": "assistant", "content": [{"type": "text", "text": "janitor heartbeat"}]}},
+        {"type": "assistant", "uuid": "a2",
+         "message": {"role": "assistant", "content": [{"type": "text", "text": "janitor heartbeat\nThe live account is X"}]}},
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    # recent_messages collapses whitespace, so the newline reads as a space.
+    assert ec.recent_messages(str(t)) == ["USER: status?", "ASSISTANT: janitor heartbeat The live account is X"]
+
+
 def test_recent_messages_a_task_notification_never_appears_as_a_human_line(tmp_path):
     """A `<task-notification>` delivery is not the human's own words and must never surface as
     a USER: line -- it must not appear in the output at all."""

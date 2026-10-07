@@ -210,11 +210,6 @@ _ORIGIN_KIND_NO_DECISION = "unclassified"
 _warned_unknown_origin_kinds: set[str] = set()
 
 _HEARTBEAT_REPLY_TEXT = "janitor heartbeat"
-# Report §4 glue item 1's own definition ("only the protocol reply"): the janitor-heartbeat-
-# protocol rule's own quiet contract prints "janitor heartbeat" then at most 2 drift lines, so
-# a bare reply is at most 3 lines -- a 4th line means real content rode along and the whole
-# text must be kept.
-_HEARTBEAT_REPLY_MAX_LINES = 3
 
 
 def _primary_text(entry: dict[str, Any]) -> str:
@@ -411,19 +406,13 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
 
 
 def is_heartbeat_reply(text: str) -> bool:
-    """True iff `text` is ONLY the janitor heartbeat protocol's bare quiet reply.
+    """True iff `text` is EXACTLY the janitor heartbeat protocol's bare quiet reply (after strip).
 
-    Used to drop an assistant text block that is pure heartbeat-protocol noise while keeping
-    everything else a heartbeat-triggered turn did (TRDD-RAEGS1D5 defect 1: the ORIGINAL
-    fix over-dropped a whole turn's worth of real work -- reads, edits, dispatches -- because
-    it skipped everything between a heartbeat prompt and the next human record). Matches the
-    janitor-heartbeat-protocol rule's own quiet contract: "reply with exactly `janitor
-    heartbeat`" or, when a drift line rides along, "`janitor heartbeat` then those lines
-    verbatim, adding at most 2 lines" -- so a match requires BOTH the exact leading phrase and
-    a total of 3 lines or fewer; a real report that merely starts with the same words but runs
-    longer must never be dropped.
+    The single content-filter predicate: used to leave pure heartbeat noise out of any
+    recent-messages / exchanges / handoff view while keeping everything else a heartbeat-
+    triggered turn did (TRDD-RAEGS1D5 defect 1). A reply that carries drift lines after the
+    phrase ("janitor heartbeat\nThe live account is X") is CONTENT -- the protocol tells the
+    model to surface those lines -- so it is NOT a match. The earlier wide rule (phrase plus up
+    to 2 lines) hid 9 real assistant messages on session b2bf5b7b (TRDD-IYNS7H83).
     """
-    stripped = text.strip()
-    if not stripped.startswith(_HEARTBEAT_REPLY_TEXT):
-        return False
-    return len(stripped.splitlines()) <= _HEARTBEAT_REPLY_MAX_LINES
+    return text.strip() == _HEARTBEAT_REPLY_TEXT

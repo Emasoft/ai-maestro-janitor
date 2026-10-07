@@ -428,10 +428,11 @@ def test_is_heartbeat_reply_exact_match() -> None:
     assert tr.is_heartbeat_reply("janitor heartbeat") is True
 
 
-def test_is_heartbeat_reply_with_up_to_two_drift_lines() -> None:
-    # janitor-heartbeat-protocol.md's own quiet contract: "janitor heartbeat" then drift
-    # lines, "adding at most 2 lines" -- so 3 total lines is still the bare quiet reply.
-    assert tr.is_heartbeat_reply("janitor heartbeat\ndrift line one\ndrift line two") is True
+def test_is_heartbeat_reply_with_drift_lines_is_content_not_noise() -> None:
+    # TRDD-IYNS7H83: a reply carrying drift lines is content (session b2bf5b7b: 9 real
+    # assistant messages "janitor heartbeat\nThe live account is ..." were hidden by the wide rule).
+    assert tr.is_heartbeat_reply("janitor heartbeat\nThe live account is X") is False
+    assert tr.is_heartbeat_reply("janitor heartbeat\ndrift line one\ndrift line two") is False
 
 
 def test_is_heartbeat_reply_false_when_too_long_or_different() -> None:

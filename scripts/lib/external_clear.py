@@ -553,8 +553,8 @@ def _record_text(content: Any, *, drop_heartbeat_reply: bool = False) -> str:
     joining, mirroring `jev_compaction.extract_items`'s per-block handling (TRDD-RAEGS1D5
     defect 1) -- collapsing the whole message into one string FIRST and checking that would
     let a real text block hide behind a heartbeat-reply block that happens to share the
-    message, and would also mis-measure `is_heartbeat_reply`'s own line-count cap against
-    text that was never on its own in the transcript.
+    message, and would make a bare reply no longer equal the bare phrase once joined with
+    other text.
     """
     if isinstance(content, str):
         if drop_heartbeat_reply and transcript_roles.is_heartbeat_reply(content):

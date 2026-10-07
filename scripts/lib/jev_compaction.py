@@ -106,10 +106,6 @@ _TOOL_INPUT_TRUNCATE = 300
 # other tool calls, other tool results, real assistant prose -- is now kept like any other item.
 _DISPATCHER_STUB_MARKER = "dispatcher-stub.py"
 
-# The janitor heartbeat protocol's exact quiet reply ("reply with exactly `janitor heartbeat`",
-# rules/janitor-heartbeat-protocol.md) -- the one assistant text that carries nothing.
-_BARE_HEARTBEAT_REPLY = "janitor heartbeat"
-
 # Pointer first-line preview cap (spec: `"<first line ≤80 chars>"`).
 _POINTER_PREVIEW_CHARS = 80
 
@@ -710,7 +706,7 @@ def extract_items(
        KEPT. Only two patterns are still dropped, matched directly rather than via a
        whole-turn skip window: the dispatcher-stub `tool_use`/`tool_result` pair
        (`_DISPATCHER_STUB_MARKER`), and an assistant text block that is nothing but the bare
-       heartbeat-protocol reply (`_BARE_HEARTBEAT_REPLY`, TRDD-D7RLXAN1). Real work a
+       heartbeat-protocol reply (`transcript_roles.is_heartbeat_reply`, TRDD-D7RLXAN1). Real work a
        `[janitor-resume]` turn does -- other tool calls, other results, real prose -- survives.
 
     3. `type: "attachment"` entries (defect 4): a mid-turn queued owner message or queued
@@ -889,13 +885,11 @@ def extract_items(
                         continue  # never an item, never remembered
                     if btype == "text":
                         text = block.get("text", "")
-                        # TRDD-D7RLXAN1: only the BARE quiet reply is dropped, not
-                        # `transcript_roles.is_heartbeat_reply`'s wider match (the reply plus up
-                        # to two lines). Those lines are drift the owner was shown and the
-                        # assistant's own words -- measured on b2bf5b7b, 9 such replies ("The
-                        # live account is ...", "The rotation outlook is better than I feared")
-                        # vanished from the full copy. Every assistant message is kept intact.
-                        if text.strip() == _BARE_HEARTBEAT_REPLY:
+                        # TRDD-D7RLXAN1 / TRDD-IYNS7H83: only the BARE quiet reply is dropped
+                        # (`transcript_roles.is_heartbeat_reply`, the one shared predicate). A
+                        # reply carrying drift lines is content -- 9 such replies on b2bf5b7b
+                        # ("The live account is ...") once vanished from the full copy.
+                        if transcript_roles.is_heartbeat_reply(text):
                             continue  # bare heartbeat-protocol reply -- see point 2 above
                         items.append(Item(f"{uuid}:{idx}", "assistant", text,
                                            estimate_tokens(text), ts, turn))

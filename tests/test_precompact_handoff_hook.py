@@ -755,24 +755,23 @@ def test_import_failure_still_writes_handoff_with_explicit_line_and_finding(
 def test_recent_turns_drops_bare_heartbeat_reply_but_keeps_substantive_heartbeat_work(
     tmp_path: Path,
 ) -> None:
-    """Only the BARE `is_heartbeat_reply` text is dropped — real work in the same unattended
-    session (heartbeat-started or not) is kept, per the orchestrator's revision of this card:
-    an unattended session's heartbeat-started turns ARE the real work.
+    """Only the BARE `is_heartbeat_reply` text is dropped -- a reply that carries drift lines is
+    content and survives (TRDD-IYNS7H83), as does real work in the same unattended session.
     """
     hook = _hook()
     tx = tmp_path / "t.jsonl"
     _write_jsonl(tx, [
         _umsg("[janitor-heartbeat]\n/path/to/stub"),
-        _amsg("janitor heartbeat"),  # bare quiet reply — dropped
+        _amsg("janitor heartbeat"),  # bare quiet reply -- dropped
         _umsg("[janitor-heartbeat]\n/path/to/stub"),
-        _amsg("janitor heartbeat\ndrift: OAuth slot 2 at 40%"),  # <=3 lines, still bare — dropped
+        _amsg("janitor heartbeat\nThe live account is X"),  # carries content -- kept
         _umsg("[janitor-heartbeat]\n/path/to/stub"),
-        _amsg("Reading the TRDD card and dispatching the fix agent."),  # real work — kept
+        _amsg("Reading the TRDD card and dispatching the fix agent."),  # real work -- kept
     ])
     turns = hook._recent_turns(str(tx), n=10)
     assert turns is not None
     assert ("assistant", "janitor heartbeat") not in turns
-    assert not any(t.startswith("janitor heartbeat\ndrift") for _, t in turns)
+    assert ("assistant", "janitor heartbeat\nThe live account is X") in turns
     assert ("assistant", "Reading the TRDD card and dispatching the fix agent.") in turns
 
 
