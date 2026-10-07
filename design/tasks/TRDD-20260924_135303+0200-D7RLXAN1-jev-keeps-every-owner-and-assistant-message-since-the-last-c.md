@@ -3,7 +3,7 @@ trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
 column: todo
 created: 2026-09-24T13:53:03+0200
-updated: 2026-10-07T19:19:59+0200
+updated: 2026-10-07T19:23:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: feature
@@ -128,3 +128,4 @@ TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heart
 2026-10-07 correction to the two 2026-10-07 lines above. Counts from the live-check report: of 9 resumed sessions, 1 read the full copy, 2 read part of it, 6 never opened it; the report lists 8 actions before the first read, not 7. The main agent's own account was wrong: in the session resumed at 03:52 it read the first 170 lines of the 988-line handoff file that the resume directive named, and never opened the copy that the READ FIRST line named. So that session counts among the 6. The conclusion stands and is stronger: the READ FIRST line was not followed in 8 of 9 cases.
 2026-10-07: third observed clear (session 74047cb8 cleared 14:49, resumed as bca1a6aa). The SessionStart injection named jev-compacted-74047cb8.md as READ FIRST; the [janitor-resume] cue then named .janitor/state/agent-handoff-74047cb8-20261007_144906+0200-14244.md as the file to read first. The resumed session read the second (all its prose, in 3 reads, after six bootstrap and arm calls) and never opened the first. Findings for the redesign: (a) one clear produced TWO read-first targets, so any design that leaves two fails whatever the file size; (b) 'before any other action' cannot pass while the arm skill and stub run first, so the pass criterion should become 'before task work'; (c) a resume-cue directive that names one file was obeyed.
 2026-10-07: the third observed clear (74047cb8 → bca1a6aa) counts as a READ: the agent-handoff file the session read in full is a byte copy of jev-compacted-74047cb8.md (128938 B both; diff -q identical). The defect was naming two files, fixed in 0ee31a20: the resume cue now names the READ FIRST file.
+2026-10-07: CORRECTION to the line above: the third clear read the byte copy in full but after six bootstrap and arm calls, so it is a PASS only if the criterion becomes 'read before task work'; under the card's 'before any other action' it is still a fail. Open: (1) decide the criterion; (2) on-session-start.py's 'read the rest' line for a truncated handoff still names the agent-handoff copy, so two names can still appear; point it at jev-compacted-<key>.md with the same mtime preference. Mtime guard for (2)'s sibling in dispatch.py landed in 170b6dce.
