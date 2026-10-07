@@ -1,10 +1,10 @@
 ---
 trdd-id: FQVEILVK
 title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 2026-10-06)
-column: human_review
+column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T03:00:03+0200
+updated: 2026-10-07T03:00:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,11 +34,13 @@ Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. al
 2026-10-07: in dev while follow-ups (1) and (2) of NEXT ACTION are worked; then human_review — both done (no commit needed: already satisfied by fdf88c7b and 3e2f0b1e). #332 closes only when every drift class is fixed or shown to need no action (owner card TRDD-6ESS2MGE; the closeable class waits on one post-release weekly audit, TRDD-8BNV75TV). #328 awaits the owner on proposal TRDD-Q9MU9CWK.
 2026-10-07: follow-up (1) found already satisfied, no change: the #326 test (fdf88c7b) reads only skills/janitor-memory-split/SKILL.md and asserts one sentence that occurs exactly once in the repo skills, inside the step-1 paragraph; follow-up (2) found already satisfied, no change: WM-CLI-05 already says lint owns body checks and validate's WARN is a mirror that leaves the exit code alone (3e2f0b1e, with 6f45acf8/d7da8884). Evidence: reports/issue-sweep/20261007-prerelease-batch.md.
 2026-10-07: v3.8.2 published with the #332 closeable change and the board re-column; 28 of 30 issues closed; #328 waits on the owner (proposal TRDD-Q9MU9CWK); #332 waits on the first weekly audit on 3.8.2 and the other drift classes (TRDD-6ESS2MGE).
+NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, testing past 40 days, ledger-note routing), owned by TRDD-6ESS2MGE; #328 waits on the owner; the closeable class waits on the first weekly audit on 3.8.2.
 
 ## Approval log
 
 - 2026-10-06T21:19:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T03:00:03+0200 — column → human_review by main-agent@ai-maestro-janitor. remaining items wait on the owner or on a post-release event
+- 2026-10-07T03:00:56+0200 — column → dev by main-agent@ai-maestro-janitor. remaining #332 drift classes are agent work
 
 ## STATE
 
