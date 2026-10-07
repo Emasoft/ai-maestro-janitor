@@ -115,7 +115,9 @@ def test_terminating_signal_reaps_the_helper_group(tmp_path: Path, sig: signal.S
     p = subprocess.Popen([sys.executable, "-c", driver])
     try:
         deadline = time.monotonic() + 30
-        while not pgid_file.exists() and time.monotonic() < deadline:
+        # The child's open("w") creates the file before the write lands, so existence alone is
+        # not readiness (seen as int("") under load in the 3.8.10 push gate).
+        while not (pgid_file.exists() and pgid_file.read_text().strip()) and time.monotonic() < deadline:
             time.sleep(0.1)
         pgid = int(pgid_file.read_text().strip())
         p.send_signal(sig)
