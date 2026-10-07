@@ -4,7 +4,7 @@ title: The lint-code drift guard reads codes from the rule registry instead of s
 column: backburner
 status: tasked
 created: 2026-10-04T15:47:32+0200
-updated: 2026-10-07T08:20:06+0200
+updated: 2026-10-07T08:21:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -49,3 +49,4 @@ The comment above _PUSH_BLOCK_RE (commit bc2bfb65) says the run-on 'only adds te
 2026-10-07: blocked-by names the owner decision, not a card, so trddgrep lint reports BLOCKED-WITHOUT-PROBE, BLOCKER-UNRESOLVED and GRAPH-UNKNOWN-BLOCKER on this card; unblock-when carries the decision predicate (not rejected). The block clears when the owner allows plain edits for module-level constants.
 2026-10-07: BLOCKED-ON-DECISION: may plain edits be used for module-level constants fastedit cannot target? asked 2026-10-07
 2026-10-07: BLOCKED-ON-DECISION (kept in backburner so the board validates): may plain edits be used for module-level constants fastedit cannot target? Asked 2026-10-07.
+2026-10-07: the BLOCKED-ON-DECISION line appears twice above; both carry the same question (two worker runs appended it), nothing differs.
