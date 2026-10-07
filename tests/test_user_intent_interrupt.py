@@ -424,10 +424,8 @@ def test_damaged_tail_still_finds_the_interrupt_before_it(tmp_path: Path) -> Non
     assert 29.0 <= age <= 31.0
 
 
-def test_window_starting_on_a_line_boundary_keeps_its_first_record(tmp_path: Path, monkeypatch) -> None:
-    """A window that starts exactly at a record boundary must keep that record: the interrupt is
-    the FIRST record of the first window (guard: the old code dropped it and found it only after
-    one growth step, so the answer is the same)."""
+def test_interrupt_at_a_window_boundary_is_still_found(tmp_path: Path, monkeypatch) -> None:
+    """An interrupt whose record starts exactly at the first window boundary is still found (today by one more widening step); this does not assert that the first window itself keeps the record."""
     interrupt = json.dumps(_interrupt_record(30)).encode() + b"\n"
     pad = json.dumps(_padding(1)[0]).encode() + b"\n"
     t = tmp_path / "session.jsonl"
@@ -468,6 +466,17 @@ def test_no_marker_anywhere_grows_to_the_whole_file_and_returns_none(tmp_path: P
     _write_jsonl(t, _padding(20))
 
     assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
+
+def test_widening_reaches_an_interrupt_at_the_start_of_the_file(tmp_path: Path, monkeypatch) -> None:
+    """Proves the widening reaches the start of the file, so the no-marker test's None is a real negative."""
+    monkeypatch.setattr(user_intent, "_INTERRUPT_SCAN_CHUNK_BYTES", 64)
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(30), *_padding(20)])
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 29.0 <= age <= 31.0
 
 
 # ---------------------------------------------------------------------------------------
