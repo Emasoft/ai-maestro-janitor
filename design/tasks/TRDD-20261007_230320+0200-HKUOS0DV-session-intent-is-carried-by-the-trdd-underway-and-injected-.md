@@ -33,7 +33,7 @@ Context, the owner's two preceding messages in the same exchange, verbatim: "and
 - With no card underway: inject board counts and the workable list as data. Never name a picked next card.
 - Inject the STATE block first with a size cap and a pointer to the file; show how old the STATE block is relative to the session's last activity.
 - Nothing is retired by this card. The owner-messages record from issue 338 (3.8.11) stays as the carrier for work that has no card.
-The bullets "no per-session marker", "never name a picked next card" and "nothing is retired" are the reviewer's suggestions adopted by the main agent on 2026-10-07; the owner was told and has not answered.
+Provenance, 2026-10-07: "no per-session marker" and "never name a picked next card" are the reviewer's suggestions adopted by the main agent. "Nothing is retired" withdraws the main agent's own earlier proposal to retire the model-written handoff, which the owner had not asked for. The owner was told all three on 2026-10-07 and had not answered by then.
 
 ## Measure before building
 
@@ -55,7 +55,7 @@ Stale STATE blocks; without enforcement the problem moves from the handoff to th
 
 - [ ] The four measurements are recorded on this card, each with its sample size and who judged it; a measurement that could not be taken is recorded as not taken and leaves this box unticked.
 - [ ] A failing test exists first for the injection script.
-- [ ] Field check, clear: after one real janitor clear the new session's first reply names the card underway and continues it with no typed message.
+- [ ] Field check, clear: after one real janitor clear the new session's first reply after the janitor's own setup calls names the card id of the card underway and continues it with no typed message.
 - [ ] Field check, restart: the same after one real Claude restart.
 - [ ] Field check, API error: the same after one turn killed by an API error, or a recorded reason why this case could not be produced.
 
