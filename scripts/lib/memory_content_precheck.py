@@ -1025,6 +1025,12 @@ def _has_substantive_body(body: str) -> bool:
     return False
 
 
+
+# The two body lines SessionStart seeds into an empty overview stub (scripts/hooks/on-session-start.py);
+# each is a fragment of one literal in the hook. A test asserts the hook still contains both.
+_SEED_STUB_PARTS = ("was seeded empty by SessionStart", "Recall by symptom:")
+
+
 # The superseded status value, tolerant of the `superseeded` misspelling exactly as
 # memgrep's own parser is (a misspelled retirement must not be invisible). Shared by
 # the retro-lesson precheck and the repair delimiter check (TRDD-QKWU26ZG).
@@ -1136,13 +1142,11 @@ def atomize_defect(text: str) -> str:
     if any(memory_edit_verify._ATOM_MARKER_RE.match(ln) for ln in text.splitlines()):
         return ""  # >=1 marker → the skill skips it ("already atomized")
     _fm, body = _split_page(text)
-    # WHY (TRDD-BRW49ELM): the SessionStart-seeded empty overview stub carries one prose line,
-    # so `_has_substantive_body` is true and the heartbeat dispatched a full agent run that
-    # abstained with zero changes. The stub says so itself; decline it HERE (the single
-    # candidacy predicate) so gate and candidate lister agree. Must stay in sync with the
-    # seed text in scripts/hooks/on-session-start.py.
-    if "was seeded empty by SessionStart" in body:
-        return ""
+    # WHY (TRDD-BRW49ELM): the SessionStart-seeded empty overview stub carries prose lines, so
+    # `_has_substantive_body` was true and the heartbeat dispatched a full agent run that
+    # abstained with zero changes. Strip ONLY the seeded lines before the substance check: a pure
+    # stub declines, a stub later filled with real facts still atomizes.
+    body = "\n".join(ln for ln in body.splitlines() if not any(p in ln for p in _SEED_STUB_PARTS))
     if not _has_substantive_body(body):
         return ""  # free-prose-leaf-no-distinct-facts — nothing markable
     return "free-prose"

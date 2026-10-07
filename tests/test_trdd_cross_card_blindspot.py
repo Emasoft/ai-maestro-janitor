@@ -440,9 +440,10 @@ def test_a_cleared_pair_is_forgotten_and_reported_again_when_it_returns(repo: Pa
     assert f"TRDD-{uid_a} & TRDD-{uid_b}" in _run(repo)
 
 
-def test_a_scan_with_an_unreadable_card_forgets_nothing(repo: Path):
+def test_a_scan_with_an_unreadable_card_forgets_nothing(repo: Path, monkeypatch: pytest.MonkeyPatch):
     """TRDD-61PLV7WS: when any card cannot be read the scan is incomplete, so a pair that
-    merely LOOKS cleared keeps its seen key (not detected != cleared)."""
+    merely LOOKS cleared keeps its seen key (not detected != cleared). The read failure is
+    injected by patching Path.read_text for that one card (in-process main())."""
     mod = _load_blindspot_module()
     uid_a, uid_b, uid_c = "aaaaaaaa", "bbbbbbbb", "cccccccc"
     key = mod._ref_pair_key("janitor#241", uid_a, uid_b)
@@ -453,9 +454,17 @@ def test_a_scan_with_an_unreadable_card_forgets_nothing(repo: Path):
     assert key in _seen_keys(repo)
 
     _write_trdd(repo, uid_a, external_refs=f"[janitor#241, TRDD-{uid_b}]")  # would clear the pair
-    unreadable.chmod(0)
-    try:
-        _run(repo)
-    finally:
-        unreadable.chmod(0o644)
+    real_read_text = Path.read_text
+
+    def flaky_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self == unreadable:
+            raise OSError("injected read failure")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    monkeypatch.setenv("JANITOR_FORCE_AI_MAESTRO", "1")
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_TRDD_PATH", raising=False)
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+    assert mod.main() == 0
+    monkeypatch.undo()
     assert key in _seen_keys(repo)
