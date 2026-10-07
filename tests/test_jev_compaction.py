@@ -6,7 +6,6 @@ import json
 import re
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -2218,14 +2217,15 @@ def test_score_items_parallel_overlaps_requests() -> None:
     for-loop exceeds both compaction-lane timeouts (the bug this card fixes -- measured: a
     49 MB transcript took 168 s on HEAD, over the 60 s sync AND the 120 s detached timeouts).
     160 non-"user" items pack 32-per-batch (card 5's non-"user" batch size) into 5 batches.
-    Asserts OVERLAP (requests in flight at once), not a wall-clock speedup: at host load ~127
-    a timing ratio failed (parallel 1.01 s vs serial 1.05 s, TRDD-KJAFABDU) although the code
-    path was right, whereas a request that sleeps keeps its slot, so overlap is load-proof."""
+    Asserts OVERLAP with a `threading.Barrier(2)`: the first two requests only proceed once both
+    are in flight, so a real pool passes at any host load while a serial executor raises
+    BrokenBarrierError after the timeout (TRDD-KJAFABDU: a wall-clock ratio, then a 0.2 s sleep
+    window, both still missed at host load 100+; a barrier needs no timing)."""
     items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(160)]
 
-    def max_in_flight(workers: int) -> int:
+    def max_in_flight(workers: int, barrier: threading.Barrier | None) -> int:
         lock = threading.Lock()
-        counts = {"now": 0, "max": 0}
+        counts = {"now": 0, "max": 0, "calls": 0}
         inner = FakeJevClient.constant(0.9)
 
         class _CountingClient:
@@ -2233,7 +2233,11 @@ def test_score_items_parallel_overlaps_requests() -> None:
                 with lock:
                     counts["now"] += 1
                     counts["max"] = max(counts["max"], counts["now"])
-                time.sleep(0.2)
+                    counts["calls"] += 1
+                    meet = barrier is not None and counts["calls"] <= 2
+                if meet:
+                    assert barrier is not None
+                    barrier.wait()
                 with lock:
                     counts["now"] -= 1
                 return inner.ask(state, questions)
@@ -2241,8 +2245,8 @@ def test_score_items_parallel_overlaps_requests() -> None:
         jc.score_items(items, "digest", _CountingClient(), max_workers=workers)
         return counts["max"]
 
-    assert max_in_flight(1) == 1
-    assert max_in_flight(8) >= 2
+    assert max_in_flight(1, None) == 1
+    assert max_in_flight(8, threading.Barrier(2, timeout=10)) >= 2
 
 
 def test_no_batch_exceeds_32_questions() -> None:
