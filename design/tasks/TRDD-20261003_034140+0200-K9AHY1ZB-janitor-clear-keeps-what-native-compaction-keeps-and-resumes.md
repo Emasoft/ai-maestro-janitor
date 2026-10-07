@@ -1,10 +1,10 @@
 ---
 trdd-id: K9AHY1ZB
 title: Janitor clear keeps what native compaction keeps and resumes in one push
-column: dev
+column: blocked
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-05T09:44:59+0200
+updated: 2026-10-07T02:27:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,8 +18,8 @@ approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
 npt: [5MOX0FPO, DS3WDTPV, PHS3DIBD]
 eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
-blocked-by: []
-pre-block-column: 
+blocked-by: [5MOX0FPO, DS3WDTPV]
+pre-block-column: dev
 blocker-probe: [trddgrep, why, K9AHY1ZB]
 blocker-holds-if: not-match:READY
 ---
@@ -328,6 +328,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; both prerequisite cards (5MOX0FPO, DS3WDTPV) are in testing. It waits on the clear-chain field acceptance and stays open until release 2 (parked effects cards 7X9WXDK9, B3PY3HV7, MMUSDJHQ). testing is not terminal, so the stays-open ruling holds.
 - 2026-10-04T20:13:40+0200 — column → blocked. Correction of the same day's move to testing: the linter raised ORDER-NPT-VIOLATED, because a parent may not pass dev while its prerequisite cards are unfinished. Nobody is writing code on this umbrella, so dev was untrue as well; blocked on its prerequisite cards is the column that is both true and lint-clean.
 - 2026-10-05T01:33:37+0200 — column → dev by main-agent@ai-maestro-janitor. Reverses the 2026-10-04 move to blocked. Measured 2026-10-05 on two scratch cards: after a blocker is closed, trddgrep why on the blocked card prints BLOCKED with no locally-resolvable blocker and never READY, and the card does not leave blocked by itself, so the probe not-match:READY would hold forever. dev is where the card linter lets a parent wait for its prerequisite cards Cleared blocked-by (--clear-blocker override).
+- 2026-10-07T02:27:25+0200 — column → blocked by main-agent@ai-maestro-janitor. blocked-by lists open cards 5MOX0FPO, DS3WDTPV; dev asserted active work
 
 ## STATE
 
@@ -339,6 +340,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-05: TRDD-PHS3DIBD added to blocked-by. The clear chain resumed a cleared session with a pointer to an older session's handoff (observed 02:17 to 02:20 on 2026-10-05); the umbrella must not unblock while that is open.
 2026-10-05 CORRECTION to the line above: blocked-by is back to empty and TRDD-PHS3DIBD is listed under npt instead, next to the two other prerequisite cards. A non-empty blocked-by on a card in dev is a lint error (GRAPH-BLOCKED-NOT-BLOCKED); this umbrella carries its open prerequisites in npt.
 2026-10-05 — prerequisite TRDD-PHS3DIBD has its root-cause fix landed (unpublished) and is in testing, waiting on the first janitor clear on a release that carries it. This umbrella stays blocked on that same live event and on its other prerequisites; it is NOT unblocked.
+2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers 5MOX0FPO, DS3WDTPV; the shipped parts of this umbrella ship independently.
 
 ## Release status
 

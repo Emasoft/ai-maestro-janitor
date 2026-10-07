@@ -1,10 +1,10 @@
 ---
 trdd-id: JSQSJ3PZ
 title: Rotator keeps the live account measurable, rotates under load, and warns before the wall
-column: dev
+column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-05T01:33:36+0200
+updated: 2026-10-07T02:27:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,8 +18,8 @@ approval-datetime: 2026-10-03T03:40:28+0200
 project-id: ai-maestro-janitor
 npt: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
 eht: [3OS6AXV3, HSRERK5S]
-blocked-by: []
-pre-block-column: 
+blocked-by: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
+pre-block-column: dev
 blocker-probe: [trddgrep, why, JSQSJ3PZ]
 blocker-holds-if: not-match:READY
 ---
@@ -329,6 +329,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; all four prerequisite cards are in testing. It waits on the rotator field acceptance on this machine and stays open until release 2 (its effects cards 3OS6AXV3 and the parked HSRERK5S). testing is not terminal, so the stays-open ruling holds.
 - 2026-10-04T20:13:39+0200 — column → blocked. Correction of the same day's move to testing: the linter raised ORDER-NPT-VIOLATED, because a parent may not pass dev while its prerequisite cards are unfinished. Nobody is writing code on this umbrella, so dev was untrue as well; blocked on its prerequisite cards is the column that is both true and lint-clean.
 - 2026-10-05T01:33:36+0200 — column → dev by main-agent@ai-maestro-janitor. Reverses the 2026-10-04 move to blocked. Measured 2026-10-05 on two scratch cards: after a blocker is closed, trddgrep why on the blocked card prints BLOCKED with no locally-resolvable blocker and never READY, and the card does not leave blocked by itself, so the probe not-match:READY would hold forever. dev is where the card linter lets a parent wait for its prerequisite cards Cleared blocked-by (--clear-blocker override).
+- 2026-10-07T02:27:25+0200 — column → blocked by main-agent@ai-maestro-janitor. blocked-by lists open cards JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ; dev asserted active work
 
 ## STATE
 
@@ -339,6 +340,7 @@ TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking back
 2026-10-04 column testing (was dev). Correction to the move reason recorded in the approval log - it called HSRERK5S parked, but HSRERK5S and 3OS6AXV3 are both in testing. Verified with git merge-base against tag v3.7.0 - fe76d99c, 2b18348f, 30d320eb, b4ba693b, b956914d, 415d1971 and e9b7622d are all inside the 3.7.0 release. Whether R4c landed was not checked. Field evidence so far is negative - on 2026-10-04 the heartbeat printed the alert that account rotation is stuck nine times in one afternoon. NEXT ACTION - after 3.7.1 is installed, observe the field acceptance list in the plan, and treat the stuck alert as a failing result until it stops.
 2026-10-05 column blocked (was testing for about two hours on 2026-10-04; that move raised ORDER-NPT-VIOLATED because a parent may not pass dev while its prerequisite cards are unfinished). blocked-by lists the same cards as npt. pre-block-column set to dev, the lint-clean place for a parent to wait. Probe measured 2026-10-05: trddgrep why prints the word READY for a card whose prerequisites are satisfied (seen on BHIS99XE) and does not print it for a blocked card (seen on 3HLI7DMK). The NEXT ACTION above is unchanged.
 2026-10-05 later: column dev (was blocked since 2026-10-04). The line above saying the probe was measured is WRONG: BHIS99XE was not a blocked card. Valid test on two scratch cards: after the blocker was closed, trddgrep why on the blocked card printed BLOCKED with no locally-resolvable blocker, never READY, and the card stayed in blocked, so the probe would never clear. blocked-by is cleared; npt still lists the prerequisite cards. dev here means waiting on those cards, not code in flight. The NEXT ACTION above is unchanged.
+2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ; the shipped parts of this umbrella ship independently.
 
 ## Release status
 
