@@ -4,7 +4,7 @@ title: A heartbeat line that repeats with identical text is silenced for ever by
 column: testing
 status: tasked
 created: 2026-10-05T23:16:34+0200
-updated: 2026-10-07T08:19:38+0200
+updated: 2026-10-07T08:20:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -41,3 +41,4 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 
 2026-10-07: trdd-cross-card-blindspot's never-forgotten pairs are fixed on main by TRDD-61PLV7WS (merge 6e623375), shipping in the next release; removing it from _SELF_DEDUPING_DETECTORS is blocked: fastedit cannot target a module-level constant, plain edits not authorised (owner asked 2026-10-07).
 2026-10-07: CORRECTION to the line above: TRDD-61PLV7WS (merge 6e623375) makes trdd-cross-card-blindspot forget cleared pairs, so it now meets the exemption contract and stays in _SELF_DEDUPING_DETECTORS; the earlier 'silent forever' note for it is fixed on main, shipping in the next release.
+2026-10-07: correction: TRDD-61PLV7WS (merge 6e623375) makes trdd-cross-card-blindspot forget cleared pairs, so it now meets the exemption contract and stays in _SELF_DEDUPING_DETECTORS; nothing needs removing, and the line above saying its removal is blocked is superseded.

@@ -4,7 +4,7 @@ title: The lint-code drift guard reads codes from the rule registry instead of s
 column: backburner
 status: tasked
 created: 2026-10-04T15:47:32+0200
-updated: 2026-10-07T08:19:39+0200
+updated: 2026-10-07T08:20:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -48,3 +48,4 @@ The comment above _PUSH_BLOCK_RE (commit bc2bfb65) says the run-on 'only adds te
 2026-10-07: worker finding: the registry in scripts/memgrep/src/rules_gen.rs has 47 names, the table 39; 8 unclassified: blanket-noqa, index-stale-rebuild, lint-over-budget, publish-globally-conflict, publish-globally-missing, publish-globally-not-symlinked, recall-over-budget, unused-noqa.
 2026-10-07: blocked-by names the owner decision, not a card, so trddgrep lint reports BLOCKED-WITHOUT-PROBE, BLOCKER-UNRESOLVED and GRAPH-UNKNOWN-BLOCKER on this card; unblock-when carries the decision predicate (not rejected). The block clears when the owner allows plain edits for module-level constants.
 2026-10-07: BLOCKED-ON-DECISION: may plain edits be used for module-level constants fastedit cannot target? asked 2026-10-07
+2026-10-07: BLOCKED-ON-DECISION (kept in backburner so the board validates): may plain edits be used for module-level constants fastedit cannot target? Asked 2026-10-07.
