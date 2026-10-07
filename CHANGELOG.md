@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.2] — 2026-10-07
+
+### Bug Fixes
+
+- **reconcile:** Check3 scans own-card STATE declarations only (janitor#332, TRDD-8BNV75TV) (b9a2377)
+- **reconcile:** Do not call a testing card closeable while it correctly waits on a live event (janitor#332, TRDD-8BNV75TV) (b0247a3)
+- **reconcile:** Recognise the real board's pending-event phrasings (janitor#332, TRDD-8BNV75TV) (dab2458)
+- **reconcile:** A design/-only citing commit does not make a card closeable (janitor#332, TRDD-8BNV75TV) (67d29e9)
+- **reconcile:** Time in testing falls back to created, not updated (janitor#332, TRDD-8BNV75TV) (8b587dd)
+- **reconcile:** Check3 skips an earlier card id only when it is the subject of "blocked" (janitor#332, TRDD-8BNV75TV) (d737816)
+- **trdd-state-reconciliation:** Closeable becomes a one-time ledger note (janitor#332) (8d1f192)
+
+### Documentation
+
+- **memory:** Split an over-budget atom in janitor-compaction-floor-gate-triggers (5497043)
+- **trdd:** Close the three 3.8.1 gap cards; card for memory chores writing mid-publish (TRDD-FQVEILVK) (ecc1600)
+- **spec:** WM-CLI-05 states lint owns body checks; validate NONE is not 'pages clean' (janitor#315) (3e2f0b1)
+- **trdd:** Close 9UVLOHED, OOZP38MN, TK529Q0F for #332 board hygiene (TRDD-6ESS2MGE) (2587a69)
+- **trdd:** Card for the reconciliation detector flagging correctly-waiting cards; sweep lessons on the umbrella (TRDD-8BNV75TV) (bef7460)
+- **trdd:** Fix four card-text contradictions; record the guard password bypass (TRDD-6ESS2MGE) (aef9b6a)
+- **trdd:** Record #332 ledger-note commits and known gaps (TRDD-8BNV75TV) (39434f3)
+- **trdd:** TRDD-8BNV75TV to testing with STATE block and implementation-commits (janitor#332) (81703ce)
+- **trdd:** 8BNV75TV implementation commits and superseded proposal; cross-links on 6ESS2MGE and 9UVLOHED (janitor#332) (9f9f7a6)
+- **trdd:** 8BNV75TV no longer claims 9UVLOHED is open (janitor#332) (8afe433)
+- **trdd:** 8BNV75TV states the 40-day clock correctly (janitor#332) (e6dbfde)
+- Add TRDD-UHMB7BZW — move the generated wikimem index out of tracked CLAUDE.md (janitor#328) (2d1bdc1)
+- **trdd:** UHMB7BZW is an owner decision on golden rules G7.1/G10.1, not a main-session one (janitor#328) (6f849ac)
+- **trdd:** UHMB7BZW waits in approval for the owner (janitor#328) (b19de63)
+- **trdd:** UHMB7BZW states three owner options and waits for user approval (janitor#328) (5a38122)
+- **trdd:** Q9MU9CWK replaces UHMB7BZW as a user-approval proposal (janitor#328) (c8d0b64)
+- **trdd:** JSQSJ3PZ and K9AHY1ZB leave dev for blocked before 3.8.2 (release gate) (c6726a4)
+- **trdd:** Release-gate notes on JSQSJ3PZ, K9AHY1ZB, FQVEILVK (3.8.2) (008970e)
+- **trdd:** Correct release-gate notes; pre-release checklist on I33ST36V (3.8.2) (d2e6284)
+- **trdd:** I33ST36V worktree-cleanup checklist item (3.8.2) (20e56a8)
+- **trdd:** Seven unfinished testing cards re-columned before 3.8.2; JSQSJ3PZ chain; Q23COADS link (634f44a)
+- **trdd:** JD2QR5SQ to backburner; ZAKT0NRI/QJ5LP4W2 cross-linked; CWKM5218 on the release checklist; FQVEILVK follow-ups recorded (cbf78b4)
+
+### Revert
+
+- **reconcile:** Drop the design-only closeable rule (janitor#332, TRDD-8BNV75TV) (91fca40)
+
+### Testing
+
+- **trdd-state-reconciliation:** Mixed-class and no-closeable-in-report guards (janitor#332, TRDD-8BNV75TV) (a5930df)
+- **trdd-state-reconciliation:** Exact closeable-candidate check; assert no report dir (janitor#332, TRDD-8BNV75TV) (6958622)
 ## [3.8.1] — 2026-10-06
 
 ### Bug Fixes
@@ -14,6 +59,10 @@ All notable changes to this project will be documented in this file.
 
 - **trdd:** Close 10 sweep cards shipped in v3.8.0; 4 stay in testing on unproven items (TRDD-FQVEILVK) (ce20f42)
 - **trdd:** The four sweep gap cards carry their proof; #323 decline recorded (TRDD-FQVEILVK) (b84716f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.1 (c6da869)
 
 ### Testing
 
