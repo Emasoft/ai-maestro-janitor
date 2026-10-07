@@ -70,6 +70,21 @@ def test_root_gitignore_hiding_design_gets_negations_appended(tmp_path: Path) ->
     assert (repo / ".gitignore").read_text() == before
 
 
+
+def test_later_root_rule_hiding_design_gets_negations_reappended_once(tmp_path: Path) -> None:
+    """The negations already sit ABOVE a later `design/` rule, so "both present" appended nothing
+    and design/ stayed hidden; the fix re-appends them at the end, once, and a second run is a no-op."""
+    repo = _repo(tmp_path)
+    (repo / ".gitignore").write_text("!/design/\n!/design/**\ndesign/\n")
+    lines = _run(_DETECTOR, repo)
+    text = (repo / ".gitignore").read_text()
+    assert text == "!/design/\n!/design/**\ndesign/\n!/design/\n!/design/**\n"
+    assert not _ignored(repo, "design/x.md") and not _ignored(repo, "design/tasks/x.md")
+    assert len(lines) == 1 and "fixed" in lines[0]
+    assert _run(_DETECTOR, repo) == []
+    assert (repo / ".gitignore").read_text() == text
+
+
 def test_nested_design_gitignore_is_reported_still_hidden_and_never_edited(tmp_path: Path) -> None:
     """A nested ignore beats the root negations, so it is warned about and left alone."""
     repo = _repo(tmp_path)

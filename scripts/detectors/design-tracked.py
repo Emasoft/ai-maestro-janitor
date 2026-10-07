@@ -84,12 +84,14 @@ def _drop_exclude_line(exclude: Path, line_no: int, pattern: str) -> bool:
     return True
 
 
-def _append_negations(root: Path) -> bool:
+def _append_negations(root: Path, force: bool = False) -> bool:
+    # force: a later root rule (`design/`, `*`) can hide design/ although both negations already
+    # exist ABOVE it; git honours the last match, so they must be written again at the end.
     gi = root / ".gitignore"
     try:
         text = gi.read_text(encoding="utf-8") if gi.is_file() else ""
         have = set(text.splitlines())
-        missing = [n for n in _NEGATIONS if n not in have]
+        missing = [n for n in _NEGATIONS if force or n not in have]
         if missing:
             sep = "" if not text or text.endswith("\n") else "\n"
             with gi.open("a", encoding="utf-8") as fh:
@@ -108,6 +110,7 @@ def _enforce_tracked(root: Path, seen: Path) -> None:
     common = _git(root, "rev-parse", "--git-common-dir")
     exclude = (root / common.strip() / "info" / "exclude") if common else None
     autofix = state.autofix_enabled()
+    reappended = False  # re-append the negations at most once per run, not on every loop pass
     for _ in range(4):  # a second `design` line may hide behind the first
         source, line_no, pattern = hit
         if not autofix:
@@ -120,7 +123,9 @@ def _enforce_tracked(root: Path, seen: Path) -> None:
         elif Path(source).name == ".gitignore" and not _same_file(root, source, root / ".gitignore"):
             break  # nested .gitignore: never edited from here
         else:
-            if not _append_negations(root):
+            force = not reappended and _same_file(root, source, root / ".gitignore")
+            reappended = reappended or force
+            if not _append_negations(root, force):
                 break
             removed.append(f"{source}:{line_no}:{pattern} overridden by root .gitignore negations")
         hit = _first_ignored(root)
