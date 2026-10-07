@@ -4,7 +4,7 @@ title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a h
 column: dev
 status: tasked
 created: 2026-09-24T19:20:05+0200
-updated: 2026-10-07T22:29:53+0200
+updated: 2026-10-07T23:59:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -16,7 +16,7 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T19:20:05+0200
 npt: []
-implementation-commits: [2325c39b, 675739c3]
+implementation-commits: [2325c39b, 675739c3, 1c045352, 22c798b4, 62cac384, 1afd8b43]
 ---
 
 # Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a half-written line
@@ -52,3 +52,8 @@ TRDD-DQXMND59 -- Jev's own reader (extract_items/expand) was fixed there in 73df
 The dependency on TRDD-DQXMND59 stage 3 (jsonl_walk.py) lives only in prose because npt is a derived-child link (GRAPH-TWO-PARENTS). When this card leaves backburner, record it as `unblock-when: [trdd:DQXMND59 ...]` or `blocked-by`, so it cannot be pulled before jsonl_walk.py exists.
 2026-10-07 — dependency met: scripts/lib/jsonl_walk.py exists (since 2026-09-25) and TRDD-DQXMND59 is complete; stage A (tail walk + shared fixtures) landed in 2325c39b; stage B moves the readers one by one
 2026-10-07 — wave 0: read_jsonl_tail replaces iter_jsonl_tail (list, errors at the call); mutation check M1 M2 M3 each caught; fixtures moved to tests/_transcript_fixtures.py; stage B plan: external_clear, user_mem_lib, pre-compact-handoff, token_meter move to the tail read; fleet_scan and user_intent consumers take parsed entries; pending_agents (both functions) and jev_compaction_lane stay on a whole-file walk via iter_jsonl_entries or parse_jsonl_line; session_continuity.py already safe, left alone; every reader keeps its current missing-file result.
+2026-10-07 — wave 1: user_mem_lib (1c045352; real bug fixed: a raw U+2028 inside a message split the record, failing-first test) and external_clear (22c798b4; real bug fixed: a whole first line dropped when the seek landed on a line boundary, failing-first test).
+2026-10-07 — wave 2: pre-compact-handoff (62cac384; same line-boundary drop fixed, failing-first test; doubling window keeps its 16 MiB and 2 s caps) and token_meter (1afd8b43; no bug, the old code was already byte-safe, its four new tests are guards that pass on the old code; latest_context_size went from 0.40 to 1.34 ms median on an 18.6 MB transcript, accepted as about 1 ms per tool call; the PreToolUse hook's own runtime was not measured). 606 tests across 22 caller test files, ruff, mypy, pyright clean.
+Follow-ups from the wave 2 review: in pre-compact-handoff.py jsonl_walk is imported in the same guarded block as transcript_roles, so a jsonl_walk import failure reports 'transcript_roles import failed' (the turns read is still guarded, no crash); both readers discard malformed-line counts; the variable named lines now holds parsed entries.
+Newly found reader not on the original list: pre-compact-handoff.py _tool_use_blocks_tail has its own tail read; check it for the same line-boundary drop.
+Remaining: user_intent and fleet_scan (consumers take raw lines, convert to parsed entries unless one does a raw-substring test), pending_agents (_last_transcript_entry_has_tool_use on the tail with a generous window; spawn_prompt on the whole-file walk), jev_compaction_lane (whole-file, keep its raw-bytes prefilter, likely parse_jsonl_line per line), _tool_use_blocks_tail; then the full suite once.

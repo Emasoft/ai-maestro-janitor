@@ -4,7 +4,7 @@ title: Carry the owner last assignment across consecutive clears (GitHub issue 3
 column: testing
 status: tasked
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-07T23:44:09+0200
+updated: 2026-10-07T23:59:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -53,5 +53,6 @@ Release notes added on GitHub above the generated changelog, then corrected afte
 Comment posted on issue 338 (issuecomment-6046964307), edited after review; the issue is left open for proposals 2 (partly done), 3 and 5. The comment promises to link the follow-up card once it is pushed: TRDD-HKUOS0DV is that card, and the link is owed after the next publish.
 Known flaws, not fixed: a typed /login is classed as an owner message and can take one of the three slots (the fix worker's side finding, not re-checked by the main agent); the owner-messages record files in .janitor/state/owner-messages/ are never pruned; replace the `assert` in `_merge_owner_messages` with an explicit `if stored is None: return` at the next touch (python -O strips asserts).
 Not verified: no real clear has yet run under 3.8.11, so the carried messages have not been seen in a live handoff; whether a plain clear (without a process restart) loads the new SessionStart hook is untested.
-Field check to move this card to complete (outcome, not mechanism; issue 338 itself reported 5/5 PASS on an idle agent): under 3.8.11, clear 1 is of a session where the owner typed a message (this writes the record), and clear 2 is of the next session after it ran with no owner message. Pass when, after clear 2, the new session's handoff quotes the owner's messages from before clear 1 (clipped long messages count) and the session either continues work with no typed owner message or, if it declines, states the open-board counts by column. A clear of a session begun under 3.8.10 tests only the single hop and does not count.
+Field check to move this card to complete (outcome, not mechanism; issue 338 itself reported 5/5 PASS on an idle agent): under 3.8.11, clear 1 is of a session where the owner typed a message (this writes the record), and clear 2 is of the next session after it ran with no owner message. Pass when, after clear 2, the new session's handoff quotes the owner's messages from before clear 1 (clipped long messages count) and the session either continues work with no typed owner message or, if it declines, states the open-board counts by column. Clear 1 qualifies when .janitor/state/owner-messages/<new-session-id>.json exists after it (the 3.8.11 hook ran); clear 2 qualifies when the cleared transcript holds no owner message. A pass shows the whole system works; the heartbeat nudge also quotes the owner, so it does not isolate the handoff carry.
 Items that must outlive this card when it closes: the three known flaws above, issue 338 proposals 2 (partly done), 3 and 5, and the owed issue link. Move them to their own cards before this card goes to complete.
+SUPERSEDED: the PARKED line about TRDD-A8DRRW0I wave 2 in the body; wave 2 resumed and landed on 2026-10-07 (62cac384, 1afd8b43).
