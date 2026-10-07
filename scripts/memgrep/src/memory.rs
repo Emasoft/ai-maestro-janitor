@@ -6744,7 +6744,7 @@ pub(crate) fn downward_reason(to: ScopeLayer) -> &'static str {
     }
 }
 
-/// THE cross-scope pair guard (TRDD-7KAL6PNB / #330, shared by reference/migrate/split/merge
+/// THE cross-scope pair guard (TRDD-7KAL6PNB / #330, shared by reference/split/merge;
 /// after TRDD-DAL802TI): THE LINK LAW is a WITHIN-LAYER law — across layers references go
 /// strictly UPWARD (LOCAL 0 < PROJECT 1 < USER 2), and a downward edge is what `lint` reports
 /// as `link-downward-cross-scope` ERROR (privacy for USER→LOCAL, portability for USER→PROJECT).
@@ -6758,15 +6758,24 @@ pub(crate) fn downward_reason(to: ScopeLayer) -> &'static str {
 /// cross-scope moves still go through `migrate-mem-atom`, one atom at a time. NOT a gate
 /// constraint: the pre-write gate's link arm deliberately skips cross-scope edges, and a
 /// plain-words tombstone would be gate-clean — refusing is the stricter policy the verbs choose.
-/// Classifies the RAW paths — `scope_layer` itself canonicalizes with a literal-prefix fallback
-/// and matches nonexistent paths (split's `--into` must not exist yet, so an outer
-/// `.canonicalize().ok()` here would fail open exactly on the dangerous case). Fail-open on
-/// `None`: an unmapped path is not proof of a violation — a test fixture or relocated root must
-/// stay linkable, as migrate already rules. KNOWN CEILING (shared with migrate): when exactly
+/// Classifies each path CANONICALLY when it exists — the same resolution the lint's link graph
+/// uses, so a `..` segment or a symlink alias classifies like the edge lint will see — falling
+/// back to the RAW spelling only for a not-yet-existing page (split's `--into`), whose scope
+/// substrings still match on the raw string. (`scope_layer` matches override roots on canonical
+/// forms and hardcoded roots on the raw string — the raw spelling alone would MISS an aliased or
+/// relative path, which is exactly the fail-open hole this canonicalize-with-fallback closes.)
+/// Known ceiling: a NOT-YET-EXISTING path reached through a symlink alias is unclassifiable
+/// (raw spelling has no substrings, canonicalize fails) — fails open. Fail-open on `None`
+/// generally: an unmapped path is not proof of a violation — a test fixture or relocated root
+/// must stay linkable, as migrate already rules. KNOWN CEILING (shared with migrate): when exactly
 /// ONE side classifies and the other is `None`, the guard fails open and the pair proceeds — a
 /// future hardening can fail closed on that shape.
 pub(crate) fn guard_downward_cross_scope(page: &Path, to: &Path) -> Result<()> {
-    let (Some(from_s), Some(to_s)) = (scope_layer(page), scope_layer(to)) else {
+    let classify = |p: &Path| -> Option<ScopeLayer> {
+        let c = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        scope_layer(&c)
+    };
+    let (Some(from_s), Some(to_s)) = (classify(page), classify(to)) else {
         return Ok(());
     };
     if to_s.rank < from_s.rank {
