@@ -121,6 +121,10 @@ def main() -> int:
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent.parent)
     now = int(time.time())
     seen = state.state_dir() / "hook-timeout-scan-seen.txt"
+    # WHY two lists: the print cap below keeps the first N lines. In file order five MEDIUM
+    # HOOK-002 lines from earlier transcripts pushed a HIGH HOOK-001 out of the printed set,
+    # and it is already marked seen, so it was never shown again. HIGH prints first.
+    high: list[str] = []
     lines: list[str] = []
 
     try:
@@ -153,7 +157,7 @@ def main() -> int:
                         msg=f"hook {hook} was killed for exceeding its timeout ({spent}) in session {sid}",
                     )
                     if line:
-                        lines.append(line)
+                        high.append(line)
                 # WHY: a killed hook is fully described by HOOK-001; its duration sits at the
                 # budget by construction, so falling through would add a redundant HOOK-002.
                 continue
@@ -176,10 +180,11 @@ def main() -> int:
 
     # WHY: every finding is already in the ledger; stdout reaches the agent's context, so a
     # flood (one stuck hook across many sessions) is capped to keep that channel bounded.
-    for line in lines[:_MAX_PRINTED]:
+    ordered = high + lines
+    for line in ordered[:_MAX_PRINTED]:
         print(line)
-    if len(lines) > _MAX_PRINTED:
-        print(f"{_NAME}: {len(lines) - _MAX_PRINTED} more recorded, see /janitor-findings")
+    if len(ordered) > _MAX_PRINTED:
+        print(f"{_NAME}: {len(ordered) - _MAX_PRINTED} more recorded, see /janitor-findings")
 
     state.rotate_log_if_big(_NAME)
     return 0

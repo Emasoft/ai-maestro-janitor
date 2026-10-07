@@ -237,3 +237,21 @@ def test_other_projects_transcripts_are_not_scanned(tmp_path: Path) -> None:
     _write(other / "zzz.jsonl", _cancelled(session="zzz"))
     e.run()
     assert "HOOK-001" not in e.codes()
+
+
+def test_a_high_finding_is_never_pushed_out_of_the_print_cap_by_medium_ones(tmp_path: Path) -> None:
+    """Six HOOK-002 in an earlier transcript and one HOOK-001 in a later one: the HOOK-001 line is printed."""
+    e = _Env(tmp_path)
+    base = int(time.time()) // 3600 * 3600
+    medium = [
+        _rec(
+            "hook_success",
+            durationMs=9000,
+            ts=datetime.fromtimestamp(base - 3600 * i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        )
+        for i in range(6)
+    ]
+    _write(e.transcript("aaa-early"), *medium)
+    _write(e.transcript("zzz-late"), _cancelled(session="zzz-late"))
+    out = e.run().splitlines()
+    assert any("HOOK-001" in ln for ln in out), out
