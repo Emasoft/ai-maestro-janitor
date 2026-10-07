@@ -196,6 +196,53 @@ def sustained_findings(
             reportable.append(finding)
     return reportable, streaks
 
+def parse_cpu_time(text: str) -> float | None:
+    """Seconds from a `ps` cumulative CPU `time` field (`[dd-][hh:]mm:ss[.cc]`), or None.
+
+    NLHVLGEP: the differenced burn needs cumulative CPU seconds; None (not 0) on any
+    unparseable text so a bad field can never be mistaken for "the process used no CPU".
+    """
+    s = text.strip()
+    if not s:
+        return None
+    days = 0.0
+    try:
+        if "-" in s:
+            d, s = s.split("-", 1)
+            days = float(int(d))
+        parts = [float(p) for p in s.split(":")]
+    except ValueError:
+        return None
+    if not 1 < len(parts) <= 3 or any(p < 0 for p in parts):
+        return None
+    secs = 0.0
+    for p in parts:
+        secs = secs * 60.0 + p
+    return days * 86400.0 + secs
+
+
+def measured_burn(
+    prior: object, cpu_time_s: float, now_epoch: float
+) -> tuple[float, float] | None:
+    """`(burn_pct, window_s)` differenced between two fires, or None when no honest delta exists.
+
+    NLHVLGEP: `(time1 - time0) / (t1 - t0)` is the measured burn over exactly the window
+    between the two fires. `prior` is the persisted `[cpu_time_s, sampled_at_epoch]` entry
+    as loaded from disk, so it is untrusted: anything that is not that shape (an entry from
+    the old schema, a bool, junk) gives None, never a guessed number. A SMALLER cpu time
+    than stored means the pid was recycled by a new process, which must not inherit its
+    predecessor's total; a non-positive window means a clock step. Both give None.
+    """
+    if not (isinstance(prior, (list, tuple)) and len(prior) == 2):
+        return None
+    t0, e0 = prior
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (t0, e0)):
+        return None
+    window = now_epoch - e0
+    if window <= 0 or cpu_time_s < t0:
+        return None
+    return (cpu_time_s - t0) / window * 100.0, window
+
 
 def alive_findings(
     findings: list[Finding], pid_alive: Callable[[int], bool]
@@ -219,6 +266,7 @@ def format_drift_line(
     disk_danger: bool,
     disk_free_pct: float | None,
     streaks: dict[str, int] | None = None,
+    measured: dict[str, tuple[float, float]] | None = None,
 ) -> str | None:
     """Render ONE concise drift line for the worst finding, or None when there is
     nothing to report. Pure formatting — no truncation/sanitization here (the caller
@@ -227,6 +275,12 @@ def format_drift_line(
 
     `streaks` is `sustained_findings`' map; when it carries the worst finding's key the
     CPU branch names how many consecutive checks the condition held for.
+
+    `measured` maps a finding key to `(burn_pct, window_s)` from `measured_burn`
+    (NLHVLGEP). When it carries the worst CPU finding's key the line reports that
+    differenced figure and its window instead of the `ps %cpu` estimate; without it the
+    estimator wording below is unchanged. The figure is for the REPORT only: nothing in
+    this module gates on it.
     """
     if not findings:
         return None
@@ -239,6 +293,7 @@ def format_drift_line(
         # reaction the ungated version produced. Both numbers are correct; they measure
         # different things, and only the alarm can say which one it reported.
         held = (streaks or {}).get(finding_key(worst))
+        diff = (measured or {}).get(finding_key(worst))
         # MEASURED 2026-08-16, correcting a FALSE claim this line shipped from 3.3.9:
         # it said "a lifetime average, not a live sample". `man ps` says %cpu is "a
         # decaying average over up to a minute of previous (real) time", and three
@@ -247,10 +302,15 @@ def format_drift_line(
         # from cpu_time deltas; and %cpu DECAYS (100.2 -> 5.0 within minutes, which a
         # 13-day denominator forbids). The old wording also told the reader the number
         # was meaningless, which is a reliable way to get the next REAL runaway dismissed.
-        window = "a ~1-minute decaying average; a live delta may differ on a bursty process"
+        if diff is not None:
+            window = f"measured over the last {diff[1]:.0f}s from CPU time"
+            pct = diff[0]
+        else:
+            window = "a ~1-minute decaying average; a live delta may differ on a bursty process"
+            pct = worst.pcpu
         if held is not None and held > 1:
             window += f"; over the bar on {held} consecutive checks"
-        metric = f"CPU {worst.pcpu:.0f}% ({window})"
+        metric = f"CPU {pct:.0f}% ({window})"
     watched_txt = " (a known FS-churn/Spotlight daemon)" if worst.is_watched else ""
     extra = f" — {len(findings) - 1} more process(es) also over threshold" if len(findings) > 1 else ""
     disk_txt = ""

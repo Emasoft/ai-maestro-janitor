@@ -565,10 +565,14 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
         if result is None or result.returncode == 0:
             return result
         if attempt < max_attempts:
+            # 45ZUV5ZD: a retry that then succeeds returns rc=0, so the caller never sees
+            # attempt 1's stderr; this line is the ONLY place its reason can be recorded.
+            _why = _masked_stderr_tail((result.stderr or "").strip())
             state.log_line(
                 "daemon",
                 f"  `{short}` exited {result.returncode} "
-                f"(attempt {attempt}/{max_attempts}) — retrying once",
+                f"(attempt {attempt}/{max_attempts}) — retrying once"
+                + (f"; stderr: {_why}" if _why else ""),
             )
     return result
 
@@ -849,12 +853,10 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
 
     WHY: daemon.log used to show only "done in Ns" for the tick, so a failing tick left no
     cause anywhere. A clean tick writes nothing: the scheduler already logs "starting" and
-    "done in Ns" every minute. Stderr is masked BEFORE the tail is cut: cutting first can
-    slice into a token so its remainder no longer starts with `sk-ant-` and escapes the mask.
-    Masking is shape-based: e-mail addresses and sk-ant- tokens (plus control chars and
-    brackets via `sanitize_for_drift_line`). No latch change on purpose: a hung `security`
-    prompt also uses ~0 CPU, so "starved" cannot be told apart from it. None (timeout / spawn
-    failure) is already logged by `_run_workload`.
+    "done in Ns" every minute. Stderr goes through `_masked_stderr_tail` (e-mail addresses,
+    sk-ant- tokens, control chars and brackets masked BEFORE the cut). No latch change on
+    purpose: a hung `security` prompt also uses ~0 CPU, so "starved" cannot be told apart
+    from it. None (timeout / spawn failure) is already logged by `_run_workload`.
 
     Never raises: it runs right before the rotation-ESC pass in `task_oauth_rotator_tick`, and
     a bad byte, unwritable log dir or full disk must not skip that pass (same rule as
@@ -866,22 +868,30 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
         err = (result.stderr or "").strip()
         if result.returncode == 0 and not err:
             return
-        masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
-        # The 300-char cut used to land mid-line (9 of 39 logged records began with a fragment
-        # such as "icate"), so when something was cut and the slice holds a newline, drop the
-        # partial first line and mark the elision with "...". A single very long line has no
-        # boundary to cut at: keep the character cut, still marked. Masking stays BEFORE the cut.
-        tail = masked[-_RC_STDERR_TAIL_CHARS:]
-        if len(masked) > _RC_STDERR_TAIL_CHARS:
-            if "\n" in tail:
-                tail = tail.split("\n", 1)[1]
-            tail = "..." + tail
-        state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {tail}")
+        state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {_masked_stderr_tail(err)}")
     except Exception as exc:  # noqa: BLE001 - see docstring
         try:
             state.log_line("daemon", f"rotator tick result not logged: {type(exc).__name__}")
         except Exception:  # noqa: BLE001, S110 - even the fallback line must not raise
             pass
+
+def _masked_stderr_tail(err: str) -> str:
+    """Sanitized, masked, line-boundary tail of a child's stderr for ONE log line.
+
+    Masking runs BEFORE the cut: cutting first can slice into a token so its remainder no
+    longer starts with `sk-ant-` and escapes the mask. The 300-char cut used to land
+    mid-line (9 of 39 logged records began with a fragment such as "icate"), so when
+    something was cut and the slice holds a newline, drop the partial first line and mark
+    the elision with "...". A single very long line has no boundary to cut at: keep the
+    character cut, still marked.
+    """
+    masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
+    tail = masked[-_RC_STDERR_TAIL_CHARS:]
+    if len(masked) > _RC_STDERR_TAIL_CHARS:
+        if "\n" in tail:
+            tail = tail.split("\n", 1)[1]
+        tail = "..." + tail
+    return tail
 
 
 def task_oauth_rotator_tick() -> None:

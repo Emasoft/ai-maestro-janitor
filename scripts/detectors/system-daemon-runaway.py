@@ -56,6 +56,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -140,6 +141,50 @@ def _save_streaks(path: Path, streaks: dict[str, int]) -> None:
     except OSError:
         pass
 
+def _gather_cpu_times(pids: list[int]) -> dict[int, float]:
+    """Cumulative CPU seconds per pid from `ps -p … -o pid=,time=`; {} on any failure.
+
+    NLHVLGEP: the differenced burn needs `time`, which the main snapshot does not carry
+    (adding a column there would reshape every captured snapshot the parser is tested on).
+    A pid that already exited is simply absent from ps's output, so it gets no figure.
+    """
+    if not pids:
+        return {}
+    proc = state.run_subprocess(
+        ["ps", "-p", ",".join(str(p) for p in pids), "-o", "pid=,time="],
+        timeout=10.0, detector_name=_LOG,
+    )
+    if proc is None:
+        return {}
+    times: dict[int, float] = {}
+    for line in proc.stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0].isdigit():
+            secs = dr.parse_cpu_time(fields[1])
+            if secs is not None:
+                times[int(fields[0])] = secs
+    return times
+
+
+def _load_samples(path: Path) -> dict[str, object]:
+    """The persisted `{key: [cpu_time_s, sampled_at_epoch]}` map, or {} on ANY problem.
+
+    Values stay untyped on purpose: `dr.measured_burn` validates each entry's shape, so a
+    stale or hand-edited entry degrades to "no delta" for that process only."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _save_samples(path: Path, samples: dict[str, list[float]]) -> None:
+    """Persist the samples atomically; a write failure costs one fire's delta, nothing more."""
+    try:
+        state.atomic_write(path, json.dumps(samples, sort_keys=True))
+    except OSError:
+        pass
+
 
 def _pid_alive(pid: int) -> bool:
     """True iff a process with `pid` currently exists (TRDD-JEEQCHFG box 2).
@@ -175,6 +220,7 @@ def main() -> int:
     ps_text = _gather_ps_snapshot()
     seen = state.state_dir() / "system-daemon-runaway-seen.txt"
     streak_file = state.state_dir() / "system-daemon-runaway-streaks.json"
+    sample_file = state.state_dir() / "system-daemon-runaway-cpu-samples.json"
     if ps_text is None:
         # Could not gather a snapshot at all — fail open (no findings), and forget any
         # prior dedupe key so a genuine runaway re-emits once `ps` is available again
@@ -229,6 +275,27 @@ def main() -> int:
     reportable, streaks = dr.sustained_findings(findings, _load_streaks(streak_file))
     _save_streaks(streak_file, streaks)
 
+
+    # NLHVLGEP: difference cumulative CPU time against the previous fire's sample so the
+    # alarm can report the MEASURED burn. REPORT ONLY: `reportable` above was decided by
+    # the unchanged %cpu bar and streak gate; nothing below can add or drop a finding.
+    # Like the streaks, samples are rewritten every fire so an ended burst is forgotten.
+    now = time.time()
+    cpu_findings = {dr.finding_key(f): f for f in findings if f.kind == "cpu"}
+    cpu_times = _gather_cpu_times([f.pid for f in cpu_findings.values()])
+    prior_samples = _load_samples(sample_file)
+    measured: dict[str, tuple[float, float]] = {}
+    samples: dict[str, list[float]] = {}
+    for key, f in cpu_findings.items():
+        cpu_s = cpu_times.get(f.pid)
+        if cpu_s is None:
+            continue
+        samples[key] = [cpu_s, now]
+        burn = dr.measured_burn(prior_samples.get(key), cpu_s, now)
+        if burn is not None:
+            measured[key] = burn
+    _save_samples(sample_file, samples)
+
     if not reportable:
         # Nothing over the bar this beat — forget the dedupe key so a FUTURE runaway
         # (even by the same process/command) re-arms instead of staying deduped
@@ -250,7 +317,7 @@ def main() -> int:
         state.rotate_log_if_big(_LOG)
         return 0
 
-    line = dr.format_drift_line(reportable, disk_danger, disk_free_pct, streaks=streaks)
+    line = dr.format_drift_line(reportable, disk_danger, disk_free_pct, streaks=streaks, measured=measured)
     if line is None:  # pragma: no cover — unreachable when reportable is non-empty
         return 0
 
