@@ -1,10 +1,10 @@
 ---
 trdd-id: 2MU62A5F
 title: the resume shows the tool and event items Jev kept even on a thin session
-column: todo
+column: testing
 status: tasked
 created: 2026-10-05T10:57:06+0200
-updated: 2026-10-05T10:57:15+0200
+updated: 2026-10-07T09:35:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T10:57:06+0200
 parent-trdd: D7RLXAN1
+implementation-commits: [09b769b2, 52c87cbb]
 ---
 
 # the resume shows the tool and event items Jev kept even on a thin session
@@ -27,3 +28,9 @@ Wanted: the resume injects the tool and event items Jev kept, not only the token
 ## Approval log
 
 - 2026-10-05T10:57:06+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T09:35:57+0200 — column → testing by main-agent@ai-maestro-janitor. built; the real-session re-render is still outstanding
+
+## Acceptance
+
+- [x] The resume injects the tool and event items Jev kept, not only the token stage's set (met by 09b769b2 and 52c87cbb; four tests in tests/test_jev_compaction.py).
+- [ ] The two real thin sessions named in the card are re-rendered and show 3 items (NOT done).

@@ -4,7 +4,7 @@ title: A rotator tick exited with status 1 at 20h45 and nothing says why
 column: testing
 status: tasked
 created: 2026-10-05T22:08:59+0200
-updated: 2026-10-07T08:45:09+0200
+updated: 2026-10-07T09:35:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,4 @@ Observed in the daemon log during a memory spike, at 20h45: the rotator tick com
 ## Implementation notes
 
 2026-10-07: cause of the original failure unprovable (no daemon log from that day); only the retry log line improved: it now carries the failed attempt's masked stderr tail.
+2026-10-07: shipped in v3.8.5; release observation starts.

@@ -1,10 +1,10 @@
 ---
 trdd-id: J6BET92S
 title: memgrep split-mem-atom leaves the parent desc and keywords unchanged and truncates the new desc mid-word
-column: backburner
+column: testing
 status: tasked
 created: 2026-09-24T19:54:59+0200
-updated: 2026-09-24T19:54:59+0200
+updated: 2026-10-07T09:35:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-09-24T19:54:59+0200
+implementation-commits: [7f308b2f]
 ---
 
 # memgrep split-mem-atom leaves the parent desc and keywords unchanged and truncates the new desc mid-word
@@ -48,3 +49,8 @@ The exact defect is preserved for review in `.claude/project/memory/claude-code-
 ## Approval log
 
 - 2026-09-24T19:54:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T09:35:39+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+
+## Implementation notes
+
+2026-10-07: split-mem-atom warns when the original description/keywords are left unchanged; the mid-word cut was already fixed by 65081d77. Merged at 1296ccde.

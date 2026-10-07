@@ -1,10 +1,10 @@
 ---
 trdd-id: K5F7US68
 title: The memory-maint dispatch queue does not drain dedup or expire
-column: backburner
+column: testing
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-08-29T15:17:33+0200
+updated: 2026-10-07T09:38:03+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -15,6 +15,8 @@ task-type: bugfix
 labels: [memory, dispatch, cost]
 release-via: publish
 test-requirements: [unit]
+implementation-commits: [86a48174, 1b2071a3]
+status: tasked
 ---
 
 # TRDD-K5F7US68 — The memory-maint dispatch queue does not drain, dedup or expire
@@ -192,3 +194,12 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
   `memory_dispatch_claim.py` as a "verification" probe and it CONSUMED a real claim — the
   claim step is not side-effect-free. A probe that mutates the queue it is inspecting is a
   trap the script's own name does not warn about; worth a guard or a `--dry-run`.
+
+## Implementation notes
+
+2026-10-07: the claim step drops an aged-out record only on a KNOWN empty candidate answer from a read-only chore (repair, atomize, consolidate, split-topic); enrich and relocate records never drain by this path; an error keeps the record claimable; card items 2 and 3 not done. Merged at 1296ccde.
+2026-10-07: disclosure: one function-level change (is_drained in scripts/memory_dispatch_claim.py, commit 1b2071a3) was made with a plain Edit, outside the plain-edit scope the main agent had set (module-level constants, comment blocks, docstrings); accepted once because it is small and covered by the two new tests.
+
+## Approval log
+
+- 2026-10-07T09:35:39+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation

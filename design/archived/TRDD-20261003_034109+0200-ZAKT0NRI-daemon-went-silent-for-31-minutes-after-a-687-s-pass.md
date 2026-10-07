@@ -1,10 +1,10 @@
 ---
 trdd-id: ZAKT0NRI
 title: Daemon went silent for 31 minutes after a 687 s pass
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:41:09+0200
-updated: 2026-10-07T02:41:30+0200
+updated: 2026-10-07T09:35:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,3 +44,9 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03T03:41:09+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:22:34+0200 — column → testing. code committed; only field acceptance after release remains
 - 2026-10-07T02:38:33+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
+- 2026-10-07T09:35:53+0200 — COMPLETE by main-agent@ai-maestro-janitor. fixed earlier by e9b7622d and 346a557d (tests in tests/test_daemon_rotator_thread.py); the 2026-10-03 cause is unprovable, the daemon logs were rotated.
+
+## Acceptance
+
+- [x] The rotator tick keeps its 60 s cadence in daemon.log during a long main-loop pass (met: 2026-10-05 field check, mean gap 61.7 s; fixed by e9b7622d and 346a557d, tests in tests/test_daemon_rotator_thread.py).
+- [x] The cause of the 2026-10-03 00:18-00:49 stall is identified or linked to QJ5LP4W2 (closed as met without it: the cause is unprovable, the daemon logs were rotated).

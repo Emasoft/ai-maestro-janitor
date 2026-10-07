@@ -3,7 +3,7 @@ trdd-id: NLHVLGEP
 title: The runaway alarm can report ground truth by differencing cumulative CPU time across its own two fires
 column: testing
 created: 2026-08-20T18:05:19+0200
-updated: 2026-10-07T08:45:10+0200
+updated: 2026-10-07T09:35:22+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -12,7 +12,7 @@ external-refs: [TRDD-JEEQCHFG, TRDD-8QSLYMGU]
 npt: []
 eht: []
 min-approval-requirement: none
-implementation-commits: [ac63bb09, b175178f]
+implementation-commits: [ac63bb09, b175178f, c5be7275]
 status: tasked
 ---
 
@@ -63,3 +63,5 @@ alarm spans, which is also exactly the window the streak gate already requires.
 ## Implementation notes
 
 2026-10-07: the runaway alarm states burn measured between two fires from CPU time; thresholds unchanged and pinned by a test; follow-up: a recycled pid with MORE CPU time than the stored sample gives a wrong figure (guard by storing the process start time); the figure only appears in the alarm text, it never triggers it.
+2026-10-07: shipped in v3.8.5; release observation starts.
+2026-10-07: the end-to-end test was load-dependent (it blocked the first 3.8.5 publish attempt at load 112); c5be7275 checks the figure against the busy child's own CPU time instead.

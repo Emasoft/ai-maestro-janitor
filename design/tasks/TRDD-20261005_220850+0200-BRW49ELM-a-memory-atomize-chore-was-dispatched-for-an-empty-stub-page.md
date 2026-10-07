@@ -4,7 +4,7 @@ title: A memory atomize chore was dispatched for an empty stub page and cost a f
 column: testing
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-07T08:19:09+0200
+updated: 2026-10-07T09:35:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,4 @@ Observed: the heartbeat emitted the atomize marker, the memory agent claimed the
 ## Implementation notes
 
 2026-10-07: atomize_defect strips the SessionStart seed lines (one constant _SEED_STUB_PARTS in scripts/lib/memory_content_precheck.py; a test checks the hook text) before the substance check; a pure stub declines, a filled stub still atomizes.
+2026-10-07: shipped in v3.8.5; release observation starts.

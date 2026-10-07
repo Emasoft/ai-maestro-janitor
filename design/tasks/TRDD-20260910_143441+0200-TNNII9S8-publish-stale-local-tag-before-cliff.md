@@ -3,12 +3,12 @@ trdd-id: TNNII9S8
 title: publish.py must reconcile stale local tags before generating the changelog
 column: testing
 created: 2026-09-10T14:34:41+0200
-updated: 2026-10-07T08:45:11+0200
+updated: 2026-10-07T09:35:21+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
-implementation-commits: [266fd249, b175178f]
+implementation-commits: [266fd249, b175178f, 556b78be]
 status: tasked
 ---
 
@@ -52,6 +52,8 @@ In `scripts/publish.py`, run the stale-tag decision (currently step 10's `_stale
 
 ## Notes and lessons learned
 2026-10-07: the bug was still present (git-cliff ran before the stale-tag step, duplicate changelog section reproduced); publish.py now drops a local tag before git-cliff only when origin provably lacks it (_remote_tag_state is False; a failed query gives None and leaves the tag for step 10 to refuse).
+2026-10-07: shipped in v3.8.5; release observation starts.
+2026-10-07: CI's Tests job failed on the 3.8.5 release commit because this card's two tests need git-cliff, absent on the runner; 556b78be makes them skip there, so CI does not exercise this fix until git-cliff is installed on the runner; the local publish gate does. A red CI cannot stop a direct publish (required checks are bypassed), it only flags it afterwards.
 
 ## Approval log
 

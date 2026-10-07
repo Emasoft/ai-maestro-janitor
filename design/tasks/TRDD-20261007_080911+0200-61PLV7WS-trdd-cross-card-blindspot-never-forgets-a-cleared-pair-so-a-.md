@@ -4,7 +4,7 @@ title: trdd-cross-card-blindspot never forgets a cleared pair, so a pair that re
 column: testing
 status: tasked
 created: 2026-10-07T08:09:11+0200
-updated: 2026-10-07T08:19:38+0200
+updated: 2026-10-07T09:35:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,4 @@ Found by the per-key forget check on TRDD-37H7QFSF (2026-10-07): scripts/detecto
 2026-10-07: tests in tests/test_trdd_cross_card_blindspot.py: cleared-then-returns covers forget, returns-prints and present-twice-once; unreadable-card-forgets-nothing covers the read-error leg.
 2026-10-07: the sweep forgets only after a complete scan (a per-card read error or the display cap means no sweep); a pair whose rare-word set changes and changes back is now reprinted; the card list is a plain per-scope directory listing, so a missing scope folder means its cards left the board.
 2026-10-07: known limit: Path.glob suppresses listing errors, so a transient I/O error on one scope folder can make its cards look absent; the result is one burst of reprinted pairs on the next good run, nothing lost or silenced.
+2026-10-07: shipped in v3.8.5; release observation starts.

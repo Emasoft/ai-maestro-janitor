@@ -1,10 +1,10 @@
 ---
 trdd-id: QXG8SRVD
 title: C25 — autorecall HOOK-003
-column: blocked
+column: testing
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-01T19:48:13+0200
+updated: 2026-10-07T09:35:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,10 +15,11 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:15+0200
-blocked-by: [B9YPSF02]
+blocked-by: []
 pre-block-column: todo
 blocker-probe: [trddgrep, why, QXG8SRVD]
 blocker-holds-if: not-match:READY
+implementation-commits: [60bac607, d3fc5f06, 053c63f2]
 ---
 
 # C25 — autorecall HOOK-003
@@ -35,3 +36,8 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:15+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:13+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on B9YPSF02 per DSN035UN wave order
+- 2026-10-07T09:35:40+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+
+## Implementation notes
+
+2026-10-07: HOOK-003 recorded at most once a day when the autorecall limit trips; fail-open. Merged at 053c63f2.

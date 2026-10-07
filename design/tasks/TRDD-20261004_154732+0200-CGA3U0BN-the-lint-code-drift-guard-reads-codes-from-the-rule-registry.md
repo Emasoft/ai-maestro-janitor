@@ -1,10 +1,10 @@
 ---
 trdd-id: CGA3U0BN
 title: The lint-code drift guard reads codes from the rule registry instead of scraping memory.rs
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-04T15:47:32+0200
-updated: 2026-10-07T08:21:36+0200
+updated: 2026-10-07T09:35:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -19,6 +19,7 @@ parent-trdd: BHIS99XE
 pre-block-column: 
 blocked-by: []
 unblock-when: []
+implementation-commits: [0977cf1f, 269a6d7e, 15e8053e]
 ---
 
 # The lint-code drift guard reads codes from the rule registry instead of scraping memory.rs
@@ -40,6 +41,7 @@ Not before. 3.7.1 is published and C21 has landed, so the registry shape is fina
 - 2026-10-04T15:47:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T08:19:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on owner decision: plain edits for module-level constants fastedit cannot target
 - 2026-10-07T08:19:38+0200 — column → backburner by main-agent@ai-maestro-janitor. reverted: blocked-by naming a decision gives lint errors; owner question recorded in body Cleared blocked-by (--clear-blocker override).
+- 2026-10-07T09:35:40+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
 
 ## Open defects carried here
 
@@ -50,3 +52,7 @@ The comment above _PUSH_BLOCK_RE (commit bc2bfb65) says the run-on 'only adds te
 2026-10-07: BLOCKED-ON-DECISION: may plain edits be used for module-level constants fastedit cannot target? asked 2026-10-07
 2026-10-07: BLOCKED-ON-DECISION (kept in backburner so the board validates): may plain edits be used for module-level constants fastedit cannot target? Asked 2026-10-07.
 2026-10-07: the BLOCKED-ON-DECISION line appears twice above; both carry the same question (two worker runs appended it), nothing differs.
+
+## Implementation notes
+
+2026-10-07: guard reads the 47-name registry; 8 names classified with what handles each; a second count guards the parser; plain edits used under the owner's delegation (owner 2026-10-07, verbatim: 'do it as you think its best. but go on. you are late.'; main agent's decision: plain Edit only for module-level constants, comment blocks or docstrings fastedit cannot target). Merged at 15e8053e.
