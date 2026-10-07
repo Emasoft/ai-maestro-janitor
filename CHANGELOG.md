@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.11] — 2026-10-07
+
+### Bug Fixes
+
+- **transcript:** One heartbeat-reply predicate, bare reply only (TRDD-IYNS7H83) (f9587fd)
+- **user-mem:** Previous_user_message reads the transcript tail through jsonl_walk (TRDD-A8DRRW0I) (1c04535)
+- **external-clear:** The recent-messages tail reads through jsonl_walk (TRDD-A8DRRW0I) (22c798b)
+- **clear:** Carry the owner's last messages across consecutive clears ([#338](https://github.com/Emasoft/ai-maestro-janitor/issues/338)) (TRDD-IN4493LC) (6da0149)
+
+### Documentation
+
+- **trdd:** Record the 3.8.10 publish and the pgid-wait test fix (TRDD-9KKPFYTP, TRDD-FQVEILVK) (b3dfbc8)
+- **trdd:** IYNS7H83 records its fix commit (TRDD-IYNS7H83) (00775af)
+- **trdd:** Correct wording stronger than its evidence on four cards (TRDD-P9D6QWMU) (b00e776)
+- **trdd:** IYNS7H83 acceptance check and breaches, P9D6QWMU closing note (TRDD-IYNS7H83, TRDD-P9D6QWMU) (76b1e4a)
+- **trdd:** Close P9D6QWMU with its checklist, fix one sentence on 7T4J5T6Z (TRDD-P9D6QWMU) (bde9aa8)
+- **trdd:** Fix one sentence on 7T4J5T6Z (TRDD-P9D6QWMU) (a7a9912)
+- **trdd:** A8DRRW0I to dev, stage A recorded (TRDD-A8DRRW0I) (c181cc7)
+- **trdd:** A8DRRW0I wave 0 recorded (TRDD-A8DRRW0I) (8a0975e)
+- Add TRDD for issue 338 — carry the owner assignment across clears (18d308e)
+- **trdd:** IN4493LC records the review findings to build into the 338 fix (TRDD-IN4493LC) (60fbf0d)
+- **trdd:** IN4493LC records the fix commit (TRDD-IN4493LC) (5bd6e11)
+
+### Features
+
+- **jsonl-walk:** Byte-safe tail walk for transcript readers (TRDD-A8DRRW0I) (2325c39)
+
+### Refactor
+
+- **jsonl-walk:** The tail read returns a list so a missing file raises at the call (TRDD-A8DRRW0I) (675739c)
 ## [3.8.10] — 2026-10-07
 
 ### Bug Fixes
@@ -36,6 +66,7 @@ All notable changes to this project will be documented in this file.
 - **trdd:** FQVEILVK records the 9KKPFYTP edit-rule breach (TRDD-FQVEILVK) (7ddaea3)
 - Bump version to 3.8.10 (ddfde60)
 - Bump version to 3.8.10 (c533d1a)
+- Bump version to 3.8.10 (e7ded32)
 
 ### Testing
 
