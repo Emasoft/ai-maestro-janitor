@@ -4,7 +4,7 @@ title: A heartbeat line that repeats with identical text is silenced for ever by
 column: testing
 status: tasked
 created: 2026-10-05T23:16:34+0200
-updated: 2026-10-07T07:51:12+0200
+updated: 2026-10-07T08:11:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 - 2026-10-05T23:16:34+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T07:47:59+0200 — column → testing by main-agent@ai-maestro-janitor. implemented in batch B5, awaiting verification
 2026-10-07: DECISION: the per-fire forget (a3583bbf, merge f1910cc4) was reverted in 876296de because detectors exit 0 silently while a condition holds (throttle, offline, own dedupe). Now four self-deduping detectors (oauth-login-needed, stale-index-lock, system-daemon-runaway, trdd-cross-card-blindspot) bypass the dispatcher dedupe = fixed for them. Every other detector's key carries the local date = bounded to one day, not fixed: a standing line of a non-exempt detector without its own dedupe now repeats once a day, and after the next release every standing line prints once (key format change). Merge 864864ba. Moved to testing by main-agent@ai-maestro-janitor.
+2026-10-07: shipped in v3.8.4; release observation starts.
 
 ## Corrections
 

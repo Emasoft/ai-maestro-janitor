@@ -4,7 +4,7 @@ title: Every heartbeat fire logs that the interrupt check was skipped because th
 column: testing
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-07T07:01:31+0200
+updated: 2026-10-07T08:11:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ Observed in the dispatch log of two other projects on every fire read: 'heartbea
 
 - 2026-10-05T22:08:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T07:01:31+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
+2026-10-07: shipped in v3.8.4; release observation starts.
 
 ## STATE
 

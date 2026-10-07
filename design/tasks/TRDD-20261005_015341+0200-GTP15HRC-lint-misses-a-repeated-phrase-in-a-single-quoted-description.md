@@ -4,7 +4,7 @@ title: Lint misses a repeated phrase in a single-quoted description
 column: testing
 status: tasked
 created: 2026-10-05T01:53:41+0200
-updated: 2026-10-07T07:48:10+0200
+updated: 2026-10-07T08:11:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ Found 2026-10-05 in the review of C17 (archived TRDD-KSCAFSLD). For description:
 - 2026-10-05T01:53:41+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T07:01:32+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
 2026-10-07: follow-up: the fixer refuses a description whose quotes do not match (1f4b1439, merge 1799a001); 0 memory pages newly flagged, counted on copies of the three stores.
+2026-10-07: shipped in v3.8.4; release observation starts.
 
 ## STATE
 

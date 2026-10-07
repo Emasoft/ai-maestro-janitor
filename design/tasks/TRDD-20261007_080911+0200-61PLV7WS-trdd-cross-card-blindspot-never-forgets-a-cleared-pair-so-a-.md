@@ -4,7 +4,7 @@ title: trdd-cross-card-blindspot never forgets a cleared pair, so a pair that re
 column: dev
 status: tasked
 created: 2026-10-07T08:09:11+0200
-updated: 2026-10-07T08:09:11+0200
+updated: 2026-10-07T08:11:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,11 @@ Found by the per-key forget check on TRDD-37H7QFSF (2026-10-07): scripts/detecto
 ## Approval log
 
 - 2026-10-07T08:09:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+
+## Acceptance
+
+- [ ] A full scan with the pair gone forgets its key.
+- [ ] A scan with a read error while the pair is present keeps it.
+- [ ] A pair that cleared and returns prints again.
+- [ ] A pair present on two scans prints once.

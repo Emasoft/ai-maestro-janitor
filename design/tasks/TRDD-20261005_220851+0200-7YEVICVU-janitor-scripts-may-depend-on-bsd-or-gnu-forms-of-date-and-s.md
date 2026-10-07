@@ -4,7 +4,7 @@ title: Janitor scripts may depend on BSD or GNU forms of date and stat that diff
 column: testing
 status: tasked
 created: 2026-10-05T22:08:51+0200
-updated: 2026-10-07T07:01:32+0200
+updated: 2026-10-07T08:11:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -28,6 +28,7 @@ Observed in ad hoc shell checks on one host: 'date -r <epoch>' and 'stat -f <for
 
 - 2026-10-05T22:08:51+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T07:01:32+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
+2026-10-07: shipped in v3.8.4; release observation starts.
 
 ## STATE
 
