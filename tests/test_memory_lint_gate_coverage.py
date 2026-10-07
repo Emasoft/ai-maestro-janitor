@@ -1,7 +1,7 @@
 """janitor#200: every memgrep lint CODE must map to a chore gate that can dispatch on it —
 or be explicitly, consciously tracked as orphaned.
 
-`memgrep lint` (scripts/memgrep/src/memory.rs) can emit ~30 distinct finding codes. The
+`memgrep lint` (codes registered in scripts/memgrep/src/rules_gen.rs) can emit ~47 distinct finding codes. The
 seven `*_has_work` prechecks in `memory_content_precheck.py` are what actually turn a
 finding into a dispatched agent. Before this file, the mapping between the two existed
 only in an issue-tracker table (janitor#200) that nothing checked against the source —
@@ -13,7 +13,7 @@ convention every other memgrep-adjacent test here follows):
 
 1. GROUND-TRUTH DRIFT GUARD — extract the full code set directly from the Rust source
    (never hand-typed) and assert it matches the classification table below. A new code
-   added to memory.rs without updating `_CODE_COVERAGE` here fails this test immediately,
+   added to the rule registry without updating `_CODE_COVERAGE` here fails this test immediately,
    forcing the classification to be a conscious decision rather than a silent gap.
 
 2. LIVE PROOF for three representative codes, chosen because they are the ones the
@@ -44,7 +44,7 @@ import pytest
 from conftest import MEMGREP_BIN_PATH
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_MEMORY_RS = _PROJECT_ROOT / "scripts" / "memgrep" / "src" / "memory.rs"
+_RULES_RS = _PROJECT_ROOT / "scripts" / "memgrep" / "src" / "rules_gen.rs"
 
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
@@ -77,38 +77,17 @@ def _pin_memgrep_for_the_gates(monkeypatch):
     if MEMGREP_BIN_PATH:
         monkeypatch.setenv("MEMGREP_BIN", MEMGREP_BIN_PATH)
 
-# Every finding is built as `violations.push(Violation { … code: "code", … })` — the struct
-# (TRDD-XI10BA5D step B / A10, which also discharged the tuple-index debt) may close with `}))`
-# (a plain statement) or `})),` (a match-arm expression), so BOTH terminators are matched,
-# non-greedy, but a push that is a match arm's tail expression ends in a bare `})` with no `;`/`,`,
-# so that block runs on into the next push and takes in EVERYTHING between the two pushes (the next
-# arm's `let code = …;` included). That is harmless only as long as no kebab literal that is not a
-# code sits between two such pushes — the exact-set assert below fails if one ever does. The
-# `let code = …;` scan in `_extract_lint_codes_from_source` is what finds bound codes deliberately,
-# not by that accident.
-# Scoping the kebab-literal search to the TEXT INSIDE each push call (not the whole file) is what
-# excludes unrelated literals like
-# `"atom-page"` (a CLI subcommand name) or `"footnote-integrity"` (a string a TEST asserts
-# against, not a code memgrep emits) without needing an explicit denylist — neither ever appears
-# inside a `violations.push(Violation { … })` call.
-_PUSH_BLOCK_RE = re.compile(r"violations\.push\(Violation \{.*?\}\)[;,]", re.DOTALL)
-_KEBAB_LITERAL_RE = re.compile(r'"([a-z][a-z0-9]*(?:-[a-z0-9]+)+)"')
+# One `Rule { code: "…", name: "…", … }` line per code in the generated registry. The registry
+# (issue-codes.toml -> rules_gen.rs) is the single source of every code name, so this guard reads
+# it instead of scraping where memory.rs happens to emit them (that scrape broke when emission
+# moved into `let code = …;` bindings and could never see a code emitted elsewhere).
+_RULE_NAME_RE = re.compile(r'\bname: "([a-z0-9-]+)"')
 
 
 def _extract_lint_codes_from_source() -> frozenset[str]:
-    """Every finding code memory.rs can emit, read directly from the source (never
+    """Every finding code memgrep can emit, read from the generated rule registry (never
     hand-typed) — the ground truth the classification table below is checked against."""
-    text = _MEMORY_RS.read_text(encoding="utf-8")
-    codes: set[str] = set()
-    for block in _PUSH_BLOCK_RE.findall(text):
-        codes.update(_KEBAB_LITERAL_RE.findall(block))
-    # A push block may take its code from a `let code = if … { "a" } else { "b" };` bound just
-    # ABOVE it (TRDD-BHIS99XE, ef58378a: the binding feeds both `rule_sev(code)` and `code,`), so
-    # the literal is no longer INSIDE the block. Scan those bindings too, or the drift guard
-    # reports a live code as removed.
-    for binding in re.findall(r"let code = [^;]*;", text):
-        codes.update(_KEBAB_LITERAL_RE.findall(binding))
-    return frozenset(codes)
+    return frozenset(_RULE_NAME_RE.findall(_RULES_RS.read_text(encoding="utf-8")))
 
 
 # code -> covering `content_has_work` intervention name, or None (orphaned: no scheduled
@@ -180,6 +159,26 @@ _CODE_COVERAGE: dict[str, str | None] = {
     "stray-display-bracket": None,
     # janitor#315: WARN-only detection of a pasted-twice section; no chore repairs it (fix=none).
     "page-duplicated-section": None,
+    # TRDD-CGA3U0BN: the eight registry names that had no row. All orphaned at the chore layer,
+    # each for a reason read from its rule definition (rules_gen.rs) and its emitter (memory.rs).
+    # MGPERF-001/-002/-003 are PERFORMANCE telemetry about memgrep itself (a recall/lint run over
+    # its `[perf]` budget; an index rebuilt on the hot path), not a defect in any page: there is
+    # no page content a chore could repair, and nothing in memory.rs emits them yet (registry only).
+    "recall-over-budget": None,
+    "lint-over-budget": None,
+    "index-stale-rebuild": None,
+    # WMPAGE-006/-007/-008: the publish-globally family. Orphaned BY DESIGN — the gate cannot own
+    # it: the right fix depends on filesystem state (is there a USER-scope symlink?) that a text
+    # predicate cannot see, and a wrong guess un-publishes a deliberately published page. The
+    # family self-heals on the next memgrep write (memory_content_precheck.py, TRDD-AO8MPK5D).
+    "publish-globally-missing": None,
+    "publish-globally-not-symlinked": None,
+    "publish-globally-conflict": None,
+    # WMSUP-001/-002: findings about the suppression comments themselves (`<!-- noqa -->`). They
+    # are linter hygiene, fixed by editing or removing the comment (unused-noqa has a built-in
+    # safe fixer run by `memgrep lint --fix`); no scheduled chore consumes them.
+    "unused-noqa": None,
+    "blanket-noqa": None,
     # Orphaned BY DESIGN, not by oversight. `page-unclosed-fence` exists to explain a
     # SILENT read failure to whoever is standing in front of it: an odd fence count makes
     # every walker swallow the rest of the page, so atoms below it vanish from lint, from
@@ -214,20 +213,20 @@ _ALL_INTERVENTIONS = (
 
 
 def test_classification_table_matches_the_source_exactly():
-    """Drift guard: every code memory.rs can emit is classified here, and nothing
-    classified here has stopped existing in the source. A code that is added, removed,
-    or renamed in memory.rs without a matching edit here fails loudly instead of
+    """Drift guard: every code in the rule registry is classified here, and nothing
+    classified here has stopped existing in the registry. A code that is added, removed,
+    or renamed in rules_gen.rs without a matching edit here fails loudly instead of
     silently going unclassified (the janitor#200 failure mode, generalized)."""
     extracted = _extract_lint_codes_from_source()
     classified = frozenset(_CODE_COVERAGE)
     missing_from_table = extracted - classified
     stale_in_table = classified - extracted
     assert not missing_from_table, (
-        f"new lint code(s) in memory.rs have no coverage classification: {sorted(missing_from_table)} "
+        f"new lint code(s) in the rule registry have no coverage classification: {sorted(missing_from_table)} "
         "— decide whether a chore gate covers them and add the row"
     )
     assert not stale_in_table, (
-        f"classified code(s) no longer exist in memory.rs: {sorted(stale_in_table)} — remove the row"
+        f"classified code(s) no longer exist in the rule registry: {sorted(stale_in_table)} — remove the row"
     )
     # A deliberate SPEED BUMP, not a redundant length check. The two set assertions above
     # already force every code to be classified — but they pass silently when a commit adds a
@@ -244,7 +243,8 @@ def test_classification_table_matches_the_source_exactly():
     # 37 -> 38: `atom-oversized-critical` (TRDD-XI10BA5D step B), classified ORPHANED at the
     # chore layer — it drains through step B's MEMCORP-002 ticket path instead — see its row.
     # 38 -> 39: `page-duplicated-section` (janitor#315), WARN-only, no chore — see its row.
-    assert len(_CODE_COVERAGE) == 39
+    # 39 -> 47: the eight registry names that had no row (TRDD-CGA3U0BN), all orphaned — see rows.
+    assert len(_CODE_COVERAGE) == 47
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():
