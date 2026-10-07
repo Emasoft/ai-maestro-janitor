@@ -843,7 +843,9 @@ def human_activity_age_from_tail(
     Pure. The walk lives in ``human_activity_scan``. Tail exhausted while every turn seen was
     scheduled → the age of the OLDEST scheduled prompt (conservative: "at least this idle").
     No prompt at all → degrade to ``substantive_age_from_tail``'s age (unknown shape ⇒ count as
-    activity, same fail-safe bias as that function)."""
+    activity, same fail-safe bias as that function). This no-prompt fallback deliberately
+    differs from ``transcript_human_idle`` (which reports a lower bound): the two lanes want
+    opposite biases, so do NOT unify them (TRDD-QONEBKGK)."""
     age, _exact, saw_prompt = human_activity_scan(tail, now=now, fallback_age=fallback_age)
     if not saw_prompt:
         sub_age, _ = substantive_age_from_tail(tail, now=now, fallback_age=fallback_age)

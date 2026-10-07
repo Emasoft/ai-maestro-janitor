@@ -1677,10 +1677,15 @@ def compose_template_handoff(
     def render(n_cards: int, n_commits: int, n_findings: int, show_other_ids: bool) -> str:
         # TRDD-QONEBKGK: a lower-bound idle (the window held no human turn) renders "≥ ~Nh",
         # never an exact claim.
+        # WHY minutes below an hour: a 720 s lower bound used to print "≥ ~0h", which reads as
+        # "not idle at all"; sub-hour idle must show its real magnitude.
         idle_h = "unknown"
         if inputs.idle_seconds is not None:
             bound = "≥ " if inputs.idle_is_lower_bound else ""
-            idle_h = f"{bound}~{inputs.idle_seconds // 3600}h"
+            if inputs.idle_seconds < 3600:
+                idle_h = f"{bound}~{inputs.idle_seconds // 60}m"
+            else:
+                idle_h = f"{bound}~{inputs.idle_seconds // 3600}h"
         ctx = "unknown" if inputs.context_tokens is None else f"~{inputs.context_tokens // 1000}k"
         out = [
             f"# Handoff — {now_iso} (auto-composed, no model turn — TRDD-PXP08ZQC)",

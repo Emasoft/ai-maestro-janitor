@@ -297,6 +297,17 @@ def test_template_handoff_carries_the_pointers_it_promises():
     assert "memgrep recall" in text
 
 
+
+def test_handoff_idle_renders_minutes_below_an_hour_and_hours_at_or_above():
+    """A 720 s lower bound reads "≥ ~12m" (not "≥ ~0h"); an exact 7200 s reads "~2h"."""
+    low = ec.compose_template_handoff(
+        _inputs(idle_seconds=720, idle_is_lower_bound=True), now_iso=NOW_ISO
+    )
+    assert "idle ≥ ~12m" in low
+    high = ec.compose_template_handoff(_inputs(idle_seconds=7200), now_iso=NOW_ISO)
+    assert "idle ~2h" in high and "≥" not in high
+
+
 def test_template_handoff_always_carries_a_reference_even_when_empty():
     """An empty session still needs a pointer into the payload store, or it is not exhaustive."""
     text = ec.compose_template_handoff(
