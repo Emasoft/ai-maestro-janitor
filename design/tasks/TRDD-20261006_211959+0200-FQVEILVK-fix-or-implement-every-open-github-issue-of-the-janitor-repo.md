@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T07:51:11+0200
+updated: 2026-10-07T10:05:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -49,6 +49,7 @@ SUPERSEDED NEXT ACTION: #332's drift classes, card by card (idle cards, reminder
 2026-10-07: stays in dev across this publish on purpose: it is the umbrella for the issue sweep, issues 328 and 332 are open and being worked, and no code of its own is half-landed in this release.
 2026-10-07: the iTerm session enumeration deadlines were raised from 15, 30, 45 s to 30, 60, 90 s on the owner's instruction (9d35df27, merge 1cc4c2e7). Known consequences, from the worker's read of the callers: when every attempt fails the daemon main loop can wait up to 186 s on one scan (its 30 s budget defers later tasks, it does not interrupt), and the peer-freeze-recovery detector, limited to 120 s, would be cut and lose that scan. The alarm that reaches the owner is written after ONE scan with zero sessions; no consecutive-scan threshold exists, so a timeout that clears on the next scan still notifies. Changing that threshold was offered to the owner and not made.
 2026-10-07: board triage of 383 cards (278 open) done; batches B1 to B3 merged on main and gated (ten fixes, three cards found already resolved); not yet released.
+2026-10-07 items the pre-clear review found on no card, recorded here so the clear does not lose them: (a) this card supersedes .janitor/state/agent-handoff.md, which holds an older handoff and must not be followed; (b) the runaway test still owes a starvation guard (assert hi_delta > 0.05); (c) the plutil marker risk in tests/test_keepalive_install.py is unverified; (d) the closing report to the owner must say that releases 3.8.4 to 3.8.6 were checkpoints, that the once-a-day repeat of standing lines and OAuth reminders is a reversible default, and that 3.8.5's CI was red.
 
 ## Approval log
 
