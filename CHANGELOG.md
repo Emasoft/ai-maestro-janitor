@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.3] — 2026-10-07
+
+### Bug Fixes
+
+- **publish:** Exempt PLUGIN_SKIP_GITHUB_INTEGRITY, refuse the legacy name (TRDD-CWKM5218) (52eb054)
+- **rotator:** A slow ps no longer loses the tick (TRDD-JOXQQL4J) (9377073)
+- **daemon:** Rotator tick stderr tail starts on a line boundary (4e58200)
+- **hooks:** Guard hooks get 30 s, advisory hooks keep their short limit (TRDD-U32EVMI9) (d28f312)
+- **publish:** Remove the unreachable PLUGIN_SKIP_INSTALL_SMOKE opt-out (TRDD-LA4MGOJN) (295b48c)
+- **dispatch:** Log every emitted keep-going nudge (TRDD-VP4UJ947) (decb827)
+- **fleet:** Give the iTerm session enumeration 30, 60 and 90 s (9d35df2)
+
+### Documentation
+
+- **trdd:** Record v3.8.2 on I33ST36V, CWKM5218, FQVEILVK (dcab13d)
+- **trdd:** FQVEILVK stays in dev; I33ST36V daemon item keeps 3.8.1 and adds 3.8.2 (cb25745)
+- **trdd:** I33ST36V records CI, install and daemon on 3.8.2; CWKM5218 count bounded (6a3bfcd)
+- **trdd:** Close I33ST36V — v3.8.2 published, installed, daemon on 3.8.2 (b36b841)
+- **trdd:** 8BNV75TV records the rejected check3/check4 exclusion branch and two replacement designs (janitor#332) (445f05b)
+- **trdd:** Close HSRERK5S — live check proven (TRDD-HSRERK5S) (4640474)
+- **trdd:** JSQSJ3PZ records the HSRERK5S closure and its review caveats (TRDD-JSQSJ3PZ) (91b9e91)
+- **trdd:** Board pass — live-check results, supersede BMITQ2MN, four new cards (TRDD-FQVEILVK) (0d4f8fd)
+- **trdd:** Close the gaps of the board pass; card for the dead publish opt-out (TRDD-FQVEILVK) (4d69da8)
+- **trdd:** Audit corrections, open-decision lines, three new cards (TRDD-FQVEILVK) (309190f)
+- **trdd:** Record the merged fixes and the hook response; card for hook start-up cost (TRDD-FQVEILVK) (714f72c)
+- **trdd:** Pre-publish pass — owner directive, dev column emptied, validate result (TRDD-FQVEILVK) (bcc0229)
+- **trdd:** Correct the 328 record, gate and validate results, iTerm ladder consequences (TRDD-FQVEILVK) (3718a1d)
+
+### Styling
+
+- **publish:** Restore the space in stage_install_smoke (TRDD-LA4MGOJN) (4be061f)
+
+### Testing
+
+- **rotator:** The ps-timeout test has no orphan child and fails loudly on a rename (TRDD-JOXQQL4J) (cc40a24)
 ## [3.8.2] — 2026-10-07
 
 ### Bug Fixes
@@ -38,6 +73,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** I33ST36V worktree-cleanup checklist item (3.8.2) (20e56a8)
 - **trdd:** Seven unfinished testing cards re-columned before 3.8.2; JSQSJ3PZ chain; Q23COADS link (634f44a)
 - **trdd:** JD2QR5SQ to backburner; ZAKT0NRI/QJ5LP4W2 cross-linked; CWKM5218 on the release checklist; FQVEILVK follow-ups recorded (cbf78b4)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.2 (36f87b4)
 
 ### Revert
 
