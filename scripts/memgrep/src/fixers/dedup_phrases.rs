@@ -62,6 +62,11 @@ fn fix_description_line(line: &str) -> Option<String> {
     } else {
         r.strip_suffix(q).map_or((r, ""), |r| (r, open))
     };
+    // WHY (TRDD-GTP15HRC follow-up): an opening quote without its matching closing one is a
+    // malformed scalar; writing it back would keep the dangling quote, so refuse instead.
+    if !open.is_empty() && close.is_empty() {
+        return None;
+    }
     let new_inner = dedup_value(inner)?;
     // Lossless: the phrase list is exactly the old one with repeats removed.
     let (old, new) = (page_description_phrases(inner), page_description_phrases(&new_inner));
@@ -174,6 +179,14 @@ mod tests {
         assert!(!has_code(Path::new(P), &fixed, CODE));
     }
 
+    #[test]
+    fn refuses_a_value_whose_opening_and_closing_quotes_do_not_match() {
+        // WHY (TRDD-GTP15HRC follow-up): a value quoted only at the start used to be rewritten with
+        // an opening quote and no closing one; a malformed scalar is refused, never "repaired".
+        for desc in ["'a b / c d / a b / e f", "\"a b / c d / a b / e f'", "'a b / c d / a b / e f\""] {
+            assert_eq!(fix(Path::new(P), &page(desc)), None, "{desc}");
+        }
+    }
 
     #[test]
     fn crlf_non_ascii_and_dots_terminator() {

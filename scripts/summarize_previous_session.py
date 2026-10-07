@@ -252,10 +252,12 @@ def _main(
     # Sized with `tail=()` (TRDD-D7RLXAN1): the room is for the Jev injected copy, which now
     # carries the newest exchanges verbatim itself.
     inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
-    room_inputs = ec.HandoffInputs(
+    # TRDD-QONEBKGK: `with_measured_facts` fills the idle/context facts the handoff header
+    # printed as "unknown" because no caller ever supplied them.
+    room_inputs = ec.with_measured_facts(ec.HandoffInputs(
         trigger="jev-compaction", findings=findings, cards=in_flight_cards,
         other_open_ids=other_open_ids_line,
-    )
+    ), str(prev), now)
     # `room_inputs` may come back with SHORTER card titles than `in_flight_cards` (TRDD-RAEGS1D5
     # room-floor follow-up, round 2): `jcl.trim_cards_for_room` shrinks titles toward "" (every id
     # kept, never dropped) when they would otherwise starve the summary's own room -- see that
@@ -300,10 +302,10 @@ def _main(
         # handoff exists for this key (the same fact-only degrade the sync hook writes on its
         # own failure) and end the hold immediately instead of waiting out a TTL whose
         # only original purpose was bounding a `jev_compact` that never returns.
-        inputs = ec.HandoffInputs(
+        inputs = ec.with_measured_facts(ec.HandoffInputs(
             trigger="jev-compaction-failed", findings=findings, cards=in_flight_cards,
             other_open_ids=other_open_ids_line,
-        )
+        ), str(prev), now)
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
@@ -327,10 +329,10 @@ def _main(
     # `cards=room_inputs.cards` (room-floor follow-up), not `in_flight_cards` -- keeps this call's
     # own room faithful to the (possibly title-shortened) facts `inject_max_bytes` was sized
     # against above; see `jcl.trim_cards_for_room`'s own docstring.
-    inputs = ec.HandoffInputs(
+    inputs = ec.with_measured_facts(ec.HandoffInputs(
         trigger=trigger, findings=findings, cards=room_inputs.cards,
         other_open_ids=other_open_ids_line,
-    )
+    ), str(prev), now)
     # TRDD-D7RLXAN1 (advisor finding A): the "Recent turns" tail only on the llm-ext fallback.
     # A Jev text carries the newest exchanges verbatim already, so a tail would repeat them;
     # an llm-ext text is a prose paraphrase, and this call is its ONLY carrier of the owner's
