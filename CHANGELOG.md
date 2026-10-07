@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Split an over-budget atom on the CPV and release pipeline page (7817d49)
 - **memory:** Drop memory-system's duplicate See also heading and retitle the CPV line in MEMORY.md (927288d)
 - **memory:** Give the merged CPV gitignore stub page its metadata block (280b6f2)
+- Bump version to 3.8.7 (ec37068)
 
 ### Testing
 
