@@ -1388,3 +1388,25 @@ def test_with_measured_facts_stays_unknown_when_the_transcript_is_absent(tmp_pat
     inputs = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(tmp_path / "gone.jsonl"), 0)
     text = ec.compose_template_handoff(inputs, now_iso=NOW_ISO)
     assert "idle unknown, context unknown" in text
+
+
+
+def test_with_measured_facts_idle_unknown_when_transcript_has_no_human_turn(tmp_path: Path):
+    """TRDD-QONEBKGK: assistant/tool-only transcript -> idle unknown; with a human turn -> measured."""
+    now = int(time.time())
+
+    def stamp(age_s: int) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - age_s))
+
+    unattended_reply = {"type": "assistant", "timestamp": stamp(60), "message": {"content": "working"}}
+    unattended = tmp_path / "unattended.jsonl"
+    unattended.write_text(json.dumps(unattended_reply) + "\n", encoding="utf-8")
+    got = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(unattended), now)
+    assert got.idle_seconds is None
+
+    prompt = {"type": "user", "timestamp": stamp(7200), "message": {"content": "hi"}}
+    reply = {"type": "assistant", "timestamp": stamp(7190), "message": {"content": "done"}}
+    attended = tmp_path / "attended.jsonl"
+    attended.write_text(json.dumps(prompt) + "\n" + json.dumps(reply) + "\n", encoding="utf-8")
+    got = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(attended), now)
+    assert got.idle_seconds is not None and 7000 <= got.idle_seconds <= 7300
