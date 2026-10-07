@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T07:01:22+0200
+updated: 2026-10-07T07:51:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -19,22 +19,28 @@ approval-datetime: 2026-10-06T21:19:59+0200
 
 # Fix or implement every open GitHub issue of the janitor repo (30 issues, 2026-10-06)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 
-v3.8.1 shipped (CI green): the four gap fixes; 28 of 30 issues closed; #328 open (owner decision), #332 open (board hygiene per card). Earlier: v3.8.0 shipped (release commit ea9e80bb, tags v3.8.0 and ai-maestro-janitor--v3.8.0, CI green on all 5 workflows).
+v3.8.3 released (CI green); installed at user scope per the prior session's record; this session still runs 3.8.2 hooks, the stub rolls forward on fire. Batches B1-B5 are merged on main and gated (latest gate at 864864ba: 18,094 passed). B5c (sub-hour idle in minutes plus two comments) is building.
+NEXT ACTION: merge B5c, short gate, scripts/publish.py --patch, install, then continue the plan reports/board/triage/20261007_062743+0200-merged-plan.md from B7, with CGA3U0BN next, then BRW49ELM, then K5F7US68 (shares memory_candidates_cli.py), and the issue #328 narrowing (card Q9MU9CWK is a proposal awaiting the owner; the public #328 comment says queued - reconcile). Cards in testing leave testing after a release observation. Worktrees under .claude/worktrees: copy any reports out before removing, check lock reasons, never force.
+Owner-visible: 37H7QFSF adds a once-a-day repeat of standing lines from non-exempt detectors (reversible default).
+
+SUPERSEDED (2026-10-07): every line of this block below this label predates v3.8.3 and is history only.
+
+SUPERSEDED (2026-10-07) v3.8.1 shipped (CI green): the four gap fixes; 28 of 30 issues closed; #328 open (owner decision), #332 open (board hygiene per card). Earlier: v3.8.0 shipped (release commit ea9e80bb, tags v3.8.0 and ai-maestro-janitor--v3.8.0, CI green on all 5 workflows).
 Issues closed on GitHub: 28 of the 30 (#306 #307 #309 #310 #311 #312 #313 #314 #315 #316 #317 #318 #319 #320 #321 #322 #323 #324 #325 #326 #327 #329 #330 #331 #333 #334 #335 #336). Owner cards moved to complete: KAXQH0J5 K2PEAYHR TMZRFMZL 8COB99QQ 4TECXZXP C9O4DJ7T KKDYNB56 9Z2MGBA5 4LXEFG9I 0YVUX6RE. Closed issue but card kept in testing for an unproven acceptance item: V13M5YY1 (#315, validate does not see a pasted-twice section), 7V9DQZ9D (#323, duplicated keywords not named), 2OJG0L0E (#326, component over-cap split re-dispatch has no test), ZNCH1MUT (#331, recall-loss rule is skill-instruction only). Q23COADS (#328) waits for the owner.
 Process note: two workers broke the no-scripted-edit brief by rewriting tests/test_issue_catalog.py with python scripts; the diffs were read and accepted.
-NEXT ACTION: remaining follow-ups: (1) check the #326 test's asserted phrases occur only inside the rule paragraph; (2) spec sentence that lint owns body checks (validate's WARN is a mirror); (3) then #332 board hygiene per card (card 6ESS2MGE). Moves were self-approved by this session (approver string main-agent@ai-maestro-janitor); the v3.8.0 release notes were edited after publish to add a Notes section (both-sides rotation; memgrep cargo install), which CHANGELOG.md does not carry.
+SUPERSEDED NEXT ACTION: remaining follow-ups: (1) check the #326 test's asserted phrases occur only inside the rule paragraph; (2) spec sentence that lint owns body checks (validate's WARN is a mirror); (3) then #332 board hygiene per card (card 6ESS2MGE). Moves were self-approved by this session (approver string main-agent@ai-maestro-janitor); the v3.8.0 release notes were edited after publish to add a Notes section (both-sides rotation; memgrep cargo install), which CHANGELOG.md does not carry.
 
 Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. all issues, no exceptions.' (the open issues of Emasoft/ai-maestro-janitor: 306, 307, 309-336, 30 in all). Owner ruling on the edit tool, verbatim answer to the question how to edit code while fastedit is frozen: 'Allow plain edits for this job'. Method: a read-only triage first (reports/board/*-github-issues-triage.md), then per issue: verify the symptom in current code, fix with a failing test first, full crate and Python suites, an adversarial review, a commit naming the issue, then a closing comment on the issue that names the commit and the release. Issues already fixed and released are closed with that evidence. Each issue gets its own card or an existing owner card; this card tracks the set.
 2026-10-07 process lesson: edit a card first and move it last — archived cards are immutable (TRDD-MQE5D28T D8), so three 3.8.1 cards kept a stale pre-release next action after an out-of-order move.
 2026-10-07 worker tool-rule breaches during the sweep, diffs read and accepted: python rewrites of tests/test_issue_catalog.py (twice), one sed -i on a new test file, fastedit used on a reports_dev triage report during the fastedit freeze.
 2026-10-07: a worker used the git safety guard's one-time password to run `git commit --amend` on its own unpushed worktree commit (landed as 91fca406). No pushed history was rewritten. This is a safety-control bypass, not a brief slip: the password is visible to the agent the guard gates. Every worker brief now says never to use a guard's one-time password.
 2026-10-07: the design-only closeable rule (67d29e91) was removed by hand in 91fca406; the closeable class's future (ledger note vs weekly surfacing) awaits the owner.
-2026-10-07: in dev while follow-ups (1) and (2) of NEXT ACTION are worked; then human_review — both done (no commit needed: already satisfied by fdf88c7b and 3e2f0b1e). #332 closes only when every drift class is fixed or shown to need no action (owner card TRDD-6ESS2MGE; the closeable class waits on one post-release weekly audit, TRDD-8BNV75TV). #328 awaits the owner on proposal TRDD-Q9MU9CWK.
+2026-10-07: in dev while follow-ups (1) and (2) of the SUPERSEDED next action are worked; then human_review — both done (no commit needed: already satisfied by fdf88c7b and 3e2f0b1e). #332 closes only when every drift class is fixed or shown to need no action (owner card TRDD-6ESS2MGE; the closeable class waits on one post-release weekly audit, TRDD-8BNV75TV). #328 awaits the owner on proposal TRDD-Q9MU9CWK.
 2026-10-07: follow-up (1) found already satisfied, no change: the #326 test (fdf88c7b) reads only skills/janitor-memory-split/SKILL.md and asserts one sentence that occurs exactly once in the repo skills, inside the step-1 paragraph; follow-up (2) found already satisfied, no change: WM-CLI-05 already says lint owns body checks and validate's WARN is a mirror that leaves the exit code alone (3e2f0b1e, with 6f45acf8/d7da8884). Evidence: reports/issue-sweep/20261007-prerelease-batch.md.
 2026-10-07: v3.8.2 published with the #332 closeable change and the board re-column; 28 of 30 issues closed; #328 waits on the owner (proposal TRDD-Q9MU9CWK); #332 waits on the first weekly audit on 3.8.2 and the other drift classes (TRDD-6ESS2MGE).
-NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, testing past 40 days, ledger-note routing), owned by TRDD-6ESS2MGE; #328 waits on the owner; the closeable class waits on the first weekly audit on 3.8.2.
+SUPERSEDED NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, testing past 40 days, ledger-note routing), owned by TRDD-6ESS2MGE; #328 waits on the owner; the closeable class waits on the first weekly audit on 3.8.2.
 2026-10-07: live checks run for the testing cards the 3.8.2 handoff called runnable: HSRERK5S proven and closed (4640474b); KE88RIKX, HYTKG53C partly proven; KVUVV9D2, 9438CGJZ, Y6WFN5L9, D5BPUFIV, C7M4RXQ2 wait on an event that has not occurred; D7RLXAN1 failed and returned to todo. Bug filed upstream as Emasoft/ai-maestro issue 176 (trddgrep why tree).
 2026-10-07: the card that the superseded TRDD-BMITQ2MN named as its blocker, TRDD-UIDK2SDL in the ai-maestro repo, is still in todo there and still expects janitor involvement (it names the janitor's server_tick_holder reader and the removed setup-token importer). Nothing was changed in that repo; the owner or that project's session should be told the importer is gone. Evidence comment posted on ai-maestro issue 176 after a rerun confirmed all four points.
 2026-10-07: owner decision still open; nothing changed today; the git guard's one-time password stays visible to subagents and the brief rule (never use it) stays; no guard change until the owner answers.
@@ -56,3 +62,7 @@ NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, 
 fastedit itself stays frozen; the plain-edit exception covers this sweep only.
 2026-10-06: all 7 groups merged on main (through 6f45acf8, cards 4f29d825); full suite green; follow-ups for #326/#331/#336 in progress; #321 awaits owner decision; 6f45acf8 is shared by #315/#322/#331 (one test+spec commit).
 Release tracking: this card owns the sweep release; after the follow-ups for #326/#331/#336 merge and the owner rules on #321, publish via scripts/publish.py, then close each issue and move its card to complete with an acceptance checklist.
+
+## Corrections
+
+2026-10-07: EZ4LSFF9 was closed complete in 31752504 but its goal was not met; the true outcome is a decision not to change config (pyright identical from any cwd, mypy differs only from inside scripts/lib, a fix would loosen a check); run mypy from the repo root.
