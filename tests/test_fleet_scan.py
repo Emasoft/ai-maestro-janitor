@@ -1385,7 +1385,7 @@ def test_iterm_probe_retries_a_transient_empty_and_reports_the_attempt_count() -
     assert sessions, "the third attempt found sessions and they must be returned"
     assert attempts == 3, "the human must be told HOW MANY times we asked"
     assert outcome == "ok"
-    assert calls == [15.0, 30.0, 45.0], f"deadlines must ESCALATE, not repeat: {calls}"
+    assert calls == [30.0, 60.0, 90.0], f"deadlines must ESCALATE, not repeat: {calls}"
     assert slept == [2.0, 4.0], f"backoff must be short and bounded: {slept}"
 
 
@@ -1408,7 +1408,16 @@ def test_iterm_probe_stops_at_the_first_success_so_a_healthy_host_pays_nothing()
     finally:
         fleet_scan._run_probe_outcome = orig  # type: ignore[assignment]
 
-    assert sessions and attempts == 1 and calls == [15.0]
+    assert sessions and attempts == 1 and calls == [30.0]
+
+
+def test_iterm_probe_ladder_is_strictly_increasing_and_starts_at_30_seconds() -> None:
+    """The enumeration deadlines must escalate and the first must be >= 30 s (owner, 2026-10-07)."""
+    import fleet_scan  # type: ignore[import-not-found]
+
+    ladder = fleet_scan._ITERM_PROBE_TIMEOUTS
+    assert ladder[0] >= 30.0
+    assert all(a < b for a, b in zip(ladder, ladder[1:], strict=False))
 
 
 def test_a_genuine_denial_still_alarms_after_every_attempt_fails() -> None:
