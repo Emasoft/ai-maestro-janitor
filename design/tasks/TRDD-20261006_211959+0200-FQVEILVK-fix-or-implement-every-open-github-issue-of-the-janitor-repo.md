@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T12:46:25+0200
+updated: 2026-10-07T15:57:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -70,3 +70,4 @@ Release tracking: this card owns the sweep release; after the follow-ups for #32
 ## Corrections
 
 2026-10-07: EZ4LSFF9 was closed complete in 31752504 but its goal was not met; the true outcome is a decision not to change config (pyright identical from any cwd, mypy differs only from inside scripts/lib, a fix would loosen a check); run mypy from the repo root.
+2026-10-07: B10b (c5ec956c) plain-Edit breach read and accepted: dispatch.py registration tuple and set member, plugin.json option, detector import/comment fixes, test edits starting with @ and decorators; follow-up fixes in 3eeaf8e6.
