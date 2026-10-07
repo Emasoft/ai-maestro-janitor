@@ -223,30 +223,39 @@ def relocate_candidates(
         out.append((f"{_rel(root, p)}#{footnote}", f"lesson-uncited at :{line} — move or link"))
     return sorted(out)
 
-def resolve_max_bytes() -> int:
+def resolve_max_bytes(*, strict: bool = False) -> int:
     """The scheduler's own `split_max_bytes` knob (review 2026-08-08: the SKILL used to say
     `--max-bytes <split_max_bytes>` with no way to resolve the placeholder, so an agent could
     run the CLI under a different cap than the scheduler's gate used). Unresolvable → 0, the
-    size check skipped (fail-open, as `main` always did)."""
+    size check skipped (fail-open, as `main` always did) — unless `strict`, which RAISES so a
+    caller that acts destructively on the answer (`candidates_for`) never proceeds on a guess."""
     try:
         import memory_settings  # noqa: PLC0415
 
         return int(memory_settings.get("split_max_bytes") or 0)
     except Exception:  # noqa: BLE001 - unresolvable knob → size check skipped (fail-open)
+        if strict:
+            raise
         return 0
 
 
 def candidates_for(
     intervention: str, root: Path, *, scope: str, now: int | None
 ) -> list[tuple[str, str]] | None:
-    """The candidates `main` would print for `intervention`, or None when this CLI has no
-    candidate predicate for it (a chore the claim step cannot judge). Shared with
+    """The candidates `main` would print for `intervention`, or None when the answer is UNKNOWN
+    — the chore is not one whose predicate is a pure read of the pages. Shared with
     `memory_dispatch_claim` (TRDD-K5F7US68) so the drain check and the agent's own listing
-    can never disagree about whether a record still has work."""
-    fn = _INTERVENTIONS.get(intervention)
-    if fn is None:
+    can never disagree about whether a record still has work.
+
+    WHY the allow-list: `enrich` and `relocate` ask `memgrep lint` through a subprocess, and
+    `memory_content_precheck` deliberately fails those toward "no candidates" when memgrep is
+    missing or errors — right for the scheduler, wrong for a caller that EXPIRES work on an
+    empty answer. Those chores answer None (unknown, keep the record). The four listed ones
+    only read files here: no subprocess, no network. A size-knob error RAISES (strict)."""
+    if intervention not in _READ_ONLY_CHORES:
         return None
-    return fn(root, scope=scope, now=now, max_bytes=resolve_max_bytes())
+    fn = _INTERVENTIONS[intervention]
+    return fn(root, scope=scope, now=now, max_bytes=resolve_max_bytes(strict=True))
 
 
 _INTERVENTIONS = {
@@ -257,6 +266,11 @@ _INTERVENTIONS = {
     "split-topic": split_topic_candidates,
     "relocate": relocate_candidates,
 }
+
+# Chores whose candidate function only reads page files (verified by reading each:
+# repair/atomize/consolidate/split-topic call no subprocess, no network). `enrich` and
+# `relocate` shell out to `memgrep lint` and fail toward "empty" — see `candidates_for`.
+_READ_ONLY_CHORES = frozenset({"repair", "atomize", "consolidate", "split-topic"})
 
 
 def main() -> int:

@@ -129,7 +129,12 @@ def is_drained(payload: dict, now: int) -> bool:
     root = Path(str(payload["root"])).expanduser()
     if not root.is_dir():
         return False
-    found = memory_candidates_cli.candidates_for(chore, root, scope=scope, now=now)
+    try:
+        found = memory_candidates_cli.candidates_for(chore, root, scope=scope, now=now)
+    except Exception:  # noqa: BLE001
+        # WHY: an expired record is lost work; any failure to measure (unresolvable size
+        # knob, unreadable tree, ...) is an UNKNOWN answer and must keep the record claimable.
+        return False
     return found is not None and not found
 
 

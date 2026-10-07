@@ -1627,3 +1627,32 @@ def test_peek_does_not_offer_a_drained_record(tmp_path):
     root.mkdir()
     _dispatch_at(sd, 1000, "repair", root)
     assert mdc.peek_one(sd, "repair") is None
+
+
+
+def test_candidates_for_raising_keeps_an_aged_out_record_claimable(tmp_path, monkeypatch):
+    """TRDD-K5F7US68: a failed measurement is UNKNOWN, never "drained" — the record must stay."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    _dispatch_at(sd, 1000, "repair", root)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("size knob unresolvable")
+
+    monkeypatch.setattr(mdc.memory_candidates_cli, "candidates_for", boom)
+    assert mdc.peek_one(sd, "repair") is not None
+    got = mdc.claim_one(sd, "repair")
+    assert got is not None and got["dispatch_id"] == "1000-abcd1234"
+
+
+def test_an_aged_out_enrich_record_is_never_drained(tmp_path):
+    """`enrich` asks memgrep lint, which answers empty when memgrep is missing — an unknown
+    answer, so an aged-out enrich record on an empty root stays claimable."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    _dispatch_at(sd, 1000, "enrich", root)
+    assert mdc.peek_one(sd, "enrich") is not None
+    got = mdc.claim_one(sd, "enrich")
+    assert got is not None and got["dispatch_id"] == "1000-abcd1234"
