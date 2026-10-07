@@ -4776,6 +4776,34 @@ def test_interrupt_cooldown_no_suppression_when_session_is_unknown(
     assert "heartbeat: interrupt check skipped, session unknown" in log_text
 
 
+def test_interrupt_cooldown_logs_unknown_session_once_per_episode(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-W3ERQIB9) The 'session unknown' line is logged once per episode, not on every
+    fire; once a fire HAS a session again, the next unknown fire logs it again."""
+    dispatch = _import_dispatch()
+    import state
+
+    needle = "heartbeat: interrupt check skipped, session unknown"
+    log_path = state.log_dir() / "dispatch.log"
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    for _ in range(3):
+        assert dispatch._phase_interrupt_cooldown() is False
+    assert log_path.read_text(encoding="utf-8").count(needle) == 1
+
+    # A fire with a known session (transcript on disk, no interrupt) ends the episode.
+    session_id = "sess-episode-1"
+    transcript = _session_transcript_file(Path.home(), env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 5, now=time.time() - 100000)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    dispatch._phase_interrupt_cooldown()
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    dispatch._phase_interrupt_cooldown()
+    assert log_path.read_text(encoding="utf-8").count(needle) == 2
+
+
 def test_main_suppresses_a_pending_clear_resume_during_the_interrupt_cooldown(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
