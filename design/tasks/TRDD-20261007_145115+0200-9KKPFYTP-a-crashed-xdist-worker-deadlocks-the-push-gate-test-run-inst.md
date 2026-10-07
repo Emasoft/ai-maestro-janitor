@@ -1,10 +1,10 @@
 ---
 trdd-id: 9KKPFYTP
 title: A crashed xdist worker deadlocks the push gate test run instead of failing it
-column: todo
+column: testing
 status: tasked
 created: 2026-10-07T14:51:15+0200
-updated: 2026-10-07T15:02:31+0200
+updated: 2026-10-07T19:57:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T14:51:15+0200
+implementation-commits: [a420ccfa]
 ---
 
 # A crashed xdist worker deadlocks the push gate test run instead of failing it
