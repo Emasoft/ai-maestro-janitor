@@ -438,6 +438,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # advisory list: when it speaks, it is either reporting that it edited a tracked file or
     # naming a leak that is already in git, and neither is something to read tomorrow.
     ("reports-gitignore", 86400, "CLAUDE_PLUGIN_OPTION_REPORTS_GITIGNORE_INTERVAL"),
+    # design-tracked is the third of the trio: design/ is PROJECT scope and must stay IN git
+    # (TRDD-58Q791FL). It fixes a hiding `.git/info/exclude` line itself, so same daily cadence.
+    ("design-tracked", 86400, "CLAUDE_PLUGIN_OPTION_DESIGN_TRACKED_INTERVAL"),
     # memorize-nudge keeps the wiki POPULATED (TRDD-87935f21, priority #6): when
     # substantive (non-bookkeeping) commits have landed since the last memory note,
     # it reminds the agent to /janitor-memory-write what changed + WHY. Reads git +
