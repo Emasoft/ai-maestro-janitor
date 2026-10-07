@@ -1283,6 +1283,10 @@ mod tests {
 
     #[test]
 
+    // Unix-only by construction: the pin needs symlink(2) to build a raw spelling with no
+    // scope substrings. `#[ignore]` (not a cfg'd no-op) so non-unix runs REPORT the skip
+    // instead of counting fake coverage.
+    #[cfg_attr(not(unix), ignore = "symlink-alias classification pin requires unix symlink(2)")]
     #[test]
     fn split_topic_refuses_through_a_symlink_alias_of_the_scope_dir() {
         // Pins the canonical-then-raw classification (TRDD-DAL802TI fix-up 2a600afb): the
@@ -1314,7 +1318,7 @@ mod tests {
         #[cfg(unix)]
         let user_page = alias_root.join("user-page.md");
         #[cfg(not(unix))]
-        let user_page = user_page_real.clone();
+        let user_page = user_page_real.clone(); // unreachable: test ignored on non-unix
         let neutral_dest = alias_root.join("neutral-dest.md");
         let before = std::fs::read_to_string(&user_page).unwrap();
 
@@ -1339,8 +1343,6 @@ mod tests {
             assert_eq!(after, before, "source page untouched");
             assert!(!neutral_dest.exists());
         }
-        #[cfg(not(unix))]
-        res.unwrap_or_else(|_| ());
     }
 
     #[test]
