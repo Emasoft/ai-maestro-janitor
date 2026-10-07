@@ -24,7 +24,7 @@ Owner directives (verbatim, 2026-10-07):
 
 > "the janitor must automatically track the design folder and since its project scoped. and must warn the agent that it must not be gitignored."
 
-> "just correct the janitor plugin to always enforce the design folder as git tracked, and the reports folder as gitignored."
+Later the same day: "just correct the janitor plugin to always enforce the design folder as git tracked, and the reports folder as gitignored."
 
 Incident: repo emasoft-complete-ios-app-authoring had a `/design/` line in `.git/info/exclude`; 467 cards stayed untracked.
 
