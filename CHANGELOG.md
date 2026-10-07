@@ -34,11 +34,13 @@ All notable changes to this project will be documented in this file.
 - **trdd:** 9KKPFYTP records step-1 measurements (TRDD-9KKPFYTP) (2574c72)
 - **trdd:** KPS76TQ3 orphan index.lock from timed-out git calls (TRDD-KPS76TQ3) (e33e876)
 - **trdd:** FQVEILVK records the 9KKPFYTP edit-rule breach (TRDD-FQVEILVK) (7ddaea3)
+- Bump version to 3.8.10 (ddfde60)
 
 ### Testing
 
 - **jev:** Assert scoring overlap instead of wall-clock speedup (TRDD-KJAFABDU) (80af265)
 - **jev:** Make the scoring-overlap test deterministic with a barrier (TRDD-KJAFABDU) (0b5b93e)
+- Bound freshness assertions by the run's own start, not a fixed window (45dd32f)
 ## [3.8.9] — 2026-10-07
 
 ### Documentation
