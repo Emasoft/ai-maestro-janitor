@@ -10,7 +10,9 @@ etc. — runs ONCE machine-wide in the daemon's `github-config-audit` task (issu
 fleet-scope work is the daemon's single-writer job; N sessions each probing 13 repos would
 stampede the API). This per-session detector is the CHEAP half: it reads ONLY the daemon's
 `<global-state>/github-config-findings.json` (one file read + a content-hash dedupe) and makes
-ZERO `gh` calls, so a fire costs almost nothing.
+no fleet-wide API calls, so a fire costs almost nothing. WHY this is not "zero `gh` calls":
+the NO_PR_REVIEW tri-state may call `gh` once per fire for THIS repo, only when its PRRD is read
+but states nothing about pull requests.
 
 It emits ONE compact drift line about THIS PROJECT'S REPO ONLY, and ALWAYS ends it with a
 pointer to `/janitor-github-config-fix --slug <this repo>` — the janitor can only NOTIFY the
@@ -25,7 +27,7 @@ another repo's fix can neither re-alert nor silence this session.
 
 Silent when: the daemon has not written a findings file yet, the file is empty/unreadable,
 this project has no resolvable GitHub slug, or THIS repo is clean. Read-only: it never calls
-the API and never mutates a repo — the on-demand fix skill does that, only on confirmation.
+the fleet API and never mutates a repo — the on-demand fix skill does that, only on confirmation.
 """
 
 from __future__ import annotations
@@ -134,21 +136,30 @@ def _apply_pr_requirement(payload: dict) -> tuple[dict, int, set[str]]:
     (cannot be determined from here, including every repo whose PRRD is not this checkout's) leaves
     the confirmed set and is reported as an advisory only.
     """
+    findings = payload.get("findings")
+    # WHY: a corrupt file can carry `findings: null` or a dict/str; iterating those crashed the
+    # detector (or walked a string char by char). Not a list = nothing to judge, payload untouched.
+    if not isinstance(findings, list):
+        return payload, 0, set()
     kept: list = []
     dropped = 0
     undetermined: set[str] = set()
     verdicts: dict[str, bool | None] = {}
-    for f in payload.get("findings", []):
+    for f in findings:
         if isinstance(f, dict) and f.get("code") == "NO_PR_REVIEW":
             s = f.get("slug")
-            key = s if isinstance(s, str) else ""
-            if key not in verdicts:
-                verdicts[key] = bpl.require_pull_request_tristate(key)
-            if verdicts[key] is False:
+            # WHY: a finding with no usable slug cannot be judged against any repo's PRRD, so it
+            # is kept untouched; filing it under "" used to make it vanish or look undetermined.
+            if not isinstance(s, str):
+                kept.append(f)
+                continue
+            if s not in verdicts:
+                verdicts[s] = bpl.require_pull_request_tristate(s)
+            if verdicts[s] is False:
                 dropped += 1
                 continue
-            if verdicts[key] is None:
-                undetermined.add(key)
+            if verdicts[s] is None:
+                undetermined.add(s)
                 continue
         kept.append(f)
     return {**payload, "findings": kept}, dropped, undetermined
@@ -163,10 +174,13 @@ def _advise_undetermined(slug: str, undetermined: bool, age_s: int | None) -> No
     """
     if not undetermined or gca.payload_is_stale(age_s):
         return
+    # WHY: the old text told the agent to "state require-pull-request: in the PRRD" — an agent
+    # obeying it would edit the owner's PRRD (golden-rule territory) to silence an advisory.
     msg = (
         f"[github-config] advisory (undetermined): the audit reports NO_PR_REVIEW for {slug}, but whether "
         "this repo requires pull requests cannot be determined from here, so nothing is proposed. "
-        "State `require-pull-request:` in its PRRD to settle it." + gca.age_label(age_s)
+        "The OWNER settles it in the PRRD; do not edit the PRRD or change the repo's rulesets on this advisory."
+        + gca.age_label(age_s)
     )
     out = dedupe.emit_once(state.state_dir() / "fleet-github-config-advisory-seen.txt", f"undetermined:{slug}", msg)
     if out is not None:
@@ -199,7 +213,17 @@ def _read_findings() -> dict | None:
 
     def newness(p: dict) -> float:
         age = gca.payload_age_seconds(p, now=now)
-        return float("-inf") if age is None else -float(age)
+        if age is None:
+            return float("-inf")
+        # WHY: payload_age_seconds clamps a future stamp to age 0, which would rank a corrupt
+        # far-future file as the NEWEST forever and mask the fresher one. Recover the stamp by
+        # asking at now + big (never clamps) and treat anything more than 300 s ahead (beyond
+        # plausible clock skew) as unparseable.
+        big = 10**11
+        ts = now + big - (gca.payload_age_seconds(p, now=now + big) or 0)
+        if ts - now > 300:
+            return float("-inf")
+        return -float(age)
 
     return max(candidates, key=newness)
 
@@ -226,6 +250,10 @@ def main() -> int:
     # filter runs over EVERY slug in this shared payload, in this one place, but everything
     # printed or proposed below is still scoped to THIS repo; the drop count is logged only.
     payload, dropped, undetermined = _apply_pr_requirement(payload)
+    # WHY: _apply_pr_requirement returns a non-list `findings` payload unchanged; the summarizers
+    # in github_config_audit iterate it, so a corrupt file must end here, silently.
+    if not isinstance(payload.get("findings"), list):
+        return 0
     if dropped:
         state.log_line(_NAME, f"dropped {dropped} NO_PR_REVIEW finding(s): pull-request requirement determined false")
 

@@ -364,14 +364,18 @@ def test_no_pr_review_is_still_raised_when_the_repos_own_prrd_says_true(tmp_path
     assert len(_proposals(tmp_path)) == 1
 
 
+
 def test_an_undetermined_requirement_keeps_an_advisory_and_never_proposes(tmp_path: Path) -> None:
     """Behaviour 2: this repo's PRRD cannot be read from here (slug does not match the checkout),
     so the finding stays as an advisory marked undetermined, with NO proposal and NO approval or
-    fix command."""
+    fix command, and the one line tells the agent the OWNER settles it, not to edit the PRRD."""
     _with_origin(tmp_path, "o/notmine")
     r = _run(tmp_path, [], age_s=3600, server=[{"slug": "o/notmine", **_NO_PR}])
     assert r.returncode == 0, r.stderr
     assert "undetermined" in r.stdout
+    assert "OWNER settles it" in r.stdout and "do not edit the PRRD" in r.stdout
+    assert "/janitor-" not in r.stdout
+    assert len(r.stdout.strip().splitlines()) == 1
     assert "GHCFG-001" not in r.stdout
     assert "/janitor-support-open-ticket" not in r.stdout
     assert "janitor-github-config-fix" not in r.stdout
@@ -398,6 +402,7 @@ def _epoch(iso: str) -> int:
     return int(datetime.fromisoformat(iso).timestamp())
 
 
+
 def test_generated_at_is_compared_as_time_not_as_text(tmp_path, monkeypatch) -> None:
     """Behaviour 4: an ISO string and an epoch integer are compared as epochs, and an unparseable
     value loses. A text compare ranks "2026-08..." above any 10-digit epoch and "garbage" above both."""
@@ -409,6 +414,48 @@ def test_generated_at_is_compared_as_time_not_as_text(tmp_path, monkeypatch) -> 
     mod = _stage(tmp_path / "b", monkeypatch, ours=_payload("garbage"), theirs={"generated_at": epoch_new, "findings": []})
     assert mod._read_findings()["generated_at"] == epoch_new, "an unparseable generated_at loses"
 
-    mod = _stage(tmp_path / "c", monkeypatch, ours=_payload("2026-10-07T12:00:00+00:00"),
+    # WHY 10-06, not 10-07: a fixed stamp later than the run time is "future" and now loses (B10c-2),
+    # so the fixture must stay in the past of every run.
+    mod = _stage(tmp_path / "c", monkeypatch, ours=_payload("2026-10-06T12:00:00+00:00"),
                  theirs={"generated_at": _epoch("2026-08-05T12:00:00+00:00"), "findings": []})
-    assert mod._read_findings()["generated_at"] == "2026-10-07T12:00:00+00:00", "newer ISO beats an older epoch"
+    assert mod._read_findings()["generated_at"] == "2026-10-06T12:00:00+00:00", "newer ISO beats an older epoch"
+
+
+def test_a_payload_whose_findings_is_not_a_list_is_silent_not_a_crash(tmp_path: Path) -> None:
+    """B10c-1: `findings: null` must exit 0 with no output (it used to raise TypeError)."""
+    _with_origin(tmp_path, "o/proj")
+    gsd = tmp_path / "global-state"
+    gsd.mkdir(parents=True)
+    (gsd / "github-config-findings.json").write_text(
+        json.dumps({"generated_at": int(time.time()), "findings": None}), encoding="utf-8")
+    r = _run(tmp_path, None)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""
+
+
+def test_apply_pr_requirement_ignores_non_list_findings_and_keeps_slugless_findings(tmp_path, monkeypatch) -> None:
+    """B10c-1: non-list findings come back unchanged with 0 dropped; a NO_PR_REVIEW finding with
+    no (or a non-string) slug is kept untouched rather than filed under "" and removed."""
+    mod = _stage(tmp_path, monkeypatch)
+    for bad in (None, {"a": 1}, "x"):
+        p = {"findings": bad}
+        assert mod._apply_pr_requirement(p) == (p, 0, set())
+    slugless = {"code": "NO_PR_REVIEW"}
+    numeric = {"code": "NO_PR_REVIEW", "slug": 7}
+    out, dropped, undetermined = mod._apply_pr_requirement({"findings": [slugless, numeric]})
+    assert out["findings"] == [slugless, numeric] and dropped == 0 and undetermined == set()
+
+
+
+def test_a_far_future_generated_at_does_not_mask_the_fresher_file(tmp_path, monkeypatch) -> None:
+    """B10c-2: a stamp a day ahead is corrupt and loses; one 60 s ahead (clock skew) still counts."""
+    now = int(time.time())
+    # The future file is listed FIRST (ours) so a tie at age 0 cannot hide the bug: max() keeps the first.
+    mod = _stage(tmp_path / "a", monkeypatch,
+                 ours={"generated_at": now + 86400, "findings": [{"slug": "o/x", "code": "NO_CI"}]},
+                 theirs={"generated_at": now, "findings": []})
+    assert mod._read_findings()["findings"] == [], "far-future stamp must lose"
+    mod = _stage(tmp_path / "b", monkeypatch,
+                 ours={"generated_at": now + 60, "findings": [{"slug": "o/x", "code": "NO_CI"}]},
+                 theirs={"generated_at": now - 3600, "findings": []})
+    assert mod._read_findings()["findings"], "60 s ahead is still fresh and wins"
