@@ -64,9 +64,6 @@ This page is the overview; the detail lives in four sub-pages (split
 - [[memory-system-superseded-history]]
 
 ## See also
-- [[project_janitor_publish_blocked_cpv_fps]]
-
-## See also
 
 - [[claude-md-canonical-form]] — CLAUDE.md is the index over this corpus; what may live in it, and the migration contract.
 - [[feedback_memory_system_is_more_than_memgrep]] — the system is {tool · rules ·
