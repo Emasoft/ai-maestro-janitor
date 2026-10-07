@@ -4,7 +4,7 @@ title: The janitor enforces design tracked and reports gitignored
 column: testing
 status: tasked
 created: 2026-10-07T16:07:35+0200
-updated: 2026-10-07T17:56:56+0200
+updated: 2026-10-07T18:41:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,3 +37,4 @@ Plan: new detector design-tracked (probe design paths with check-ignore --no-ind
 ## Corrections
 
 2026-10-07: when design/ is hidden because a parent folder is excluded, the append path still writes !/design/ and !/design/** to the root .gitignore, re-probes, finds it still hidden and warns, leaving a .gitignore edit that achieves nothing. Fix: check that the negations would take effect (or revert the append) before keeping it.
+2026-10-07T18:41:17+0200: CORRECTION to the line above: the excluded-parent case does not happen for design/. It sits at the repo root, and a root .gitignore with * followed by !/design/ and !/design/** leaves design files NOT ignored (measured, reports/board/20261007_160605+0200-gitignore-precedence-measure.md case 3a). Only a nested .gitignore defeats the repair, and the detector already leaves that case unedited.
