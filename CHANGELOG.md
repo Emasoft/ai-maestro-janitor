@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.9] — 2026-10-07
+
+### Documentation
+
+- **trdd:** Record the 3.8.8 publish follow-ups (TRDD-FQVEILVK) (d2572ca)
+
+### Testing
+
+- **memgrep-binary-stale:** Skip the real-404 test when gh is not authenticated (TRDD-V5V1CBLM) (559f610)
 ## [3.8.8] — 2026-10-07
 
 ### Bug Fixes
@@ -31,6 +40,7 @@ All notable changes to this project will be documented in this file.
 
 - Bump version to 3.8.8 (e976da4)
 - Bump version to 3.8.8 (5792d99)
+- Bump version to 3.8.8 (60b6454)
 ## [3.8.7] — 2026-10-07
 
 ### Bug Fixes
