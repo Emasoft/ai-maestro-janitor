@@ -4,7 +4,7 @@ title: A crashed xdist worker deadlocks the push gate test run instead of failin
 column: testing
 status: tasked
 created: 2026-10-07T14:51:15+0200
-updated: 2026-10-07T19:57:22+0200
+updated: 2026-10-07T21:46:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,3 +35,4 @@ Facts (verified 2026-10-07 by reading scripts/publish.py): both test call sites 
 ## Step 1 measurements
 
 2026-10-07: repro (20 sleeping tests plus a self-SIGKILL test, -n 4 loadgroup, repo flags) hung past a 120 s hard timeout without the flag (exit 124); with --max-worker-restart=0 it exited 1 in 17 s. The old subprocess.run timeout path left the pytest controller orphaned. Fix: commit a420ccfa.
+2026-10-07 — 3.8.10 push gate (attempt 2) was refused by this card's own new test test_terminating_signal_reaps_the_helper_group with int('') — the child's open('w') creates the pgid file before the write lands and the test waited on existence only. Fixed in 94ff7c0b (wait for non-empty content). The fix was NOT shown failing first (evidence is the traceback, no reproduction). Not swept — the test's three fixed 30 s deadlines and this file's timeout=25/120 scenarios remain load-sensitive. Worker breach recorded — fastedit mangled decorator spacing and the worker repaired it with the Edit tool; final diff was the intended 3 lines. 3.8.10 published at e7ded327 on attempt 3, all five workflows green.
