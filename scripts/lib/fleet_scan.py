@@ -776,37 +776,19 @@ def _is_interrupt_record(rec: dict) -> bool:
     return isinstance(text, str) and text.strip() == _INTERRUPT_MARKER
 
 
-def human_activity_age_from_tail(tail: list[str], *, now: int, fallback_age: int | None) -> int | None:
-    """Seconds since the newest HUMAN (or agent-typed) transcript turn — a stricter cousin of
-    ``substantive_age_from_tail`` that ALSO discounts a whole heartbeat cron turn, not just its
-    queue-bookkeeping line (TRDD-O7UCNNN2).
-
-    A heartbeat fire is a ``type: user`` record carrying ``scheduledFireId`` at its top level;
-    Claude Code answers it with a real substantive turn (assistant content, tool calls), so
-    ``substantive_age_from_tail`` — correctly, for ITS purpose — sees an armed session as
-    perpetually active. The external-clear lane needs the opposite bias: an armed session must
-    still be able to reach "idle" between beats.
-
-    Pure. The walk lives in ``human_activity_scan``. Tail exhausted while every turn seen was
-    scheduled → the age of the OLDEST scheduled prompt (conservative: "at least this idle").
-    No prompt at all → degrade to ``substantive_age_from_tail`` age (unknown shape ⇒ count as
-    activity, same fail-safe bias as that function)."""
-    age, _exact, saw_prompt = human_activity_scan(tail, now=now, fallback_age=fallback_age)
-    if not saw_prompt:
-        sub_age, _ = substantive_age_from_tail(tail, now=now, fallback_age=fallback_age)
-        return sub_age
-    return age
-
-def human_activity_scan(tail: list[str], *, now: int, fallback_age: int | None) -> tuple[int | None, bool, bool]:
+def human_activity_scan(
+    tail: list[str], *, now: int, fallback_age: int | None
+) -> tuple[int | None, bool, bool]:
     """``(age, exact, saw_prompt)`` for the newest HUMAN (or agent-typed) turn in `tail`.
 
     Walks the tail backwards, grouping records into turns delimited by PROMPT records
-    (``_is_prompt_record``); a turn whose prompt is heartbeat-scheduled is skipped WHOLE; the
-    first turn whose prompt is NOT scheduled returns the age of that turn newest record with
-    ``exact=True``. Tail exhausted while every turn seen was scheduled -> the age of the OLDEST
-    scheduled prompt with ``exact=False`` (a LOWER BOUND: "at least this idle", because the
-    human turn, if any, is older than the read window). No prompt at all -> ``(None, False,
-    False)``; the caller decides what that means (TRDD-QONEBKGK)."""
+    (``_is_prompt_record``); a turn whose prompt is heartbeat-scheduled is skipped WHOLE (its
+    records don't count, tracked but discarded); the first turn whose prompt is NOT scheduled
+    returns the age of that turn's newest record with ``exact=True``. Tail exhausted while every
+    turn seen was scheduled → the age of the OLDEST scheduled prompt with ``exact=False`` (a
+    LOWER BOUND: "at least this idle", because the human turn, if any, is older than the read
+    window). No prompt at all → ``(None, False, False)``; the caller decides what that means
+    (TRDD-QONEBKGK)."""
     import token_history
 
     group_newest_ts: int | None = None
@@ -822,7 +804,7 @@ def human_activity_scan(tail: list[str], *, now: int, fallback_age: int | None) 
         if rec.get("type") == "queue-operation":
             continue  # bookkeeping only, same exclusion as substantive_age_from_tail
         if _is_interrupt_record(rec):
-            continue  # our OWN esc_nudge record -- never a human turn (F6 derived)
+            continue  # our OWN esc_nudge's record — never a human turn (F6 derived)
         ts = token_history.parse_ts(rec.get("timestamp", ""))
         if group_newest_ts is None and ts is not None:
             group_newest_ts = ts
@@ -830,7 +812,7 @@ def human_activity_scan(tail: list[str], *, now: int, fallback_age: int | None) 
             saw_prompt = True
             if "scheduledFireId" in rec:
                 if ts is not None:
-                    oldest_scheduled_ts = ts  # walking backward => last write wins = oldest
+                    oldest_scheduled_ts = ts  # walking backward ⇒ last write wins = oldest
                 group_newest_ts = None  # this turn is discarded; start a fresh group
                 continue
             if group_newest_ts is not None:
@@ -843,6 +825,30 @@ def human_activity_scan(tail: list[str], *, now: int, fallback_age: int | None) 
     if oldest_scheduled_ts is not None:
         return max(0, now - oldest_scheduled_ts), False, True
     return fallback_age, False, True
+
+
+def human_activity_age_from_tail(
+    tail: list[str], *, now: int, fallback_age: int | None
+) -> int | None:
+    """Seconds since the newest HUMAN (or agent-typed) transcript turn — a stricter cousin of
+    ``substantive_age_from_tail`` that ALSO discounts a whole heartbeat cron turn, not just its
+    queue-bookkeeping line (TRDD-O7UCNNN2).
+
+    A heartbeat fire is a ``type: user`` record carrying ``scheduledFireId`` at its top level;
+    Claude Code answers it with a real substantive turn (assistant content, tool calls), so
+    ``substantive_age_from_tail`` — correctly, for ITS purpose — sees an armed session as
+    perpetually active. The external-clear lane needs the opposite bias: an armed session must
+    still be able to reach "idle" between beats.
+
+    Pure. The walk lives in ``human_activity_scan``. Tail exhausted while every turn seen was
+    scheduled → the age of the OLDEST scheduled prompt (conservative: "at least this idle").
+    No prompt at all → degrade to ``substantive_age_from_tail``'s age (unknown shape ⇒ count as
+    activity, same fail-safe bias as that function)."""
+    age, _exact, saw_prompt = human_activity_scan(tail, now=now, fallback_age=fallback_age)
+    if not saw_prompt:
+        sub_age, _ = substantive_age_from_tail(tail, now=now, fallback_age=fallback_age)
+        return sub_age
+    return age
 
 
 # Tools whose ONLY possible answer comes from a person, so an unanswered call to one is
@@ -1004,9 +1010,9 @@ def transcript_human_idle(path: str, now: int) -> tuple[int, bool] | None:
     transcript; ``None`` when the file is absent or has no timestamped line. ``exact`` is False
     when the read window holds only heartbeat-scheduled prompts or no prompt at all: the age is
     then a LOWER BOUND (the last human turn, if any, is older than the window). TRDD-QONEBKGK:
-    the handoff composer is handed the PREVIOUS session transcript path, which is no longer the
-    project newest file after a clear, so the project-wide ``human_activity_age`` would measure
-    the wrong session.
+    the handoff composer is handed the PREVIOUS session's transcript path, which is no longer
+    the project's newest file after a clear, so the project-wide ``human_activity_age`` would
+    measure the wrong session.
 
     WHY a bound instead of unknown: a window with no human turn proves "at least this idle"
     (a lower bound from its oldest line), which is information; "unknown" threw it away, and

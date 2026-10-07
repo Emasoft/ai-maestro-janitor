@@ -1637,7 +1637,7 @@ class HandoffInputs:
 
 
 def with_measured_facts(inputs: HandoffInputs, transcript_path: str, now: int) -> HandoffInputs:
-    """`inputs` with `idle_seconds` / `context_tokens` measured from the cleared session own
+    """`inputs` with `idle_seconds` / `context_tokens` measured from the cleared session's own
     transcript. TRDD-QONEBKGK: no caller ever filled them, so every handoff said "idle unknown,
     context unknown" although both are readable from the transcript; each stays None (and the
     text keeps saying "unknown") only when its source is genuinely absent. A window with no human
@@ -1654,7 +1654,9 @@ def with_measured_facts(inputs: HandoffInputs, transcript_path: str, now: int) -
     )
 
 
-def compose_template_handoff(inputs: HandoffInputs, *, now_iso: str, max_bytes: int = HANDOFF_MAX_BYTES) -> str:
+def compose_template_handoff(
+    inputs: HandoffInputs, *, now_iso: str, max_bytes: int = HANDOFF_MAX_BYTES
+) -> str:
     """PURE. Build a link-only handoff from on-disk facts, with ZERO model tokens.
 
     It must satisfy `clear_trigger.check_handoff_concise` BY CONSTRUCTION, because the thing it
@@ -1673,8 +1675,12 @@ def compose_template_handoff(inputs: HandoffInputs, *, now_iso: str, max_bytes: 
     findings = list(inputs.findings)
 
     def render(n_cards: int, n_commits: int, n_findings: int, show_other_ids: bool) -> str:
-        # TRDD-QONEBKGK: a lower-bound idle (window held no human turn) renders "≥ ~Nh", never an exact claim.
-        idle_h = "unknown" if inputs.idle_seconds is None else f"{'≥ ' if inputs.idle_is_lower_bound else ''}~{inputs.idle_seconds // 3600}h"
+        # TRDD-QONEBKGK: a lower-bound idle (the window held no human turn) renders "≥ ~Nh",
+        # never an exact claim.
+        idle_h = "unknown"
+        if inputs.idle_seconds is not None:
+            bound = "≥ " if inputs.idle_is_lower_bound else ""
+            idle_h = f"{bound}~{inputs.idle_seconds // 3600}h"
         ctx = "unknown" if inputs.context_tokens is None else f"~{inputs.context_tokens // 1000}k"
         out = [
             f"# Handoff — {now_iso} (auto-composed, no model turn — TRDD-PXP08ZQC)",
