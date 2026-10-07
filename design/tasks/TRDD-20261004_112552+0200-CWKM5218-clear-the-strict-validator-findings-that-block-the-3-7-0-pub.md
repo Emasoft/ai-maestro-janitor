@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: todo
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-07T02:38:35+0200
+updated: 2026-10-07T03:00:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -41,3 +41,5 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 2026-10-06 NEXT ACTION: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI: add a diagnostic CI step that prints the uvx install path and the ~/.cache/cpv manifest names, or reproduce here with ~/.cache/cpv moved aside; or close this point if Emasoft/claude-plugins-validation#243 resolves it.
 2026-10-06: v3.7.4 and v3.7.5 were also published with the integrity exemption (five releases so far).
 2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI (diagnostic CI step, or reproduce with ~/.cache/cpv moved aside); the 3.7.1 CI run that was awaited has long since happened.
+2026-10-07: v3.8.2 is the sixth release published with CPV_SKIP_GITHUB_INTEGRITY=1; run-1 evidence: of 3446 listed files, the 50 printed were all 'deleted locally', none 'differs' (3396 not printed).
+2026-10-07 TIME BOMB: CPV says the CPV_ name is deprecated in favour of PLUGIN_SKIP_GITHUB_INTEGRITY and will be removed in a future major release; publish.py's bypass guard refuses every PLUGIN_SKIP_ variable, so once CPV drops the legacy name this host cannot publish until either the uvx integrity abort is fixed or publish.py exempts the new name.
