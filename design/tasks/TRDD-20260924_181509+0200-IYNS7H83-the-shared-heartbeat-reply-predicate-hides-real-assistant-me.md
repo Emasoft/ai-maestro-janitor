@@ -1,10 +1,10 @@
 ---
 trdd-id: IYNS7H83
 title: The shared heartbeat-reply predicate hides real assistant messages from the recent-turns tail
-column: backburner
+column: testing
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-10-05T10:56:56+0200
+updated: 2026-10-07T22:04:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T18:15:09+0200
+implementation-commits: [f9587fd0]
 ---
 
 # The shared heartbeat-reply predicate hides real assistant messages from the recent-turns tail
@@ -32,3 +33,4 @@ Fix at the root: one predicate, not two. First decide the actual question the wi
 ## Related
 
 TRDD-D7RLXAN1 -- the acceptance run that found the 9-message false-drop (jev_compaction.py extract_items narrowing to the bare-reply-only exclusion) is what surfaced this predicate split.
+- 2026-10-07 -- Decided: narrow (bare-only) wins; all callers were content filters. transcript_roles.is_heartbeat_reply is now the single predicate and jev_compaction uses it (commit f9587fd0).
