@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +208,84 @@ def carry_task_dir(old_session_id: str, new_session_id: str) -> int:
     return copied
 
 
-def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dict[str, Any]:
+
+#: Issue 338: the owner's last messages are kept per session LINEAGE and handed from each cleared
+#: session to its successor, so a clear whose session held no human message (only injected
+#: commands and heartbeats) does not erase them.
+OWNER_MESSAGES_KEEP = 3
+OWNER_MESSAGES_DIR = "owner-messages"
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _record_path(state_dir: Path, session_id: str) -> Path | None:
+    """The record file of `session_id`, or None when the id is not a plain token (no path escape)."""
+    if not _SESSION_ID_RE.fullmatch(session_id) or session_id in (".", ".."):
+        return None
+    return Path(state_dir) / OWNER_MESSAGES_DIR / f"{session_id}.json"
+
+
+def owner_record(state_dir: Path, session_id: str) -> dict[str, Any] | None:
+    """The lineage record of `session_id` ({messages, own_reply, origin_session, recorded_at}),
+    or None when absent or malformed. Never raises: a corrupt file means "nothing to carry"."""
+    path = _record_path(state_dir, session_id)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        state.log_line("session-continuity", f"owner record {path.name} unreadable: {exc!r}")
+        return None
+    raw = data.get("messages") if isinstance(data, dict) else None
+    messages = [
+        {"text": str(m["text"]), "ts": str(m.get("ts") or "")}
+        for m in raw or []
+        if isinstance(m, dict) and isinstance(m.get("text"), str) and m["text"].strip()
+    ]
+    if not messages:
+        return None
+    return {
+        "messages": messages[-OWNER_MESSAGES_KEEP:],
+        "own_reply": str(data.get("own_reply") or ""),
+        "origin_session": str(data.get("origin_session") or ""),
+        "recorded_at": str(data.get("recorded_at") or ""),
+    }
+
+
+def _write_owner_record(state_dir: Path, session_id: str, record: dict[str, Any]) -> None:
+    """Atomically store `record` for `session_id`; a failure is logged, never raised (SessionStart path)."""
+    path = _record_path(state_dir, session_id)
+    if path is None:
+        state.log_line("session-continuity", f"owner record not written: bad session id {session_id!r}")
+        return
+    try:
+        state.atomic_write(path, json.dumps(record, ensure_ascii=False))
+    except OSError as exc:
+        state.log_line("session-continuity", f"owner record {path.name} not written: {exc!r}")
+
+
+def age_words(ts: str, *, now: float | None = None) -> str:
+    """`ts` (ISO 8601, as a transcript stores it) as "12 minutes ago"; "time unknown" when empty or unparsable."""
+    try:
+        then = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        seconds = int((time.time() if now is None else now) - then.timestamp())
+    except (ValueError, AttributeError, OverflowError):
+        return "time unknown"
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if seconds >= size:
+            n = seconds // size
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return "less than a minute ago"
+
+
+def clear_fields(
+    transcript_path: str,
+    *,
+    goal_max: int = GOAL_MAX_CHARS,
+    state_dir: Path | None = None,
+    new_session_id: str = "",
+) -> dict[str, Any]:
     """The clear-only continuity fields of the OLD transcript (all sanitized, all best-effort).
 
     `own_reply` is the LAST assistant text block of the turn that answers `last_user` -- the
@@ -218,8 +297,19 @@ def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dic
     chain re-types the goal as `/goal <text>` and a goal clipped at 400 chars would be a
     different, weaker goal -- so that caller widens the clip instead of growing a second
     goal extractor.
+
+    `state_dir` / `new_session_id` (issue 338, TRDD-IN4493LC). WHY: this function used to read
+    only the cleared transcript, so a session that held no human message (injected commands,
+    heartbeats, a "nothing to resume" stand-down) cleared into a successor that knew nothing of
+    the owner and stood down too -- repeatedly, with hundreds of open cards. With `state_dir`
+    the last three human messages of the whole clear chain (and the reply to the newest) are
+    merged with the record stored under the cleared session's id, and written under the new id
+    (and the cleared one) so the chain continues. A stand-down never replaces the stored reply:
+    it is only replaced by a reply to a NEW human message. Without `state_dir` nothing is read
+    or written (clear_trigger needs only the goal).
     """
     last_user = reply = goal_cond = plan = ""
+    humans: list[tuple[str, str]] = []
     goal_met = True
     turn_open = False
     try:
@@ -241,6 +331,7 @@ def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dic
                     text = _human_text(entry)
                     if text:
                         last_user, reply, turn_open = text, "", True
+                        humans = [*humans, (text, str(entry.get("timestamp") or ""))][-OWNER_MESSAGES_KEEP:]
                     elif _is_heartbeat_prompt(entry):
                         turn_open = False
                 elif turn_open:
@@ -250,13 +341,47 @@ def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dic
     except OSError:
         pass
     plan_ok = plan.endswith(".md") and Path(plan).is_file()
-    return {
+    fields: dict[str, Any] = {
         "last_user": _clean(last_user, LAST_USER_MAX_CHARS),
         "own_reply": _clean(reply, OWN_REPLY_MAX_CHARS, keep_end=True),
         "goal": "" if goal_met else _clean(goal_cond, goal_max),
         "plan_file": state.sanitize_for_drift_line(plan) if plan_ok else "",
         "open_tasks": _open_tasks(transcript_path),
     }
+    if state_dir is not None:
+        _merge_owner_messages(fields, humans, Path(transcript_path).stem, state_dir, new_session_id)
+    return fields
+
+
+def _merge_owner_messages(
+    fields: dict[str, Any],
+    humans: list[tuple[str, str]],
+    cleared_id: str,
+    state_dir: Path,
+    new_session_id: str,
+) -> None:
+    """Fold this transcript's human messages into the lineage record and persist it (see `clear_fields`)."""
+    stored = owner_record(state_dir, cleared_id)
+    fresh = [{"text": _clean(t, LAST_USER_MAX_CHARS), "ts": ts} for t, ts in humans]
+    old = stored["messages"] if stored else []
+    messages = (old + [m for m in fresh if m not in old])[-OWNER_MESSAGES_KEEP:]
+    if not messages:
+        return
+    if fresh:
+        origin, own_reply = cleared_id, fields["own_reply"]
+    else:
+        assert stored is not None  # messages non-empty with no fresh ones => they came from `stored`
+        origin, own_reply = stored["origin_session"], stored["own_reply"]
+        fields["carried_from"] = {"session_id": origin, "ts": messages[-1]["ts"]}
+        fields["last_user"], fields["own_reply"] = messages[-1]["text"], own_reply
+    fields["owner_messages"] = messages
+    if new_session_id:
+        record = {
+            "messages": messages, "own_reply": own_reply, "origin_session": origin,
+            "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        for sid in (new_session_id, cleared_id):
+            _write_owner_record(state_dir, sid, record)
 
 
 def _is_heartbeat_prompt(entry: dict[str, Any]) -> bool:
@@ -272,24 +397,54 @@ def _is_heartbeat_prompt(entry: dict[str, Any]) -> bool:
 
 
 def next_action(fields: dict[str, Any]) -> str | None:
-    """The NEXT ACTION sentence, or None when the old session has no human message to quote."""
+    """The NEXT ACTION sentence, or None when there is no human message to quote."""
     if not fields.get("last_user"):
         return None
-    head = f"The user's last message was «{fields['last_user']}». "
-    if not fields.get("own_reply"):
-        return head + "You had not replied yet: answer it."
-    # Why: the old "ask it again and stop" left resumed sessions idle (29 min measured) because
-    # quiet heartbeats never wake them. Work is limited to the task already in flight and
-    # excludes the action the question gates. The no-task case keeps the old ask-and-wait so a
-    # session with no assignment never picks work itself (RULE 1).
+    messages = fields.get("owner_messages") or []
+    # Why (issue 338): after consecutive clears a resumed session stood down with "nothing to
+    # resume" and its successor took that statement for a fact about the board, hundreds of open
+    # cards notwithstanding. The owner's own words are carried verbatim, and the closing sentence
+    # makes a stand-down answerable with board counts instead of an opinion.
+    listed = "; ".join(
+        f"({age_words(str(m.get('ts') or ''))}) «{m['text']}»" for m in messages
+    )
+    own_reply = fields.get("own_reply")
+    if fields.get("carried_from"):
+        head = (
+            "No human message arrived in the session that was just cleared. The owner's most "
+            f"recent messages, from an earlier session of this clear chain, were: {listed}. "
+        )
+        if own_reply:
+            head += f"Your reply at that time was «{own_reply}». "
+        head += (
+            "These are the owner's own words, carried verbatim by the janitor: act on the "
+            "instruction among them. "
+        )
+    else:
+        head = ""
+        if len(messages) > 1:
+            head = f"The owner's most recent messages were: {listed}. "
+        head += f"The user's last message was «{fields['last_user']}». "
+    if not own_reply:
+        body = "You had not replied yet: answer it."
+    else:
+        # Why: the old "ask it again and stop" left resumed sessions idle (29 min measured) because
+        # quiet heartbeats never wake them. Work is limited to the task already in flight and
+        # excludes the action the question gates. The no-task case keeps the old ask-and-wait so a
+        # session with no assignment never picks work itself (RULE 1).
+        body = (
+            ("" if fields.get("carried_from") else f"Your reply was «{own_reply}». ")
+            + "Continue the task that was already in flight. If your reply asked the user something, "
+            "keep doing the steps of that task that do not depend on the answer, then ask the "
+            "question again at the end of your reply. Never take the action the question asks "
+            "permission for, nor anything destructive, irreversible or outward-facing that depends "
+            "on the answer. If no task was in flight, or your question asked what to work on, ask "
+            "it again and wait."
+        )
     return (
-        head + f"Your reply was «{fields['own_reply']}». "
-        "Continue the task that was already in flight. If your reply asked the user something, "
-        "keep doing the steps of that task that do not depend on the answer, then ask the "
-        "question again at the end of your reply. Never take the action the question asks "
-        "permission for, nor anything destructive, irreversible or outward-facing that depends "
-        "on the answer. If no task was in flight, or your question asked what to work on, ask "
-        "it again and wait."
+        head + body + " A previous session's statement that there is nothing to resume is that "
+        "session's opinion, not a fact about the board. If you still decline to work, your reply "
+        "must state the open-board counts by column."
     )
 
 

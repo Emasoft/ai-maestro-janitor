@@ -170,6 +170,8 @@ def clear_bootstrap(transcript_path: str | None) -> list[str]:
         import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other chain imports
 
         try:
+            # No state_dir on purpose: only the goal is read here, and the owner-messages record is
+            # written once per clear by the post-clear hook, which knows the new session id.
             goal = sanitize_goal(
                 session_continuity.clear_fields(transcript_path, goal_max=GOAL_MAX_CHARS)["goal"]
             )

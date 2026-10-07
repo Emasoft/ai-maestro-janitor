@@ -186,7 +186,9 @@ def _recent_model_handoff(sd: Path, key: str, transcript_path: str) -> Path | No
         return None
     return path
 
-def _continuity(root: Path, sd: Path, transcript_path: str) -> tuple[str, str | None]:
+def _continuity(
+    root: Path, sd: Path, transcript_path: str, new_session_id: str = "",
+) -> tuple[str, str | None]:
     """(`## Continuity` block, quoted NEXT ACTION) from the OLD transcript; ("", None) on a fault.
 
     Skills, live agents and open files come from the PreCompact hook's own
@@ -195,6 +197,9 @@ def _continuity(root: Path, sd: Path, transcript_path: str) -> tuple[str, str | 
     constants at import, so it cannot move into `lib/`); the goal, tasks, plan file and the
     last exchange are the clear-only fields in `lib/session_continuity.py`. The two halves
     fail independently: a native-record fault still leaves the clear-only fields.
+
+    Issue 338: `sd` + `new_session_id` let `clear_fields` carry the owner's last messages from
+    one cleared session to the next, so a session with no human message still hands them on.
     """
     import session_continuity as sc  # noqa: PLC0415
     import state  # noqa: PLC0415
@@ -215,7 +220,7 @@ def _continuity(root: Path, sd: Path, transcript_path: str) -> tuple[str, str | 
     except Exception as exc:  # noqa: BLE001 -- continuity is best-effort, never blocks the clear
         state.log_line("jev-post-clear-hook", f"native continuity record unavailable: {exc!r}")
     try:
-        fields = sc.clear_fields(transcript_path)
+        fields = sc.clear_fields(transcript_path, state_dir=sd, new_session_id=new_session_id)
     except Exception as exc:  # noqa: BLE001 -- same: degrade to the generic NEXT ACTION
         state.log_line("jev-post-clear-hook", f"clear continuity fields unavailable: {exc!r}")
         return "", None
@@ -319,7 +324,9 @@ def _main() -> int:
     # here), so the continuity block and the quoted NEXT ACTION are built only on this path.
     # Its byte size is taken out of the lane budget BEFORE the Jev summary is sized, so the
     # block can never push the injection past `LANE_INJECTION_MAX_BYTES`.
-    continuity_block, next_action = _continuity(root, sd, transcript_path)
+    continuity_block, next_action = _continuity(
+        root, sd, transcript_path, str(data.get("session_id", "") or "").strip(),
+    )
     lane_budget = jcl.LANE_INJECTION_MAX_BYTES - len(continuity_block.encode("utf-8"))
     head_paths, heads_unavailable, in_flight_cards, other_open_ids_line = jcl.state_head_paths(
         root, sd, transcript_path,

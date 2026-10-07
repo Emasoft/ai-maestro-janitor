@@ -294,3 +294,134 @@ def test_no_sidecar_means_no_continuity_block(tmp_path, monkeypatch):
     out = _run_hook(tmp_path, monkeypatch, transcript, doc=_COMPACTED_DOC, sidecar=False)
     assert "## Continuity" not in out
     assert out == ""
+
+
+# --- issue 338: the owner's last messages survive consecutive clears ---------------------------
+# Record shapes below are copied from real cleared-and-resumed transcripts (2026-10-07), with the
+# private text replaced: the plugin-qualified arm/resume command wrappers (origin human), the
+# local-command-caveat (isMeta), the skill-body expansion (isMeta) and the heartbeat prompt.
+
+_ARM = _user(
+    "<command-message>ai-maestro-janitor:janitor-arm</command-message>\n"
+    "<command-name>/ai-maestro-janitor:janitor-arm</command-name>",
+    origin={"kind": "human"}, turnOrigin="human",
+)
+_RESUME = _user(
+    "<command-message>ai-maestro-janitor:janitor-resume</command-message>\n"
+    "<command-name>/ai-maestro-janitor:janitor-resume</command-name>",
+    origin={"kind": "human"}, turnOrigin="human",
+)
+_CAVEAT = _user("<local-command-caveat>caveat</local-command-caveat>", isMeta=True)
+
+
+def _stood_down_session(path: Path) -> str:
+    """A resumed session in which no human typed: injected commands, heartbeats, a stand-down."""
+    return _write(
+        path,
+        [_CAVEAT, _ARM, _user("Base directory for this skill: x", isMeta=True), _RESUME,
+         _assistant(_text("There's nothing to resume.")), *_heartbeat_turns(2)],
+    )
+
+
+def _stamped(text: str, ts: str) -> dict:
+    return _user(text, timestamp=ts)
+
+
+def _transcript_a(tmp_path: Path) -> str:
+    return _write(
+        tmp_path / "sess-a.jsonl",
+        [_stamped("fix issue 338 now", "2026-10-07T19:00:00.000Z"), _assistant(_text("on it")),
+         _stamped("and why two clears?", "2026-10-07T19:05:00.000Z"), _assistant(_text("measuring it")),
+         *_heartbeat_turns(1)],
+    )
+
+
+def test_clear_writes_the_lineage_record_under_both_session_ids(tmp_path):
+    """The two human messages and the reply land in owner-messages/<id>.json for old and new id."""
+    sd = tmp_path / "sd"
+    fields = sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    assert [m["text"] for m in fields["owner_messages"]] == ["fix issue 338 now", "and why two clears?"]
+    for sid in ("sess-a", "sess-b"):
+        rec = json.loads((sd / "owner-messages" / f"{sid}.json").read_text(encoding="utf-8"))
+        assert [m["text"] for m in rec["messages"]] == ["fix issue 338 now", "and why two clears?"]
+        assert rec["own_reply"] == "measuring it" and rec["origin_session"] == "sess-a"
+
+
+def test_second_clear_with_no_human_message_carries_the_first_sessions_messages(tmp_path):
+    """B has only injected records and a stand-down: A's messages and A's reply are carried and quoted."""
+    sd = tmp_path / "sd"
+    sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    fields = sc.clear_fields(
+        _stood_down_session(tmp_path / "sess-b.jsonl"), state_dir=sd, new_session_id="sess-c",
+    )
+    assert [m["text"] for m in fields["owner_messages"]] == ["fix issue 338 now", "and why two clears?"]
+    assert fields["own_reply"] == "measuring it", "B's stand-down must not become the reply"
+    assert fields["carried_from"] == {"session_id": "sess-a", "ts": "2026-10-07T19:05:00.000Z"}
+    action = sc.next_action(fields)
+    assert action is not None
+    assert "earlier session" in action and "fix issue 338 now" in action and "and why two clears?" in action
+    assert "measuring it" in action and "nothing to resume" not in action.split("A previous session")[0]
+    assert "open-board counts by column" in action and "standing assignment" not in action
+
+
+def test_third_hop_still_carries_the_first_sessions_messages(tmp_path):
+    """C (again no human message) still hands A's messages on to D."""
+    sd = tmp_path / "sd"
+    sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    sc.clear_fields(_stood_down_session(tmp_path / "sess-b.jsonl"), state_dir=sd, new_session_id="sess-c")
+    fields = sc.clear_fields(_stood_down_session(tmp_path / "sess-c.jsonl"), state_dir=sd, new_session_id="sess-d")
+    assert fields["owner_messages"][0]["text"] == "fix issue 338 now"
+    assert fields["own_reply"] == "measuring it" and fields["carried_from"]["session_id"] == "sess-a"
+    assert (sd / "owner-messages" / "sess-d.json").is_file()
+
+
+def test_new_human_message_appends_and_only_the_last_three_are_kept(tmp_path):
+    """A later session with its own human message: stored + new, trimmed to three, new reply wins."""
+    sd = tmp_path / "sd"
+    sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    later = _write(
+        tmp_path / "sess-b.jsonl",
+        [_ARM, _stamped("third", "2026-10-07T20:00:00.000Z"), _assistant(_text("r3")),
+         _stamped("fourth", "2026-10-07T20:10:00.000Z"), _assistant(_text("r4"))],
+    )
+    fields = sc.clear_fields(later, state_dir=sd, new_session_id="sess-c")
+    assert [m["text"] for m in fields["owner_messages"]] == ["and why two clears?", "third", "fourth"]
+    assert fields["own_reply"] == "r4" and "carried_from" not in fields
+    action = sc.next_action(fields)
+    assert action is not None and "most recent messages were" in action and "fourth" in action
+
+
+def test_unrelated_sessions_in_one_state_dir_do_not_see_each_other(tmp_path):
+    """Records are keyed by session lineage: an unrelated cleared session carries nothing."""
+    sd = tmp_path / "sd"
+    sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    fields = sc.clear_fields(
+        _stood_down_session(tmp_path / "other.jsonl"), state_dir=sd, new_session_id="other-2",
+    )
+    assert fields["last_user"] == "" and "carried_from" not in fields
+    assert sc.next_action(fields) is None
+
+
+def test_without_state_dir_nothing_is_read_or_written(tmp_path):
+    """state_dir=None keeps today's behaviour: the cleared transcript alone, no files."""
+    fields = sc.clear_fields(_transcript_a(tmp_path))
+    assert fields["last_user"] == "and why two clears?" and "carried_from" not in fields
+    assert not list(tmp_path.rglob("owner-messages"))
+
+
+def test_corrupt_lineage_record_means_no_carry_and_no_exception(tmp_path):
+    """A garbage record file is ignored: the fresh session simply gets no carried messages."""
+    sd = tmp_path / "sd"
+    (sd / "owner-messages").mkdir(parents=True)
+    (sd / "owner-messages" / "sess-b.json").write_text("{not json", encoding="utf-8")
+    fields = sc.clear_fields(
+        _stood_down_session(tmp_path / "sess-b.jsonl"), state_dir=sd, new_session_id="sess-c",
+    )
+    assert fields["last_user"] == "" and "carried_from" not in fields
+    assert sc.owner_record(sd, "sess-b") is None
+
+
+def test_injected_command_records_are_never_human_text():
+    """The real arm/resume/caveat/heartbeat shapes of a resumed session are not human input."""
+    for entry in (_ARM, _RESUME, _CAVEAT, _user("[janitor-heartbeat]\nrun the stub")):
+        assert sc._human_text(entry) == ""

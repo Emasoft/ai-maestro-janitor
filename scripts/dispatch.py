@@ -4117,6 +4117,23 @@ def _phase_keep_going_nudge() -> None:
     # re-anchors it every fire. Both probes are fail-open (a broken pointer must
     # never silence the nudge — the nudge IS the night-survival pulse).
     bits: list[str] = []
+    # Issue 338: FIRST, the owner's newest message, so a session that stood down after a clear
+    # is re-anchored on what the owner actually said. The record exists only for a session
+    # created by a janitor clear; fail-open like the probes below.
+    try:
+        import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other phase imports
+
+        rec = session_continuity.owner_record(
+            sd, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip(),
+        )
+        if rec:
+            newest = rec["messages"][-1]
+            bits.append(
+                f"owner's last message ({session_continuity.age_words(newest['ts'])}): "
+                f"«{session_continuity._clean(newest['text'], 160)}»"
+            )
+    except Exception as exc:  # noqa: BLE001 -- a broken record must never silence the nudge
+        state.log_line("dispatch", f"keep-going: owner record unavailable: {exc!r}")
     try:
         directive_file = state.state_dir() / "resume-directive.txt"
         if directive_file.is_file() and directive_file.stat().st_size > 0:

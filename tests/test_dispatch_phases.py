@@ -5067,3 +5067,32 @@ def test_run_detector_filters_a_memory_chore_marker_when_cooldown_active(
     assert "[janitor-memory-consolidate]" not in out, (
         f"a memory-chore marker must be filtered during the cooldown, got {out!r}"
     )
+
+
+def test_keep_going_nudge_leads_with_the_owners_last_message_when_a_record_exists(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue 338: a lineage record for the current session puts the owner's newest message first;
+    without one the nudge is unchanged."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-now")
+    dispatch = _import_dispatch()
+    import session_continuity
+    import state
+
+    state.init_state()
+    _make_idle_and_stale(state)
+    plain = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "owner's last message" not in plain
+    state.atomic_write(
+        state.state_dir() / "owner-messages" / "sess-now.json",
+        json.dumps({
+            "messages": [{"text": "[janitor-resume] fix 338 now", "ts": ""}],
+            "own_reply": "ok", "origin_session": "sess-old", "recorded_at": "",
+        }),
+    )
+    assert session_continuity.owner_record(state.state_dir(), "sess-now") is not None
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    note = out.splitlines()[1]
+    assert note.startswith("continue your pending task (keep-going mode) — owner's last message (time unknown): «")
+    assert "fix 338 now" in note
+    assert "[janitor-resume] fix" not in note, "quoted text must not be able to form a bare marker"
