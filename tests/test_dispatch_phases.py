@@ -4804,6 +4804,38 @@ def test_interrupt_cooldown_logs_unknown_session_once_per_episode(
     assert log_path.read_text(encoding="utf-8").count(needle) == 2
 
 
+
+def test_interrupt_cooldown_unknown_session_line_rearms_after_a_known_session_fire(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-W3ERQIB9 follow-up) Two fires with no session log the line once; a fire WITH a
+    session logs no new line; the next fire with no session logs it again (2 in total)."""
+    dispatch = _import_dispatch()
+    import state
+
+    needle = "heartbeat: interrupt check skipped, session unknown"
+    log_path = state.log_dir() / "dispatch.log"
+
+    def count() -> int:
+        return log_path.read_text(encoding="utf-8").count(needle) if log_path.is_file() else 0
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    dispatch._phase_interrupt_cooldown()
+    dispatch._phase_interrupt_cooldown()
+    assert count() == 1
+
+    session_id = "sess-rearm-1"
+    transcript = _session_transcript_file(Path.home(), env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 5, now=time.time() - 100000)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    dispatch._phase_interrupt_cooldown()
+    assert count() == 1
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    dispatch._phase_interrupt_cooldown()
+    assert count() == 2
+
+
 def test_main_suppresses_a_pending_clear_resume_during_the_interrupt_cooldown(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
