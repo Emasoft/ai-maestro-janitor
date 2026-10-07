@@ -867,7 +867,16 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
         if result.returncode == 0 and not err:
             return
         masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
-        state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {masked[-_RC_STDERR_TAIL_CHARS:]}")
+        # The 300-char cut used to land mid-line (9 of 39 logged records began with a fragment
+        # such as "icate"), so when something was cut and the slice holds a newline, drop the
+        # partial first line and mark the elision with "...". A single very long line has no
+        # boundary to cut at: keep the character cut, still marked. Masking stays BEFORE the cut.
+        tail = masked[-_RC_STDERR_TAIL_CHARS:]
+        if len(masked) > _RC_STDERR_TAIL_CHARS:
+            if "\n" in tail:
+                tail = tail.split("\n", 1)[1]
+            tail = "..." + tail
+        state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {tail}")
     except Exception as exc:  # noqa: BLE001 - see docstring
         try:
             state.log_line("daemon", f"rotator tick result not logged: {type(exc).__name__}")

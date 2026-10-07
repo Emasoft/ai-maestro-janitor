@@ -6,6 +6,7 @@ Real subprocesses through the real `_run_workload`; real temp log dir.
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -83,6 +84,30 @@ def test_email_inside_repr_quotes_is_masked(tmp_path: Path) -> None:
     log = _tick(tmp_path, f"import sys; print(repr(\"slot for {_ADDR}\"), file=sys.stderr); sys.exit(1)")
     assert "rotator tick rc=1" in log
     assert _ADDR not in log
+
+
+
+def test_cut_stderr_tail_starts_on_a_line_boundary(tmp_path: Path) -> None:
+    """A tail cut mid-line drops the partial first line and is prefixed with an ellipsis."""
+    body = (
+        "import sys\n"
+        "for i in range(40):\n"
+        "    print(f\"line-{i:02d} \" + \"x\" * 20, file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    log = _tick(tmp_path, body)
+    tail = log.split("stderr: ", 1)[1].rstrip("\n")
+    assert tail.startswith("...")
+    first = tail[3:].lstrip().split("\n")[0].split()
+    assert re.fullmatch(r"line-\d\d", first[0]) and first[1] == "x" * 20
+    assert "line-39" in tail
+
+
+def test_cut_single_long_line_keeps_the_character_cut(tmp_path: Path) -> None:
+    """With no newline in the slice, the character cut is kept and prefixed with an ellipsis."""
+    log = _tick(tmp_path, "import sys; print(\"y\" * 400, file=sys.stderr); sys.exit(1)")
+    tail = log.split("stderr: ", 1)[1]
+    assert tail.startswith("...y")
 
 
 def test_unwritable_log_dir_does_not_raise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
