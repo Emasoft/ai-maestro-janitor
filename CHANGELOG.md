@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Bump version to 3.8.8 (e976da4)
+- Bump version to 3.8.8 (5792d99)
 ## [3.8.7] — 2026-10-07
 
 ### Bug Fixes
