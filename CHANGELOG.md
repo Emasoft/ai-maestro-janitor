@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.5] — 2026-10-07
+
+### Bug Fixes
+
+- **memory:** Atomize declines the SessionStart-seeded overview stub (TRDD-BRW49ELM) (c2840ec)
+- **detectors:** Trdd-cross-card-blindspot forgets cleared pair keys (TRDD-61PLV7WS) (33ccbe6)
+- **memory:** Decline only a pure seeded stub, one shared seed constant (TRDD-BRW49ELM) (e64e584)
+- **publish:** Drop unpublished stale local tags before git-cliff runs (TRDD-TNNII9S8) (266fd24)
+- **daemon:** The retry line carries the failed attempt's stderr tail (TRDD-45ZUV5ZD) (01c663e)
+- **dispatch:** One session per project root gets the board nudge, via an expiring lease (TRDD-LH84WTL5) (c386b27)
+
+### Documentation
+
+- Add TRDD-61PLV7WS — trdd-cross-card-blindspot never forgets a cleared pair (b22c61c)
+- **trdd:** Record v3.8.4 on its cards, refresh the FQVEILVK state (TRDD-FQVEILVK) (3cfd5e4)
+- **trdd:** Give the FQVEILVK install step a CI check that survives a clear (TRDD-FQVEILVK) (332e737)
+- **trdd:** Use the full release sha in the FQVEILVK CI check (TRDD-FQVEILVK) (956411e)
+- **trdd:** Record batch B6 and the 3.8.4 install on the cards (TRDD-FQVEILVK) (53475c2)
+- **trdd:** Land the card corrections that 53475c24 described but did not contain (TRDD-FQVEILVK) (a32e521)
+- **trdd:** Mark the duplicated correction lines on CGA3U0BN and 37H7QFSF (TRDD-FQVEILVK) (cc56a72)
+- **trdd:** Mark the duplicated decision line on CGA3U0BN (TRDD-FQVEILVK) (f7a26b4)
+- **trdd:** Record batch B7 on its cards (TRDD-FQVEILVK) (da48834)
+- **trdd:** FQVEILVK publishes B6 and B7 as 3.8.5 now, B8 follows as 3.8.6 (TRDD-FQVEILVK) (248dcfe)
+- **trdd:** FQVEILVK records the stopped 3.8.5 attempt and the republish (TRDD-FQVEILVK) (fb7244c)
+
+### Features
+
+- **runaway:** The alarm reports burn measured between two fires (TRDD-NLHVLGEP) (ac63bb0)
+
+### Testing
+
+- **runaway:** Check the measured burn against the busy child's own CPU time (TRDD-NLHVLGEP) (c5be727)
 ## [3.8.4] — 2026-10-07
 
 ### Bug Fixes
@@ -26,6 +58,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** Record batches B1 to B3 on their cards (TRDD-FQVEILVK) (3175250)
 - **trdd:** Record batches B4 and B5 on their cards (TRDD-FQVEILVK) (c133883)
 - **trdd:** Verify the exempt detectors, close EMMXG7GW, refresh the FQVEILVK state (TRDD-FQVEILVK) (527b037)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.4 (b1f9ca2)
 
 ### Refactor
 
