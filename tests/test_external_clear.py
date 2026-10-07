@@ -1359,3 +1359,32 @@ def test_awaiting_a_full_lane_past_the_deadline_gives_up():
 
     assert got is None
     assert len(calls) >= 2, "it must actually poll, not refuse on the first look"
+
+
+def test_with_measured_facts_puts_idle_and_context_into_the_handoff(tmp_path: Path):
+    """TRDD-QONEBKGK: a transcript with a known last prompt and context size fills both facts."""
+    now = int(time.time())
+
+    def stamp(age_s: int) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - age_s))
+
+    transcript = tmp_path / "prev.jsonl"
+    prompt = {"type": "user", "timestamp": stamp(3 * 3600 + 30), "message": {"content": "hi"}}
+    reply = {
+        "type": "assistant",
+        "timestamp": stamp(3 * 3600 + 20),
+        "message": {"usage": {"input_tokens": 1000, "cache_read_input_tokens": 120_000,
+                              "cache_creation_input_tokens": 4000}},
+    }
+    transcript.write_text(json.dumps(prompt) + "\n" + json.dumps(reply) + "\n", encoding="utf-8")
+    inputs = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(transcript), now)
+    text = ec.compose_template_handoff(inputs, now_iso=NOW_ISO)
+    assert "idle ~3h" in text
+    assert "context ~125k" in text
+
+
+def test_with_measured_facts_stays_unknown_when_the_transcript_is_absent(tmp_path: Path):
+    """TRDD-QONEBKGK: a missing transcript is genuinely unknown, so the text still says so."""
+    inputs = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(tmp_path / "gone.jsonl"), 0)
+    text = ec.compose_template_handoff(inputs, now_iso=NOW_ISO)
+    assert "idle unknown, context unknown" in text

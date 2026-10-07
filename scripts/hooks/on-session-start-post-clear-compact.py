@@ -338,10 +338,11 @@ def _main() -> int:
     # TRDD-O2FNJ4KW follow-up (review correction 3): passed as `HandoffInputs.other_open_ids`
     # below, its own section, never appended into `findings` -- a board-membership fact is not a
     # janitor finding.
-    inputs = ec.HandoffInputs(
+    # TRDD-QONEBKGK: measured from the cleared transcript; before, the header said "unknown".
+    inputs = ec.with_measured_facts(ec.HandoffInputs(
         trigger="jev-compaction", findings=findings, cards=in_flight_cards,
         other_open_ids=other_open_ids_line, next_action=next_action,
-    )
+    ), transcript_path, int(time.time()))
     # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `compose_handoff_room`
     # needs the SAME facts `compose_handoff` itself will use once a summary exists -- see that
     # function's own docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this

@@ -35,6 +35,7 @@ nobody can tune.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import shutil
@@ -1630,6 +1631,21 @@ class HandoffInputs:
     # The clear path's NEXT ACTION sentence (`session_continuity.next_action`): it quotes the
     # last human message and the reply that answered it. None keeps the generic card-STATE text.
     next_action: str | None = None
+
+
+def with_measured_facts(inputs: HandoffInputs, transcript_path: str, now: int) -> HandoffInputs:
+    """`inputs` with `idle_seconds` / `context_tokens` measured from the cleared session's own
+    transcript. TRDD-QONEBKGK: no caller ever filled them, so every handoff said "idle unknown,
+    context unknown" although both are readable from the transcript; each stays None (and the
+    text keeps saying "unknown") only when its source is genuinely absent."""
+    import cold_cache_compact  # noqa: PLC0415 -- heavy sibling lib, only this path needs it
+    import fleet_scan  # noqa: PLC0415
+
+    return dataclasses.replace(
+        inputs,
+        idle_seconds=fleet_scan.transcript_human_idle(transcript_path, now),
+        context_tokens=cold_cache_compact.context_tokens_for(transcript_path),
+    )
 
 
 def compose_template_handoff(

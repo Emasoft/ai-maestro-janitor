@@ -990,6 +990,17 @@ def human_activity_age(root: str, now: int) -> int | None:
     return min(candidates) if candidates else None
 
 
+def transcript_human_idle(path: str, now: int) -> int | None:
+    """Seconds since the newest HUMAN (or agent-typed) turn of ONE named transcript, ``None``
+    when the file is absent. TRDD-QONEBKGK: the handoff composer is handed the PREVIOUS
+    session's transcript path, which is no longer the project's newest file after a clear, so
+    the project-wide ``human_activity_age`` would measure the wrong session."""
+    mtime_age = _age(path, now)
+    if mtime_age is None:
+        return None
+    return human_activity_age_from_tail(_tail_lines(path), now=now, fallback_age=mtime_age)
+
+
 def transcript_age(root: str, now: int) -> int | None:
     """Seconds since this project's newest SUBSTANTIVE transcript line, or ``None``
     if no transcript exists. Thin wrapper over ``transcript_activity`` kept for the

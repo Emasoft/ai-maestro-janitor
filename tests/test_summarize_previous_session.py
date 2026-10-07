@@ -476,8 +476,13 @@ def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(
     assert jcl.inject_max_bytes_for(raw_room, str(prev)) < jcl.LANE_MIN_INJECT_BYTES, (
         "fixture must starve the RAW, full-title room below the target, or it proves nothing new"
     )
+    # TRDD-QONEBKGK: the lane now measures idle/context from the transcript, which changes the
+    # facts header's size, so the independent expectation must carry the same measured facts.
     expected_inputs, expected_inject_max_bytes = jcl.trim_cards_for_room(
-        ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
+        ec.with_measured_facts(
+            ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards), str(prev),
+            int(time.time()),
+        ),
         now_iso=now_iso_probe, tail=tail_probe, transcript_path=str(prev),
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
