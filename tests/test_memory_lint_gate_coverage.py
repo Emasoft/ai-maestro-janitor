@@ -87,7 +87,16 @@ _RULE_NAME_RE = re.compile(r'\bname: "([a-z0-9-]+)"')
 def _extract_lint_codes_from_source() -> frozenset[str]:
     """Every finding code memgrep can emit, read from the generated rule registry (never
     hand-typed) — the ground truth the classification table below is checked against."""
-    return frozenset(_RULE_NAME_RE.findall(_RULES_RS.read_text(encoding="utf-8")))
+    text = _RULES_RS.read_text(encoding="utf-8")
+    names = _RULE_NAME_RE.findall(text)
+    # Guard against the parser UNDER-reading: a second method (one `Rule { code:` entry per
+    # line) must agree, or a regex that silently misses an entry would shrink the ground truth
+    # and let a missing table row go unnoticed.
+    entries = text.count("    Rule { code: ")
+    assert len(names) == entries == len(set(names)), (
+        f"registry parser read {len(names)} names but rules_gen.rs has {entries} entries"
+    )
+    return frozenset(names)
 
 
 # code -> covering `content_has_work` intervention name, or None (orphaned: no scheduled
@@ -163,20 +172,24 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # each for a reason read from its rule definition (rules_gen.rs) and its emitter (memory.rs).
     # MGPERF-001/-002/-003 are PERFORMANCE telemetry about memgrep itself (a recall/lint run over
     # its `[perf]` budget; an index rebuilt on the hot path), not a defect in any page: there is
-    # no page content a chore could repair, and nothing in memory.rs emits them yet (registry only).
+    # no page content a chore could repair: REGISTERED BUT NOT EMITTED YET (no emitter in memgrep).
     "recall-over-budget": None,
     "lint-over-budget": None,
     "index-stale-rebuild": None,
-    # WMPAGE-006/-007/-008: the publish-globally family. Orphaned BY DESIGN — the gate cannot own
-    # it: the right fix depends on filesystem state (is there a USER-scope symlink?) that a text
-    # predicate cannot see, and a wrong guess un-publishes a deliberately published page. The
-    # family self-heals on the next memgrep write (memory_content_precheck.py, TRDD-AO8MPK5D).
+    # WMPAGE-006/-007/-008: the publish-globally family. No chore row, because NORMALIZED BY EVERY
+    # WRITE VERB: `atomic_write_page` (the sole choke point of edit/add-atom/add-lesson/migrate/
+    # new-page) runs `normalize_page_until_clean` before and after each write, and every state
+    # autofixes (TRDD-RY0IJBJI). A content gate cannot own it anyway: the right fix depends on
+    # filesystem state (is there a USER-scope symlink?) that a text predicate cannot see, and a
+    # wrong guess un-publishes a deliberately published page (memory_content_precheck.py,
+    # TRDD-AO8MPK5D).
     "publish-globally-missing": None,
     "publish-globally-not-symlinked": None,
     "publish-globally-conflict": None,
-    # WMSUP-001/-002: findings about the suppression comments themselves (`<!-- noqa -->`). They
-    # are linter hygiene, fixed by editing or removing the comment (unused-noqa has a built-in
-    # safe fixer run by `memgrep lint --fix`); no scheduled chore consumes them.
+    # WMSUP-001/-002: findings about the suppression comments themselves (`<!-- noqa -->`).
+    # unused-noqa: AUTO-FIXED by `memgrep lint --apply-fixes` (fixers/unused_noqa.rs), not by a
+    # chore. blanket-noqa: NO fixer exists (fixers/mod.rs registers none) — the author must name
+    # the codes by hand; it is a WARN no chore consumes.
     "unused-noqa": None,
     "blanket-noqa": None,
     # Orphaned BY DESIGN, not by oversight. `page-unclosed-fence` exists to explain a
