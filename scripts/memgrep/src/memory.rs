@@ -5638,6 +5638,19 @@ pub fn page_description_phrases(desc: &str) -> Vec<String> {
     static SEPARATORS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = SEPARATORS
         .get_or_init(|| regex::Regex::new(r"\s*/\s*|\s+—\s+|\s*;\s*|\?\s+").expect("valid regex"));
+    // WHY (TRDD-GTP15HRC): a single-quoted YAML scalar (doubled quote = escape) used to keep its
+    // quotes on the first and last phrase, so a repeat of the first phrase never compared equal and
+    // lint stayed silent. Read the scalar first, then split; the per-phrase `"` trim below stays for
+    // the double-quoted form.
+    let desc = desc.trim();
+    let unquoted;
+    let desc = match desc.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+        Some(inner) => {
+            unquoted = inner.replace("''", "'");
+            unquoted.as_str()
+        }
+        None => desc,
+    };
     re.split(desc)
         .map(|s| s.trim().trim_matches('"').trim().to_string())
         .filter(|s| !s.is_empty())
