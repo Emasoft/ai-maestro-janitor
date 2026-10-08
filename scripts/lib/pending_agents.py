@@ -57,9 +57,13 @@ from pathlib import Path
 from typing import Iterator
 
 try:
+    import jsonl_walk  # sibling lib (stdlib-only byte-safe JSONL walk, TRDD-A8DRRW0I)
     import state  # scripts/lib on sys.path (dispatch / detector callers)
 except ImportError:  # imported as ``lib.pending_agents`` (hooks put scripts/ on path)
-    from lib import state  # type: ignore[no-redef]
+    from lib import (
+        jsonl_walk,  # type: ignore[no-redef]
+        state,  # type: ignore[no-redef]
+    )
 
 import os
 
@@ -453,6 +457,13 @@ _KEEP_GOING_TOOL_WAIT_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_TOOL_WAIT_S"
 KEEP_GOING_TOOL_WAIT_S = 1500
 
 
+# Generous tail window (TRDD-A8DRRW0I wave 4b) for the last-entry tool_use probe —
+# matches the tail reads elsewhere in the repo; a real assistant record with a tool_use
+# block fits well inside it, and a torn last line only means the last COMPLETE record
+# is read, which is the correct semantics for "the last entry has tool_use".
+_TOOL_USE_TAIL_BYTES = 64 * 1024
+
+
 def _last_transcript_entry_has_tool_use(path: str) -> bool:
     """True iff the LAST JSON line of the transcript is an assistant message whose content
     includes a `tool_use` block — i.e. the agent is waiting on a tool result, not idle.
@@ -460,16 +471,11 @@ def _last_transcript_entry_has_tool_use(path: str) -> bool:
     about a tool wait, and `agent_is_live` already treats that case as not-live via the
     plain mtime check below it."""
     try:
-        last = ""
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    last = line
-        if not last:
+        entries = jsonl_walk.read_jsonl_tail(Path(path), _TOOL_USE_TAIL_BYTES, malformed_lines=[])
+        if not entries:
             return False
-        rec = json.loads(last)
-        if not isinstance(rec, dict) or rec.get("type") != "assistant":
+        rec = entries[-1]
+        if rec.get("type") != "assistant":
             return False
         content = rec.get("message", {}).get("content") if isinstance(rec.get("message"), dict) else None
         if not isinstance(content, list):
@@ -707,30 +713,22 @@ def spawn_prompt(transcript_path: str) -> str:
         path = Path(str(transcript_path or ""))
         if not path.is_file():
             return ""
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(rec, dict) or rec.get("type") != "user":
-                    continue
-                msg = rec.get("message")
-                content = msg.get("content") if isinstance(msg, dict) else None
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    parts = [
-                        b.get("text", "")
-                        for b in content
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    ]
-                    joined = "\n".join(p for p in parts if p)
-                    if joined:
-                        return joined
+        for _line_no, rec in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
+            if rec.get("type") != "user":
+                continue
+            msg = rec.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = [
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                joined = "\n".join(p for p in parts if p)
+                if joined:
+                    return joined
         return ""
     except Exception:  # noqa: BLE001 - recovery must never raise into a hook or dispatch
         return ""
