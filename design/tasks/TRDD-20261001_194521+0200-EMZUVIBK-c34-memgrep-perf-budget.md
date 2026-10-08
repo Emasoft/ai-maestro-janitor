@@ -4,7 +4,7 @@ title: C34 — memgrep perf budget
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-06T20:18:57+0200
+updated: 2026-10-08T20:01:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,6 +37,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:41+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 3HLI7DMK per DSN035UN wave order
 - 2026-10-06T20:03:31+0200 — column → todo by main-agent@ai-maestro-janitor. only blocker 3HLI7DMK complete Cleared blocked-by (--clear-blocker override).
 - 2026-10-06T20:18:57+0200 — column → blocked. waits on JD2QR5SQ (C22), which also writes scripts/memgrep/tests/cli.rs
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## STATE
 

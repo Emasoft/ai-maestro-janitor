@@ -12,7 +12,7 @@ severity: major
 labels: [oauth-rotator, keychain, macos]
 relevant-rules: []
 blocker-probe: trddgrep --porcelain show V5RXQ4NB | cut -f3
-blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Rotator keychain READ re-prompts (partition-list flap)

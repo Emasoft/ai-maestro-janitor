@@ -4,7 +4,7 @@ title: C40 — fix dominant recall wait
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-06T15:11:30+0200
+updated: 2026-10-08T20:02:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -38,6 +38,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:43+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on V12ZHM1B per DSN035UN wave order
 - 2026-10-04T13:11:02+0200 — column → todo by main-agent@ai-maestro-janitor. blocker V12ZHM1B is complete and archived Cleared blocked-by (--clear-blocker override).
 - 2026-10-06T15:11:30+0200 — column → blocked. the source fix needs an edit fastedit refuses; tracked by 6NMQ95TQ; owner refused the plain edit on 2026-10-06
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## Findings 2026-10-06
 

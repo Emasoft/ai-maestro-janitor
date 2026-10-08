@@ -18,8 +18,8 @@ approval-datetime: 2026-10-03T03:41:36+0200
 project-id: ai-maestro-janitor
 review-after: 2026-10-17
 parent-trdd: JSQSJ3PZ
-blocker-probe: [trddgrep, show, B78NJU35]
-blocker-holds-if: not-match:RESOLVED
+blocker-probe: trddgrep --porcelain show B78NJU35 | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Spare accounts stop decaying (account B root cause, spare-age alert)

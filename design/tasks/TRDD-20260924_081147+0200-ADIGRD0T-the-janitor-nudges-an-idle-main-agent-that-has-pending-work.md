@@ -17,7 +17,7 @@ approval-datetime: 2026-09-24T08:11:47+0200
 blocked-by: [6ESS2MGE]
 pre-block-column: todo
 blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show 6ESS2MGE --porcelain | cut -f3
-blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # The janitor nudges an idle main agent that has pending work

@@ -18,7 +18,7 @@ blocked-by: [XI10BA5D]
 pre-block-column: todo
 unblock-when: [trdd:XI10BA5D terminal]
 blocker-probe: trddgrep --porcelain show XI10BA5D | cut -f3
-blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # the memory split chore copies the parent description onto a child page

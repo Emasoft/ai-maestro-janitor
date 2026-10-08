@@ -13,7 +13,7 @@ effort: XL
 labels: [fleet, ai-maestro, cli-adoption, epic]
 relevant-rules: []
 blocker-probe: trddgrep --porcelain show W8KDPT2M | cut -f3
-blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Adopt the AI Maestro control/monitor/task CLI layer (epic)

@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-07T04:31:37+0200
+updated: 2026-10-08T20:02:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -330,6 +330,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-04T20:13:39+0200 — column → blocked. Correction of the same day's move to testing: the linter raised ORDER-NPT-VIOLATED, because a parent may not pass dev while its prerequisite cards are unfinished. Nobody is writing code on this umbrella, so dev was untrue as well; blocked on its prerequisite cards is the column that is both true and lint-clean.
 - 2026-10-05T01:33:36+0200 — column → dev by main-agent@ai-maestro-janitor. Reverses the 2026-10-04 move to blocked. Measured 2026-10-05 on two scratch cards: after a blocker is closed, trddgrep why on the blocked card prints BLOCKED with no locally-resolvable blocker and never READY, and the card does not leave blocked by itself, so the probe not-match:READY would hold forever. dev is where the card linter lets a parent wait for its prerequisite cards Cleared blocked-by (--clear-blocker override).
 - 2026-10-07T02:27:25+0200 — column → blocked by main-agent@ai-maestro-janitor. blocked-by lists open cards JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ; dev asserted active work
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## STATE
 

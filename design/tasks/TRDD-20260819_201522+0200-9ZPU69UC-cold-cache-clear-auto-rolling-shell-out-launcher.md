@@ -126,5 +126,5 @@ sufficient evidence for a shell-out chore — a non-trivial duration is.
 
 ## Approval log
 - 2026-09-05T10:50:00+0200 — RE-BLOCKED on the REAL condition by main-session (peer answer from the ai-maestro hub session, 2026-09-05): this card and ai-maestro#157 are ONE lane; both ends are wired; the lane is CONDITIONAL, default-OFF, and `AIM_COLD_CACHE_CLEAR` is set nowhere BY DESIGN — an owner arm-or-decline (ai-maestro TRDD-YRZXUBW8). Until the owner arms it the janitor daemon correctly keeps the chore. `blocked-by` was `peer-repo-hub-lane-wiring` (`decision:peer`); the peer has decided, and what remains is the OWNER's switch.
-2026-10-08: probe caveat MOVED out of this governance log to the card body (Why) per review round on cbd04248 — the Approval log keeps governance entries only.
+- 2026-10-08: (blank line — the probe caveat that stood here was removed; it lives in the card body and on TRDD-9UORH472)
 

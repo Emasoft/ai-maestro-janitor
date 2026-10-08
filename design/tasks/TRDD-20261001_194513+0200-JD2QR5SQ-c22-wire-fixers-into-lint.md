@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-07T04:30:20+0200
+updated: 2026-10-08T20:02:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -63,6 +63,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-07T02:38:32+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
 - 2026-10-07T02:41:30+0200 — column → backburner by main-agent@ai-maestro-janitor. no code edit allowed until fastedit freeze lifted
 - 2026-10-07T04:30:20+0200 — column → testing by main-agent@ai-maestro-janitor. STATE already says the card is in testing; column said backburner; field use waits on the owner's fastedit freeze of 2026-10-06
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## STATE
 

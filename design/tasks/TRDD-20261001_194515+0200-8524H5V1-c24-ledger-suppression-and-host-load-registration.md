@@ -4,7 +4,7 @@ title: C24 — ledger suppression and host-load registration
 column: backburner
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-05T02:06:48+0200
+updated: 2026-10-08T20:01:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -48,6 +48,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-03 — CORRECTION (review of 3754d0b8): RECON line 4: write the detector-name to code mapping inline in _run_detector, not as a new module-level dict, or it hits the same fastedit limit.
 2026-10-03 — CORRECTION (review of 3754d0b8): Before dispatch: widen Writes to include design/specs/issue-codes.toml, the files build_issue_codes.py regenerates (scripts/lib/issue_codes_gen.py, docs/ISSUE-CODES.md, src/rules_gen.rs), tests/test_findings_ledger.py and a dispatch drift test; and confirm with the owner that the 'nothing suppressed' fallback on a malformed .janitor.toml is an accepted exception to the fail-fast rule.
 - 2026-10-03T15:51:18+0200 — column → backburner. waits on the owner's plain-edit decision (registration in module-level _DETECTORS) and on confirming the malformed-config fallback; not workable as written
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## STATE
 

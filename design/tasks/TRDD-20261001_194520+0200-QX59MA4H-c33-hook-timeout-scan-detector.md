@@ -4,7 +4,7 @@ title: C33 — hook-timeout-scan detector
 column: todo
 status: tasked
 created: 2026-10-01T19:45:20+0200
-updated: 2026-10-07T10:07:58+0200
+updated: 2026-10-08T20:01:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -39,6 +39,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — SCOPE EXTENDED (absorbs superseded C1B, TRDD-B9YPSF02): besides HOOK-001 from hook_cancelled/timedOut=true, also emit HOOK-002 hook-near-timeout from hook_success/hook_cancelled entries whose durationMs >= 80% of the hook timeout (timeoutMs when the record has it, else the timeout configured for that exact command in hooks/hooks.json; skip hooks with no known timeout). Dedupe one HOOK-002 per (hook command, hour). Reference implementation of the threshold and dedupe: reports/dsn035un/c1b-superseded/hook_timing.py (local).
 - 2026-10-01 — MAPPING (wave-1 review finding 3): hook_success.command holds the literal ${CLAUDE_PLUGIN_ROOT} text; match on the script path relative to the plugin root against the janitor own hooks/hooks.json entries. HOOK-002 covers janitor hooks only (other plugins have no timeout in success records and their hooks.json is not ours to parse); HOOK-001 covers every plugin via hook_cancelled.timeoutMs.
 - 2026-10-07T10:07:58+0200 — column → todo by main-agent@ai-maestro-janitor. blocker B9YPSF02 was superseded and archived 2026-10-01 and its scope absorbed into this card Cleared blocked-by (--clear-blocker override).
+- 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
 
 ## STATE
 

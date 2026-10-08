@@ -31,7 +31,7 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 ## Approval log
 
 - 2026-10-05T16:43:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-2026-10-08: probe caveat MOVED out of this governance log to the card body (Decisions) per review round on cbd04248 — the Approval log keeps governance entries only.
+- 2026-10-08: (blank line — the probe caveat that stood here was removed; it lives in the card body and on TRDD-9UORH472)
 
 ## Decisions
 
