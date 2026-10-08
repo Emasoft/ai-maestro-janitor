@@ -615,6 +615,8 @@ def recently_interrupted(
     window_bytes = min(_INTERRUPT_SCAN_CHUNK_BYTES, size) if size else 0
     while True:
         # A zero-size window means an EMPTY transcript -- unrecoverable, no window left to grow.
+        # This pre-bail is also load-bearing (review F5): it stays ahead of read_jsonl_tail's
+        # own `tail_bytes < 1` ValueError, which the `except OSError` below does NOT catch.
         # A non-empty-but-recordless read (read_jsonl_tail returning [] for a window holding no
         # COMPLETE record, e.g. one record longer than the window) must NOT bail out here: it
         # falls through to the window-growth check below, which is what finds that record.
