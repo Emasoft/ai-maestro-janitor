@@ -1,10 +1,10 @@
 ---
 trdd-id: 20JQQVDQ
 title: The memgrep cross-scope guard still lets a split into a relative not-yet-existing page through
-column: todo
+column: backburner
 status: tasked
 created: 2026-10-07T11:50:57+0200
-updated: 2026-10-07T12:46:25+0200
+updated: 2026-10-08T20:37:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T11:50:57+0200
+review-after: 2026-10-09
 ---
 
 # The memgrep cross-scope guard still lets a split into a relative not-yet-existing page through
@@ -41,3 +42,5 @@ These commits were made in this checkout by a writer the main session could not 
 ## Approval log
 
 - 2026-10-07T11:50:57+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-08T20:33:40+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
+- 2026-10-08T20:37:42+0200 — column → backburner. 24h memgrep-quiet clock resets on any DGBZVZPP Rust commit; parked with review-after, restartable when the tree has rested 24h per card note (e)
