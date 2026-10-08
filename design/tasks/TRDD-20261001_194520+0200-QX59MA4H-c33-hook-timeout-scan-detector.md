@@ -1,10 +1,10 @@
 ---
 trdd-id: QX59MA4H
 title: C33 — hook-timeout-scan detector
-column: todo
+column: testing
 status: tasked
 created: 2026-10-01T19:45:20+0200
-updated: 2026-10-08T20:01:58+0200
+updated: 2026-10-08T20:37:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -40,6 +40,9 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — MAPPING (wave-1 review finding 3): hook_success.command holds the literal ${CLAUDE_PLUGIN_ROOT} text; match on the script path relative to the plugin root against the janitor own hooks/hooks.json entries. HOOK-002 covers janitor hooks only (other plugins have no timeout in success records and their hooks.json is not ours to parse); HOOK-001 covers every plugin via hook_cancelled.timeoutMs.
 - 2026-10-07T10:07:58+0200 — column → todo by main-agent@ai-maestro-janitor. blocker B9YPSF02 was superseded and archived 2026-10-01 and its scope absorbed into this card Cleared blocked-by (--clear-blocker override).
 - 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
+- 2026-10-08T20:33:13+0200 — column → todo. blocker B9YPSF02 absorbed by this card per its own SCOPE EXTENSION line; tree quiet; 2026-10-07 owner delegation covers code edits
+- 2026-10-08T20:33:36+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
+- 2026-10-08T20:37:19+0200 — column → testing. worker verified all deliverables on disk (detector, registry, codes, 18 tests; pytest 18+23 passed, ruff clean) — reports_dev/20261008-fanout-qx59ma4h.md; acceptance fixture evidence recorded in report
 
 ## STATE
 
