@@ -41,6 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jsonl_walk  # noqa: E402  -- sibling lib; stdlib-only byte-safe JSONL tail reader (TRDD-A8DRRW0I)
 import state  # noqa: E402
 import token_history  # noqa: E402  -- sibling lib; leaf-safe, provides parse_ts
 
@@ -479,27 +480,6 @@ def resolve_interrupt_cooldown_s(env: Mapping[str, str] | None = None) -> int:
     return val if val > 0 else DEFAULT_INTERRUPT_COOLDOWN_S
 
 
-def _tail_bytes(path: Path, max_bytes: int = 64 * 1024) -> list[str]:
-    """The last `max_bytes` of `path` as non-blank text lines. Empty list on any I/O failure.
-
-    A near-duplicate of `fleet_scan._tail_lines` — NOT imported from there because `fleet_scan`
-    imports `terminal_trigger`, which imports THIS module: importing `fleet_scan` here would be a
-    straight import cycle (fleet_scan -> terminal_trigger -> user_intent -> fleet_scan). Small,
-    stable, and cheap enough to duplicate rather than restructure three modules to share it."""
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as fh:
-            if size > max_bytes:
-                fh.seek(size - max_bytes)
-            data = fh.read(max_bytes + 1)
-    except OSError:
-        return []
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    if len(lines) > 1 and size > max_bytes:
-        lines = lines[1:]  # first line is almost certainly truncated mid-record
-    return [ln for ln in lines if ln.strip()]
-
-
 def _interrupt_text(rec: Mapping) -> str | None:
     """The flattened text of a `type: user` transcript record's `message.content`, or None.
 
@@ -634,26 +614,32 @@ def recently_interrupted(
     deadline_ts = resolved_now - resolved_window
     window_bytes = min(_INTERRUPT_SCAN_CHUNK_BYTES, size) if size else 0
     while True:
-        lines = _tail_bytes(transcript, window_bytes) if window_bytes else []
-        if not lines:
+        # A zero-size window means an EMPTY transcript -- unrecoverable, no window left to grow.
+        # A non-empty-but-recordless read (read_jsonl_tail returning [] for a window holding no
+        # COMPLETE record, e.g. one record longer than the window) must NOT bail out here: it
+        # falls through to the window-growth check below, which is what finds that record.
+        if window_bytes < 1:
+            state.log_line("user_intent", f"recently_interrupted: unreadable transcript: {transcript}")
+            return None
+        try:
+            # read_jsonl_tail RAISES OSError on an unreadable file (fail fast at the call) --
+            # caught here to keep this function's documented fail-open (None) contract. It
+            # handles the boundary byte itself: a seek landing exactly on a record boundary
+            # keeps that first record (the old inline `_tail_bytes` dropped it on EVERY
+            # oversized file, losing whole records from this scan).
+            entries = jsonl_walk.read_jsonl_tail(transcript, window_bytes, malformed_lines=[])
+        except OSError:
             state.log_line("user_intent", f"recently_interrupted: unreadable transcript: {transcript}")
             return None
         # Re-scan the WHOLE window every growth step, not just the newly-revealed prefix:
-        # `_tail_bytes` decides whether to drop a guessed-truncated first line purely from
-        # `size > max_bytes` on THIS call, so the exact line boundaries shift between windows
-        # of different size -- a "just scan what's new" diff would silently trust that the tail
-        # is byte-for-byte stable across windows, which it is not guaranteed to be. Re-scanning
-        # is idempotent (same record, same verdict) and the window only grows a handful of
-        # times before hitting the whole-file fallback, so the extra work is bounded and cheap;
-        # a wrong verdict from a misaligned diff is not an acceptable trade for it.
+        # the exact record boundaries shift between windows of different size -- a "just scan
+        # what's new" diff would silently trust that the tail is byte-for-byte stable across
+        # windows, which it is not guaranteed to be. Re-scanning is idempotent (same record,
+        # same verdict) and the window only grows a handful of times before hitting the
+        # whole-file fallback, so the extra work is bounded and cheap; a wrong verdict from a
+        # misaligned diff is not an acceptable trade for it.
         consecutive_old = 0  # reset each growth step: this re-scans the window from its own tail
-        for raw in reversed(lines):
-            try:
-                rec = json.loads(raw)
-            except ValueError:
-                continue  # malformed line -- keep walking back for an earlier valid record
-            if not isinstance(rec, dict):
-                continue
+        for rec in reversed(entries):
             ts = token_history.parse_ts(rec.get("timestamp", ""))
             text = _interrupt_text(rec)
             if text is not None:

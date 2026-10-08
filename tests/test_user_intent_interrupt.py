@@ -232,17 +232,17 @@ def test_multi_doubling_window_growth_still_finds_the_interrupt(tmp_path: Path, 
     """Force several window-doubling iterations (`_INTERRUPT_SCAN_CHUNK_BYTES` shrunk to 64) so
     an interrupt sitting well before the tail requires >1 growth step -- proves the
     re-scan-the-whole-window approach doesn't lose or misalign records across doublings. Asserts
-    on the `_tail_bytes` call count too, not just the final answer: without it a future change
+    on the `read_jsonl_tail` call count too, not just the final answer: without it a future change
     that made the loop succeed on iteration 1 would still pass silently, testing nothing."""
     monkeypatch.setattr(user_intent, "_INTERRUPT_SCAN_CHUNK_BYTES", 64)
-    real_tail_bytes = user_intent._tail_bytes
+    real_read_tail = user_intent.jsonl_walk.read_jsonl_tail
     calls: list[int] = []
 
-    def _counting_tail_bytes(path, max_bytes=64 * 1024):
-        calls.append(max_bytes)
-        return real_tail_bytes(path, max_bytes)
+    def _counting_read_tail(path, tail_bytes, *, malformed_lines):
+        calls.append(tail_bytes)
+        return real_read_tail(path, tail_bytes, malformed_lines=malformed_lines)
 
-    monkeypatch.setattr(user_intent, "_tail_bytes", _counting_tail_bytes)
+    monkeypatch.setattr(user_intent.jsonl_walk, "read_jsonl_tail", _counting_read_tail)
 
     t = tmp_path / "session.jsonl"
     # Non-`user` padding so the (c) "newer user prompt -> user is back" short-circuit can never
