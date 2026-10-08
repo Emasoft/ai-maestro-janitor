@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-08T20:02:03+0200
+updated: 2026-10-09T00:51:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -52,6 +52,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: field use of lint --apply-fixes by C30, C31, C32 and removal of the known residue (stale allow(dead_code) attributes, three stray /// lines near lint_label); no code edit until the owner lifts the fastedit freeze of 2026-10-06 (a freeze is not a card, so blocked-by cannot name it; trddgrep has no park field for it, review-after only mutes drift detection).
 2026-10-07: to backburner, not todo: no code edit is allowed until the owner lifts the fastedit freeze of 2026-10-06, so it must not be pulled.
 2026-10-07: column corrected to testing: this STATE already says the card is in testing while the column said backburner; field use waits on the owner's fastedit freeze of 2026-10-06.
+2026-10-09 residue attempt: all three residue edits were applied (three stray /// lines near lint_label, both allow(dead_code) attributes on PageFix/plan_page_fix, module-wide allow in fixers/mod.rs) with tests green (444 unit + 244 cli), but cargo clippy -- -D warnings failed on PageFix.attempted/fixed — read only by cfg(test) code — so the struct-level allow is still NEEDED, contradicting the card STATE note that both allows are now unneeded. Edits reverted (git checkout -- the two files) to keep the gate clean; the ///-line removal is worth re-attempting alone (independent of the allow question). Report: reports_dev/20261009_005018+0200-jd2qr5sq-residue.md
 
 ## Approval log
 
