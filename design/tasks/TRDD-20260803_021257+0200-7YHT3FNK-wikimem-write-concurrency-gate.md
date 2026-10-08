@@ -110,3 +110,11 @@ reread the file first."**
   txn/bridge/repomap suites.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] P1 landed (ea05bc5): memgrep write_gate gives scope locks + --base-sha256 CAS on all 4 write verbs; LIVE Python↔Rust lock parity proven (same scope root → same memory-maint-<sha16>.lock from both languages); flock wait with bounded timeout is the write queue; migrate locks both scopes sorted.
+- [x] P3 landed (70fd8a1): Python realpath lock parity pinned by a symlink test; bridge append under the scope lock with OUTCOME_LOCK_HELD; CLAUDE.md writers audited already-compliant (flock at claudemd_slim.py:118 + stat-CAS), no redundant machinery added.
+- [x] P2 landed (c7cd177): memgrep edit verb — exact-unique-match replace; 0-match/CAS-mismatch refuses with the canonical STALE_MSG verbatim and writes nothing; multi-match refuses unless --replace-all; verified live through the installed binary.
+- [x] P4 landed (954ba2a): the mandate on every doc surface — memgrep verbs or the harness Edit tool are the only sanctioned edit paths, raw shell is a violation, refusal → re-read → retry; both context-floor cap tests green.
+- [x] 285 crate + 180 Python + 873 doc-suite tests green; every verification bullet in the body checked.
+- [x] Ships via the blocked release train (TRDD-AWXK0RFT).

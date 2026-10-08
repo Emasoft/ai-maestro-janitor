@@ -113,3 +113,10 @@ the new rule intends to keep.
   blocker deliberately, and no card that named one should stop being reported.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Proximity scope decided on evidence: the blank-line-separated PARAGRAPH, not the line — the corpus only true positive (TRDD-3XS3PDCF) wraps its blocker across two lines, so a same-line rule would have dropped it.
+- [x] Measured on the live corpus both ways before coding: whole-body 52 → paragraph-scoped 23 prose-named candidates; TRDD-2C8XFOW9 4 → 0 and TRDD-AM8JD9SG 8 → 0 while 3XS3PDCF still yields ab232dbd; board-wide reconciler reports zero stale blockers and every dropped one was a reuse citation.
+- [x] _paragraph_spans returns offsets so the match runs on the MASKED body with ids read from the ORIGINAL; the length-preserving property of _mask_inline_code now stated at its definition.
+- [x] The frontmatter blocked-by path is untouched and pinned by its own test so a later narrowing of the prose path cannot bleed into it.
+- [x] 3 tests added (true positive spanning lines; citation in another paragraph — confirmed failing first; frontmatter-only); 57 in test_trdd_common.py, 187 across the TRDD suite, 14062 full-suite, ruff clean.

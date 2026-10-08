@@ -87,3 +87,9 @@ correct for a root that may sit behind for hours.
   consumed at `index.rs:320`, and asserted by a test at `index.rs:2122`. Checked the emission
   site specifically because a constant that exists but is never raised looks identical to a
   shipped feature.
+## Acceptance checklist
+
+- [x] A database behind the binary reports under the distinct non-damage code MEMGREP-011 (BEHIND_LADDER_CODE, emitted at index.rs:877 on the ver < expect_version branch), not as a failed migration.
+- [x] The MEMGREP-011 wording directs that opening or reindexing the root runs the ladder and forbids rebuilding it; consumed at index.rs:320.
+- [x] The emission site was verified reachable, not merely defined — the shipped behavior, not just the constant, is confirmed.
+- [x] A genuinely half-applied migration (stamped current, column absent) still fails loudly under MEMGREP-004, asserted by a test at index.rs:2122.

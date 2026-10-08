@@ -91,3 +91,11 @@ Zero hits today for any of this — verified 2026-08-02 (grep `include-supersede
 - The reorder pass round-trips a fixture page with zero knowledge loss (oracle green).
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Default-exclude of status:superseded atoms shipped in all 4 search paths (walk+index × recall+find), filtered at the consumer, index producers untouched (commit cceb229).
+- [x] --include-superseded flag on recall/find; the second-hop by-id/by-name addressed lookup never filters, pinned by test.
+- [x] Both lint WARNs shipped (superseded-atom-above-delimiter, superseded-atom-no-delimiter-heading) with the canonical ## Superseded spelling and a fence-aware SSOT.
+- [x] Bench gate re-run: the one removed query is the only honest target (its sole ground-truth atom is deliberately superseded); every metric delta hand-verified as that query arithmetic — accuracy filter not weakened.
+- [x] 271 crate tests + clippy + both bench gates + live installed-binary behavioral checks all green; gates re-run first-hand by the orchestrating session.
+- [x] The readability layer (reorder pass + model-page doc) split out to TRDD-QKWU26ZG per the card own refinement.

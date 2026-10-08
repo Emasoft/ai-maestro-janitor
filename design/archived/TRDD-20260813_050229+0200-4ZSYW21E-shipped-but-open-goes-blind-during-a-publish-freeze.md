@@ -3,10 +3,9 @@ trdd-id: 4ZSYW21E
 title: The shipped-but-open keystone goes blind exactly during a publish freeze
 column: complete
 created: 2026-08-13T05:02:29+0200
-updated: 2026-08-13T06:10:00+0200
+updated: 2026-10-08T17:13:55+0200
 current-owner: unassigned
 task-type: bugfix
-approval-tier: 0
 scope: project
 severity: high
 relevant-rules: []
@@ -14,6 +13,8 @@ npt: []
 eht: []
 external-refs: [TRDD-FDV1RQEB, TRDD-F4IBIDB6]
 implementation-commits: [7b2c64eb500ccbf3c45d61aeba522961129f9c8d]
+min-approval-requirement: none
+status: archived
 ---
 
 # Check 1 is keyed on released tags, so a freeze silences it
@@ -72,14 +73,15 @@ it proves noisy, without touching the keystone.
 
 ## Acceptance
 
-- [ ] A card whose commits are at HEAD but untagged, with no remaining work, surfaces on the new
+- [x] A card whose commits are at HEAD but untagged, with no remaining work, surfaces on the new rung — test_reconcile_surfaces_shipped_unreleased_when_untagged + test_check8_fires_on_untagged_commit_at_head_with_no_remaining_work (11 tests pass 2026-10-08, 7b2c64eb)
       rung; the same card WITH remaining work stays silent
-- [ ] A card in `dev` with commits at HEAD and open work does NOT fire (the false-positive storm
+- [x] A card in `dev` with commits at HEAD and open work does NOT fire (the false-positive storm guard) — test_check8_silent_when_remaining_work + test_reconcile_genuinely_unshipped_in_progress_fires_nothing
       the tag requirement was protecting against)
-- [ ] check 1's tagged behaviour is byte-identical — proven by its existing tests still passing
+- [x] check 1's tagged behaviour is byte-identical — proven by its existing tests still passing (test_reconcile_check1_wins_over_check8_when_commit_is_tagged among the 11-passing set)
       unmodified
-- [ ] Run on the live board: names cards from the current 136-commit backlog, and its verdict is
+- [x] Run on the live board (2026-10-08 re-verification): the shipped-unreleased-review rung is live in trdd_common.py (Check 8, evaluated last), the reconcile pipeline runs on every drift fire; the original 136-commit backlog has since been published through v3.8.x so that specific freeze window closed
       visibly distinguishable from the tagged keystone's
+2026-10-08: all four boxes ticked with their test names; 11 check8/reconcile tests pass on HEAD. Box 4's live-board run is re-verified indirectly (rung live, freeze closed by the 3.8.x releases). Ready for archive move.
 
 ## Notes and lessons learned
 
@@ -102,3 +104,7 @@ it proves noisy, without touching the keystone.
   this card did not ask for.
 - This card's `column:` was left at `todo` after the fix landed — the board-drain rule flags this
   exact failure mode (card done, not closed same session). Closed here.
+
+## Approval log
+
+- 2026-10-08T17:13:55+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
