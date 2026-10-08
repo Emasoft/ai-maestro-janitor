@@ -18,8 +18,8 @@ status: tasked
 blocked-by: [NGLPQ7SW]
 pre-block-column: testing
 unblock-when: [trdd:NGLPQ7SW terminal]
-blocker-probe: [trddgrep, show, NGLPQ7SW]
-blocker-holds-if: not-match:complete
+blocker-probe: trddgrep --porcelain show NGLPQ7SW | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # The live credential is filed into its slot before every switch away from it

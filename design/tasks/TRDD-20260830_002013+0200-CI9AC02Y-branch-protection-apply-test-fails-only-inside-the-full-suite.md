@@ -16,8 +16,8 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-A8DRPZFM]
-blocker-probe: [trddgrep, show, CI9AC02Y]
-blocker-holds-if: not-match:RESOLVED
+blocker-probe: trddgrep --porcelain show CI9AC02Y | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # A guard test that passes alone and fails in the suite

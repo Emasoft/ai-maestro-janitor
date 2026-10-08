@@ -19,8 +19,8 @@ implementation-commits: [f7fb03f6]
 blocked-by: [ASHLUQ6O]
 pre-block-column: testing
 unblock-when: [trdd:ASHLUQ6O terminal]
-blocker-probe: [trddgrep, show, ASHLUQ6O]
-blocker-holds-if: not-match:complete
+blocker-probe: trddgrep --porcelain show ASHLUQ6O | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # The janitor installs a fast pre-commit privacy-leak scan in every project it runs in

@@ -11,8 +11,8 @@ scope: project
 severity: major
 labels: [oauth-rotator, keychain, macos]
 relevant-rules: []
-blocker-probe: [trddgrep, show, V5RXQ4NB]
-blocker-holds-if: not-match:RESOLVED
+blocker-probe: trddgrep --porcelain show V5RXQ4NB | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # Rotator keychain READ re-prompts (partition-list flap)

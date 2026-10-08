@@ -14,8 +14,8 @@ implementation-commits: [eb9faa1, e65ced5f]
 blocked-by: [OZNG3N2D]
 unblock-when: [trdd:OZNG3N2D terminal]
 relevant-rules: []
-blocker-probe: [trddgrep, show, OZNG3N2D]
-blocker-holds-if: not-match:complete
+blocker-probe: trddgrep --porcelain show OZNG3N2D | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # ai-maestro harness preparedness audit — janitor fleet machinery inside an ai-maestro agent

@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=a6005d3b45f1 generated=2026-10-05T10:16:47+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=a9a1e5ceed4c generated=2026-10-08T18:40:26+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -169,8 +169,8 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
   - [janitor-detector-and-hook-roster-findings](.claude/project/memory/janitor-detector-and-hook-roster-findings.md) — how good are the scan_text rules
 
-**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (71 registered, marketplace-refresh retired 2026-09-17)
-- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (71 registered, marketplace-refresh retired 2026-09-17)
+**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (75 registered, marketplace-refresh retired 2026-09-17)
+- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (75 registered, marketplace-refresh retired 2026-09-17)
 
 **janitor-publish-pipeline** — publish blocked
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
@@ -191,7 +191,6 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
   - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
   - [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
-  - [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
 
 **oauth-rotation-renew-reauth** — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
 - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
@@ -219,6 +218,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
 - [project_janitor_cc_changelog_currency-audit-2-1-198-to-2-1-232](.claude/project/memory/project_janitor_cc_changelog_currency-audit-2-1-198-to-2-1-232.md) — did the Claude Code changelog 2.1.198 to 2.1.232 break the janitor
 - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
+- [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — Merged into project_janitor_publish_blocked_cpv_fps
 - [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
 - [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
 - [review-fork-gate-when-to-spawn-and-when-not](.claude/project/memory/review-fork-gate-when-to-spawn-and-when-not.md) — the review-fork gate fires on every turn

@@ -15,8 +15,8 @@ relevant-rules: []
 implementation-commits: []
 status: tasked
 review-after: 2026-11-11
-blocker-probe: [trddgrep, show, I6ZZWVDN]
-blocker-holds-if: not-match:RESOLVED
+blocker-probe: trddgrep --porcelain show I6ZZWVDN | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # Measure the janitor's remaining two injected blocks (SessionStart:compact, StopFailure:rate_limit)

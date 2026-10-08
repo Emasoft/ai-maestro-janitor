@@ -18,8 +18,8 @@ approval-datetime: 2026-10-05T22:11:16+0200
 blocked-by: [6NMQ95TQ]
 pre-block-column: todo
 unblock-when: [trdd:6NMQ95TQ terminal]
-blocker-probe: [trddgrep, show, 6NMQ95TQ]
-blocker-holds-if: not-match:complete
+blocker-probe: trddgrep --porcelain show 6NMQ95TQ | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 
 # The burn gate docstring still describes usage cap learning as active
