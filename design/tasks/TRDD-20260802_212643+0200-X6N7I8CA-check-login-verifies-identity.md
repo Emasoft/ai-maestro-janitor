@@ -70,4 +70,4 @@ oracle exists; the shell checks just don't consult it. Options, cheapest first:
 - [x] check-login.sh ok lines now claim a session is SAVED with an owner-unverified caveat, never asserting whose account it is (commit 35eaf8c)
 - [x] lifetime-status.sh ok verdict reports ok (session saved; owner unverified) and the bare nothing-to-do all-clear is gone; both clean exits print the shared IDENTITY_CAVEAT
 - [x] Exit-0 contract (session saved and persisted) unchanged for callers
-- [x] Wording-contract tests in tests/test_oauth_helper_scripts.py pin both shapes against regression (25 pass)
+- [x] Wording-contract tests in tests/test_oauth_helper_scripts.py pin both shapes against regression (16 pass)

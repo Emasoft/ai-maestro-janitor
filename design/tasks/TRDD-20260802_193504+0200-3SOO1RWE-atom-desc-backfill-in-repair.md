@@ -84,7 +84,7 @@ REQUIRE it at write time; nothing validates or backfills it on EXISTING atoms.
 ## Notes and lessons learned
 ## Acceptance checklist
 
-- [x] SSOT atom-desc check shipped in memory_edit_verify.py: missing, empty, unquoted-prose or over-200-char descs flag; quoted and clean-slug forms pass — verified against memgrep desc_unquoted_prose (memory.rs:3081) first.
+- [x] SSOT atom-desc check shipped in memory_edit_verify.py: missing, empty, unquoted-prose or over-200-char descs flag; quoted and clean-slug forms pass — verified against memgrep desc_unquoted_prose (memory.rs:5392) first.
 - [x] The check is wired into both verify_repair (refusal reason) and _page_needs_repair (scheduler precheck) so the two cannot drift.
 - [x] A defect found by measuring was fixed: a page with duplicate Notes headings no longer makes _body_minus_lessons raise; the oracle reports the duplicate-heading violation instead.
 - [x] Precheck dispatches on the violation with a refusal ledger and per-run caps bounding the sweep.
