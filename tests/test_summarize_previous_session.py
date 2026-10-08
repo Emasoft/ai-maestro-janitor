@@ -1256,6 +1256,30 @@ def test_random_uppercase_word_that_is_not_an_open_id_never_counts(
     assert with_transcript[3] == without_transcript[3]
 
 
+
+def test_non_utf8_byte_in_matched_line_still_counts_the_mention(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-A8DRRW0I wave 4c review C-A6 pinning: a matched line carrying a non-UTF-8 byte used
+    to be skipped wholesale by a UnicodeDecodeError in the old text-mode read; through
+    jsonl_walk.parse_jsonl_line (errors="replace" per line) the mention inside it still counts."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = tmp_path / "rank-transcript.jsonl"
+    good = json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "text", "text": "K0PMVRN6 is done."}]}}).encode()
+    # The id-bearing line has a raw 0xFF byte inside its text; decode-as-replace must not
+    # erase the record.
+    torn = b"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [" \
+           b"{\"type\": \"text\", \"text\": \"also K0PMVRN6 again \xff\xfb.\"}]}}\n"
+    transcript.write_bytes(good + b"\n" + torn)
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, _other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    assert cards[0][0] == "K0PMVRN6"
+
+
 def test_bulk_tool_use_mention_does_not_change_the_ranking(tmp_path, monkeypatch, _isolated_env):
     """TRDD-O2FNJ4KW follow-up (review correction 1): a SINGLE `tool_use` input block naming
     more than `jcl._TOOL_USE_MENTION_CAP` distinct open-card ids (a worker prompt, a card batch,
