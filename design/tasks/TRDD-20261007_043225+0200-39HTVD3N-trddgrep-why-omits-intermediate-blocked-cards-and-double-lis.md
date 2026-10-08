@@ -4,7 +4,7 @@ title: trddgrep why omits intermediate blocked cards and double-lists blockers
 column: blocked
 status: tasked
 created: 2026-10-07T04:32:25+0200
-updated: 2026-10-07T05:15:38+0200
+updated: 2026-10-08T17:05:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,11 +15,12 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T04:32:25+0200
-blocked-by: [ai-maestro#176]
+blocked-by: [gh:ai-maestro#176]
 pre-block-column: backburner
 blocker-probe: gh issue view 176 --repo Emasoft/ai-maestro --json state
 blocker-holds-if: match:OPEN
 blocker-probe-canary: match:state
+unblock-when: [issue:Emasoft/ai-maestro#176 closed]
 ---
 
 # trddgrep why omits intermediate blocked cards and double-lists blockers

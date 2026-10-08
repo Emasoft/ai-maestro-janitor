@@ -4,7 +4,7 @@ title: The rotator reports a usage-endpoint throttle with no rotation target as 
 column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-07T22:06:10+0200
+updated: 2026-10-08T17:09:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T16:43:27+0200
-blocked-by: [decision:owner-chooses-throttle-behaviour-A-or-B]
+blocked-by: [gh:ai-maestro-janitor/QHACQPPG#0]
 unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B]
 pre-block-column: dev
 implementation-commits: [5bdb9521]
@@ -33,3 +33,4 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 
 2026-10-05: only the alert-text half is implemented now; suppressing the stuck report on a usage-endpoint throttle is waiting for an owner decision, because a guard placed in the final stuck branch does not stop the degraded rotate and would delay a real low-utilisation limit report.
 2026-10-05: the alert-text half is committed as 5bdb9521. Its limit: the marker kind all-accounts-maxed is also written on a usage-endpoint throttle, so on such a tick the new text is as false as the old one; it is right only when the accounts really are at their limits. The alert backoff keys on the condition name, not the text, so a kind change does not re-notify. Open choice for the owner: A, stay put and stay quiet on a usage-endpoint 429 while the last good reading is within limits, applied where the 429 is first judged; B, keep the present behaviour.
+2026-10-08 lint migration: the descriptive decision token moved out of the graph's way — blocked-by now carries the external-issue spelling gh:ai-maestro-janitor/QHACQPPG#0 (a self-referential pointer naming THIS card's owner decision, so the graph reads it as a non-local ref — WARN, no edge — instead of mangling 'decision:...' to the fake id DECISION and ERRORing). The real wait condition stays in unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B], which is what trdd-drift evaluates. If the owner ever files the A-or-B decision as a GitHub issue, replace #0 with that issue number.

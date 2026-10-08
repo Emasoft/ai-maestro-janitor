@@ -3,19 +3,19 @@ trdd-id: 9ZPU69UC
 title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fire it without importing janitor code
 column: blocked
 pre-block-column: testing
-blocked-by: [owner-arms-AIM_COLD_CACHE_CLEAR (ai-maestro#157, ai-maestro TRDD-YRZXUBW8)]
+blocked-by: [gh:ai-maestro#157]
 unblock-when: [decision:user]
 created: 2026-08-19T20:15:22+0200
-updated: 2026-09-05T10:50:00+0200
+updated: 2026-10-08T17:05:29+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
-approval-tier: 0
 scope: project
 external-refs: [TRDD-TIZHEPNC]
 implementation-commits: [1d5a3b16]
 npt: []
 eht: []
+min-approval-requirement: none
 ---
 
 # Cold-cache-clear launcher for the server lane (3.3.18, committed to the hub peer)

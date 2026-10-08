@@ -4,7 +4,7 @@ title: amp identity guard help text says cd to the agent directory resolves iden
 column: blocked
 status: tasked
 created: 2026-10-06T21:25:52+0200
-updated: 2026-10-07T07:51:12+0200
+updated: 2026-10-08T17:05:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:52+0200
-blocked-by: [Emasoft/ai-maestro#172]
+blocked-by: [gh:Emasoft/ai-maestro#172]
 pre-block-column: todo
 unblock-when: [issue:Emasoft/ai-maestro#172]
 ---

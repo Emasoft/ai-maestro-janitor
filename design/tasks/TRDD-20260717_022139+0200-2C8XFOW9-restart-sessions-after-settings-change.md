@@ -3,15 +3,16 @@ trdd-id: 2C8XFOW9
 title: Restart Claude sessions after the janitor changes ~/.claude/settings.json (apply-on-restart)
 column: blocked
 pre-block-column: backburner
-blocked-by: [ai-maestro#75]
+blocked-by: [gh:ai-maestro#75]
 created: 2026-07-17T02:21:39+0200
-updated: 2026-08-02T11:26:00+0200
+updated: 2026-10-08T17:05:19+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 release-via: publish
 relevant-rules: [7]
 implementation-commits: []
+unblock-when: [issue:Emasoft/ai-maestro#75 closed]
 ---
 
 ## ⏵ ARCHITECTURE CORRECTION (2026-07-17, AUTHORITATIVE — supersedes the per-session framing below)

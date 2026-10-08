@@ -3,8 +3,8 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: blocked
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-28T07:27:03+0200
-blocked-by: [ai-maestro#152]
+updated: 2026-10-08T17:05:19+0200
+blocked-by: [gh:ai-maestro#152]
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -14,12 +14,13 @@ blocker-probe: bash ~/.claude/account-rotator/lifetime-status.sh
 blocker-probe-canary: match:cookie/session
 blocker-holds-if: match:ACTION DUE
 priority: high
-approval-tier: 0
 labels: [oauth-rotator, alerts, self-heal, upstream-ai-maestro]
 npt: []
 eht: []
 implementation-commits: [2d30dd7b]
 relevant-rules: []
+min-approval-requirement: none
+unblock-when: [issue:Emasoft/ai-maestro#152 closed]
 ---
 
 # The rotator gave up, kept the reason, and stopped checking whether it still applies

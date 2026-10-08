@@ -4,18 +4,19 @@ title: Read the harness's own prompt_cache status object as the primary cache-st
 column: blocked
 pre-block-column: todo
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-02T01:38:00+0200
+updated: 2026-10-08T17:05:29+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: [AgentlensPro#19]
+blocked-by: [gh:AgentlensPro#19]
 npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-2F3I2P18, TRDD-1QJIZFFW]
+unblock-when: [decision:owner-on-agentlenspro-integration]
 ---
 
 # The harness now publishes warm/cold directly — prefer it over inference

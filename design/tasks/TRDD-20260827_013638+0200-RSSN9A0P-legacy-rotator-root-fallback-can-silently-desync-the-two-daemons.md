@@ -3,8 +3,8 @@ trdd-id: RSSN9A0P
 title: A stale legacy rotator root can silently desync the janitor and ai-maestro daemons
 column: blocked
 created: 2026-08-27T01:36:38+0200
-updated: 2026-10-04T13:11:23+0200
-blocked-by: [ai-maestro#153]
+updated: 2026-10-08T17:05:19+0200
+blocked-by: [gh:ai-maestro#153]
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -19,6 +19,7 @@ npt: []
 eht: []
 implementation-commits: []
 relevant-rules: []
+unblock-when: [issue:Emasoft/ai-maestro#153 closed]
 ---
 
 # The two daemons share one credential store — until the canonical root vanishes, then they diverge silently
