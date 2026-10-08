@@ -43,6 +43,7 @@ import dedupe  # noqa: E402
 import external_clear  # noqa: E402
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
+import jsonl_walk  # noqa: E402 -- stdlib-only shared JSONL line parser (byte-safe decode, TRDD-A8DRRW0I)
 import state  # noqa: E402
 import transcript_roles  # noqa: E402  -- stdlib-only, shared classifier (used by _scan_transcript_mentions)
 import trdd_common  # noqa: E402  -- stdlib-only (TERMINAL_COLUMNS), shared with the drift detectors
@@ -363,7 +364,7 @@ def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) ->
     """`{card_id: last_line_number_mentioned}` over the WHOLE transcript, one single streamed
     pass (TRDD-O2FNJ4KW) -- never loads the file into memory (measured up to 258MB on this
     project) and never re-parses a line whose raw bytes don't contain any `open_ids` id at all
-    (`_line_mentions_any_open_id`), which skips the `json.loads`+`transcript_roles.classify_
+    (`_line_mentions_any_open_id`), which skips the `parse_jsonl_line`+`transcript_roles.classify_
     record` cost for the overwhelming majority of lines (tool_result payloads, board dumps, file
     reads) before it's paid. `open_ids` empty (no board, or trddgrep unavailable) short-circuits
     to an empty result without opening the file at all -- there is nothing any mention could
@@ -388,7 +389,8 @@ def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) ->
     at the same "most recent" rank. Owner (human) messages are the only thing never capped.
 
     A malformed line (partial write, non-UTF8) is skipped, not fatal -- one bad line in a
-    multi-gigabyte transcript must never abort the whole scan."""
+    multi-gigabyte transcript must never abort the whole scan (`jsonl_walk.parse_jsonl_line`
+    returns None for it, TRDD-A8DRRW0I)."""
     mentions: dict[str, int] = {}
     if not open_ids:
         return mentions
@@ -400,11 +402,13 @@ def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) ->
         for lineno, raw in enumerate(fh):
             if not _line_mentions_any_open_id(raw, open_ids):
                 continue
-            try:
-                entry = json.loads(raw)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                continue
-            if not isinstance(entry, dict):
+            # `parse_jsonl_line` takes the raw BYTES and decodes per line (TRDD-A8DRRW0I):
+            # a non-UTF-8 byte inside a matched line decodes with errors="replace" instead of
+            # raising, and the malformed/blank/non-object cases all come back as None. The
+            # 0-based `lineno` here is only used for malformed reporting inside the helper --
+            # nothing this scan stores depends on the numbering convention.
+            entry = jsonl_walk.parse_jsonl_line(raw, lineno, [])
+            if entry is None:
                 continue
             # Same `type` **or** `message.role` fallback `external_clear._record_text`'s own
             # caller uses -- real transcripts always carry a top-level `type`, but fixtures (and
