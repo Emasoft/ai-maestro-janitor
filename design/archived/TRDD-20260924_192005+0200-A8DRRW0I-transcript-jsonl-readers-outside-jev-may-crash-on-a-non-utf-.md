@@ -1,10 +1,10 @@
 ---
 trdd-id: A8DRRW0I
 title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a half-written line
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-09-24T19:20:05+0200
-updated: 2026-10-08T16:06:10+0200
+updated: 2026-10-08T16:16:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -45,6 +45,7 @@ Design constraint: the shared walk lives in a NEW stdlib-only module, scripts/li
 ## Approval log
 
 - 2026-09-24T19:20:05+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-08T16:16:26+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
 
 ## Related
 
@@ -61,4 +62,16 @@ Remaining: user_intent and fleet_scan (consumers take raw lines, convert to pars
 2026-10-08 — adversarial review of the follow-ups: sound; C2 (column-0 comment) fixed by indenting in place; C3 (the blank line this replaces, dedup residue) noted; F4 docstring nit and F5 fixture consolidation deferred to wave 4.
 2026-10-08 — wave 4b/4c/4d landed: pending_agents (_last_transcript_entry_has_tool_use on a 64 KiB read_jsonl_tail window, spawn_prompt on iter_jsonl_entries; docstring corrected to last-complete-record-in-window semantics, review F-A1/F-A2), jev_compaction_lane (_scan_transcript_mentions keeps its raw-bytes prefilter and streamed pass, matched lines parse through parse_jsonl_line — review C-A1: a matched line with a non-UTF-8 byte NOW COUNTS its mention where the old UnicodeDecodeError skip did not; judged a fix, the id bytes were already clean in the prefilter — C-A6 wants one pinning test), _tool_use_blocks_tail (pre-compact-handoff, through read_jsonl_tail with failing-first boundary test; review A3 documented the tail_bytes<1 ValueError edge). 4a (user_intent) and 4e (fleet_scan consumers + full suite + this card's close-out) in flight.
 2026-10-08 — wave 4e close-out: waves 4a-4e landed — this line supersedes the "4a (user_intent) and 4e in flight" note on the previous line. Wave 4a: user_intent reads through jsonl_walk (c3b726bf) plus review F5's load-bearing comment on recently_interrupted's window pre-bail (5678497e). Wave 4e (fleet_scan): the card's two pre-authorized branches both examined and NEITHER taken — no consumer does a raw-substring test, but two consumers give a MALFORMED line load-bearing meaning that read_jsonl_tail's silent drop cannot express (substantive_age_from_tail reads it as substantive-of-unknown-time, stopping the trailing-enqueue count; awaiting_user_decision returns False on an unparseable tail, refusing to prove a pending question), and one 64 KiB window feeds four consumers from a single read — so _tail_lines STAYS on raw lines with the boundary handling in place, and its docstring now states both the F4 clarification (the extra byte is a pre-window boundary probe, never part of the returned lines) and this raw-lines rationale. Diff is docstring-only. Verification: ruff clean, mypy clean (536 files), pyright clean (the five wave files), full suite 18246 passed / 2 skipped / 2 FAILED — both failures pre-existing, unrelated to wave 4e: test_jev_boundary fails on a wave-2 residue (62cac384's trailing comment 'never jev_compaction' on the jsonl_walk import line trips _imports' boundary regex; its own docstring claims comments cannot false-positive, which holds for whole-line comments only, not trailing ones — reproduce with the worker's change stashed), and test_sandbox_guard_process::test_a_test_may_kill_its_own_grandchild is a pid-set flake that passes in isolation. Wave-4e docstring change uncommitted at write time — the orchestrator commits.
-2026-10-08 — close-out: C-A6 pinned DISCRIMINATINGLY (c39dc887 + rework 48aca5a9 — the torn line is the only id-bearing line; failing-first proven empirically against cf32b8ff^: old json.loads raises UnicodeDecodeError inside the parse, fallback fill returned ABCDEF12, red; current: green). Four wave-core files re-run 197 passed incl. test_jev_boundary green (the 72783936 residue fix holds); C-A6 verified in isolation on both sides. Memory-note atomize residue fixed separately (42fbd219). Two review forks returned: round 1 (the non-discriminating assert — fixed), round 2 (evidence placement + suite scope — this line is the rewording). Move out of dev follows.
+2026-10-08 — close-out: C-A6 pinned DISCRIMINATINGLY (c39dc887 + rework 48aca5a9 — the torn line is the only id-bearing line; failing-first proven empirically against cf32b8ff^ lane code with the reworked test: old json.loads raises UnicodeDecodeError inside the parse (confirmed by direct probe), the fallback fill returned ABCDEF12 — red; current code — green. Three review forks, all returned: round 1 the non-discriminating assert (fixed), round 2 evidence placement + suite scope (this line reworded), round 3 verdict sound — noted the proof's first red-attempt ran the pre-rework test (no-op) and accepted the genuine red run by its ABCDEF12 no-mentions signature; position/last-line-wins semantics explicitly NOT pinned here. Full nine-file wave suite re-run after the rework: 539 passed, exit 0, incl. test_jev_boundary green (the 72783936 residue fix holds). Memory-note atomize residue fixed separately (42fbd219). Ready to leave dev.
+
+## Acceptance checklist
+
+- [x] jsonl_walk.py exists (TRDD-DQXMND59 stage 3, dependency met 2026-10-07)
+- [x] Stage A tail walk + shared fixtures (2325c39b)
+- [x] Every in-scope reader moved off its own parse: user_mem_lib, external_clear, pre-compact-handoff (incl _tool_use_blocks_tail), token_meter, fleet_scan, user_intent, pending_agents (both fns), jev_compaction_lane
+- [x] session_continuity.py assessed safe, left alone
+- [x] Real bugs fixed: user_mem_lib raw U+2028 split; external_clear tail boundary drop; fleet_scan boundary-aligned record loss
+- [x] C-A6 pinned discriminatingly, failing-first proven empirically (48aca5a9)
+- [x] Full suite green: nine-file wave set 539 passed exit 0; test_jev_boundary green after 72783936
+- [x] ruff, mypy, pyright clean (per-wave verifications in the log)
+- [x] Three adversarial review rounds returned and applied; no finding rejected
