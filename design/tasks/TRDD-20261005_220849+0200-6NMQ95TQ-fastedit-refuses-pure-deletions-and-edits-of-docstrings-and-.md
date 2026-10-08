@@ -1,10 +1,10 @@
 ---
 trdd-id: 6NMQ95TQ
 title: fastedit refuses pure deletions and edits of docstrings and module constants and workers then edit by script
-column: blocked
+column: backburner
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-08T17:05:28+0200
+updated: 2026-10-08T17:27:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -15,12 +15,12 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:49+0200
-blocked-by: [gh:fastedit#14, gh:fastedit#15]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: gh issue view 14 --repo Emasoft/fastedit --json state
 blocker-holds-if: match:OPEN
 blocker-probe-canary: match:state
-unblock-when: [issue:Emasoft/fastedit#14 closed, issue:Emasoft/fastedit#15 closed]
+unblock-when: []
 ---
 
 # fastedit refuses pure deletions and edits of docstrings and module constants and workers then edit by script
@@ -45,3 +45,4 @@ Observed three times in one day in this repository: fastedit refused a pure dele
 2026-10-06 (C22 S3+S4, commit 1f2a2896): three more refusals, all worker-reported and not reproduced by the main agent except that, for (b), the main agent checked that the committed diff near lint_label adds only the three stray lines, (a) and (b) on scripts/memgrep/src/memory.rs, (c) on design/specs/wikimem-memgrep-spec.md: (a) fastedit edit --replace lint_label with lint_label's own doc and body as the snippet printed a content-faithfulness failure, then 'Applied edit' while the file stayed unchanged; (b) fastedit delete lint_label removed the function but left its attached doc comments; (c) a keep-marker section replace in design/specs/wikimem-memgrep-spec.md was rejected after 9 attempts with a marker leaking into the merge. Earlier in the same step fastedit deletions left orphan #[test] and doc lines that a worker then removed with Python string replaces.
 2026-10-07: the probe checks fastedit issue 14 only; blocked-by also names issue 15, so the card can auto-clear while 15 is still open. Check 15 by hand before resuming.
 2026-10-08: both issues CLOSED upstream (14 at 09:30Z, 15 at 09:29Z, closure comment documents the deterministic paths for the refused classes) but the fixes are ON MAIN ONLY — fastedit 0.5.0 is still the latest tag/release (compare v0.5.0...main is 4 commits ahead) and the installed uv tool is 0.5.0. Probed the installed 0.5.0 with issue 14's repro shapes: the pure-deletion refusal still stands (function-splice guard correctly refuses a snippet with no definition line) and --insert-after works. unblock-when set to the two issue predicates so trdd-drift sees them closed — BUT the card's own discipline says re-test the six recorded edits against each new fastedit RELEASE; the fix is not released yet, so the card stays blocked on the practical gate: upgrade the installed fastedits tool (uv tool upgrade fastedits or install from main), re-run the six recorded edits, then resume the blocked dependents ZYX8B2RA and YELTOX2S. Adding a release predicate is not expressible (no kind for it), so the hand-check noted in the card's 2026-10-07 line still applies.
+2026-10-08 re-test against INSTALLED fastedit 0.5.0 (per review round 6, before the drift fire could auto-unblock): (b) delete no longer leaves attached docs — plain python fn, python fn with docstring, and a Rust fn with a comment ABOVE it all deleted cleanly (the Rust case prints 'warning: parse errors after delete' — cosmetic, tree-sitter chokes on the # comment I planted; the removal itself was correct); (a) replace-with-shorter-body now APPLIES correctly (faithfulness guard accepts it, file verified changed, and a no-op re-edit is correctly refused as 'No change resulted'); (c) keep-marker: a snippet MERELY MENTIONING marker words applies cleanly; the diff baseline (issue 15) is correct — diff shows the last edit, a no-op re-edit reports no change. CONCLUSION: on the shapes re-testable in isolation on 0.5.0, the recorded refusals do NOT reproduce — but the fix is still UNRELEASED (main is 4 commits ahead of tag v0.5.0, no newer tag exists), and one refusal class (the original 'Applied edit while file stayed unchanged' on a 624 KB Rust file) was never reproduced in isolation. Card moves to backburner: re-run this re-test against the NEXT fastedit RELEASE (tag > 0.5.0), then resume dependents ZYX8B2RA and YELTOX2S.
