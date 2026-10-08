@@ -118,3 +118,11 @@ detector shipped. It is present today in BOTH the repo and the installed 2.3.0 c
 - The prerequisite fire-stamp lands first, bounded (no unbounded append).
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Prerequisite fire-stamp shipped: dispatch.main() stamps fire epoch into .janitor/logs/heartbeat-fires.log as its first act, before every early-returning phase including stop-mode; bounded by log_line structural rotation, best-effort so telemetry cannot kill a fire; proven by test_main_stamps_fire_time_even_on_the_earliest_early_return.
+- [x] heartbeat_cadence.py FAST-tier docstring states firing frequency unchanged, worst-case gap = period + jitter, both sources with their disagreement (CronCreate up to 10 percent of period, max 15 min vs CC docs up to half the interval, checked 2026-08-02), and points measurement at fire times never the token-meter.
+- [x] Wikimem corrected at both claim sites (janitor-beat-tasks-and-limitations.md tier table + ATOM-PHXC-VE71) with correction lesson [^2] added via memgrep add-lesson; validate + lint clean.
+- [x] Repo-wide grep confirms no claim survives that a tier recovery latency is exactly its period; published TRDD-0QQX9H0G left frozen per rule 12.
+- [x] No jitter number fabricated: the token-meter.jsonl premise was retracted (turn-END data; the uniform ts mod 300 distribution is the tell) and only the two documents ranges are quoted with source and date.
+- [x] The false lead dismissed with evidence: the 1,644 missing-detector lines in dispatch.log all date 2026-06-04 to 2026-06-12 under session 4eb7bf5d, from before the detector shipped.

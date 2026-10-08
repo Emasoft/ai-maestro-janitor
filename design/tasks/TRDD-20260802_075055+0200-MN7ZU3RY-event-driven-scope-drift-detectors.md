@@ -112,3 +112,10 @@ the existing heartbeat channel rather than by injecting a strippable block into 
 - A cache-break report over a session with many config touches shows no new hook offender.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Event payloads and watchPaths placement verified against the installed 2.1.220 binary (zod schemas via strings), not the docs
+- [x] Fable advisor verdict PROCEED-WITH-CHANGES applied in full: all 6 changes (falsifiable armed-proof, no detector_lock, mcp lane via FileChanged, zero-stdout hooks, one script per event, next-fire-latency wording)
+- [x] Shipped on-config-change.py, on-file-changed.py, on-session-start-watchpaths.py, the hooks.json registrations, and the dead-watch cross-check in tracked-ignored.py
+- [x] tests/test_event_driven_hooks.py green: 7 tests, real subprocess runs
+- [x] Poll backstop left untouched (trap 1: hooks fire for the live session only; every other project keeps the cadence)

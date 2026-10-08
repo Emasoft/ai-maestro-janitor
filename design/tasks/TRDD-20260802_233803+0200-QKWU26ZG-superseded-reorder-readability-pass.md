@@ -71,3 +71,10 @@ travel; `atom_lessons_travel` is wired into the composites since c669107a).
 - A page with no superseded atoms is untouched.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Landed as commit 5b5816e
+- [x] Repair chore chosen as the home: checklist entry and staged-edit step shipped (create the ## Superseded heading before Notes when missing; move superseded atom blocks below it VERBATIM, lessons stay pooled)
+- [x] _page_needs_repair mirrors memgrep two WARN shapes via the shared _SUPERSEDED_STATUS_RE
+- [x] The ## Superseded convention documented on wikimem-model.md beside the superseded-memory invariant
+- [x] 128 precheck/maintenance + 88 skill-shape tests green

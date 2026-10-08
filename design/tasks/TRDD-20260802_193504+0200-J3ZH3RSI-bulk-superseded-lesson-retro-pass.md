@@ -72,3 +72,11 @@ consolidate/conflict) — no retro-lesson marker; no scheduled chore scans for
 - The precheck returns False on a clean corpus (no churn dispatches).
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Precheck retro_lesson_has_work shipped in memory_content_precheck.py — candidate is a status:superseded atom marker with no superseded-by: pointer, misspelling parity with memgrep.
+- [x] 7th marker [janitor-memory-retro-lesson] added to memory-maintenance.py with cadence key retro_lesson_per_day (default 0=OFF), plus the heartbeat rule row, harness_selftest marker vocabulary and agent/frequency-skill rosters.
+- [x] Chore skill janitor-memory-retro-lesson shipped: WHY sourced only from the commit/TRDD provenance chain, unsourceable → FLAG, never invented.
+- [x] Documented gotcha: memgrep --retire-atom is idempotent-skipped when status: already exists, so the skill completes the superseded-by: pointer via the repair-op txn to make the precheck converge.
+- [x] 224 tests green; fixture-conversion and flag paths exercised structurally (precheck units + e2e dispatch parametrize); first real conversion run observation-gated on a corpus candidate appearing.
+- [x] Ships via the blocked release train (TRDD-AWXK0RFT).

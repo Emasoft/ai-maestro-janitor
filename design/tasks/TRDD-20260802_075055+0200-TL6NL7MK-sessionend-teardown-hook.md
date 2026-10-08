@@ -92,3 +92,10 @@ ignored (as `StopFailure`'s is), that settles the question and the finding belon
 - Fail-open: a raising teardown must never delay or break session exit.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] SessionEnd event verified present in the installed 2.1.220 CLI binary (strings probe, x24), not taken from docs
+- [x] on-session-end.py shipped with exactly two side effects: user-memory mirror sync at teardown and the session-clean-exit.ts stamp
+- [x] hooks/hooks.json registers SessionEnd (timeout 10)
+- [x] tests/test_on_session_end.py green: 4 real subprocess runs (stamp+mirror standalone, stamp-only thin-harness, garbage stdin exits 0, resume flags survive teardown); test_hooks_execute.py 26 green over the extended hooks.json
+- [x] Zero stdout and zero additionalContext by design; bare main() so the exit code can never turn non-zero

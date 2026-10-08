@@ -106,3 +106,9 @@ EQ792YPX and T7N67AQP that way) reports permanent phantom "stale blockers". That
 wrong close, and it is a different mechanism. Separate card, per rule 13 — not a second item here.
 
 ## Notes and lessons learned
+## Acceptance checklist
+
+- [x] Bug reproduced before fixing: the new regression test failed against the old code with the predicted assert False is True
+- [x] One-token quantifier fix landed in check2_has_remaining_work (not any(done) became any(not done))
+- [x] Suites green: 54 passed in test_trdd_common.py, 184 passed across the TRDD suite, ruff clean
+- [x] Live-board reconciler diff matches the proof: closeable-candidate 2 to 1, and the one that moved (TRDD-dfc0959a) genuinely has pending validation

@@ -276,3 +276,11 @@ as an empty string.[^1]
   end-to-end by TRDD-DB1P25S4 — signed-identity interpreter ladder (`48c524af`, v3.3.16), live
   proof today: the launchd daemon under the framework python3.12 fired `esc_nudge → iterm` at
   19:53:58. GH#92 closed with the full record.
+## Acceptance checklist
+
+- [x] Part 1 (PATH): daemon_path.py and daemon._repair_tool_path() shipped in v0.35.5 (commit 2ff5c7c), deployed and live-verified
+- [x] Live proof on launchd daemon restart (pid 79652): PATH augmented log line, then the FIRST injection a launchd-spawned daemon ever landed (session-liveness FIRED rearm via tmux; prior record 0 fires in 254 beats)
+- [x] Part 2 silence half: iterm_automation_blocked() detects the denied-by-TCC signature, stamps it, and the phase alarm emits one line naming consequence and remedy, once per occurrence, self-clearing (commit 43f3f2a, 2026-07-11)
+- [x] Launch-path rewrite deliberately declined with the reasons recorded (unverified TCC root cause, machine-wide blast radius); the alarm tells the user exactly what to grant
+- [x] False ai-maestro-channel claim of v0.35.5 corrected in v0.35.6 and pinned by test_aimaestro_cli_is_deliberately_not_a_tracked_injection_tool
+- [x] TCC half resolved end-to-end by TRDD-DB1P25S4 (signed-identity interpreter ladder, 48c524af, v3.3.16): launchd daemon under the framework python3.12 fired esc_nudge to iterm; GH#92 closed with the full record
