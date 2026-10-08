@@ -1,10 +1,10 @@
 ---
 trdd-id: 9KKPFYTP
 title: A crashed xdist worker deadlocks the push gate test run instead of failing it
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T14:51:15+0200
-updated: 2026-10-07T21:46:51+0200
+updated: 2026-10-08T16:41:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,8 +31,19 @@ Facts (verified 2026-10-07 by reading scripts/publish.py): both test call sites 
 - 2026-10-07T14:51:15+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-07T14:56:30+0200: the gate runs `uv run --extra dev pytest tests/ -x -q --tb=short -n auto --dist loadgroup --timeout=300 --timeout-method=thread` (scripts/publish.py _PYTEST_CMD, line 225); the pre-push hook is git-hooks/pre-push (line 48 runs `uv run python scripts/publish.py --gate`). The only outer wall-clock limit on the hook's pytest run is _TEST_SUITE_TIMEOUT_SEC = 3600 s (scripts/publish.py:185, applied at :1475 and :1733); the hook itself has no timeout. It did not end the 13:43 hang because the run was stopped by hand before 3600 s elapsed (stop time not recorded, so this is inferred). The crashed test was not identified, because the log did not name it. The acceptance test must run the deadlock scenario in a child pytest process with its own hard timeout, so a regression cannot deadlock the suite that runs it.
 2026-10-07T15:02:30+0200: the process check in the acceptance test must be keyed to that run's own pids or process group, not a machine-wide pytest search (other projects run pytest and node test suites on this host concurrently). The fix belongs at the two pytest call sites (publish.py G4 and step 3), not in the shared run() helper, which every publish command uses.
+- 2026-10-08T16:41:17+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
 
 ## Step 1 measurements
 
 2026-10-07: repro (20 sleeping tests plus a self-SIGKILL test, -n 4 loadgroup, repo flags) hung past a 120 s hard timeout without the flag (exit 124); with --max-worker-restart=0 it exited 1 in 17 s. The old subprocess.run timeout path left the pytest controller orphaned. Fix: commit a420ccfa.
 2026-10-07 — 3.8.10 push gate (attempt 2) was refused by this card's own new test test_terminating_signal_reaps_the_helper_group with int('') — the child's open('w') creates the pgid file before the write lands and the test waited on existence only. Fixed in 94ff7c0b (wait for non-empty content). The fix was NOT shown failing first (evidence is the traceback, no reproduction). Not swept — the test's three fixed 30 s deadlines and this file's timeout=25/120 scenarios remain load-sensitive. Worker breach recorded — fastedit mangled decorator spacing and the worker repaired it with the Edit tool; final diff was the intended 3 lines. 3.8.10 published at e7ded327 on attempt 3, all five workflows green.
+2026-10-08 — acceptance re-verified on HEAD: tests/test_publish_pytest_crash.py 4 passed (47 s) — crash-exits-nonzero-with-restart-limit + group gone, timeout-kills-group, SIGTERM/SIGHUP reap the helper group; both call sites (publish.py:1513, :1771) run through run_pytest_in_own_session with --max-worker-restart=0 in _PYTEST_CMD (publish.py:231); the fix shipped in v3.8.10 (e7ded327, all five workflows green). Acceptance criteria met — card ready to leave testing.
+
+## Acceptance checklist
+
+- [x] A killed xdist worker makes the gate exit non-zero within 5 min of the kill (test_crash_fails_promptly_with_restart_limit: exit not in (0,3), restart limit in the real _PYTEST_CMD)
+- [x] Post-exit snapshot shows no surviving pytest/xdist from that run (_group_gone via os.killpg(pgid, 0), keyed to the run's own pgid)
+- [x] Real test in a child pytest process with its own hard timeout (test_hung_run_is_killed_as_a_group_on_timeout, timeout=25 inside a 240 s outer bound)
+- [x] SIGTERM/SIGHUP to the publisher reaps the session-isolated group (test_terminating_signal_reaps_the_helper_group, both signals)
+- [x] Fix at the two pytest call sites (publish.py:1513 G4, :1771 step 3), not the shared run() helper
+- [x] Shipped in v3.8.10 (e7ded327), all five workflows green; tests re-verified on HEAD 2026-10-08: 4 passed
