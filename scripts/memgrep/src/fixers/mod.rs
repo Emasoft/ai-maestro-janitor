@@ -100,4 +100,57 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&ledger).unwrap(), "x.md\tr0\ny.md\tr1\n");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+
+    /// C22 S1 (TRDD-JD2QR5SQ): every fixer_for arm name IS a registered lint rule — pins the
+    /// arm-table ⊆ rule-table invariant against a typo'd EXISTING arm. Known ceiling: ARM_NAMES
+    /// is a hand-maintained copy of the match arms; an arm ADDED to fixer_for without extending
+    /// this list is undetected — extend the list whenever you extend the match.
+    #[test]
+    fn every_fixer_for_arm_name_is_a_registered_rule() {
+        const ARM_NAMES: &[&str] = &[
+            "page-no-notes-section",
+            "atom-unquoted-desc",
+            "atom-keywords-duplicated",
+            "page-description-duplicated-phrases",
+            "superseded-atom-above-delimiter",
+            "superseded-atom-no-delimiter-heading",
+            "unused-noqa",
+        ];
+        for name in ARM_NAMES {
+            assert!(fixer_for(name).is_some(), "arm {name} does not resolve — stale arm name?");
+            assert!(
+                crate::rules_gen::RULES.iter().any(|r| r.name == *name),
+                "arm {name} matches no registered lint rule — it drops out of registered() silently"
+            );
+        }
+    }
+
+    /// C22 S1 (TRDD-JD2QR5SQ): a `fixer_for` name matching no arm dispatches to None —
+    /// unmatched-input contract only; the arm ⊆ rule invariant is every_fixer_for_arm_name_is_a_registered_rule.
+    #[test]
+    fn fixer_for_name_matching_no_rule_returns_none() {
+        // fn pointers compare badly (clippy fn_ptr_cmp), so assert .is_none(), not == None.
+        assert!(fixer_for("no-such-fixer-arm").is_none());
+        // Exact match only: a near-miss of a real arm is still unmatched.
+        assert!(fixer_for("page-no-notes-section-typo").is_none());
+        assert!(fixer_for("").is_none());
+    }
+
+    /// C22 S1 follow-up (TRDD-JD2QR5SQ): a ledger path that is a DIRECTORY must fail fast with
+    /// a clean io::Error — no panic, no silent success, and NOT the NotFound arm, which the
+    /// reader treats as an empty ledger and would then write through.
+    #[test]
+    fn record_unfixed_fails_fast_when_ledger_path_is_a_directory() {
+        let dir = std::env::temp_dir().join(format!("memgrep-unfixed-isdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ledger = dir.join("ledger.tsv");
+        std::fs::create_dir(&ledger).unwrap();
+        let r = record_unfixed(&ledger, "p.md", "r1");
+        assert!(r.is_err(), "a directory in the ledger's place must error, not succeed: {r:?}");
+        assert_ne!(r.as_ref().unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
 }

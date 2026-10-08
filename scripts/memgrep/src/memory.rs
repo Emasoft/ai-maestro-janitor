@@ -6323,7 +6323,6 @@ fn apply_lint_config(
     (sorted_v, sorted_f)
 }
 
-
 /// Outcome of planning the `--apply-fixes` fix of one page (TRDD-JD2QR5SQ S2).
 pub(crate) struct PageFix {
     pub text: String,
