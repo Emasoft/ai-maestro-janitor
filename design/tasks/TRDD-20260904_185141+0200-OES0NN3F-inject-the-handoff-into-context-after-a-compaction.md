@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: complete
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-17T07:24:53+0200
+updated: 2026-10-08T18:53:44+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -120,7 +120,7 @@ a release as the card says. R3: subagents are mentioned, not their preservation 
       `_handoff_body` returns `None`, caller returns silently (arm C).
 - [x] `uv run ruff check`, `mypy --ignore-missing-imports` and `uvx --with pyright pyright` all
       clean on the changed file; `pytest -k "session_start or hooks_execute"` → **73 passed**.
-- [ ] **Verified from a REAL compaction's logs, not only the simulated payload.** This is the
+- [x] **Verified from a REAL compaction's logs, not only the simulated payload.** — **Evidence 2026-10-08 (open-box audit): 8 projects show post-2026-09-17 stamps; newest emasoft-complete-ios-app-authoring s:44336822, source=compact at 2026-10-07T22:44:17+0200, build 3.7.5 confirmed by _continuity_nudge symbol count, precompact-continuity.json trigger=auto written the same second.** This is the
       one criterion still open — it needs an actual compaction to occur in a live session.
       **CHECKED 2026-09-05 AND STILL OPEN — with the exact recipe, so the next session spends
       one command instead of re-deriving it.** `.janitor/logs/session-start.log` records the

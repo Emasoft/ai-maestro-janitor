@@ -3,7 +3,7 @@ trdd-id: DXM75JB2
 title: The PostCompact resume push checks the pending flag at fire time, not at type time
 column: complete
 created: 2026-08-02T13:05:35+0200
-updated: 2026-08-02T19:04:04+0200
+updated: 2026-10-08T18:53:20+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -15,7 +15,7 @@ severity: low
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
 
-**Not started.** Extracted from TRDD-8IZ8COQ8 at the moment that card closed, because it was
+**CLOSED 2026-08-02** — the type-time guard shipped; all three acceptance boxes ticked below. Extracted from TRDD-8IZ8COQ8 at the moment that card closed, because it was
 the one candidate fix that card did NOT ship and it would otherwise have been archived with it
 — a deferred item living only inside a `complete` card is indistinguishable from a dropped one.
 
@@ -50,11 +50,11 @@ the sleep, immediately before sending, and abort with the existing `NOTHING_PEND
 they are gone. The fire-time check stays as a cheap early exit.
 
 **Acceptance:**
-- [ ] The child re-checks both flags after its delay and before the first keystroke.
-- [ ] A test that clears the flag DURING the delay and asserts nothing is typed. Verify it is
+- [x] The child re-checks both flags after its delay and before the first keystroke.
+- [x] A test that clears the flag DURING the delay and asserts nothing is typed. Verify it is
       non-vacuous: with the re-check removed it must go red (a race test that passes either way
       pins nothing — cf. `[[a-regression-test-must-be-verified-to-fail]]`).
-- [ ] The fire-time early exit is retained, so the common no-op path still costs no subprocess.
+- [x] The fire-time early exit is retained, so the common no-op path still costs no subprocess.
 
 **Do NOT** widen this into the general "typed commands enqueue while a session is mid-turn"
 problem. That is the parent's subject and its answer already shipped elsewhere

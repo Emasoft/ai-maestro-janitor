@@ -3,7 +3,7 @@ trdd-id: 76XSELZ7
 title: Read-only detector git calls must not take index.lock — GIT_OPTIONAL_LOCKS=0
 column: complete
 created: 2026-08-08T15:53:11+0200
-updated: 2026-08-12T14:35:55+0200
+updated: 2026-10-08T18:53:27+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -43,10 +43,10 @@ hits under scripts/.
 
 ## Acceptance
 
-- [ ] All read-only detector/hook git spawns carry GIT_OPTIONAL_LOCKS=0 (grep-clean)
-- [ ] Env-assembly test pinned
-- [ ] Writer paths (publish.py commit/tag) unchanged
-- [ ] #245 answered when it ships
+- [x] All read-only detector/hook git spawns carry GIT_OPTIONAL_LOCKS=0 (grep-clean)
+- [x] Env-assembly test pinned
+- [x] Writer paths (publish.py commit/tag) unchanged
+- [x] #245 answered when it ships
 
 ## Approval log
 

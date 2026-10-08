@@ -1,9 +1,9 @@
 ---
 trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
-column: complete
+column: blocked
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-28T07:47:45+0200
+updated: 2026-10-08T18:57:15+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -11,6 +11,9 @@ relevant-rules: [7.1, 8.1, 9.1, 10.1]
 parent-trdd: H12K9JYX
 npt: []
 eht: []
+blocked-by: decision:owner-ratifies-editorial-layer-split-into-new-trdd
+status: tasked
+pre-block-column: complete
 ---
 
 # CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
@@ -639,7 +642,7 @@ removed a false-positive CLASS without moving a single block on the actual file.
 - [x] Both janitor fences byte-identical across a real 60-block migration
 - [x] Each gate falsified individually, with its red set predicted in advance
 - [ ] An agent writes the atom/fold (CM-2 step 3) — unbuilt
-- [ ] The fences are refreshed after migration (CM-2 step 6) — **NOT refreshed. Still unbuilt.**
+- [x] ~~The fences are refreshed after migration (CM-2 step 6)~~ — **SUPERSEDED 2026-10-08 by the shipped drain path: drain_if_queued performs the deferred cmd_index at an already-paid invalidation (claudemd_queue.py:51, e448b65b, test_drain_if_queued_with_marker_writes_and_clears); the 'apply probes but does not refresh' caveat (test_cli_apply_points_at_the_index_refresh_it_deliberately_does_not_do) applies to apply, not the queue path. Original note preserved: NOT refreshed. Still unbuilt.**
       `e448b65b` made `apply` PROBE and REPORT the staleness it causes, so an operator is never
       silently left with a stale index — but reporting a stale index is not refreshing it, and the
       test that covers it is named for exactly that: `test_cli_apply_points_at_the_index_refresh_
@@ -648,7 +651,7 @@ removed a false-positive CLASS without moving a single block on the actual file.
       (Marked `[x] partially, by design` by the part-2 session and corrected here: a checkbox is
       read at a glance and the qualifier is not, so a caveated tick reads as done to every later
       reader — the same over-claim class this card's own gates exist to catch.)
-- [ ] The scheduler runs it unprompted (`PRRD G8.1`) — unbuilt
+- [x] The scheduler runs it unprompted (`PRRD G8.1`) — **SHIPPED 2026-08-28 as the free-rider redesign (supersedes 'unbuilt'): detector `claudemd-migration-queue.py` registered in dispatch.py:198 (interval 3600), drain_if_queued wired at post-compact-resume.py:640; the 2026-08-28 decision (card :733-798) proved the original §STATE scheduler plan a category error — scheduler DETECTS+QUEUES, the write rides PostCompact. Ticked by the open-box audit 2026-10-08**
 
 ## ⚠ 2026-08-13 09:10 — THE SCHEDULER PLAN IN §STATE IS PROBABLY WRONG. Read before building part 2.
 
@@ -740,13 +743,13 @@ literal enumeration so a future model cannot reason its way to a wider one.
 
 ## 4. Acceptance
 
-- [ ] A line added to `CLAUDE.md` outside the five elements is migrated by the next chore
+- [x] ~~A line added to `CLAUDE.md` outside the five elements is migrated by the next chore~~ — **SUPERSEDED 2026-10-08: box written for the §4 end-to-end chore; the built system queues + refreshes the INDEX instead (detector + drain, see box above); the narrative-removal half is the deliberately-unbuilt editorial layer (see the 2026-08-28 decision, card :733-798). Text below preserved:**
       run, without any agent being prompted.
 - [ ] The migrated content is recallable by a symptom query that uses none of its own jargon.
-- [ ] A dev-ops command line added to §Commands is left ALONE (the exemption holds).
-- [ ] Preservation oracle passes; refuses to commit and reports if it does not.
-- [ ] Index fence lists every root topic after the migration.
-- [ ] `claudemd_slim check` exits 0 afterwards.
+- [x] A dev-ops command line added to §Commands is left ALONE (the exemption holds).
+- [x] Preservation oracle passes; refuses to commit and reports if it does not.
+- [x] Index fence lists every root topic after the migration.
+- [ ] `claudemd_slim check` exits 0 afterwards. — **STATUS 2026-10-08: FAILING at HEAD (exit 1, 'wikimem index is STALE vs the corpus'); the drain would clear it at the next compaction. Honest status: not yet met.**
 - [ ] A chore that cannot find an owning page creates one at the right tier rather than
       dumping the text into an unrelated page.
 
@@ -817,3 +820,8 @@ goes red, which is the only durable defence against re-introducing the defect un
 heartbeat cadence — the shape §2 implied and the shape that would have reintroduced the exact cost
 this card exists to remove. The scheduler detects and queues; only an already-paid moment writes.
 
+
+## Approval log
+
+2026-10-08 — open-box audit: engine boxes ticked/superseded above with evidence; boxes 641/745/750 + narrative half of 743 are the deliberately-unbuilt editorial layer — real undone work, not obsolete. Card's own one-atomic-task rule points to splitting it into a new TRDD. LEFT OPEN for the code-owner decision; not archived with dishonest boxes. Box 749 failing at HEAD, cleared by the next drain.
+- 2026-10-08T18:57:15+0200 — column → blocked by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: engine proven and ticked; editorial layer (641/745/750 + narrative 743) is real undone work needing a code-owner split decision; box 749 failing at HEAD pending next drain

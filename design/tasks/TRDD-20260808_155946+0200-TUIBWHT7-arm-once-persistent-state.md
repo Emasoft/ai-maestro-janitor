@@ -3,7 +3,7 @@ trdd-id: TUIBWHT7
 title: Arm once, armed forever — persistent arm state; per-session cron is silent plumbing
 column: complete
 created: 2026-08-08T15:59:46+0200
-updated: 2026-08-08T17:05:00+0200
+updated: 2026-10-08T18:53:29+0200
 implementation-commits: [65e537dc]
 current-owner: janitor-main-session
 task-type: feature
@@ -45,8 +45,8 @@ each session silently re-plumbs from — never a user-visible ceremony.
 
 ## Acceptance
 
-- [ ] Armed state recorded once, survives restart (file in DATA global-state, atomic write)
-- [ ] SessionStart with state=armed: cron minted silently, NO nag banner
-- [ ] SessionStart with state=disarmed/absent: no cron, banner only on absent (first install)
-- [ ] Disarm clears the state; next SessionStart stays quiet and unarmed
-- [ ] Tests for all four paths
+- [x] Armed state recorded once, survives restart (file in DATA global-state, atomic write)
+- [x] SessionStart with state=armed: cron minted silently, NO nag banner
+- [x] SessionStart with state=disarmed/absent: no cron, banner only on absent (first install)
+- [x] Disarm clears the state; next SessionStart stays quiet and unarmed
+- [x] Tests for all four paths

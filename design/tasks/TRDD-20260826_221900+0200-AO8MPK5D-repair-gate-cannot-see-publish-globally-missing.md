@@ -3,7 +3,7 @@ trdd-id: AO8MPK5D
 title: The repair chore is told to fix publish-globally-missing but its gate cannot see it
 column: complete
 created: 2026-08-26T22:19:00+0200
-updated: 2026-08-27T13:37:28+0200
+updated: 2026-10-08T18:53:44+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -201,14 +201,14 @@ way the chore's design forbids, for a WARN whose runtime behaviour is already id
 
 ## Acceptance
 
-- [ ] A PROJECT page whose only defect is a missing `publish-globally:` is named by
+- [x] ~~A PROJECT page whose only defect is a missing `publish-globally:` is named by~~ — **OBSOLETE 2026-10-08: the card closed 2026-08-27 by REJECTING its own criteria (Option 2 — never widen `repair_defect`; efad7a99 records the rejection in memory_content_precheck.py:818-855; the defect self-heals via atomic_write_page → normalize_page_until_clean). Text below preserved:**
       `memory_candidates_cli.py` and makes `repair_has_work` return True
-- [ ] The PROJECT test mirrors `memgrep`'s `scope_layer` PATH rule, NOT `metadata.type` — with a
+- [x] ~~The PROJECT test mirrors `memgrep`'s `scope_layer` PATH rule, NOT `metadata.type`~~ — **OBSOLETE 2026-10-08: same 2026-08-27 rejection — no widening check was added; the type-is-content-class trap is documented in the same comment block. Text below preserved:**
       test that a `type: reference` page in the PROJECT root is still flagged, and a `type:
       project` page in the USER root is NOT
-- [ ] The card's own doc states the SCOPE GATE runs first, so nobody measures success by
+- [x] The card's own doc states the SCOPE GATE runs first, so nobody measures success by
       re-linting: with `edit_project_scope` off, a correct predicate still drains nothing
-- [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+- [x] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
 
 ## Notes and lessons learned
 

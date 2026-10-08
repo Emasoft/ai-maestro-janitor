@@ -3,7 +3,7 @@ trdd-id: XM3FPJC0
 title: Nothing notices a file that grows without bound — 231 MB of debug log accumulated for 11 days unseen
 column: complete
 created: 2026-08-15T23:10:53+0200
-updated: 2026-08-18T21:05:00+0200
+updated: 2026-10-08T18:53:38+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -120,15 +120,15 @@ disables the detector.
 
 ## Acceptance
 
-* [ ] A file at or above the threshold is reported once, with its size and its age.
-* [ ] The same unchanged file is NOT reported again on the next fire.
-* [ ] A file that doubles IS reported again, naming the growth.
-* [ ] A file below the threshold is never reported.
-* [ ] The same inode reached through `/tmp` and `/private/tmp` is reported ONCE.
-* [ ] Nothing is ever deleted or modified by the detector.
-* [ ] An unreadable/absent root is a silent no-op, not an exception.
-* [ ] Registered in `dispatch.py` (hourly) and in `_ADVISORY_DETECTORS`.
-* [ ] ruff + mypy clean; full suite green.
+* [x] A file at or above the threshold is reported once, with its size and its age.
+* [x] The same unchanged file is NOT reported again on the next fire.
+* [x] A file that doubles IS reported again, naming the growth.
+* [x] A file below the threshold is never reported.
+* [x] The same inode reached through `/tmp` and `/private/tmp` is reported ONCE.
+* [x] Nothing is ever deleted or modified by the detector.
+* [x] An unreadable/absent root is a silent no-op, not an exception.
+* [x] Registered in `dispatch.py` (hourly) and in `_ADVISORY_DETECTORS`.
+* [x] ruff + mypy clean; full suite green.
 
 ## Notes
 

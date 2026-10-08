@@ -3,7 +3,7 @@ trdd-id: FE6W36WL
 title: memgrep trio — one block-props spelling, a bumped page lmd, and a per-page lint that can see cross-page rules
 column: complete
 created: 2026-08-14T06:14:33+0200
-updated: 2026-08-14T16:24:00+0200
+updated: 2026-10-08T18:53:31+0200
 current-owner: main
 task-type: bugfix
 external-refs: [janitor#266, janitor#265, janitor#262, janitor#260]
@@ -135,13 +135,13 @@ violating THE LINK LAW.
 
 ## Acceptance
 
-- [ ] One renderer emits every block-props site; atom, lesson, and retire-atom agree.
-- [ ] A round-trip test proves the SPACED lesson spelling parses (never emitted before, so
+- [x] One renderer emits every block-props site; atom, lesson, and retire-atom agree.
+- [x] A round-trip test proves the SPACED lesson spelling parses (never emitted before, so
       its parseability is asserted, not proven, until the test runs).
-- [ ] `add-atom` / `add-lesson` / `edit` bump the page `lmd:`; `ocd` untouched; a mechanical
+- [x] `add-atom` / `add-lesson` / `edit` bump the page `lmd:`; `ocd` untouched; a mechanical
       repair pass does NOT bump it.
-- [ ] `memgrep lint <page>` reports a `link-one-sided` finding for a link added to a
+- [x] `memgrep lint <page>` reports a `link-one-sided` finding for a link added to a
       backlink-less page, anchored on the edited page.
-- [ ] The lint summary can never print a bare `0` for a check it did not run — when no scope
+- [x] The lint summary can never print a bare `0` for a check it did not run — when no scope
       resolves, it names what was skipped.
-- [ ] `cargo test` green; the Python suites that read memgrep output stay green.
+- [x] `cargo test` green; the Python suites that read memgrep output stay green.

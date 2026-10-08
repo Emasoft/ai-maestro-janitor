@@ -3,7 +3,7 @@ trdd-id: XOITBRIZ
 title: The code-fence mask hides dynamic-exec-in-body's primary threat — the fence is not the signal, the surrounding prose is
 column: complete
 created: 2026-08-13T11:26:39+0200
-updated: 2026-08-18T21:12:00+0200
+updated: 2026-10-08T18:55:47+0200
 current-owner: janitor-main-session
 task-type: security
 approval-tier: 0
@@ -92,7 +92,7 @@ recall 2/3 → 3/3 with no FP change.
       `dynamic-exec-in-body` 3/3 (100%) → **6/9 (67%)**. The discriminator was partly overfit to
       the three samples it was tuned against. Nothing was re-tuned to recover 100% — refitting to
       the new samples would destroy the only unbiased measurement in this card.
-- [ ] ~~`dynamic-exec-in-body` reaches ≥3/3~~ — **this box was written against the biased sample
+- [x] ~~`dynamic-exec-in-body` reaches ≥3/3~~ — **RETIRED 2026-10-08 by the open-box audit: written against the biased sample
       and is retired, not ticked.** The defensible criterion is the LIKE-FOR-LIKE comparison on
       the full 9-attack / 72-benign set, which is what actually justifies the change:
 
@@ -119,20 +119,20 @@ recall 2/3 → 3/3 with no FP change.
       than inventing one, which is why it is justified independently of the sample that exposed
       it. Baseline updated so a regression back to 6/9 now FAILS the gate.
 
-- [ ] **THE BLIND SET IS NOW BURNED FOR THIS RULE — do not quote 7/9 as an unbiased number.**
+- [x] **THE BLIND SET IS NOW BURNED FOR THIS RULE — do not quote 7/9 as an unbiased number.**
       Shape C was fixed after seeing which blind sample exposed it. The fix's justification is
       objective (a documented exec surface missing from a rule whose stated domain covers it),
       but the SCORE is no longer a clean out-of-sample measurement. A future claim about this
       rule's recall needs a NEW blind set, authored without reading this card.
 
-- [ ] REMAINS OPEN: 4 shapes (A, B, D, E), and the report is deliberately honest that only
+- [x] ~~REMAINS OPEN: 4 shapes (A, B, D, E)~~ — **SUPERSEDED 2026-10-08 by TRDD-VAWIKRK2 (archived complete), which resolved A (7c1d17ee, floor untouched), B (559fa7fc, 9/9), D (7cc45cf6, positional heading fix) and deferred E with a zero-evidence probe. Text below preserved:** the report is deliberately honest that only
       **C** was safe to close on existing evidence. A and D are knob-shaped but their FP cost at
       the new setting is UNMEASURED, not zero — A repeats the exact base64-floor trap this card
       already recorded once. E needs multi-literal correlation, a different kind of matching
       than any current branch. `two-step-code-injection` now measures 5/9 intended (8/9 by any
       rule), NOT the 3/9 written here earlier — that figure predated its own fix and was stale.
 
-- [ ] **Shape D is this card's own recorded lesson, recurring.** A genuine `eval(` is suppressed
+- [x] ~~**Shape D is this card's own recorded lesson, recurring.**~~ — **SUPERSEDED 2026-10-08 by TRDD-VAWIKRK2: D's positional heading fix shipped at 7cc45cf6 (35 files before, 35 after, 0 newly). Text below preserved:** A genuine `eval(` is suppressed
       because the word "Report" appears in the document's H1 (*"# Report Formatter Skill"*),
       260+ chars away. The card already warns: a negative term must mean "this code is named as
       bad", never "this document is of a certain kind" — that was the `checklist` removal. The

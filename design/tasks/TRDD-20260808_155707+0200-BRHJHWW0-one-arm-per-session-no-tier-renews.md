@@ -3,7 +3,7 @@ trdd-id: BRHJHWW0
 title: One arm per session — kill mid-session tier renews; the dispatcher throttles internally
 column: complete
 created: 2026-08-08T15:57:07+0200
-updated: 2026-08-08T16:38:00+0200
+updated: 2026-10-08T18:53:28+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -59,8 +59,8 @@ churn is a real system load.
 
 ## Acceptance
 
-- [ ] Zero `[janitor-renew]` emissions across a simulated day of tier-state flapping
-- [ ] The 6-day expiry renew still fires (once)
-- [ ] User cadence knob honored; default */15
-- [ ] SKILL.md wording updated; TRDD-CI6ZTNB9 closed as superseded by this (its defect is
+- [x] Zero `[janitor-renew]` emissions across a simulated day of tier-state flapping
+- [x] The 6-day expiry renew still fires (once)
+- [x] User cadence knob honored; default */15
+- [x] SKILL.md wording updated; TRDD-CI6ZTNB9 closed as superseded by this (its defect is
       unreachable once tiers stop driving renews)

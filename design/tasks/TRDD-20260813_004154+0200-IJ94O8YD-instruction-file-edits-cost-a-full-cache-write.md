@@ -3,7 +3,7 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: complete
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-20T18:40:00+0200
+updated: 2026-10-08T18:53:43+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -199,7 +199,7 @@ only has to be sampled before it ages out, the way the first window's rules edit
       it. **This is not the janitor's doing and not a rules-edit** — which reframes the card
       again: the dominant avoidable cost is a HARNESS behaviour, not instruction-file hygiene.
       Candidate (a) — a re-rendering `<system-reminder>` — is NOT what this diff shows.
-- [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
+- [x] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix — **answered by the DECIDED box below + THE SCOPE CALL (:216-241); ticked by the open-box audit 2026-10-08**
       spelled out rather than implied — **RE-SCOPED 2026-08-16, and deliberately not built yet.**
       Both surviving boxes were written when this card believed instruction-file edits were the
       dominant avoidable cost. Two measurements later that is false: the cost is EPISODIC (~150k
