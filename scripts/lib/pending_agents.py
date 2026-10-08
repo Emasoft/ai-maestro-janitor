@@ -465,11 +465,15 @@ _TOOL_USE_TAIL_BYTES = 64 * 1024
 
 
 def _last_transcript_entry_has_tool_use(path: str) -> bool:
-    """True iff the LAST JSON line of the transcript is an assistant message whose content
-    includes a `tool_use` block — i.e. the agent is waiting on a tool result, not idle.
-    Fail-closed (False) on any read/parse fault: an unreadable transcript proves nothing
-    about a tool wait, and `agent_is_live` already treats that case as not-live via the
-    plain mtime check below it."""
+    """True iff the last COMPLETE record within the last 64 KiB of the transcript is an
+    assistant message whose content includes a `tool_use` block — i.e. the agent is
+    waiting on a tool result, not idle. Fail-closed (False) on any read/parse fault: an
+    unreadable transcript proves nothing about a tool wait. TRDD-A8DRRW0I wave 4b
+    (review F-A1/F-A2): the probe reads a 64 KiB TAIL WINDOW via the shared reader, not
+    the whole file, so a tool_use record buried deeper than the window (a burst of
+    enqueue lines, or a single assistant record bigger than it) reads as False, benign
+    because `agent_is_live` then falls back to the mtime check, which those very
+    enqueue lines keep fresh (TRDD-8DR0X08A)."""
     try:
         entries = jsonl_walk.read_jsonl_tail(Path(path), _TOOL_USE_TAIL_BYTES, malformed_lines=[])
         if not entries:
