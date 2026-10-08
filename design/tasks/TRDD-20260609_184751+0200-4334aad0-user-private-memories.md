@@ -3,7 +3,7 @@ trdd-id: 4334aad0-c5b2-4990-8214-11e654032cd7
 title: User private memories — /to-user-mem + /search-user-mem with +/- query operators
 column: complete
 created: 2026-06-09T18:47:51+0200
-updated: 2026-06-09T20:30:00+0200
+updated: 2026-10-08T19:08:07+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -19,13 +19,14 @@ target-branch: main
 test-requirements: [unit, integration]
 runtime-targets: [macos, linux]
 external-refs: []
+status: tasked
 ---
 
 # TRDD-4334aad0 — User private memories
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
 
-**Status:** IMPLEMENTED + tested (column: complete). JANITOR-side build landed.
+**Status:** IMPLEMENTED + tested, and the column agrees. JANITOR-side build landed.
 
 **What shipped:**
 - `scripts/lib/user_mem_lib.py` — `UserMemStore` (save/read/delete/search),
@@ -37,7 +38,7 @@ external-refs: []
   privacy intercept). Fast no-op for non-user-mem prompts.
 - `commands/{to,search,share}-user-mem.md` — three slash commands.
 - Wired into `hooks/hooks.json` (UserPromptSubmit array, 2nd entry).
-- Tests: `tests/test_user_mem_lib.py` (22) + `tests/test_user_mem_hooks.py` (17).
+- Tests: `tests/test_user_mem_lib.py` (22) + `tests/test_user_mem_hooks.py` (17). **(2026-10-08 B14: all four shipped items above verified present in-tree; both test files exist and the hooks.json wiring is live.)**
 
 **Storage location (decided):** `~/.claude/projects/<project-slug>/memory/user-mem/`
 — sibling of the agent corpus (the harness per-project memory dir), one `<NNNNNN>.md`
@@ -194,3 +195,7 @@ deliberate gate that lets a chosen memory into the agent's context).
 - **Commands location:** two new slash commands shipped by the janitor plugin
   (`commands/to-user-mem.md`, `commands/search-user-mem.md`) backed by the
   on-prompt-submit hook (for the privacy intercept) + a memgrep call (for search).
+
+## Approval log
+
+- 2026-10-08T19:08:07+0200 — column → complete by main-agent@ai-maestro-janitor. grandfathered pre-checklist card; body + STATE record the shipped build (user_mem_lib.py, /to-user-mem, /search-user-mem); B14 board-validation pass archives it with the other terminal cards

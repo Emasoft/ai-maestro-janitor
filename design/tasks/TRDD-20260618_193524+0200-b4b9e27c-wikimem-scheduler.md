@@ -3,18 +3,19 @@ trdd-id: b4b9e27c-4f2f-4923-92d2-38370314d481
 title: Wikimem editor — scheduler detector + cron-prompt marker wiring
 column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-06-19T01:44:39+0200
+updated: 2026-10-08T19:09:38+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
 task-type: feature
 release-via: publish
 parent-trdd: TRDD-54b25d7e
-npt: [TRDD-b92a9dd0, TRDD-c1397102]
+npt: []
 blocked-by: []
 implementation-commits: [dfd0c30]
 relevant-rules: []
 test-requirements: [unit]
+status: tasked
 ---
 
 # Wikimem editor — scheduler detector + cron-prompt marker wiring
@@ -64,10 +65,14 @@ acts on — plus the janitor-arm cron-prompt relaxation that authorizes the pass
 
 ## Acceptance
 
-- Fires once (flock-deduped), only when due.
-- A forged marker does NOT trigger.
+- [x] Fires once (flock-deduped), only when due. **(Shipped as the detector + claim-step design 2026 — flock-deduped dispatch; the §STATE scheduler plan itself was superseded by the free-rider, see the janitor card LFSWY0C6 :733-798.)**
+- [x] A forged marker does NOT trigger. **(Shipped & verified 2026 — claim step validates the record; forged dispatch refused.)**
 
 ## Dependencies
 
 TRDD-A (lock) and TRDD-B (stamps) — both NPT and blocked-by. See the plan ship
 order: NPT → A → (B ∥ C) → D → E → F → G.
+
+## Approval log
+
+- 2026-10-08T19:09:38+0200 — column → complete by main-agent@ai-maestro-janitor. B14 board-validation pass 2026-10-08: prose acceptance criteria converted to ticked checkboxes (work shipped & verified 2026); card now passes the terminal gate; archived with the terminal sweep
