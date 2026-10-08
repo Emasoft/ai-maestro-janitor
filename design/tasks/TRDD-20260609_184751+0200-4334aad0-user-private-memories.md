@@ -26,7 +26,7 @@ status: tasked
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
 
-**Status:** Built and tested; this card's own column field records the same close. JANITOR-side build landed.
+The JANITOR-side build landed and is tested — the column field records the same close.
 
 **What shipped:**
 - `scripts/lib/user_mem_lib.py` — `UserMemStore` (save/read/delete/search),
