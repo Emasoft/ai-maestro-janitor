@@ -677,10 +677,20 @@ def stale_threshold_for(armed_cron: str, base_stale_s: int = STALE_S) -> int:
 
 def _tail_lines(path: str, max_bytes: int = 64 * 1024) -> list[str]:
     """The last ``max_bytes`` of ``path`` as text lines. When the file is larger than the
-    window, one extra byte is read: if the byte just BEFORE the window is a newline the
-    window starts on a record boundary and every line is kept; otherwise the first line was
-    cut mid-record and is dropped. Empty list on any I/O failure — the caller falls back to
-    mtime semantics, never crashes the scan."""
+    window, one extra byte is read BEFORE the window as a record-boundary probe: it is
+    discarded after the test and is never part of the returned lines. If that byte is a
+    newline the window starts on a record boundary and every line is kept; otherwise the
+    first line was cut mid-record and is dropped. Empty list on any I/O failure — the
+    caller falls back to mtime semantics, never crashes the scan.
+
+    Returns RAW TEXT LINES, not parsed records (TRDD-A8DRRW0I wave 4e): the consumers give
+    a MALFORMED line load-bearing meaning that ``jsonl_walk.read_jsonl_tail`` (which drops
+    it silently) cannot express — ``substantive_age_from_tail`` reads malformed content as
+    substantive-of-unknown-time, which stops the trailing-enqueue count, and
+    ``awaiting_user_decision`` reads an unparseable tail as "cannot prove a pending
+    question" (False). Parsed tails would silently change both returned values, and one
+    window feeds several consumers from a single read, so the boundary handling stays here
+    instead of delegating to the shared walk."""
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as fh:

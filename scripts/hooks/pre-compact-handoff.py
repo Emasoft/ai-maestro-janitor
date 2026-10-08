@@ -104,7 +104,7 @@ jw: Any = None
 _TRANSCRIPT_ROLES_IMPORT_ERROR: str | None = None
 try:
     try:
-        from lib import jsonl_walk as jw  # stdlib-only shared tail reader (never jev_compaction)
+        from lib import jsonl_walk as jw  # stdlib-only shared tail reader, never the Jev one
         from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
     except ImportError:
         import jsonl_walk as jw  # type: ignore[no-redef]
