@@ -20,7 +20,7 @@ external-refs: [TRDD-2F3I2P18]
 pre-block-column: testing
 unblock-when: []
 blocker-probe: [trddgrep, --porcelain, show, VT332PJG]
-blocker-holds-if: not-match:	(complete|completed|cancelled|superseded|published|live|failed|live_auditing)	
+blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded|published|live|failed|live_auditing)\t
 assignee: janitor-main-session
 ---
 

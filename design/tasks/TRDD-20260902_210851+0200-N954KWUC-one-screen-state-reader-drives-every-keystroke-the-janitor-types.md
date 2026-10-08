@@ -20,7 +20,7 @@ implementation-commits: [afd3af70, 30508054, 8cb71c3b, 2a625380, e93a9203, 6197d
 created-by: USER directive 2026-09-02 21:07
 pre-block-column: 
 blocker-probe: [trddgrep, --porcelain, show, 8P4BNY5J]
-blocker-holds-if: not-match:	(complete|completed|cancelled|superseded|published|live|failed|live_auditing)	
+blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded|published|live|failed|live_auditing)\t
 status: tasked
 ---
 
