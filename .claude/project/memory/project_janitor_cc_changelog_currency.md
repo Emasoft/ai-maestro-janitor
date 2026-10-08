@@ -2,7 +2,7 @@
 name: project_janitor_cc_changelog_currency
 description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code / a forked session cleared itself or reloaded plugins it already had / the exfil guard missed a < redirection / the context watchdog never fires and looks healthy / my LOCAL TRDDs under ~/.claude/projects vanished / TaskCreate does not exist any more / the rules tell me to use a task tool I do not have / stale-task detector never fires is that a bug / a subagent spawn cap changed did the janitor adapt / does the janitor cover GitLab token families / is a symlinked plugin dev checkout safe from cache prune / the janitor thinks context is under 20 percent when it is nearly full / does Claude Code now resume itself after a rate limit / is the OAuth rotator still needed / Continue automatically at usage limit / CLAUDE_CODE_PROJECT_DIR_NAME / project_slug returns the wrong dir / why is every project sharing one memory dir / fleet_scan resolves every project to the same slug / promptCacheTtl and subagentPromptCacheTtl / is the janitor up to date with Claude Code 2.1.248 / --restricted mode makes the janitor inert / CLAUDE_CODE_RESTRICTED / arming a heartbeat that can never fire / why did arming succeed in a session with no Bash / a hook stdout brace object is now an error / experimental.cacheTtl per-agent prompt cache TTL / CLAUDE.md says keep-alive but the levers are gone / is the CLAUDE.md feature list stale / prompt-cache keep-alive still exist"
 ocd: 2026-06-11
-lmd: 2026-10-04
+lmd: 2026-10-08
 metadata:
   node_type: memory
   type: project
@@ -74,7 +74,7 @@ Claude Code **2.1.241 → 2.1.247** triaged against the janitor 2026-08-27, in f
 Two settings-shaped items worth knowing before they bite: **`CLAUDE_CODE_PROJECT_DIR_NAME`** (2.1.234) lets a host override the per-project transcript dir with a short custom name, while `memory_scopes.project_slug()` still derives that directory purely by dashing every non-alphanumeric in the absolute path — if a host ever sets it, LOCAL memory, LOCAL TRDDs and several detectors silently address a directory the harness is not using. And **`promptCacheTtl` / `subagentPromptCacheTtl`** (2.1.243) make the 1-hour-main / 5-minute-subagent split a CONFIGURABLE value, not the harness constant several janitor comments still describe it as. [^1]
 
 
-^ATOM-JOE9-C5MF [desc: "CC 2.1.248 triage: no break; the janitor now REFUSES to arm under --restricted, and 4 of 5 audited areas were already aligned", keywords: is_the_janitor_up_to_date_with_claude_code_2.1.248 did_CC_2.1.248_break_the_janitor --restricted_mode_makes_the_janitor_inert CLAUDE_CODE_RESTRICTED arming_a_heartbeat_that_can_never_fire experimental.cacheTtl_per-agent_prompt_cache_TTL a_hook_stdout_brace_object_is_now_an_error print(dict)_in_a_hook cross-session_messaging_now_works_on_Bedrock_Vertex_Foundry a_subagent_SendMessage_reply_goes_to_the_parent hourly_prompt_cache_miss_from_OAuth_token_refresh_is_fixed_upstream Sonnet_5_auto-compacts_at_967K_not_934K desktopSessionCleanupPeriodDays, type: project, ocd: 2026-08-28, lmd: 2026-08-28]
+^ATOM-JOE9-C5MF [desc: "CC 2.1.248 triage verdict: no code break; the one real gap was --restricted making the janitor inert, now refused at arm_prepare and reported by doctor", keywords: is_the_janitor_up_to_date_with_claude_code_2.1.248 did_CC_2.1.248_break_the_janitor --restricted_mode_makes_the_janitor_inert CLAUDE_CODE_RESTRICTED arming_a_heartbeat_that_can_never_fire why_did_arming_succeed_in_a_session_with_no_Bash arm_prepare_refuses_in_restricted_mode doctor_prints_restricted-mode_FAIL_row armed_flag_claims_machine-wide_protection_that_cannot_exist restricted_mode_strips_tools_and_ignores_settings_files heartbeat_cron_cannot_run_its_dispatcher_stub five_parallel_audits_reports_cc-align_2148, type: project, ocd: 2026-08-28, lmd: 2026-10-08]
 
 Claude Code **2.1.248** triaged against the janitor 2026-08-28 in five parallel audits (per-agent
 cache TTL, `--restricted`, hook stdout, cross-session messaging, continuity/cache constants);
@@ -88,6 +88,9 @@ there (reusing the existing `scope=refused` STOP contract, so the skill needed n
 harmless no-op: `armed.flag` would claim machine-wide protection that cannot exist, and nothing
 downstream re-checks. [^2]
 
+
+^ATOM-OBH2-QSQ6 [desc: "CC 2.1.248: the other four audited areas were already aligned; plus the stale 2.1.228 audit-line correction (that card reached complete)", keywords: experimental.cacheTtl_per-agent_prompt_cache_TTL no_agent_justifies_1h_cacheTtl bounded_single-pass_workers_turns_back-to-back hourly_cacheTtl_only_pays_when_turns_are_minutes_apart a_hook_stdout_brace_object_is_now_an_error print(dict)_in_a_hook hook_stdout_already_json_dumps cross-session_messaging_now_works_on_Bedrock_Vertex_Foundry a_subagent_SendMessage_reply_goes_to_the_parent Sonnet_5_auto-compacts_at_967K_not_934K no_934_967_auto_compact_constant_to_go_stale Workflow-5.7k_token_budget stale_2.1.228_session_cleanup_OPEN_line TRDD-9DLBHWGV_card_reached_complete read_the_audit_block_as_its_2026-08-14_state, type: project, ocd: 2026-10-08, lmd: 2026-10-08]
+
 **The other four were already aligned, each verified rather than assumed.** No agent justifies
 `experimental.cacheTtl: "1h"` — all three are bounded single-pass workers whose turns are
 back-to-back, and a 1h TTL only pays when turns are MINUTES apart. Every `{`-shaped hook stdout
@@ -100,7 +103,7 @@ go stale.
 
 **Correction to the 2.1.213-2.1.232 audit above:** its "2.1.228 session cleanup ⚠ OPEN -
 TRDD-9DLBHWGV" line is stale - that card reached `column: complete`. Read that block as the
-audit's state on 2026-08-14, not as current status. [^2]
+audit's state on 2026-08-14, not as current status.
 
 
 ^ATOM-H76S-947V [desc: "CC 2.1.251+ gives first-party signals the janitor's pollers predate: PreModelSwitch/PostModelSwitch hooks, SessionStart staleness+re-cache cost, a prompt_cache warm/cold status object, promptCacheTtl ", keywords: model_change_event PostModelSwitch_hook PreModelSwitch no_event_exists_we_must_poll prompt_cache_status_object warm_cold_cache_signal promptCacheTtl_setting claude_attach_logs_respawn notify_when_idle continue_automatically_at_usage_limit statusline_polling_fallback changelog_adoption_cards, trdd: TRDD-GK35MOXU, ocd: 2026-09-01, lmd: 2026-09-01]
