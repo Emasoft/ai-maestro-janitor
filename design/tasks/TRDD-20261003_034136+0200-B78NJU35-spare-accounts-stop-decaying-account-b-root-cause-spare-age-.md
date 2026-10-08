@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:41:36+0200
 project-id: ai-maestro-janitor
 review-after: 2026-10-17
 parent-trdd: JSQSJ3PZ
-blocker-probe: trddgrep --porcelain show B78NJU35 | cut -f3
+blocker-probe: trddgrep --porcelain show JSQSJ3PZ | cut -f3
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
