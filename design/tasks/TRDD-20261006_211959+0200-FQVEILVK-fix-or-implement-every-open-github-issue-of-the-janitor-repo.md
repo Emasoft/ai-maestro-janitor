@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T21:46:52+0200
+updated: 2026-10-08T16:48:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -54,6 +54,7 @@ SUPERSEDED NEXT ACTION: #332's drift classes, card by card (idle cards, reminder
 2026-10-07 12:05 SUPERSEDES the 11:15 FOREIGN EDITS line: the other writer committed its memgrep work on this main as b5e8ae5c, 2a600afb and ab7e60c8 (fleet card DAL802TI, now archived); nothing is blocked by it any more, but the writer is still unidentified and may commit again, so keep staging by name. Its remaining gap is card 20JQQVDQ. Since 11:15: 6L7OEJ8C log lines (3904fe81); 6CF3L7IJ overrun watch landed and hardened (109d3649, 4dd4e3b6, 7dddf719); the bounded-wait root-cause fix for 6CF3L7IJ is not started (advisor first, touches rotation code). Full gate clean on 109d3649 (18,165 passed); not yet rerun on the newest main. Worker breach accepted after reading the diff: one plain Edit on Task.run's body in 4dd4e3b6 after fastedit refused twice. The [plugin-data] lines in test output are the conftest write-guard attributing live-daemon writes, not a test leak (tests/conftest.py, daemon_owned_labels).
 2026-10-07 12:50: accepted worker breach, diff read: plain Edit on a test function body in scripts/memgrep/src/mem_split.rs (dbf2f0c9) after one fastedit refusal, without trying the full-function replacement. Its subject wrongly cites 20JQQVDQ (noted on that card). Release still needs: memory-system.md duplicate See also and MEMORY.md title fix, a check whether publish.py compares the CLAUDE.md memory index, the full gate on the newest main, publish and install.
 2026-10-07 — 3.8.10 published (release commit e7ded327, three bump commits, attempts 1 and 2 refused by load-sensitive tests fixed in 45dd32f1 and 94ff7c0b) and installed at user scope; all five workflows green; CI log confirms the real GitHub 404 test ran (not in the skip list). Release notes added on GitHub. Validator integrity check skipped again.
+2026-10-08 B14 note: YXY992BN's superseded-by value 'agentlenspro-investigate-burn' is a SKILL name, not a TRDD id — no replacement card was minted because the replacement is the external agentlenspro investigate_burn tool, verified live 2026-07-11. The DANGLING-REF error is a false positive; unfixable in place (archived cards are immutable), accepted as known-noise.
 
 ## Approval log
 

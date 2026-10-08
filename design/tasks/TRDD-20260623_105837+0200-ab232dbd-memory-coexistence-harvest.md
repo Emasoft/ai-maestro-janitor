@@ -13,7 +13,7 @@ effort: L
 labels: [memory, wikimem, harvest, architecture, recall-rule]
 parent-trdd: TRDD-87935f21
 supersedes: []
-blocked-by: [TRDD-3b9b2040]
+blocked-by: []
 pre-block-column: dev
 relevant-rules: []
 release-via: publish

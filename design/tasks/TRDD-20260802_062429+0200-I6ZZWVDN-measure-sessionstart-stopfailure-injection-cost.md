@@ -4,7 +4,7 @@ title: Measure the janitor's remaining two injected blocks — SessionStart comp
 column: todo
 
 created: 2026-08-02T06:24:29+0200
-updated: 2026-10-07T04:43:54+0200
+updated: 2026-10-08T16:50:42+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 severity: MEDIUM
@@ -98,6 +98,7 @@ It is the janitor's OWN remaining cost, so it does not belong on a cross-project
 and an NPT written as a bullet is a task nobody can see on the board (rule 9: derived tasks are
 their own depth-1 TRDDs).
 2026-10-07: premise stale. stop-failure.log (project log dir) now shows 185 'rate limit: fired detached rotator auto' lines, last at line 2514 [2026-10-06T03:56:18+0200] session fccb077b; dated lines 09-27 x8, 09-28 x108, 09-29 x18, 10-03 x10, 10-06 x3. Not verified: that this branch is the StopFailure rate_limit matcher this card measures, and that agentlenspro still holds those sessions. NEXT ACTION: run agentlenspro get_cache_break_report --full for session fccb077b and record verdict (a), (b) or (c) of the Verification section.
+2026-10-08 — NEXT ACTION executed, verdict (a) variant: the 185 stop-failure.log lines are NOT the card's StopFailure:rate_limit injection cost — they are on-stop-failure.py's OWN routing log lines (state.log_line 'stop-failure' at :114, :143, :233), written by the janitor's recovery hook on every turn-ending API error, not by Claude Code's StopFailure hook event stream. agentlenspro get_cache_break_report unreachable (MCP server down on localhost:4316), so (a)'s full boundary-vs-emitter evidence is half-shown: the log grep proves the WRITER is janitor code, but the SessionStart/StopFailure INJECTED BLOCK sizes for these sessions remain unmeasured while agentlenspro is down. Card returns to the event-wait it was in: measure when agentlenspro is reachable again. SLFMG704's ORDER-NPT-VIOLATED error stands as a true statement (the NPT is genuinely unfinished) and is archived-card noise: SLFMG704 is complete-history, the NPT I6ZZWVDN is this card, still todo — the violation is real but not actionable from the archive.
 
 ## What was measured, and what was not
 

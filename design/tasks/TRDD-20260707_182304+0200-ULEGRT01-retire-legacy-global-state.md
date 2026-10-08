@@ -5,18 +5,19 @@ column: complete
 blocked-by: []
 eht: [TK1H3LSA]
 created: 2026-07-07T18:23:04+0200
-updated: 2026-09-01T21:14:00+0200
+updated: 2026-10-08T16:52:49+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
 severity: LOW
 effort: S
-approval-tier: 0
 task-type: refactor
 parent-trdd: TRDD-2U8AH82F
 labels: [daemon, state-migration, cleanup]
 release-via: publish
 test-requirements: [unit]
+min-approval-requirement: none
+derived: true
 ---
 
 # TRDD-ULEGRT01 — Retire the legacy `~/.claude/janitor-global-state/` read-fallback
@@ -630,6 +631,7 @@ The 2026-07-11 STATE block read **"GATE RE-ARMED. Do NOT do the removal in the r
 7ceab3f."** That framing is retained below for history but is no longer the operative reason to
 wait: 7ceab3f (the keychain-latch fix) has long since published, and the blocker is now the
 QK7M2B0X dual-write, not an unpublished latch fix.
+2026-10-08 lint note: GRAPH-DEPTH1 ('derived, yet npt=[] eht=[TK1H3LSA]') is BY DESIGN — this card is itself an EHT of TRDD-2U8AH82F and minted its own EHT child TK1H3LSA for the deliberately-unclosed deletion box (a scheduled action living as an unchecked box on a done card became its own card, per this card's own discipline); the depth-1 checker flags any eht on a derived card. GRAPH-FALSE-COMPLETE names TK1H3LSA open (backburner, correctly parked on its own card). GRAPH-PARENT-IS-DERIVED on TK1H3LSA is the same intentional chain from the child. All three findings are accepted known-noise, not defects.
 
 ## ⏵ Historical STATE — 2026-07-11 (superseded; kept for the verification lesson)
 
