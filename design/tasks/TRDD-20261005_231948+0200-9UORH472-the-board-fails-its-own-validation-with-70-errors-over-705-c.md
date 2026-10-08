@@ -4,7 +4,7 @@ title: The board fails its own validation with 70 errors over 705 cards
 column: todo
 status: tasked
 created: 2026-10-05T23:19:48+0200
-updated: 2026-10-08T18:02:16+0200
+updated: 2026-10-08T18:07:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,3 +29,4 @@ Goal: investigate each error card by card and repair or re-column it; never by a
 
 2026-10-05 (review): the list in the body does not add up to 70 as written. The 13 cards that are complete but still in the tasks folder carry two errors each (the folder mismatch and the open boxes), and the blockers that are not card ids are 7 rows over 6 cards (9ZPU69UC has two). This card is an umbrella, not one atomic task: each repair is a per-card judgment recorded on that card, the tool's automatic fix is never looped over the list, and a move of a card between lifecycle folders is decided card by card. The question of how a wait on a human decision is written belongs to the card tool, which is another project's.
 2026-10-08: citation-sweep round closed. Correction to the sweep commit's message ('every fix independently re-verified'): the count was 5 of 6 at commit time — index.rs:2162 was trusted to the worker's grep and the follow-up check found it off (the fn at :2162 is a DIFFERENT test, an_index_behind_the_ladder_is_not_a_failed_migration; the half-applied-migration test is a_migration_that_fails_validation_rolls_back_and_does_not_stamp_its_version at index.rs:2059). Fixed to symbol+line. Lessons per review round 10: a verification claim in a commit message must name its own coverage; bare line numbers rot (the sweep found +57/+38/+40 drift) — symbol+line is the durable shape for future checklists.
+2026-10-08 round 11: the round-10 note's deltas wording corrected — the +57/+38/+40 numbers were derived by the round-10 review FROM the sweep's old→new pairs, not found by the sweep itself; provenance now stated. And the 053SGT7N paraphrase was settled by reading both test bodies (round-11 detail on that card).
