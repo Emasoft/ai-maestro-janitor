@@ -4,7 +4,7 @@ title: The rotator reports a usage-endpoint throttle with no rotation target as 
 column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-08T19:48:03+0200
+updated: 2026-10-08T19:54:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,7 +31,7 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 ## Approval log
 
 - 2026-10-05T16:43:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
+2026-10-08: probe caveat MOVED out of this governance log to the card body (Decisions) per review round on cbd04248 — the Approval log keeps governance entries only.
 
 ## Decisions
 
@@ -39,3 +39,4 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 2026-10-05: the alert-text half is committed as 5bdb9521. Its limit: the marker kind all-accounts-maxed is also written on a usage-endpoint throttle, so on such a tick the new text is as false as the old one; it is right only when the accounts really are at their limits. The alert backoff keys on the condition name, not the text, so a kind change does not re-notify. Open choice for the owner: A, stay put and stay quiet on a usage-endpoint 429 while the last good reading is within limits, applied where the 429 is first judged; B, keep the present behaviour.
 2026-10-08 lint migration: the descriptive decision token moved out of the graph's way — blocked-by now carries the external-issue spelling gh:ai-maestro-janitor/QHACQPPG#0 (a self-referential pointer naming THIS card's owner decision, so the graph reads it as a non-local ref — WARN, no edge — instead of mangling 'decision:...' to the fake id DECISION and ERRORing). The real wait condition stays in unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B], which is what trdd-drift evaluates. If the owner ever files the A-or-B decision as a GitHub issue, replace #0 with that issue number.
 2026-10-08: the sentinel gh: pointer is a WORKAROUND, not a convention — the checker gap (decision: tokens mangle to fake ids) filed upstream as Emasoft/ai-maestro#177; when that fix lands, re-spell this blocker back to decision:owner-chooses-throttle-behaviour-A-or-B.
+2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
