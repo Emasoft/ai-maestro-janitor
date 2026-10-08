@@ -4,7 +4,7 @@ title: Spare accounts stop decaying (account B root cause, spare-age alert)
 column: testing
 status: tasked
 created: 2026-10-03T03:41:36+0200
-updated: 2026-10-05T11:12:03+0200
+updated: 2026-10-08T19:02:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,8 @@ approval-datetime: 2026-10-03T03:41:36+0200
 project-id: ai-maestro-janitor
 review-after: 2026-10-17
 parent-trdd: JSQSJ3PZ
+blocker-probe: [trddgrep, show, B78NJU35]
+blocker-holds-if: not-match:RESOLVED
 ---
 
 # Spare accounts stop decaying (account B root cause, spare-age alert)

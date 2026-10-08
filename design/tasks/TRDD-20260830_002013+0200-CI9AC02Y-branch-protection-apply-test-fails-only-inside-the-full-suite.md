@@ -4,7 +4,7 @@ title: test_apply_warns_when_viewer_not_admin passes alone and fails inside the 
 column: backburner
 review-after: 2026-11-07
 created: 2026-08-30T00:20:13+0200
-updated: 2026-10-07T04:30:12+0200
+updated: 2026-10-08T19:02:21+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -16,6 +16,8 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-A8DRPZFM]
+blocker-probe: [trddgrep, show, CI9AC02Y]
+blocker-holds-if: not-match:RESOLVED
 ---
 
 # A guard test that passes alone and fails in the suite

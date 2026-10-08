@@ -4,7 +4,7 @@ title: The rotator reports a usage-endpoint throttle with no rotation target as 
 column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-08T17:29:06+0200
+updated: 2026-10-08T19:02:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -19,6 +19,9 @@ blocked-by: [gh:ai-maestro-janitor/QHACQPPG#0]
 unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B]
 pre-block-column: dev
 implementation-commits: [5bdb9521]
+blocker-probe: [trddgrep, show, QHACQPPG]
+blocker-holds-if: match:DECIDED
+blocker-probe-canary: match:QHACQPPG
 ---
 
 # The rotator reports a usage-endpoint throttle with no rotation target as exhausted and the stuck alert gives the wrong remedy

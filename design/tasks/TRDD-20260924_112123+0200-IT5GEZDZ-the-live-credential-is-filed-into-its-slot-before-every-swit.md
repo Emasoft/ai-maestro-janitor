@@ -3,7 +3,7 @@ trdd-id: IT5GEZDZ
 title: The live credential is filed into its slot before every switch away from it
 column: blocked
 created: 2026-09-24T11:21:23+0200
-updated: 2026-10-06T21:08:46+0200
+updated: 2026-10-08T19:01:24+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -17,6 +17,9 @@ approval-datetime: 2026-09-24T11:21:23+0200
 status: tasked
 blocked-by: [NGLPQ7SW]
 pre-block-column: testing
+unblock-when: [trdd:NGLPQ7SW terminal]
+blocker-probe: [trddgrep, show, NGLPQ7SW]
+blocker-holds-if: not-match:complete
 ---
 
 # The live credential is filed into its slot before every switch away from it

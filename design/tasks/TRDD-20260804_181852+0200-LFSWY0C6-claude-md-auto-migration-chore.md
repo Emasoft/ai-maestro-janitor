@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: blocked
 created: 2026-08-04T18:18:52+0200
-updated: 2026-10-08T18:57:15+0200
+updated: 2026-10-08T19:02:42+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -11,9 +11,13 @@ relevant-rules: [7.1, 8.1, 9.1, 10.1]
 parent-trdd: H12K9JYX
 npt: []
 eht: []
-blocked-by: decision:owner-ratifies-editorial-layer-split-into-new-trdd
+blocked-by: gh:ai-maestro-janitor/LFSWY0C6#0
 status: tasked
 pre-block-column: complete
+unblock-when: [decision:owner-ratifies-editorial-layer-split-into-new-trdd]
+blocker-probe: [trddgrep, show, LFSWY0C6]
+blocker-holds-if: match:DECIDED
+blocker-probe-canary: match:LFSWY0C6
 ---
 
 # CLAUDE.md excess narrative is migrated out automatically by a scheduled chore

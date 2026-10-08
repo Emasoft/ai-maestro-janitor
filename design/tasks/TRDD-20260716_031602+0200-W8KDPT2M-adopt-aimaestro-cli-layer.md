@@ -4,7 +4,7 @@ title: Adopt the AI Maestro control-monitor-task CLI layer for all fleet operati
 column: backburner
 review-after: 2026-10-26
 created: 2026-07-16T03:16:02+0200
-updated: 2026-08-27T13:37:28+0200
+updated: 2026-10-08T19:02:20+0200
 current-owner: janitor-session
 task-type: infra
 scope: project
@@ -12,6 +12,8 @@ severity: major
 effort: XL
 labels: [fleet, ai-maestro, cli-adoption, epic]
 relevant-rules: []
+blocker-probe: [trddgrep, show, W8KDPT2M]
+blocker-holds-if: not-match:RESOLVED
 ---
 
 # Adopt the AI Maestro control/monitor/task CLI layer (epic)

@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: blocked
 created: 2026-09-24T07:42:31+0200
-updated: 2026-10-05T11:12:46+0200
+updated: 2026-10-08T19:01:24+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -18,6 +18,9 @@ status: tasked
 implementation-commits: [f7fb03f6]
 blocked-by: [ASHLUQ6O]
 pre-block-column: testing
+unblock-when: [trdd:ASHLUQ6O terminal]
+blocker-probe: [trddgrep, show, ASHLUQ6O]
+blocker-holds-if: not-match:complete
 ---
 
 # The janitor installs a fast pre-commit privacy-leak scan in every project it runs in

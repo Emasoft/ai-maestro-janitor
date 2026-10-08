@@ -4,13 +4,15 @@ title: Rotator keychain READ re-prompts — the app resets the credentials item 
 column: backburner
 review-after: 2026-10-12
 created: 2026-07-16T03:16:02+0200
-updated: 2026-08-27T13:37:28+0200
+updated: 2026-10-08T19:02:20+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 severity: major
 labels: [oauth-rotator, keychain, macos]
 relevant-rules: []
+blocker-probe: [trddgrep, show, V5RXQ4NB]
+blocker-holds-if: not-match:RESOLVED
 ---
 
 # Rotator keychain READ re-prompts (partition-list flap)

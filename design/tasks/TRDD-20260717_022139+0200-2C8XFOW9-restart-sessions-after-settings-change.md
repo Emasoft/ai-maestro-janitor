@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: backburner
 blocked-by: [gh:ai-maestro#75]
 created: 2026-07-17T02:21:39+0200
-updated: 2026-10-08T17:05:19+0200
+updated: 2026-10-08T19:01:33+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -13,6 +13,8 @@ release-via: publish
 relevant-rules: [7]
 implementation-commits: []
 unblock-when: [issue:Emasoft/ai-maestro#75 closed]
+blocker-probe: [gh, issue, view, 75, --repo, Emasoft/ai-maestro, --json, state]
+blocker-holds-if: not-match:OPEN
 ---
 
 ## ⏵ ARCHITECTURE CORRECTION (2026-07-17, AUTHORITATIVE — supersedes the per-session framing below)

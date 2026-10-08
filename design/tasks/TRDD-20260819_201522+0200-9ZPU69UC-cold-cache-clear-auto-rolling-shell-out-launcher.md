@@ -6,7 +6,7 @@ pre-block-column: testing
 blocked-by: [gh:ai-maestro#157]
 unblock-when: [decision:user]
 created: 2026-08-19T20:15:22+0200
-updated: 2026-10-08T17:05:29+0200
+updated: 2026-10-08T19:02:41+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -16,6 +16,9 @@ implementation-commits: [1d5a3b16]
 npt: []
 eht: []
 min-approval-requirement: none
+blocker-probe: [trddgrep, show, 9ZPU69UC]
+blocker-holds-if: match:DECIDED
+blocker-probe-canary: match:9ZPU69UC
 ---
 
 # Cold-cache-clear launcher for the server lane (3.3.18, committed to the hub peer)

@@ -3,7 +3,7 @@ trdd-id: YSFQNR8Y
 title: the memory split chore copies the parent description onto a child page
 column: blocked
 created: 2026-09-23T23:05:46+0200
-updated: 2026-09-23T23:23:36+0200
+updated: 2026-10-08T19:01:23+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -16,6 +16,9 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T23:05:46+0200
 blocked-by: [XI10BA5D]
 pre-block-column: todo
+unblock-when: [trdd:XI10BA5D terminal]
+blocker-probe: [trddgrep, show, XI10BA5D]
+blocker-holds-if: not-match:complete
 ---
 
 # the memory split chore copies the parent description onto a child page

@@ -4,7 +4,7 @@ title: Summarizer holds every pane on a sibling's live transcript
 column: testing
 status: tasked
 created: 2026-10-03T03:42:01+0200
-updated: 2026-10-05T11:12:07+0200
+updated: 2026-10-08T19:02:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,8 @@ approval-datetime: 2026-10-03T03:42:01+0200
 project-id: ai-maestro-janitor
 review-after: 2026-10-17
 parent-trdd: K9AHY1ZB
+blocker-probe: [trddgrep, show, LXUZYFD9]
+blocker-holds-if: not-match:RESOLVED
 ---
 
 # Summarizer holds every pane on a sibling's live transcript
