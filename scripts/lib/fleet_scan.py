@@ -698,6 +698,7 @@ def _tail_lines(path: str, max_bytes: int = 64 * 1024) -> list[str]:
     except OSError:
         return []
     lines = data.decode("utf-8", errors="replace").splitlines()
+# TRDD-A8DRRW0I review F2: the len>1 guard below stays — a window that legitimately holds exactly one whole boundary record must NOT be dropped; the leak it permits (a fragment as the ONLY line, one ~64 KiB record straddling the window) is unchanged from the old code and downstream json.loads failures already treat it as noise.
     if cut_mid_record and len(lines) > 1:
         lines = lines[1:]  # the first line is a fragment of a record that began before the window
     return [ln for ln in lines if ln.strip()]
