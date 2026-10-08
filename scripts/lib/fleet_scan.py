@@ -676,20 +676,30 @@ def stale_threshold_for(armed_cron: str, base_stale_s: int = STALE_S) -> int:
 
 
 def _tail_lines(path: str, max_bytes: int = 64 * 1024) -> list[str]:
-    """The last ``max_bytes`` of ``path`` as text lines (first line dropped when the
-    read started mid-line). Empty list on any I/O failure — the caller falls back to
+    """The last ``max_bytes`` of ``path`` as text lines. When the file is larger than the
+    window, one extra byte is read: if the byte just BEFORE the window is a newline the
+    window starts on a record boundary and every line is kept; otherwise the first line was
+    cut mid-record and is dropped. Empty list on any I/O failure — the caller falls back to
     mtime semantics, never crashes the scan."""
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as fh:
-            if size > max_bytes:
-                fh.seek(size - max_bytes)
-            data = fh.read(max_bytes + 1)
+            truncated = size > max_bytes
+            if truncated:
+                fh.seek(size - max_bytes - 1)
+                data = fh.read(max_bytes + 1)
+                # TRDD-A8DRRW0I: a window starting exactly on a line boundary used to lose
+                # its first whole record, because any oversized file had its first line dropped.
+                cut_mid_record = data[:1] != b"\n"
+                data = data[1:]
+            else:
+                data = fh.read(max_bytes + 1)
+                cut_mid_record = False
     except OSError:
         return []
     lines = data.decode("utf-8", errors="replace").splitlines()
-    if len(lines) > 1 and size > max_bytes:
-        lines = lines[1:]  # the first line is almost certainly truncated mid-record
+    if cut_mid_record and len(lines) > 1:
+        lines = lines[1:]  # the first line is a fragment of a record that began before the window
     return [ln for ln in lines if ln.strip()]
 
 

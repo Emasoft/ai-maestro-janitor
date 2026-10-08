@@ -1437,3 +1437,104 @@ def test_a_genuine_denial_still_alarms_after_every_attempt_fails() -> None:
         fleet_scan._run_probe_outcome = orig  # type: ignore[assignment]
 
     assert sessions == {} and outcome == "timeout" and attempts == 3
+
+
+
+def _tail_window_file(tmp_path: Path, name: str, data: bytes) -> str:
+    p = tmp_path / name
+    p.write_bytes(data)
+    return str(p)
+
+
+def test_tail_lines_keeps_the_first_record_when_the_window_starts_on_a_line_boundary(
+    tmp_path: Path,
+) -> None:
+    """TRDD-A8DRRW0I: a read window that begins exactly on a record boundary must return
+    that record whole; the old code dropped it as if it were a cut fragment."""
+    path = _tail_window_file(tmp_path, "t.jsonl", b"aaaa\nbbbb\ncccc\n")
+    assert fs._tail_lines(path, max_bytes=10) == ["bbbb", "cccc"]
+
+
+def test_tail_lines_drops_the_fragment_when_the_window_cuts_a_record(tmp_path: Path) -> None:
+    """A window that starts mid-record must not return the cut fragment; the next whole
+    record is the first line returned."""
+    path = _tail_window_file(tmp_path, "t.jsonl", b"aaaa\nbbbb\ncccc\n")
+    assert fs._tail_lines(path, max_bytes=8) == ["cccc"]
+
+
+def _activity_root(tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", tag: str) -> tuple[Path, Path]:
+    import memory_scopes  # type: ignore[import-not-found]
+
+    home = tmp_path / tag
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    root = home / "proj"
+    root.mkdir()
+    slug = memory_scopes.project_slug(os.path.realpath(str(root)))
+    tdir = home / ".claude" / "projects" / slug
+    tdir.mkdir(parents=True)
+    return root, tdir
+
+
+def test_transcript_activity_keeps_the_first_record_on_a_line_boundary(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-A8DRRW0I: the 64 KiB window starts exactly on a substantive record (age 4000)
+    followed by fresh enqueues (age 20). The old code dropped that record and reported 20."""
+    import json as _json
+
+    now = 1_784_300_000
+    root, tdir = _activity_root(tmp_path, monkeypatch, "c")
+    window = 64 * 1024
+    enq = _enqueue_line(now - 20) + "\n"
+    n_enq = 10
+    base = {"type": "assistant", "timestamp": _iso(now - 4000), "message": {}, "pad": ""}
+    base_len = len(_json.dumps(base)) + 1
+    pad = window - n_enq * len(enq) - base_len
+    assert pad > 0
+    base["pad"] = "x" * pad
+    first = _json.dumps(base) + "\n"
+    assert len(first) + n_enq * len(enq) == window
+    (tdir / "s1.jsonl").write_text("filler-line\n" + first + enq * n_enq, encoding="utf-8")
+    age, trailing, _awaiting = fs.transcript_activity(str(root), now)
+    assert age == 4000
+    assert trailing == n_enq
+
+
+def test_transcript_activity_torn_last_line_keeps_the_documented_meanings(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """Pins the documented malformed-line meanings (guard, passes on the old code): a torn
+    last line ends the trailing enqueue run, and it never proves a pending question."""
+    now = 1_784_300_000
+    root, tdir = _activity_root(tmp_path, monkeypatch, "d1")
+    lines = [_substantive_line(now - 4000), _enqueue_line(now - 20), _enqueue_line(now - 3)]
+    (tdir / "s1.jsonl").write_text("\n".join(lines) + '\n{"type": "assist', encoding="utf-8")
+    age, trailing, awaiting = fs.transcript_activity(str(root), now)
+    assert trailing == 0
+    assert age == 4000
+    assert awaiting is False
+
+    root2, tdir2 = _activity_root(tmp_path, monkeypatch, "d2")
+    lines2 = [_substantive_line(now - 4000), _tool_use_line(now - 2000, "toolu_PLAN")]
+    (tdir2 / "s1.jsonl").write_text("\n".join(lines2) + '\n{"type": "assist', encoding="utf-8")
+    _age2, _trailing2, awaiting2 = fs.transcript_activity(str(root2), now)
+    assert awaiting2 is False
+
+
+def test_transcript_activity_zero_byte_and_short_files_keep_their_results(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """Guard: an empty transcript falls back to its mtime age; a file shorter than the
+    window is read whole."""
+    now = 1_784_300_000
+    root, tdir = _activity_root(tmp_path, monkeypatch, "e1")
+    empty = tdir / "s1.jsonl"
+    empty.write_bytes(b"")
+    os.utime(empty, (now - 100, now - 100))
+    assert fs.transcript_activity(str(root), now) == (100, 0, False)
+
+    root2, tdir2 = _activity_root(tmp_path, monkeypatch, "e2")
+    lines = [_substantive_line(now - 4000), _enqueue_line(now - 20)]
+    (tdir2 / "s1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert fs.transcript_activity(str(root2), now) == (4000, 1, False)
