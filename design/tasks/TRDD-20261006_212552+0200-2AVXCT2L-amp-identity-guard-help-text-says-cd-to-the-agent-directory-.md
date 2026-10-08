@@ -4,7 +4,7 @@ title: amp identity guard help text says cd to the agent directory resolves iden
 column: blocked
 status: tasked
 created: 2026-10-06T21:25:52+0200
-updated: 2026-10-08T17:05:29+0200
+updated: 2026-10-08T19:01:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,8 @@ approval-datetime: 2026-10-06T21:25:52+0200
 blocked-by: [gh:Emasoft/ai-maestro#172]
 pre-block-column: todo
 unblock-when: [issue:Emasoft/ai-maestro#172]
+blocker-probe: [gh, issue, view, 172, --repo, Emasoft/ai-maestro, --json, state]
+blocker-holds-if: not-match:OPEN
 ---
 
 # amp identity guard help text says cd to the agent directory resolves identity but it does not

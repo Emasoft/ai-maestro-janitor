@@ -4,7 +4,7 @@ title: The burn gate docstring still describes usage cap learning as active
 column: blocked
 status: tasked
 created: 2026-10-05T22:11:16+0200
-updated: 2026-10-06T19:19:25+0200
+updated: 2026-10-08T19:01:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -17,6 +17,9 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:16+0200
 blocked-by: [6NMQ95TQ]
 pre-block-column: todo
+unblock-when: [trdd:6NMQ95TQ terminal]
+blocker-probe: [trddgrep, show, 6NMQ95TQ]
+blocker-holds-if: not-match:complete
 ---
 
 # The burn gate docstring still describes usage cap learning as active

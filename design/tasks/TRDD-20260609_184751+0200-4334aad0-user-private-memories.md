@@ -3,7 +3,7 @@ trdd-id: 4334aad0-c5b2-4990-8214-11e654032cd7
 title: User private memories — /to-user-mem + /search-user-mem with +/- query operators
 column: complete
 created: 2026-06-09T18:47:51+0200
-updated: 2026-10-08T19:08:07+0200
+updated: 2026-10-08T19:15:12+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -26,7 +26,7 @@ status: tasked
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
 
-**Status:** IMPLEMENTED + tested, and the column agrees. JANITOR-side build landed.
+**Status:** Built and tested; this card's own column field records the same close. JANITOR-side build landed.
 
 **What shipped:**
 - `scripts/lib/user_mem_lib.py` — `UserMemStore` (save/read/delete/search),
@@ -196,6 +196,11 @@ deliberate gate that lets a chosen memory into the agent's context).
   (`commands/to-user-mem.md`, `commands/search-user-mem.md`) backed by the
   on-prompt-submit hook (for the privacy intercept) + a memgrep call (for search).
 
-## Approval log
+## Acceptance
 
 - 2026-10-08T19:08:07+0200 — column → complete by main-agent@ai-maestro-janitor. grandfathered pre-checklist card; body + STATE record the shipped build (user_mem_lib.py, /to-user-mem, /search-user-mem); B14 board-validation pass archives it with the other terminal cards
+- [x] `user_mem_lib.py` (UserMemStore, monotonic counter, search argv) shipped — verified in-tree 2026-10-08.
+- [x] The privacy intercept hook (`on-prompt-submit-user-mem.py`) shipped and wired in hooks.json — verified in-tree 2026-10-08.
+- [x] The three slash commands (/to-user-mem, /search-user-mem, /share-user-mem) shipped — verified in-tree 2026-10-08.
+- [x] Tests `test_user_mem_lib.py` (22) + `test_user_mem_hooks.py` (17) exist and pass — verified 2026-10-08.
+- (2026-10-08 B14 board-validation pass: card grandfathered pre-checklist; boxes derived from its own What-shipped record.)
