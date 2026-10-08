@@ -3,7 +3,7 @@ trdd-id: DXM75JB2
 title: The PostCompact resume push checks the pending flag at fire time, not at type time
 column: complete
 created: 2026-08-02T13:05:35+0200
-updated: 2026-10-08T18:53:20+0200
+updated: 2026-10-08T18:57:54+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -11,6 +11,7 @@ parent-trdd: 8IZ8COQ8
 derived: true
 derived-kind: eht
 severity: low
+status: archived
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
@@ -60,3 +61,7 @@ they are gone. The fire-time check stays as a cheap early exit.
 problem. That is the parent's subject and its answer already shipped elsewhere
 (TRDD-8DR0X08A F2, the `trailing_enqueues` wedge short-circuit). This card is one race in one
 script.
+
+## Approval log
+
+- 2026-10-08T18:57:54+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

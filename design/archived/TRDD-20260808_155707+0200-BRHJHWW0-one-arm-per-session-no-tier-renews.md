@@ -3,15 +3,16 @@ trdd-id: BRHJHWW0
 title: One arm per session — kill mid-session tier renews; the dispatcher throttles internally
 column: complete
 created: 2026-08-08T15:57:07+0200
-updated: 2026-10-08T18:53:28+0200
+updated: 2026-10-08T18:57:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
-approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
 external-refs: [janitor#190]
 supersedes-partially: [TRDD-0QQX9H0G, TRDD-CI6ZTNB9]
+min-approval-requirement: none
+status: archived
 ---
 
 # One arm per session — no mid-session re-arming
@@ -64,3 +65,7 @@ churn is a real system load.
 - [x] User cadence knob honored; default */15
 - [x] SKILL.md wording updated; TRDD-CI6ZTNB9 closed as superseded by this (its defect is
       unreachable once tiers stop driving renews)
+
+## Approval log
+
+- 2026-10-08T18:57:55+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

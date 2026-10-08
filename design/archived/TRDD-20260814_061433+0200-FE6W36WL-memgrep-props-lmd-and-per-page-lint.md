@@ -3,12 +3,13 @@ trdd-id: FE6W36WL
 title: memgrep trio — one block-props spelling, a bumped page lmd, and a per-page lint that can see cross-page rules
 column: complete
 created: 2026-08-14T06:14:33+0200
-updated: 2026-10-08T18:53:31+0200
+updated: 2026-10-08T18:57:57+0200
 current-owner: main
 task-type: bugfix
 external-refs: [janitor#266, janitor#265, janitor#262, janitor#260]
 relevant-rules: []
 implementation-commits: [ae7f32a8, 22ed55f7, 88390fc2]
+status: archived
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
@@ -145,3 +146,7 @@ violating THE LINK LAW.
 - [x] The lint summary can never print a bare `0` for a check it did not run — when no scope
       resolves, it names what was skipped.
 - [x] `cargo test` green; the Python suites that read memgrep output stay green.
+
+## Approval log
+
+- 2026-10-08T18:57:57+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

@@ -3,7 +3,7 @@ trdd-id: AO8MPK5D
 title: The repair chore is told to fix publish-globally-missing but its gate cannot see it
 column: complete
 created: 2026-08-26T22:19:00+0200
-updated: 2026-10-08T18:53:44+0200
+updated: 2026-10-08T18:57:57+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -16,6 +16,7 @@ npt: []
 eht: []
 implementation-commits: [efad7a99]
 relevant-rules: []
+status: archived
 ---
 
 # The repair chore is told to fix `publish-globally-missing` but its gate cannot see it
@@ -225,3 +226,7 @@ the same cause as the 29**, the PROJECT scope gate, see the correction in the ST
     what the predicate said, and I filed a card naming a real-but-secondary cause whose fix would
     have changed nothing measurable. DO walk the gates in EXECUTION ORDER, outermost first, and
     confirm the target is even in the eligible set before reading the predicate that judges it.
+
+## Approval log
+
+- 2026-10-08T18:57:57+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

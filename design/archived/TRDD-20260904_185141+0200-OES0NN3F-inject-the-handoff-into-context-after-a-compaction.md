@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: complete
 created: 2026-09-04T18:51:41+0200
-updated: 2026-10-08T18:53:44+0200
+updated: 2026-10-08T18:57:58+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -19,6 +19,7 @@ eht: []
 implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf, 34b0d74d, 57f015ba, e6cc2036, 9f601253, a96f7ef1, af8ded3a]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 review-after: 2026-09-24
+status: archived
 ---
 
 # Inject the handoff after a compaction, the way `/clear` already does
@@ -244,6 +245,7 @@ a release as the card says. R3: subagents are mentioned, not their preservation 
 - 2026-09-17T07:04:48+0200 — COMPLETE by main session (owner standing permission 2026-09-03). R2 recorded on 7MGJYLY5; continuity nudge shipped in a96f7ef1/af8ded3a; box 8 verified from real compaction logs.
 2026-09-17 — CLOSER audit: the 06:58 re-tick of box 8 also used a pre-nudge build. ANIME2SVG's compact at 2026-09-15T16:59:14+0200 (stamp .janitor/state/compact-handoff-injected.ts=1789484354) ran under 3.5.0; the continuity nudge (a96f7ef1, TRDD-V3BQT7QE/7MGJYLY5) merged only into v3.5.1 (git merge-base --is-ancestor a96f7ef1 v3.5.1 = true). So this evidence still verifies the superseded prose-handoff path, not the nudge auto-compaction now ships. Searched every .janitor/logs/session-start.log and .janitor/state/precompact-continuity.json on this machine for the nudge marker ("auto-compacted by the harness", _continuity_nudge, precompact-continuity.json) — zero hits anywhere. Box 8 UNCHECKED and review-after set to 2026-09-24. Closing recipe: once a session running >=3.5.1 logs source=compact, grep its .janitor/logs/session-start.log for the literal nudge text "Context was auto-compacted by the harness" or confirm .janitor/state/precompact-continuity.json was written by that session's PreCompact hook.
 - 2026-09-17T19:42:20+0200 — MECHANICAL redaction (9745b4f6): absolute home paths in 1 body line(s) genericised to ~/ or repo-relative because CPV --strict refuses /Users/<name>/ in a pushed card; no fact changed, updated: not bumped (janitor-main-session)
+- 2026-10-08T18:57:58+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.
 
 ## ⏵ STATE (authoritative — supersedes the body)
 

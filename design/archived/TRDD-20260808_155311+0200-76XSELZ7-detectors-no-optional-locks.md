@@ -3,14 +3,15 @@ trdd-id: 76XSELZ7
 title: Read-only detector git calls must not take index.lock — GIT_OPTIONAL_LOCKS=0
 column: complete
 created: 2026-08-08T15:53:11+0200
-updated: 2026-10-08T18:53:27+0200
+updated: 2026-10-08T18:57:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
-approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
 external-refs: [janitor#245]
+min-approval-requirement: none
+status: archived
 ---
 
 # Detector git reads must not take index.lock
@@ -57,3 +58,4 @@ hits under scripts/.
   `detectors/worktree-janitor.py`, `detectors/project-plugins-update.py`), several with comments
   citing janitor#245 — the very issue this card cites. The work was done incrementally by other
   changes and nothing closed the card.
+- 2026-10-08T18:57:55+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

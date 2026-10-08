@@ -3,16 +3,17 @@ trdd-id: XOITBRIZ
 title: The code-fence mask hides dynamic-exec-in-body's primary threat — the fence is not the signal, the surrounding prose is
 column: complete
 created: 2026-08-13T11:26:39+0200
-updated: 2026-10-08T18:55:47+0200
+updated: 2026-10-08T18:57:56+0200
 current-owner: janitor-main-session
 task-type: security
-approval-tier: 0
 scope: project
 severity: high
 relevant-rules: []
 npt: []
 eht: []
 external-refs: [janitor#226, janitor#254, TRDD-HYV0SOC6]
+min-approval-requirement: none
+status: archived
 ---
 
 # `dynamic-exec-in-body` catches 1 of 3 of its own documented shape, because the mask is aimed at the wrong feature
@@ -151,5 +152,6 @@ recall 2/3 → 3/3 with no FP change.
   to TRDD-VAWIKRK2 (`created-by:` this card, per one-atomic-task-per-TRDD — the parent card's
   own text says only C was safe to close on existing evidence). The burned-blind-set
   constraint and the retired ≥3/3 box remain recorded here as the honest bounds of the claim.
+- 2026-10-08T18:57:56+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.
 
 ## Notes and lessons learned

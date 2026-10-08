@@ -3,16 +3,17 @@ trdd-id: BEIG83VR
 title: publish.py stage 10 has no index.lock recovery — the TUWUB0SG class rc-128ed a release tonight
 column: complete
 created: 2026-08-20T00:53:21+0200
-updated: 2026-10-08T18:53:44+0200
+updated: 2026-10-08T18:57:57+0200
 implementation-commits: [d917cce6]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
-approval-tier: 0
 scope: project
 external-refs: [TRDD-TUWUB0SG]
 npt: []
 eht: []
+min-approval-requirement: none
+status: archived
 ---
 
 # Extend the attributed index.lock recovery to publish.py's git sites
@@ -93,3 +94,4 @@ lock a live operation is about to use would corrupt it.
   premise was falsified during implementation (a pre-flight existed); the fix addresses the
   real cause — an age floor that cannot apply to a writer's own collision — and the card
   body records the correction rather than the original guess.
+- 2026-10-08T18:57:57+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

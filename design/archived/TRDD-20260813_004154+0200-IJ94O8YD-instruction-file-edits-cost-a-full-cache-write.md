@@ -3,16 +3,17 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: complete
 created: 2026-08-13T00:41:54+0200
-updated: 2026-10-08T18:53:43+0200
+updated: 2026-10-08T18:57:56+0200
 current-owner: janitor-main-session
 task-type: refactor
-approval-tier: 0
 scope: project
 severity: medium
 relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-B07VPT2G]
+min-approval-requirement: none
+status: archived
 ---
 
 # The one avoidable cache cost the corpus actually shows
@@ -257,3 +258,4 @@ on, and no plausible result flips a "don't build machinery" call.
   gated on a scope judgement the card had deferred twice; the judgement is now made and
   recorded with its reasoning, rather than leaving the card open as a standing invitation to
   build a guard the evidence does not support.
+- 2026-10-08T18:57:56+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

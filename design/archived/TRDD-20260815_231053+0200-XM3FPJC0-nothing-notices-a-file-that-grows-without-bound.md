@@ -3,16 +3,17 @@ trdd-id: XM3FPJC0
 title: Nothing notices a file that grows without bound — 231 MB of debug log accumulated for 11 days unseen
 column: complete
 created: 2026-08-15T23:10:53+0200
-updated: 2026-10-08T18:53:38+0200
+updated: 2026-10-08T18:57:57+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
-approval-tier: 0
 severity: medium
 relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-LCO8229M, TRDD-ZNN0UK5K, TRDD-1T53EKTN]
+min-approval-requirement: none
+status: archived
 ---
 
 # Nothing notices a file that grows without bound
@@ -148,3 +149,4 @@ see the balloon everywhere, and only ever fixes what it owns.
   balloon present. The re-alert policy itself was already proven live on real files on
   2026-08-15 (re-reported only the grower past the 2× gate); the scheduling was the only
   unproven half and is unproven no longer. Shipped in v3.3.6, in the released line.
+- 2026-10-08T18:57:57+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.

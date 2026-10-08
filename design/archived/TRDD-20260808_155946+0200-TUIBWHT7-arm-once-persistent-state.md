@@ -3,14 +3,15 @@ trdd-id: TUIBWHT7
 title: Arm once, armed forever — persistent arm state; per-session cron is silent plumbing
 column: complete
 created: 2026-08-08T15:59:46+0200
-updated: 2026-10-08T18:53:29+0200
+updated: 2026-10-08T18:57:56+0200
 implementation-commits: [65e537dc]
 current-owner: janitor-main-session
 task-type: feature
-approval-tier: 0
 relevant-rules: []
 npt: [BRHJHWW0]
 eht: []
+min-approval-requirement: none
+status: archived
 ---
 
 # Arm once, armed forever
@@ -50,3 +51,7 @@ each session silently re-plumbs from — never a user-visible ceremony.
 - [x] SessionStart with state=disarmed/absent: no cron, banner only on absent (first install)
 - [x] Disarm clears the state; next SessionStart stays quiet and unarmed
 - [x] Tests for all four paths
+
+## Approval log
+
+- 2026-10-08T18:57:56+0200 — COMPLETE by main-agent@ai-maestro-janitor. open-box audit 2026-10-08: every open box ticked with evidence or struck with supersession reason; audit reports reports_dev/b14-openbox-audit-a.md, -b.md.
