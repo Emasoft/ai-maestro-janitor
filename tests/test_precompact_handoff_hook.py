@@ -654,6 +654,22 @@ def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
     assert all("janitor-heartbeat" not in t for _, t in turns)
     assert all(t != "second question" for _, t in turns)
 
+def test_tool_use_blocks_tail_boundary_landed_tool_use_survives(tmp_path: Path) -> None:
+    """TRDD-A8DRRW0I wave 4d: when the tail window lands EXACTLY on a record boundary whose
+    first (only) record is an assistant tool_use record, that record must survive. The old
+    unconditional `lines[1:]` dropped it whenever the file was oversized, losing real
+    tool_use blocks. Fixture: the window is byte-exact the tool_use line's length, so the
+    seek lands precisely on that line's start (asserted below)."""
+    hook = _hook()
+    tool_rec = _tool_use_turn("Read", file_path="/x.py")
+    keep_line = json.dumps(tool_rec) + "\n"
+    tx = tmp_path / "t.jsonl"
+    pre = "x" * 200 + "\n"  # force the file oversized so a seek happens
+    tx.write_text(pre + keep_line, encoding="utf-8")
+    assert len(pre) + len(keep_line) > len(keep_line)  # oversized: the seek really happens
+    blocks = hook._tool_use_blocks_tail(str(tx), tail_bytes=len(keep_line))
+    assert blocks == tool_rec["message"]["content"]
+
 
 def test_recent_turns_excludes_task_notification(tmp_path: Path) -> None:
     """TRDD-91D2VHW3: a task-notification record is not human conversation — must be dropped."""

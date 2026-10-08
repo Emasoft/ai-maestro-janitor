@@ -724,34 +724,21 @@ def _format_memory_rows(
 def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> list[dict]:
     """All ASSISTANT `tool_use` blocks in the transcript TAIL, oldest-first, fail-open [].
 
-    Same tail-seek/decode/skip-malformed-line contract as `_recent_turns` — the
-    transcript can be many MB, and a parser fault must never break the handoff.
+    Same tail-read contract as `_recent_turns` — the transcript can be many MB, and a
+    parser fault must never break the handoff. The tail read goes through the shared
+    `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I wave 4d): the shared walk drops the
+    seek-cut first line only when the seek really cut one, so a window landing exactly
+    on a record boundary no longer loses that record's tool_use blocks.
     """
     if not transcript_path:
         return []
-    path = Path(transcript_path)
     try:
-        size = path.stat().st_size
-        with path.open("rb") as fh:
-            seeked = size > tail_bytes
-            if seeked:
-                fh.seek(size - tail_bytes)
-            raw = fh.read()
+        entries = jw.read_jsonl_tail(Path(transcript_path), tail_bytes, malformed_lines=[])
     except OSError:
         return []
-    lines = raw.decode("utf-8", errors="replace").splitlines()
-    if seeked and lines:
-        lines = lines[1:]  # drop the probably-partial first line after the tail seek
     blocks: list[dict] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+    for obj in entries:
+        if obj.get("type") != "assistant":
             continue
         message = obj.get("message")
         content = message.get("content") if isinstance(message, dict) else None
