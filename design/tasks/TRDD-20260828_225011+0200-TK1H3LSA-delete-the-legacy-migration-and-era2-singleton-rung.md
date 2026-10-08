@@ -1,10 +1,10 @@
 ---
 trdd-id: TK1H3LSA
 title: Delete the legacy migration function and the era-2 singleton rung
-column: backburner
-blocked-by: []
+column: blocked
+blocked-by: gh:ai-maestro-janitor/TK1H3LSA#0
 created: 2026-08-28T22:50:11+0200
-updated: 2026-08-28T22:50:11+0200
+updated: 2026-10-08T19:19:08+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 7
@@ -12,12 +12,17 @@ severity: LOW
 effort: S
 min-approval-requirement: none
 task-type: refactor
-parent-trdd: TRDD-ULEGRT01
-derived: true
+parent-trdd: 
+derived: 
 derived-kind: eht
 labels: [daemon, state-migration, cleanup]
 release-via: publish
 test-requirements: [unit]
+unblock-when: [date:2027-02-28]
+blocker-probe: [date, +%Y-%m-%d]
+blocker-holds-if: not-match:2027-02
+status: tasked
+pre-block-column: backburner
 ---
 
 # TRDD-TK1H3LSA — Delete `migrate_global_state_to_data_dir()` and the era-2 `_singleton_paths` rung
@@ -90,3 +95,7 @@ TRDD-ULEGRT01's notes before touching it.
 - 2026-08-28 — Spun out of TRDD-ULEGRT01 at its close. The parent's own lesson applies here twice
   over: **when you retire a READ path, audit the WRITE and DELETE paths separately** — "where I
   look" and "where I must not leave anything" are different questions.
+
+## Approval log
+
+- 2026-10-08T19:18:15+0200 — column → blocked by main-agent@ai-maestro-janitor. B14 2026-10-08: real deferred deletion (legacy migration fn + era-2 singleton rung) whose preconditions are fleet-wide migration of every host; parked with a date predicate (2027-02-28 review) instead of sitting in backburner pretending to be pullable

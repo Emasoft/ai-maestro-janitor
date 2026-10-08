@@ -3,7 +3,7 @@ trdd-id: b4b9e27c-4f2f-4923-92d2-38370314d481
 title: Wikimem editor — scheduler detector + cron-prompt marker wiring
 column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-10-08T19:09:38+0200
+updated: 2026-10-08T19:11:41+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
@@ -76,3 +76,4 @@ order: NPT → A → (B ∥ C) → D → E → F → G.
 ## Approval log
 
 - 2026-10-08T19:09:38+0200 — column → complete by main-agent@ai-maestro-janitor. B14 board-validation pass 2026-10-08: prose acceptance criteria converted to ticked checkboxes (work shipped & verified 2026); card now passes the terminal gate; archived with the terminal sweep
+- 2026-10-08T19:11:41+0200 — column → complete by main-agent@ai-maestro-janitor. B14 2026-10-08: checklist pass done in 05366a8f; archived with the terminal sweep
