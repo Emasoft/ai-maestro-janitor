@@ -6142,9 +6142,6 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     }
 }
 
-/// `--diff`: for every canonical page the lint run visits, print to STDERR what `--apply-fixes`
-/// would change (`--- <path>` then `-`/`+` lines of the differing middle) or `refused <path>: <why>`.
-/// Writes nothing. Page enumeration mirrors `lint_paths_with` (non-pages skipped, one view per file).
 /// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
 /// fixer would clear every finding of that rule on that page (a label that promises a fix the engine
 /// will not make is a lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
@@ -6328,12 +6325,15 @@ fn apply_lint_config(
 
 
 /// Outcome of planning the `--apply-fixes` fix of one page (TRDD-JD2QR5SQ S2).
-#[allow(dead_code)]
 pub(crate) struct PageFix {
     pub text: String,
     /// Rule codes the fixers changed; empty on refusal.
+    /// Read only by `#[cfg(test)]` code, so dead_code fires only in the non-test profile; field-scoped so a later genuinely-dead field isn't masked.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fixed: Vec<&'static str>,
     /// Rule codes the fixers would have changed when the plan was refused; empty otherwise.
+    /// Treat as required, not a preference: do NOT fold both into one struct-level allow — that would mask a future genuinely-dead field.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub attempted: Vec<&'static str>,
     pub refusal: Option<String>,
 }
@@ -6343,7 +6343,6 @@ pub(crate) struct PageFix {
 // suppressed finding on the page is never auto-fixed. The gate check is read-only. The gate refusal
 // reason lists only the gate-floor codes found in the proposed text, never the gate's error text,
 // so the once-only unfixed ledger sees the same bytes on every run.
-#[allow(dead_code)]
 pub(crate) fn plan_page_fix(path: &Path, text: &str, cfg: &crate::lint_config::LintConfig) -> PageFix {
     use crate::lint_config::{is_enabled, is_fixable};
     use crate::lint_rules::rule_by_name;

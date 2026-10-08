@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 pub(crate) mod notes_section;
 pub(crate) mod quote_desc;
 pub(crate) mod dedup_keywords;
