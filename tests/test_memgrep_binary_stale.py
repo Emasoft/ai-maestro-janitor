@@ -91,6 +91,21 @@ def test_ahead_without_memgrep_changes_is_quiet() -> None:
     assert det.classify(data) == 0
 
 
+def test_diverged_with_memgrep_changes_is_stale() -> None:
+    """Diverged (both sides moved) with memgrep source files changed is stale."""
+    data = _fixture("ahead")
+    data["status"] = "diverged"
+    assert det.classify(data) > 0
+
+
+def test_diverged_without_memgrep_changes_is_quiet() -> None:
+    """Diverged but no file under scripts/memgrep/ changed: the binary is still current."""
+    data = _fixture("ahead")
+    data["status"] = "diverged"
+    data["files"] = [f for f in data["files"] if not f["filename"].startswith("scripts/memgrep/")]
+    assert det.classify(data) == 0
+
+
 def test_stamp_parsing() -> None:
     """The build stamp is the commit in `memgrep --version`; `unknown` means no stamp."""
     assert det.parse_stamp("memgrep 0.2.0 (5497043, 2026-10-07)") == "5497043"

@@ -4,7 +4,7 @@ title: Nothing installs or updates the memgrep binary after a plugin update, so 
 column: testing
 status: tasked
 created: 2026-10-06T20:14:55+0200
-updated: 2026-10-07T15:21:39+0200
+updated: 2026-10-08T20:39:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,8 @@ The plugin ships the Rust source and plugin.json tells the user to run cargo ins
 ## Approval log
 
 - 2026-10-06T20:14:55+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-08T20:33:39+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
+- 2026-10-08T20:39:50+0200 — column → testing. worker verified detector+tests per settled design; added 2 missing diverged cases (19 pass, ruff clean) — reports_dev/20261008-fanout-v5v1cblm.md
 
 ## Design
 
