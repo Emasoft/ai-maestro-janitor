@@ -92,4 +92,4 @@ correct for a root that may sit behind for hours.
 - [x] A database behind the binary reports under the distinct non-damage code MEMGREP-011 (BEHIND_LADDER_CODE, emitted at index.rs:934 on the ver < expect_version branch), not as a failed migration.
 - [x] The MEMGREP-011 wording directs that opening or reindexing the root runs the ladder and forbids rebuilding it; consumed at index.rs:358.
 - [x] The emission site was verified reachable, not merely defined — the shipped behavior, not just the constant, is confirmed.
-- [x] A genuinely half-applied migration (stamped current, column absent) still fails loudly under MEMGREP-004, asserted by a test at index.rs:2162.
+- [x] A genuinely half-applied migration (stamped current, column absent) still fails loudly under MEMGREP-004 — a_migration_that_fails_validation_rolls_back_and_does_not_stamp_its_version at index.rs:2059 (round-10 correction: the sweep's 2162 named the test after it).
