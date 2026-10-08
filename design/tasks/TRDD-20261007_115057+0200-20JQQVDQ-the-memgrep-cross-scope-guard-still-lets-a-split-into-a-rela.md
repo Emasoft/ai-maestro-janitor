@@ -4,7 +4,7 @@ title: The memgrep cross-scope guard still lets a split into a relative not-yet-
 column: backburner
 status: tasked
 created: 2026-10-07T11:50:57+0200
-updated: 2026-10-08T20:40:48+0200
+updated: 2026-10-08T23:45:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,3 +45,4 @@ These commits were made in this checkout by a writer the main session could not 
 - 2026-10-07T11:50:57+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-08T20:33:40+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
 - 2026-10-08T20:37:42+0200 — column → backburner. 24h memgrep-quiet clock resets on any DGBZVZPP Rust commit; parked with review-after, restartable when the tree has rested 24h per card note (e)
+- 2026-10-08T23:45:29+0200 — column → backburner. re-park after R9UXOSR5 commit: the 24h memgrep-quiet clock question is moot — R9UXOSR5 touched scripts/lib + tests only, NOT scripts/memgrep; tree of scripts/memgrep unchanged since its last commit; card remains startable per note (e) once verified
