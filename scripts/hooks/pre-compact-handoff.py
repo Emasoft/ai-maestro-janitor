@@ -729,6 +729,9 @@ def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -
     `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I wave 4d): the shared walk drops the
     seek-cut first line only when the seek really cut one, so a window landing exactly
     on a record boundary no longer loses that record's tool_use blocks.
+    Review A3: unlike the old seek, `read_jsonl_tail` raises ValueError for `tail_bytes < 1`
+    (outside the OSError catch) — unreachable from the sole caller, which always passes
+    _TAIL_BYTES.
     """
     if not transcript_path:
         return []
