@@ -1,9 +1,9 @@
 ---
 trdd-id: R9UXOSR5
 title: Retire the decision question and owner tiers once prose is never scored
-column: backburner
+column: complete
 created: 2026-09-24T14:12:48+0200
-updated: 2026-10-05T10:56:55+0200
+updated: 2026-10-08T23:46:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: refactor
@@ -14,6 +14,7 @@ mandated-by: user
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T14:12:48+0200
+status: archived
 ---
 
 # Retire the decision question and owner tiers once prose is never scored
@@ -35,3 +36,14 @@ Related: TRDD-D7RLXAN1 (this card is D7RLXAN1's dead-code follow-up, split out p
 ## Approval log
 
 - 2026-09-24T14:12:48+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-08T20:38:16+0200 — column → dev. dispatched per 9UORH472-round-8 review: D7RLXAN1 acceptance shipped (c7779d84, v3.7.0) — the card's own sequencing precondition; the dead-code retirement piece is agent-workable unlike D7RLXAN1's owner decision
+- 2026-10-08T23:46:42+0200 — COMPLETE by main-agent@ai-maestro-janitor. acceptance checklist written, all boxes evidenced by fd880f60 and two independent verification runs.
+
+## Acceptance
+
+- [x] DECISION_QUESTION, asks_decision path, user group in score_items removed (grep: 0 live references; remaining mentions are comments citing the retirement)
+- [x] decision-threshold CLI/env retired from scripts/jev_compact.py (DECISION_ENV, passthrough, decision-threshold flag)
+- [x] jev_shadow_log decision dimension retired (retrieve-row suffix, replay decision-question); old on-disk rows unselectable by design
+- [x] _select_injected owner and decision tiers (steps 1,3,4,6) removed; guaranteed-owner-slot mechanism and full must-stay list intact (grep-verified)
+- [x] Scores.decision_passed and its evict_key term removed; negative hasattr assertion pins the removal
+- [x] Its own commit fd880f60; verification: 230 named-suite pass + pyright 0 + ruff clean + full suite 18231/2 + collect 18233, worker and orchestrator independent runs
