@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: blocked
 created: 2026-08-04T18:18:52+0200
-updated: 2026-10-08T19:02:42+0200
+updated: 2026-10-08T19:47:39+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -39,6 +39,7 @@ blocker-probe-canary: match:LFSWY0C6
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
 
 ## ⏵ 2026-08-26 — MEASURED: the SEMANTIC half has nothing to migrate; only the index is stale
 

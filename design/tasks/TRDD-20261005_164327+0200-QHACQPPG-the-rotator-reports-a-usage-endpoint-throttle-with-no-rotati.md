@@ -4,7 +4,7 @@ title: The rotator reports a usage-endpoint throttle with no rotation target as 
 column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-08T19:02:42+0200
+updated: 2026-10-08T19:48:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,6 +31,7 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 ## Approval log
 
 - 2026-10-05T16:43:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
 
 ## Decisions
 

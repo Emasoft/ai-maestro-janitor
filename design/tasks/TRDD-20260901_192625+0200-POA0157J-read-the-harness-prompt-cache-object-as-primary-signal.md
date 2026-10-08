@@ -4,7 +4,7 @@ title: Read the harness's own prompt_cache status object as the primary cache-st
 column: blocked
 pre-block-column: todo
 created: 2026-09-01T19:26:25+0200
-updated: 2026-10-08T19:02:42+0200
+updated: 2026-10-08T19:47:41+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -39,6 +39,7 @@ rewrites a user-owned status-line command from a plugin and leaves two tools par
 from the live object, box 1), then step 2 of the design below — prefer the fresh first-party
 signal in `cache_certainly_expired`, tri-state preserved, fall through unchanged when stale
 or absent.
+2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
 
 ## Why
 
