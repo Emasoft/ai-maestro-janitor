@@ -4,7 +4,7 @@ title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a h
 column: dev
 status: tasked
 created: 2026-09-24T19:20:05+0200
-updated: 2026-10-07T23:59:13+0200
+updated: 2026-10-08T12:54:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -57,3 +57,5 @@ The dependency on TRDD-DQXMND59 stage 3 (jsonl_walk.py) lives only in prose beca
 Follow-ups from the wave 2 review: in pre-compact-handoff.py jsonl_walk is imported in the same guarded block as transcript_roles, so a jsonl_walk import failure reports 'transcript_roles import failed' (the turns read is still guarded, no crash); both readers discard malformed-line counts; the variable named lines now holds parsed entries.
 Newly found reader not on the original list: pre-compact-handoff.py _tool_use_blocks_tail has its own tail read; check it for the same line-boundary drop.
 Remaining: user_intent and fleet_scan (consumers take raw lines, convert to parsed entries unless one does a raw-substring test), pending_agents (_last_transcript_entry_has_tool_use on the tail with a generous window; spawn_prompt on the whole-file walk), jev_compaction_lane (whole-file, keep its raw-bytes prefilter, likely parse_jsonl_line per line), _tool_use_blocks_tail; then the full suite once.
+2026-10-08 — wave 3: fleet_scan (_tail_lines): real bug fixed — a 64 KiB window landing exactly on a record boundary dropped its first whole record, so a boundary-aligned newest substantive record read as stale activity (failing-first test). Fix reads one extra byte before the window as a boundary test; torn-last-line semantics pinned by guard tests that pass on the old code. The wave-3 worker died mid-wave on an API error (oauth_org_not_allowed); fix verified and committed on resume: 103 fleet_scan tests pass, ruff+mypy+pyright clean, 8a77a5e8.
+2026-10-08 — wave 3: fleet_scan (_tail_lines): real bug fixed — a 64 KiB window landing exactly on a record boundary dropped its first whole record, so a boundary-aligned newest substantive record read as stale activity (failing-first test). Fix reads one extra byte before the window as a boundary test; torn-last-line semantics pinned by guard tests that pass on the old code. The wave-3 worker died mid-wave on an API error (oauth_org_not_allowed); fix verified and committed on resume: 103 fleet_scan tests pass, ruff+mypy+pyright clean, 8a77a5e8.
