@@ -1,10 +1,10 @@
 ---
 trdd-id: DGBZVZPP
 title: memgrep tests share process-wide state and fail at random under load
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-04T14:01:11+0200
-updated: 2026-10-05T09:45:00+0200
+updated: 2026-10-08T21:20:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,8 @@ About 110 test sites set process-wide environment variables while tests run in p
 ## Verification 2026-10-04
 
 Clippy clean; 409 and 196 tests pass in parallel, serially, and in two repeat runs; release build has no warnings; with the override lookup disabled 16 unit tests fail, so the overrides are load-bearing; no assertion removed.
+2026-10-08 re-verification at HEAD 64fb9deb (fan-out worker, reports_dev/20261008-fanout-dgbzvzpp.md): ALL card items already implemented and passing — clippy clean from both cwds with the guard probe firing, Rust 444 unit + 244 cli in parallel, full Python suite 18251 pass / 2 skip. No code change needed; card closeable.
+- [x] All acceptance items verified passing at HEAD (re-verification 2026-10-08, see above) — box ticked on the worker's evidence
 
 ## Open items
 
@@ -54,3 +56,5 @@ Clippy clean; 409 and 196 tests pass in parallel, serially, and in two repeat ru
 ## Approval log
 
 - 2026-10-04T14:01:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-08T20:33:38+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
+- 2026-10-08T21:20:51+0200 — COMPLETE by main-agent@ai-maestro-janitor. re-verified closeable at HEAD: clippy guard + scoped_env + 8 test isolations all present; clippy clean, Rust 444+244 pass, Python 18251 pass/2 skip (worker evidence, reports_dev/20261008-fanout-dgbzvzpp.md).
