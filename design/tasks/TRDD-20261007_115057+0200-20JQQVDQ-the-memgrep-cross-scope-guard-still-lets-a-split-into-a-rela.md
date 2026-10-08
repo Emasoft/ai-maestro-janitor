@@ -4,7 +4,7 @@ title: The memgrep cross-scope guard still lets a split into a relative not-yet-
 column: backburner
 status: tasked
 created: 2026-10-07T11:50:57+0200
-updated: 2026-10-08T23:45:29+0200
+updated: 2026-10-09T00:00:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ These commits were made in this checkout by a writer the main session could not 
 2026-10-07 second correction: point (b) above is also INFERRED (scope_layer's body was not read in this session). Test spelling: use .claude/project/memory/new.md with the process cwd set to a scratch project root and every scope override pointed at scratch; do not use memory/new.md, which only adds a cwd dependency.
 2026-10-07: commit dbf2f0c9 cites this card in its subject but is NOT this card's fix: it only clears two clippy errors in b69a5d32's symlink-alias test so the release gate passes. Do not list it under implementation-commits.
 2026-10-08 (park caveat): the review-after date 2026-10-09 is a known false-positive — the real restart condition is memgrep tree quiet 24h (card note (e)); if any Rust commit lands tonight the date expires while the condition is false. Re-derive the condition before starting; do not trust the date alone.
+2026-10-08 — second-round review of the corrective edit: no blockers. Two recorded dispositions: (1) card verified STARTABLE per note (e) but deliberately left on backburner with review-after armed — restart is deferred to an explicit owner pull or the next fan-out directive, do not treat STARTABLE as an instruction to start; (2) the owner-quote provenance in memory atom LS2E-OQ8N is refuted against FABRICATION (exact text confirmed in a user-role transcript message) — automation-injection not excluded in principle, no observed mechanism (all automated session messages are tag-wrapped or token-prefixed; the quote is bare prose).
 
 ## Approval log
 
