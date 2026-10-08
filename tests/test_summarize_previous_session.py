@@ -1259,14 +1259,17 @@ def test_random_uppercase_word_that_is_not_an_open_id_never_counts(
 
 def test_non_utf8_byte_in_matched_line_still_counts_the_mention(tmp_path, monkeypatch, _isolated_env):
     """TRDD-A8DRRW0I wave 4c review C-A6 pinning: a matched line carrying a non-UTF-8 byte used
-    to be skipped wholesale by a UnicodeDecodeError in the old text-mode read; through
-    jsonl_walk.parse_jsonl_line (errors="replace" per line) the mention inside it still counts."""
+    to be skipped by json.loads' UnicodeDecodeError (verified against cf32b8ff^: the raise
+    happens inside the parse, the old code's `continue` drops the mention); through
+    jsonl_walk.parse_jsonl_line (errors="replace" per line) the record survives and counts.
+    The torn line is the ONLY id-bearing line -- a clean line naming the same id would make
+    this assert pass on the old code too, pinning nothing (review of c39dc887)."""
     project_dir = _isolated_env
     (project_dir / "design" / "tasks").mkdir(parents=True)
     _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
     transcript = tmp_path / "rank-transcript.jsonl"
     good = json.dumps({"type": "user", "message": {"role": "user", "content": [
-        {"type": "text", "text": "K0PMVRN6 is done."}]}}).encode()
+        {"type": "text", "text": "Unrelated chatter, no card id here."}]}}).encode()
     # The id-bearing line has a raw 0xFF byte inside its text; decode-as-replace must not
     # erase the record.
     torn = b"{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [" \
