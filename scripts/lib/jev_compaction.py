@@ -42,7 +42,6 @@ from jevctx.types import (  # noqa: E402
     MAX_QUESTIONS_PER_REQUEST,
     JevClient,
     JevValidationError,
-    Noul,
     NoulAnswer,
     Origin,
     Pointer,
@@ -55,9 +54,7 @@ __all__ = [
     "Scores",
     "NoDigest",
     "RETRIEVE_QUESTION",
-    "DECISION_QUESTION",
     "DEFAULT_RELEVANCE_THRESHOLD",
-    "DEFAULT_DECISION_THRESHOLD",
     "ConversationWindow",
     "extract_items",
     "split_conversation",
@@ -124,8 +121,8 @@ class Item:
     `jevctx.segments.segment()` piece, id "<entry uuid>:<block index>@<a>-<b>" (1-based,
     inclusive line numbers into the block's own raw text) -- see `_segment_tool_result`.
     `protected=True` marks a segment whose structural kind is `stacktrace` or `diff`: it
-    ranks above a relevance-only item in `compose()`'s eviction/pointer-slot ordering, below
-    a `decision_passed` one. Always `False` for a non-segmented Item.
+    ranks above a relevance-only item in `compose()`'s eviction/pointer-slot ordering. Always
+    `False` for a non-segmented Item.
     """
 
     id: str
@@ -152,22 +149,16 @@ class Item:
 
 @dataclass(frozen=True)
 class Scores:
-    """Both Noul answers for one item, plus the two derived facts callers need.
+    """The Noul answer for one item, plus the derived facts callers need.
 
     `kept`/`oversized` are computed here (not left for `compose` to recompute) because
-    `score_items` is the one place that knows the thresholds it used -- `compose`'s
+    `score_items` is the one place that knows the threshold it used -- `compose`'s
     signature has no threshold parameters, it just trusts these booleans.
     """
 
     relevance: float
-    decision: float
     oversized: bool
     kept: bool
-    # Baked in here for the same reason `kept`/`oversized` are: `score_items` is the one
-    # place that knows `decision_threshold`. `compose`'s budget eviction reads this to
-    # protect a user-stated decision/constraint/correction from being dropped for space
-    # before a merely-relevant item is (see `compose`'s eviction-order comment).
-    decision_passed: bool
     # TRDD-1ETALGDG followup: True iff this item was NEVER sent to Jev at all -- a provider
     # firewall block or an oversized batch survived every split retry `score_items` tried
     # (see `_score_batch_resilient`). Distinct from an ordinary below-threshold item (which
@@ -268,29 +259,13 @@ class NoDigest(Exception):
 # question, not "relevant right now") -- see reports/compaction-replacement/
 # 20260923_200805+0200-jev-reference-gap-analysis.md row 13.
 
-# Verbatim per the implementation spec (docs_dev/jev-compaction-spec.md, card 3).
-DECISION_QUESTION = Noul(
-    instructions=(
-        "Is this a decision, constraint, correction or instruction the user stated, "
-        "that later work must obey?"
-    ),
-    true="Yes -- a decision, constraint, correction or instruction the user stated.",
-    false="No -- not a decision, constraint, correction or instruction from the user.",
-)
-
 DEFAULT_RELEVANCE_THRESHOLD = 0.5
-DEFAULT_DECISION_THRESHOLD = 0.5
 
-# Card 5 (TRDD-HWF3QFAB): a "user" item is asked BOTH questions (2 real questions per item,
-# so 16 items -- MAX_QUESTIONS_PER_REQUEST // 2 -- fill one 32-question Jev request);
-# every other kind is asked relevance only (1 real question per item, so a full 32 items
-# fit the same request). Two batch sizes chosen per kind, rather than one shared size that
-# always assumes 2 questions per item (the pre-card-5 approach): since "user" items are the
-# small minority of a real transcript (report row 7/9: task-notifications alone outnumber
-# human messages ~27:1), this roughly halves the batch count -- and with it the digest
-# `state` re-billed on every batch -- for the majority of items.
-_USER_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST // 2
-_OTHER_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST
+# TRDD-HWF3QFAB (card 5) sized the planner for a per-kind split (16 two-question "user"
+# items vs 32 one-question others). TRDD-R9UXOSR5 retired the decision question and with it
+# the user group -- every scored item is tool/event and asked relevance only, so one batch
+# size remains: a full MAX_QUESTIONS_PER_REQUEST items, one question each.
+_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST
 
 # "BudgetPlanner allows it cleanly, otherwise keep the conservative planning and record
 # why" (this card's own spec text) -- it does NOT hold cleanly: jevctx.types's own
@@ -317,8 +292,8 @@ _SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS = 20_000
 # splits a batch that hits either in half and retries the halves (see `_score_batch_resilient`),
 # bounded by two independent caps so a persistently-blocking backend can't turn one bad batch
 # into an unbounded retry storm: `_MAX_SPLIT_DEPTH` bounds how many times any ONE batch is
-# halved (5 halvings takes the largest batch this module ever plans, 32 items -- `card 5's
-# _OTHER_BATCH_MAX_QUESTIONS` -- down to 1: 32->16->8->4->2->1), and `_MAX_RETRIED_REQUESTS`
+# halved (5 halvings takes the largest batch this module ever plans, 32 items -- the
+# `_BATCH_MAX_QUESTIONS` cap -- down to 1: 32->16->8->4->2->1), and `_MAX_RETRIED_REQUESTS`
 # bounds the TOTAL extra (non-original) requests across the whole `score_items` call.
 _MAX_SPLIT_DEPTH = 5
 _MAX_RETRIED_REQUESTS = 64
@@ -480,9 +455,11 @@ def _is_heartbeat_entry(entry: dict[str, Any]) -> bool:
 # result would cost more in per-segment pointer/header overhead than it could ever save.
 _SEGMENT_THRESHOLD_TOKENS = 1000
 
-# Card 6: "Protected kinds stacktrace and diff rank above relevance-only items in evict_key,
-# below decision_passed" -- see `Item.protected` and `compose()`'s `evict_key`/
-# `_pointer_priority`/admission-sort tuples, all of which fold this in as a middle tier.
+# Card 6: "Protected kinds stacktrace and diff rank above relevance-only items in evict_key"
+# -- see `Item.protected` and `compose()`'s `evict_key`/
+# `_pointer_priority`/admission-sort tuples, all of which fold this in as a top tier.
+# (TRDD-R9UXOSR5: it used to sit between `decision_passed` and relevance; the decision
+# question's retirement left it the highest tier among scored items.)
 _PROTECTED_SEGMENT_KINDS = frozenset({"stacktrace", "diff"})
 
 
@@ -961,42 +938,33 @@ def build_digest(
 def _score_batch(
     batch: Batch,
     *,
-    asks_decision: bool,
     items_by_id: dict[str, Item],
     digest: str,
     client: JevClient,
     relevance_threshold: float,
-    decision_threshold: float,
 ) -> dict[str, Scores]:
     """Score one batch; the unit `score_items` fans out over a `ThreadPoolExecutor` (card 3,
     TRDD-CC0CZLMO) -- pulled out of the batch loop so each batch's `client.ask()` round trip
-    can run on its own worker thread. `items_by_id`/`digest`/`client`/the two thresholds are
+    can run on its own worker thread. `items_by_id`/`digest`/`client`/the threshold are
     read-only for the whole `score_items` call, so sharing them across threads needs no lock.
 
-    `asks_decision` replaces the old per-item `kind == "user"` check (TRDD-RAEGS1D5 defect 3):
-    card 5 (TRDD-HWF3QFAB) groups items by kind into homogeneous batches before this is ever
-    called, so every item in one batch shares the same answer -- checking it once per batch
-    is simpler and correct by construction (a batch can never mix a "user" item with a
-    non-"user" one). A non-"user" item still never gets a `:dec` question sent for it: Jev's
-    `state` carries only `{ref, text}` (no author), so asking it there would let that item's
-    text alone earn `decision_passed` and `compose`'s eviction protection, defeating the
-    question's own point.
+    TRDD-R9UXOSR5: relevance only. The old per-kind split (card 5, TRDD-HWF3QFAB) asked a
+    second DECISION question of "user" batches; D7RLXAN1 already stopped any "user" item
+    reaching `score_items` (see `split_conversation`), so the question and its threshold went
+    with it -- every scored item is tool/event and judged on relevance alone.
     """
     if batch.meta.get("oversized"):
         # Never sent -- fail-open at the library level regardless of caller intent, exactly
         # like jevctx.scorer's own oversized handling. `compose` still refuses to inline it
         # because `oversized=True` here (spec: "never inlined").
         it = items_by_id[batch.items[0].id]
-        return {it.id: Scores(relevance=1.0, decision=1.0, oversized=True,
-                               kept=False, decision_passed=False)}
+        return {it.id: Scores(relevance=1.0, oversized=True, kept=False)}
 
     refs = batch.question_keys
     state = _scorer.build_state(digest, batch.items, refs)
-    questions: dict[str, Question] = {}
-    for ref in refs:
-        questions[f"{ref}:rel"] = _scorer._ref_question(RETRIEVE_QUESTION, ref)
-        if asks_decision:
-            questions[f"{ref}:dec"] = _scorer._ref_question(DECISION_QUESTION, ref)
+    questions: dict[str, Question] = {
+        f"{ref}:rel": _scorer._ref_question(RETRIEVE_QUESTION, ref) for ref in refs
+    }
 
     answers = client.ask(state, questions)  # a JevError here propagates -- see score_items
 
@@ -1009,20 +977,8 @@ def _score_batch(
                 f"expected a NoulAnswer for ref {ref!r}, got {type(rel_answer).__name__}"
             )
         rel = rel_answer.value
-        if asks_decision:
-            dec_answer = answers.get(f"{ref}:dec")
-            if not isinstance(dec_answer, NoulAnswer):
-                raise JevValidationError(
-                    f"expected a NoulAnswer for ref {ref!r}, got {type(dec_answer).__name__}"
-                )
-            dec = dec_answer.value
-            decision_passed = dec >= decision_threshold
-        else:
-            dec = 0.0  # never asked -- see this function's docstring
-            decision_passed = False
-        kept = rel >= relevance_threshold or decision_passed
-        result[it.id] = Scores(relevance=rel, decision=dec, oversized=False,
-                                kept=kept, decision_passed=decision_passed)
+        kept = rel >= relevance_threshold
+        result[it.id] = Scores(relevance=rel, oversized=False, kept=kept)
     return result
 
 
@@ -1044,12 +1000,10 @@ def _halve(batch: Batch) -> tuple[Batch, Batch]:
 def _score_batch_resilient(
     batch: Batch,
     *,
-    asks_decision: bool,
     items_by_id: dict[str, Item],
     digest: str,
     client: JevClient,
     relevance_threshold: float,
-    decision_threshold: float,
     retry_budget: _RetryBudget,
     origin_index: int,
     max_split_depth: int,
@@ -1085,9 +1039,8 @@ def _score_batch_resilient(
     try:
         return (
             _score_batch(
-                batch, asks_decision=asks_decision, items_by_id=items_by_id, digest=digest,
+                batch, items_by_id=items_by_id, digest=digest,
                 client=client, relevance_threshold=relevance_threshold,
-                decision_threshold=decision_threshold,
             ),
             [],
         )
@@ -1137,9 +1090,9 @@ def _score_batch_resilient(
                 blocked.extend(it.id for it in half.items)
                 continue
             half_scores, half_blocked = _score_batch_resilient(
-                half, asks_decision=asks_decision, items_by_id=items_by_id, digest=digest,
+                half, items_by_id=items_by_id, digest=digest,
                 client=client, relevance_threshold=relevance_threshold,
-                decision_threshold=decision_threshold, retry_budget=retry_budget,
+                retry_budget=retry_budget,
                 origin_index=origin_index, max_split_depth=max_split_depth, depth=depth + 1,
             )
             merged.update(half_scores)
@@ -1153,29 +1106,20 @@ def score_items(
     client: JevClient,
     *,
     relevance_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
-    decision_threshold: float = DEFAULT_DECISION_THRESHOLD,
     max_workers: int = 8,
     max_split_depth: int = _MAX_SPLIT_DEPTH,
     max_retried_requests: int = _MAX_RETRIED_REQUESTS,
 ) -> dict[str, Scores]:
-    """Score every item against its question(s), batched by kind, fanned out concurrently.
+    """Score every item against the relevance question, batched and fanned out concurrently.
 
-    Sends both questions for a "user" item in ONE request, not two: a review of the first
-    draft (two sequential `jevctx.scorer.score_items` calls, one per question) found that
-    sends every item's TEXT twice -- once per question's own batch `state` -- doubling
-    exactly the cost `jevctx.budget` exists to avoid (Jev bills for `state`, not questions).
-    `jevctx.scorer.score_items` has no "two questions per item" mode, so this drives
-    `BudgetPlanner` + `client.ask()` directly via `_score_batch` instead.
-
-    Card 5 (TRDD-HWF3QFAB): items are split into two groups BEFORE planning -- `kind ==
-    "user"` (both questions, `_USER_BATCH_MAX_QUESTIONS` == 16 items per batch, so the real
-    question count never exceeds Jev's 32-per-request cap) and everything else (relevance
-    only, `_OTHER_BATCH_MAX_QUESTIONS` == 32 items per batch). Splitting up front -- rather
-    than the pre-card-5 approach of planning every item as if it cost 2 questions and only
-    skipping the `:dec` one for non-"user" items at send time -- means a transcript's
-    overwhelming non-"user" majority (report row 7/9: task-notifications alone outnumber
-    human messages ~27:1) now packs twice as many items per request, roughly halving both
-    the batch count and the digest `state` re-billed on every one of them.
+    TRDD-R9UXOSR5: relevance only, one question per item. The old second DECISION question
+    (card 3 of the spec, card 5's per-kind batching) retired with the `kind == "user"` group
+    D7RLXAN1 already removed from `score_items`'s input (`split_conversation` routes every
+    owner/assistant/control item to the verbatim conversation, never scored) -- so the batch
+    plan is one homogeneous group of tool/event items, `_BATCH_MAX_QUESTIONS` (== 32) items
+    per batch, one real question each. This still drives `BudgetPlanner` + `client.ask()`
+    directly via `_score_batch` (not `jevctx.scorer.score_items`), for the fail-closed and
+    resilience behaviour below.
 
     Card 3 (TRDD-CC0CZLMO): batches are planned once, then run concurrently on a
     `ThreadPoolExecutor(max_workers)` -- mirrors `jevctx.scorer.score_items`'s own fan-out
@@ -1216,27 +1160,13 @@ def score_items(
     items_by_id = {it.id: it for it in items}
 
     rel_tokens = estimate_tokens(_scorer._ref_question(RETRIEVE_QUESTION, "i0").to_payload())
-    dec_tokens = estimate_tokens(_scorer._ref_question(DECISION_QUESTION, "i0").to_payload())
     envelope_tokens = estimate_tokens(_scorer.build_state(digest, [], []))
 
-    user_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens)
-                  for it in items if it.kind == "user"]
-    other_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens)
-                   for it in items if it.kind != "user"]
-
-    user_batches = BudgetPlanner(
-        max_questions=_USER_BATCH_MAX_QUESTIONS,
+    score_items_list = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens) for it in items]
+    batches = BudgetPlanner(
+        max_questions=_BATCH_MAX_QUESTIONS,
         state_plus_all_questions=_SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS,
-    ).plan(user_items, rel_tokens + dec_tokens, envelope_tokens)
-    other_batches = BudgetPlanner(
-        max_questions=_OTHER_BATCH_MAX_QUESTIONS,
-        state_plus_all_questions=_SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS,
-    ).plan(other_items, rel_tokens, envelope_tokens)
-    # (batch, asks_decision) -- the flag that was `items_by_id[...].kind == "user"` per item
-    # before card 5 is now decided once per batch, since a batch never mixes the two groups.
-    work: list[tuple[Batch, bool]] = (
-        [(b, True) for b in user_batches] + [(b, False) for b in other_batches]
-    )
+    ).plan(score_items_list, rel_tokens, envelope_tokens)
 
     scores: dict[str, Scores] = {}
     blocked_ids: list[str] = []
@@ -1244,13 +1174,13 @@ def score_items(
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
             pool.submit(
-                _score_batch_resilient, batch, asks_decision=asks_decision,
+                _score_batch_resilient, batch,
                 items_by_id=items_by_id, digest=digest, client=client,
-                relevance_threshold=relevance_threshold, decision_threshold=decision_threshold,
+                relevance_threshold=relevance_threshold,
                 retry_budget=retry_budget, origin_index=origin_index,
                 max_split_depth=max_split_depth,
             )
-            for origin_index, (batch, asks_decision) in enumerate(work)
+            for origin_index, batch in enumerate(batches)
         ]
         try:
             for future in as_completed(futures):
@@ -1281,8 +1211,7 @@ def score_items(
         # marks these apart from an ordinary below-threshold item so `jev_compact.py` can
         # count them for its own `blocked=N` visibility line and `compose()` can render a
         # distinct pointer note (see their own docstrings).
-        scores[item_id] = Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
-                                  decision_passed=False, blocked=True)
+        scores[item_id] = Scores(relevance=0.0, oversized=False, kept=False, blocked=True)
     return scores
 
 
@@ -1308,7 +1237,8 @@ def _format_pointer(item: Item) -> str:
     line UNPARSEABLE by `pipeline.parse_pointer`/`find_pointers` -- their `_POINTER_RE`'s id
     character class (`[A-Za-z0-9:_.-]+`) does not include `@`, so the regex fails to match at
     that position and `find_pointers` silently skips the whole line. Same trade-off this
-    module already made once for `_format_decision_pointer` below (see its own docstring) --
+    module already made for the retired `_format_decision_pointer` (TRDD-R9UXOSR5 removed it
+    with the decision question) --
     not fixed here for the same reason: nothing in this project reads `compose()`'s FULL or
     injected output back through `find_pointers`/`parse_pointer` in production today (`grep`
     confirmed: only `jevctx.pipeline` itself and this repo's own pointer-format tests call
@@ -1324,39 +1254,11 @@ def _format_pointer(item: Item) -> str:
     return format_pointer(Pointer(id=item.id, lines=None, tokens=item.tokens, summary=summary))
 
 
-# Coordinator addition (TRDD-RAEGS1D5, full-copy decision-pointer uncap): ~60 chars, not
-# `_POINTER_PREVIEW_CHARS`'s 80 -- these lines are UNCAPPED (see `_MAX_ELIDED_POINTERS`'s own
-# docstring below), and on the 258 MB transcript ~74% of owner messages pass the decision
-# question (28/38 measured on the 49 MB one), so keeping the per-line cost down matters more
-# here than for the ordinary, still-capped-at-40 pointer list.
-_DECISION_POINTER_PREVIEW_CHARS = 60
-
-
-def _format_decision_pointer(item: Item) -> str:
-    """Compact one-line stand-in for an elided decision-passing owner item, used ONLY for the
-    now-uncapped decision pointers in the FULL (`--out`) render (see `_MAX_ELIDED_POINTERS`).
-    Just the id and a short preview -- no `tokens=`/`[[elided ...]]` wrapper -- because at
-    up to ~185 of these on the 258 MB transcript, the full `_format_pointer` line (id +
-    `tokens=N` + an 80-char preview) would cost noticeably more bytes for no added value: the
-    model already knows this is a decision item from the section header, it only needs the id
-    to `expand` and enough text to recognize which one. Deliberately NOT parsed back by
-    `pipeline.find_pointers`/`parse_pointer` (unlike `_format_pointer`'s output) -- nothing
-    downstream reads the full document back into `Pointer` objects; `expand <id>` looks the id
-    up in the transcript directly, never in this rendered text.
-    """
-    summary = ""
-    for line in item.text.splitlines():
-        if line.strip():
-            summary = _truncate(line, _DECISION_POINTER_PREVIEW_CHARS)
-            break
-    return f"{item.id}: {summary}"
-
-
 # Spec: "Oversized single item (jev marks oversized) -> never inlined; pointer + first 20
 # lines" -- a DIFFERENT, richer pointer than a plain budget-dropped item gets (that one is
 # just the single-line `_format_pointer` above). An oversized item never even reached Jev
 # (jevctx's own budget planner refuses to send it -- see `score_items`), so it has no
-# relevance/decision signal at all; the extra 20 lines give the model enough to decide
+# relevance signal at all; the extra 20 lines give the model enough to decide
 # whether `expand` is worth it, which the 80-char preview alone cannot.
 _OVERSIZED_PREVIEW_LINES = 20
 
@@ -1401,32 +1303,10 @@ _MINIMAL_FIXED_LINE = "(budget too small, see full copy)"
 # scales with transcript size; the items dropped from the list are still `expand`-able by id, the
 # model just is not told about them by name.
 #
-# TRDD-RAEGS1D5 (full-copy decision-pointer uncap): this cap governs only the NON-decision-
-# passing elided items in the FULL (`--out`) render -- an elided item that passed the decision
-# question is never counted against it there (see `compose()`'s elided-selection code and
-# `_format_decision_pointer`). Real data: the 258 MB transcript had 250 decision-passing owner
-# items elided-or-kept and only 40 pointer slots total, so 180 of them were reachable by id
-# only through `expand --list --grep`, never named in the document the resumed session
-# actually reads -- the FULL copy is written to disk precisely so it can afford to name all of
-# them. In the injected copy (`--inject-out`, byte-budgeted) this cap likewise governs only the
-# ORDINARY pointers; decision pointers come on top of it, bounded by their own byte share
-# (`_INJECT_DECISION_POINTER_SHARE`, TRDD-U6C3YXEL) -- see `_select_injected`.
+# TRDD-R9UXOSR5: this cap governs EVERY elided item in the FULL (`--out`) render again. The
+# old decision-pointer uncap (TRDD-RAEGS1D5) exempted decision-passing items from it; that
+# tier went with the decision question, so there is no second pointer class to exempt.
 _MAX_ELIDED_POINTERS = 40
-
-# TRDD-RAEGS1D5 (decision-pointer hard ceiling, adversarial-review finding 1 on the
-# full-copy decision-pointer uncap above): uncapping `decision_elided` removed the OLD
-# unbounded-growth failure (one pointer line per elided item, uncapped, measured ~2.4 MB on
-# the largest real transcript -- `_MAX_ELIDED_POINTERS`'s own docstring above) only for
-# NON-decision items; `decision_elided` itself had no ceiling at all. On real data ~74% of
-# owner messages pass the decision question (28/38 on the 49 MB transcript), so a transcript
-# with more, or more decision-dense, owner turns than the 258 MB one measured (214 decision
-# pointers, 61 KB) can reproduce that same failure through this new path. Past this many
-# elided decision items, the OLDEST are dropped in favor of one summary line -- see
-# `compose()`'s elided-selection code -- keeping the newest ones (what the owner said most
-# recently matters most on resume), never the highest-scoring: every decision item already
-# shares the same top-level `_pointer_priority` tier (`decision_passed=True`), so a score-based
-# tiebreak has no more principled claim than recency does.
-_MAX_DECISION_POINTERS = 400
 
 # TRDD-RAEGS1D5 (injected-copy content fix): measured on three real transcripts (reports/
 # compaction-replacement/), the injected copy `jev_compact.py compact --inject-out` writes came
@@ -1468,55 +1348,6 @@ DEFAULT_INJECT_NON_OWNER_ITEM_BYTES = 350
 # including every OTHER owner message, still uses `max_item_bytes`.
 NEWEST_OWNER_ITEM_BYTES = 1500
 
-# TRDD-RAEGS1D5 (orchestrator rebalance): a real run on this repo's own 49 MB and 258 MB
-# transcripts showed the injected copy 100% kept="user" (15/15 and 11/11) -- the owner's own
-# messages crowded out everything the session actually DID (its assistant replies, tool calls,
-# task-notification events). This caps the OWNER group's total byte share -- the newest message
-# plus any further owner messages, newest-first with `decision_passed` ones preferred -- at
-# `_OWNER_SHARE` of the kept-item budget, so non-user work always gets a real chance at the
-# rest. It is a CEILING enforced by a running byte total during selection, never a pre-reserved
-# block: a handful of short owner one-liners that do not use the whole share leave the
-# remainder to flow to the other tiers, not sit unused (see the selection code below).
-_OWNER_SHARE = 0.40
-
-# TRDD-RAEGS1D5 (owner per-item token cap, review of the admission-order fix): the token-level
-# counterpart of `DEFAULT_INJECT_ITEM_BYTES`/`NEWEST_OWNER_ITEM_BYTES`, closing a gap those two
-# never covered -- `--out` never sets `max_item_bytes`, so its render had NO per-item
-# truncation lever at all, and the `budget_tokens` admission below used to admit or evict a
-# whole owner item by its FULL token count. Measured on the 258 MB real transcript: owner items
-# in the full copy fell from 58 to 45 kept, with only 12 elided pointers surviving the cap --
-# a handful of huge owner messages alone consumed the ENTIRE `_OWNER_SHARE` of the budget
-# (whole-or-nothing), evicting every OTHER owner item outright -- including decision-passing
-# ones -- well before the share was actually spent item-by-item. Every owner item beyond the
-# guaranteed newest slot (which stays whole -- see that slot's own comment below) now competes
-# for the share as a verbatim-prefix-plus-pointer excerpt capped at this many tokens, the same
-# shape `render()` already uses for the byte-capped injected copy, so one big message can no
-# longer starve several smaller ones out entirely.
-_OWNER_ITEM_TOKEN_CAP = 500
-
-
-def _owner_item_admission_cost(it: Item) -> tuple[int, bool]:
-    """The effective TOKEN cost of admitting `it` beyond compose()'s guaranteed owner slot --
-    itself when it already fits `_OWNER_ITEM_TOKEN_CAP`, else the cap PLUS the pointer line's
-    own cost (it will render as a verbatim prefix + pointer instead of being admitted or
-    evicted whole -- see `_truncate_prefix_tokens` and `_OWNER_ITEM_TOKEN_CAP`'s own docstring
-    for why this replaced a plain admit-or-evict decision on the item's full token count).
-    Returns `(cost, truncated)`.
-
-    Adversarial review (TRDD-RAEGS1D5): the first version of this function returned exactly
-    `_OWNER_ITEM_TOKEN_CAP` for a truncated item, undercounting what `render()` actually prints
-    by one `_format_pointer` line -- the byte-tier's own `_inline_cost` (used by the injected
-    copy's `_select_injected` candidates) already folds that pointer cost into ITS truncated-item
-    cost, so this token-level twin must too, or `admitted_tokens`/`total_tokens` silently drift
-    away from what `budget_tokens` is supposed to bound (harmless for `--out` today, since it
-    never sets `max_bytes`, but a real inconsistency the "same shape" rationale claims not to
-    have).
-    """
-    if it.tokens <= _OWNER_ITEM_TOKEN_CAP:
-        return it.tokens, False
-    return _OWNER_ITEM_TOKEN_CAP + estimate_tokens(_format_pointer(it)), True
-
-
 # TRDD-RAEGS1D5: pointers are breadcrumbs (an id + an 80-char preview), not the content the
 # resumed session actually needs -- capping their share of the injected byte budget keeps them
 # from crowding out kept items the way the old whole-item eviction let them. 0.15, under the
@@ -1525,20 +1356,11 @@ def _owner_item_admission_cost(it: Item) -> tuple[int, bool]:
 # compacted context" trailer -- the transcript path repeated up to 4x) already consume 1.3-1.6
 # KB of a 5000-byte budget before a single pointer or kept item is rendered, so reserving the
 # full 20-25% for pointers on TOP of that left too little for kept items; 0.15 is still a real
-# ceiling on ORDINARY pointers, sized to what real data showed was actually left once the fixed
+# ceiling on pointers, sized to what real data showed was actually left once the fixed
 # cost is measured (`_select_injected`'s `available` measures that cost directly, never guesses
-# it). Decision pointers have their own share, below.
+# it). TRDD-R9UXOSR5: the decision-pointer reserve that used to sit on top of this share
+# (`_INJECT_DECISION_POINTER_SHARE`, TRDD-U6C3YXEL) went with the decision question.
 _INJECT_POINTER_SHARE = 0.15
-
-# TRDD-U6C3YXEL (decision D2, amendment S2): the injected copy's count line said "681 / 6688 /
-# 22709 more" on three real transcripts while 21/22/7 decision-passing owner messages had no
-# pointer at all -- the resumed session could not tell they existed. Naming every one is not
-# affordable (d30bf250: 28 of them x ~150 B per pointer = its whole 4,230-B room), so the
-# NEWEST excluded ones get an ordinary `[[elided id=...]]` pointer up to this share of the
-# available bytes and the rest are counted. 0.25, not the advisor's 0.20: S2 kept the ordinary pointer format (it
-# parses with `find_pointers`, TRDD-HWF3QFAB, and needs no `render()` change), which is ~45 B
-# larger than the compact `id: preview` form the 0.20 was sized for.
-_INJECT_DECISION_POINTER_SHARE = 0.25
 
 # TRDD-BLGZTHQ9 (decision D3, amendment S3): "not truncated" is not "informative" -- measured
 # on the three real injected copies, whole-but-empty non-owner items won inline slots on
@@ -1550,16 +1372,6 @@ _INJECT_DECISION_POINTER_SHARE = 0.25
 # words are the owner's words.
 _INJECT_MIN_BODY_CHARS = 80
 _INJECT_MIN_WHOLE_TOOL_BODY_CHARS = 20
-
-# TRDD-BLGZTHQ9 (amendment S4): the guaranteed owner items were admitted unconditionally at
-# `NEWEST_OWNER_ITEM_BYTES` (1,500 B), so on a ~3.9 KB room one long newest message plus the
-# newest decision item could leave too little for the non-owner floor, which the old code then
-# force-admitted over budget and the backstop evicted again. The newest message's cap is now
-# this share of the available bytes (never below the general owner cap `max_item_bytes`, never
-# above 1,500 B), and the newest decision item is shown inline only when both together fit in
-# `_INJECT_GUARANTEED_SHARE` of it; otherwise it becomes a reserved decision pointer.
-_INJECT_NEWEST_OWNER_SHARE = 0.35
-_INJECT_GUARANTEED_SHARE = 0.50
 
 # TRDD-D7RLXAN1: the injected copy's share, of the room left after its fixed lines, for the
 # newest owner/assistant messages (verbatim, never scored) -- the READ FIRST line included. The
@@ -1590,32 +1402,6 @@ def _truncate_prefix_bytes(text: str, limit: int) -> str:
     if nl > 0:
         return cut[:nl].decode("utf-8")
     return cut.decode("utf-8", "ignore")
-
-
-def _truncate_prefix_tokens(text: str, max_tokens: int) -> str:
-    """A VERBATIM prefix of `text` estimated at <= `max_tokens` -- never paraphrased.
-
-    Token-level counterpart of `_truncate_prefix_bytes` (the owner per-item token cap's own
-    truncation lever -- see `_OWNER_ITEM_TOKEN_CAP`): `estimate_tokens` has no byte-oriented
-    shortcut the way UTF-8 truncation does (a CJK character costs a different token rate than
-    a latin one, `jevctx.tokens._estimate_str`), so this binary-searches the CHARACTER cut
-    point instead -- the same halving idea `build_digest`'s own single-oversized-part fallback
-    already uses, converging in O(log n) calls to `estimate_tokens`. Cuts back to the last
-    whole line within that point, same as the byte version, so a truncated item still reads as
-    complete lines.
-    """
-    if estimate_tokens(text) <= max_tokens:
-        return text
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if estimate_tokens(text[:mid]) <= max_tokens:
-            lo = mid
-        else:
-            hi = mid - 1
-    prefix = text[:lo]
-    nl = prefix.rfind("\n")
-    return prefix[:nl] if nl > 0 else prefix
 
 
 def _render_minimal_fallback(newest_owner: Item | None, max_bytes: int) -> str:
@@ -1853,18 +1639,15 @@ class _InjectCandidate:
     id: str
     kind: ItemKind
     turn: int
-    score: float  # max(relevance, decision)
-    decision_passed: bool  # only ever True for kind "user" (score_items asks nobody else)
-    guaranteed: bool  # one of compose()'s `guaranteed_owner_items`
+    score: float  # the relevance answer
     inline_cost: int | None  # exact rendered bytes shown inline; None = never inline
     pointer_cost: int  # exact rendered bytes of its `[[elided id=...]]` line(s)
     pointer_eligible: bool  # False for a content-free non-owner item (counted, never pointed)
     # TRDD-SK490HKU: the exact rendered bytes of a Jev-kept, over-cap tool/event item shown
     # WHOLE (not a prefix) -- `_inline_cost(it, len(it.text.encode()))`, i.e. `cap == len(text)`
     # so no truncation branch fires. `None` for every item that is already inline via
-    # `inline_cost`, a task-notification (excerpt-only, never whole), or a "user" item (owner
-    # tiers have their own share caps). Default last so the hand-built candidates in
-    # tests/test_jev_compaction.py keep compiling without naming it.
+    # `inline_cost` or a task-notification (excerpt-only, never whole). Default last so the
+    # hand-built candidates in tests/test_jev_compaction.py keep compiling without naming it.
     whole_cost: int | None = None
 
 
@@ -1872,7 +1655,6 @@ class _InjectCandidate:
 class _InjectSelection:
     kept: list[str]  # inline ids, in render order
     pointers: list[str]  # ordinary pointers (at most `max_pointers`)
-    decision_pointers: list[str]  # reserved decision pointers, same `[[elided ...]]` format
     hidden: int  # everything else, for the count line
     # TRDD-SK490HKU: ids the second fill pass admitted WHOLE past their normal cap -- `compose`
     # reads this to build `relaxed_cap`, the per-id cap `render()` must use so an item costed
@@ -1909,30 +1691,28 @@ def _select_injected(
             raise ValueError(f"{c.id} is not an inline candidate")
         return c.inline_cost
 
-    total = 0  # exact bytes of: inline items + the decision reserve + ordinary pointers
+    total = 0  # exact bytes of: inline items + ordinary pointers
     inline_ids: set[str] = set()
 
-    # 1. Guaranteed owner items, the newest message first (owner ruling fe38e095): admitted
-    #    unconditionally -- over budget here is the pathological case the backstop handles.
-    #    Amendment S4: the newest DECISION item (when different) only if both together fit
-    #    `_INJECT_GUARANTEED_SHARE` of the room; otherwise it falls to step 3 as a reserved
-    #    decision pointer, so the non-owner floor stays reservable on a ~3.9 KB room.
-    guaranteed: list[_InjectCandidate] = []
-    for i, c in enumerate(sorted((c for c in cands if c.guaranteed), key=lambda c: c.turn,
-                                 reverse=True)):
-        if i == 0 or fits(share(_INJECT_GUARANTEED_SHARE), total, inline_cost(c)):
-            guaranteed.append(c)
-            inline_ids.add(c.id)
-            total += inline_cost(c)
-    owner_bytes = total
+    def admit(c: _InjectCandidate) -> bool:
+        """Inline `c` if the document still fits."""
+        nonlocal total
+        new_total = total + inline_cost(c)
+        if available is not None and new_total > available:
+            return False
+        total = new_total
+        inline_ids.add(c.id)
+        return True
 
-    # 2. The non-owner floor (owner ruling aabd8b0c: "the resumed session learns what was
-    #    DONE"), reserved BEFORE the owner tier and never over budget -- met by reservation,
+    # 1. The non-owner floor (owner ruling aabd8b0c: "the resumed session learns what was
+    #    DONE"), reserved first and never over budget -- met by reservation,
     #    not by overrun plus eviction (the round-5 defect). No `protected` term: a 350-B slice
-    #    of a diff must not outrank prose.
+    #    of a diff must not outrank prose. TRDD-R9UXOSR5: the guaranteed-owner slot (old step
+    #    1, owner ruling fe38e095) went with the decision question -- no owner item is ever a
+    #    scored candidate any more, so there is no owner tier to guarantee.
     non_owner_order = sorted(
-        (c for c in cands if c.kind != "user" and c.inline_cost is not None),
-        key=lambda c: (c.decision_passed, c.score, c.turn), reverse=True,
+        (c for c in cands if c.inline_cost is not None),
+        key=lambda c: (c.score, c.turn), reverse=True,
     )
     non_owner: list[_InjectCandidate] = []
     for c in non_owner_order:
@@ -1943,79 +1723,17 @@ def _select_injected(
             inline_ids.add(c.id)
             total += inline_cost(c)
 
-    # 3. Decision-pointer reserve (TRDD-U6C3YXEL, D2): pointers to the NEWEST not-inline
-    #    decision items -- the same newest-first rule `_MAX_DECISION_POINTERS` uses in the full
-    #    copy -- within a byte limit fixed HERE: their share, or less if steps 1-2 left less.
-    #    WHY the reserve is recomputed around every later admission instead of refunded: the
-    #    design's rule gave a reserved item's pointer bytes back to general admission when it
-    #    went inline, so steps 4 and 6 drained the reserve -- measured on the four cached real
-    #    transcripts, 2/0/2/1 decision pointers (acceptance: at least min(6, excluded)), and 0
-    #    on the hand fixture of test_injected_excluded_decision_items_get_newest_first_...;
-    #    re-reserving only from leftover room still gave 3/4/8/2. Held, the reserve always
-    #    names the newest excluded decision items up to the limit, and an item going inline
-    #    hands its place to the next-newest one.
-    decision_order = sorted(
-        (c for c in cands if c.decision_passed and c.id not in inline_ids),
-        key=lambda c: c.turn, reverse=True,
-    )
-    reserve_limit = (None if available is None
-                     else min(int(available * _INJECT_DECISION_POINTER_SHARE), available - total))
-
-    def reserve(also_inline: str = "") -> tuple[list[str], int]:
-        ids: list[str] = []
-        used = 0
-        for c in decision_order:
-            if len(ids) >= _MAX_DECISION_POINTERS:
-                break
-            if (c.id not in inline_ids and c.id != also_inline
-                    and fits(reserve_limit, used, c.pointer_cost)):
-                ids.append(c.id)
-                used += c.pointer_cost
-        return ids, used
-
-    reserve_bytes = reserve()[1]
-    total += reserve_bytes
-
-    def admit(c: _InjectCandidate) -> bool:
-        """Inline `c` if the document still fits with the reserve recomputed around it."""
-        nonlocal total, reserve_bytes
-        new_reserve = reserve(also_inline=c.id)[1] if c.decision_passed else reserve_bytes
-        new_total = total - reserve_bytes + new_reserve + inline_cost(c)
-        if available is not None and new_total > available:
-            return False
-        total, reserve_bytes = new_total, new_reserve
-        inline_ids.add(c.id)
-        return True
-
-    # 4. Further owner messages, decision-passing first then newest, within `_OWNER_SHARE`.
-    #    Excludes a guaranteed decision item step 1 demoted (S4 made it a pointer, not a retry).
-    owner_cap = share(_OWNER_SHARE)
-    owner_tier: list[_InjectCandidate] = []
-    owner_overflow: list[_InjectCandidate] = []
-    for c in sorted(
-        (c for c in cands if c.kind == "user" and not c.guaranteed and c.inline_cost is not None),
-        key=lambda c: (c.decision_passed, c.turn), reverse=True,
-    ):
-        if fits(owner_cap, owner_bytes, inline_cost(c)) and admit(c):
-            owner_tier.append(c)
-            owner_bytes += inline_cost(c)
-        else:
-            owner_overflow.append(c)
-
-    # 5. Non-owner items beyond the floor, same order as step 2.
+    # 2. Non-owner items beyond the floor, same order as step 1.
     non_owner += [c for c in non_owner_order if c.id not in inline_ids and admit(c)]
 
-    # 6. One more try for the owner overflow, without the share cap.
-    rescued = [c for c in owner_overflow if admit(c)]
-
-    # 6b. TRDD-SK490HKU: second fill pass -- spend whatever room remains on a Jev-kept, over-cap
+    # 2b. TRDD-SK490HKU: second fill pass -- spend whatever room remains on a Jev-kept, over-cap
     # tool/event item WHOLE, highest score first, each only if its exact whole rendered cost
-    # fits what is left (never a prefix -- TRDD-BLGZTHQ9 holds). Runs BEFORE step 7's ordinary
+    # fits what is left (never a prefix -- TRDD-BLGZTHQ9 holds). Runs BEFORE step 3's ordinary
     # pointers (not after) so an admitted item's pointer bytes are never spent at all, rather
     # than spent and then refunded -- advisor report 20260925_054459, item 1 point 2: this is
     # also what lets a room reclaim an already-assigned pointer's bytes for a bigger whole item.
     # `whole_cost` is only ever set (see `_InjectCandidate`) for a candidate not already inline,
-    # so this never re-admits one of steps 1-6's own picks.
+    # so this never re-admits one of steps 1-2's own picks.
     whole: list[str] = []
     for c in sorted(
         (c for c in cands if c.whole_cost is not None and c.id not in inline_ids),
@@ -2028,15 +1746,15 @@ def _select_injected(
             inline_ids.add(c.id)
             total += cost
 
-    # 7. Ordinary pointers (amendment S1: every item not inline -- elided by the token stage or
-    #    excluded here), highest score first, capped by count (`max_pointers`, S8: decision
-    #    pointers come on top) and by `_INJECT_POINTER_SHARE`. Decision items are step 3's.
+    # 6. Ordinary pointers (amendment S1: every item not inline -- elided by the token stage or
+    #    excluded here), highest score first, capped by count (`max_pointers`) and by
+    #    `_INJECT_POINTER_SHARE`. TRDD-R9UXOSR5: the decision-pointer reserve (old step 3,
+    #    TRDD-U6C3YXEL) went with the decision question.
     pointer_cap = share(_INJECT_POINTER_SHARE)
     pointers: list[str] = []
     pointer_bytes = 0
     for c in sorted(
-        (c for c in cands
-         if c.id not in inline_ids and c.pointer_eligible and not c.decision_passed),
+        (c for c in cands if c.id not in inline_ids and c.pointer_eligible),
         key=lambda c: c.score, reverse=True,
     ):
         if len(pointers) >= max_pointers:
@@ -2048,15 +1766,14 @@ def _select_injected(
             total += c.pointer_cost
 
     # TRDD-SK490HKU: `whole` sits right after `non_owner` in render order -- the backstop's
-    # stage (2) evicts non-owner items in reverse `kept_order` (jev_compaction.py:2818-2833),
-    # so a whole-admitted item (the largest, lowest-priority of the non-owner set) is the FIRST
-    # thing sacrificed if the pathological backstop ever has to run at all.
-    kept = [c.id for c in (*guaranteed, *owner_tier, *non_owner)] + whole + [c.id for c in rescued]
-    decision_pointers = reserve()[0]
+    # stage (2) evicts non-owner items in reverse `kept_order`, so a whole-admitted item (the
+    # largest, lowest-priority of the non-owner set) is the FIRST thing sacrificed if the
+    # pathological backstop ever has to run at all.
+    kept = [c.id for c in non_owner] + whole
     # TRDD-U6C3YXEL: the count line names EVERYTHING not shown -- it used to omit every byte-
-    # stage exclusion, so "681 more" hid 21 decision-passing owner messages.
-    hidden = len(cands) - len(kept) - len(pointers) - len(decision_pointers)
-    return _InjectSelection(kept=kept, pointers=pointers, decision_pointers=decision_pointers,
+    # stage exclusion, so "681 more" hid 21 owner messages.
+    hidden = len(cands) - len(kept) - len(pointers)
+    return _InjectSelection(kept=kept, pointers=pointers,
                             hidden=hidden, whole=whole)
 
 
@@ -2090,11 +1807,7 @@ def compose(
     written out exactly ONCE by design (TRDD-EFA4P42B: it used to appear up to four times --
     the header, the "N more items" line, the "Full compacted context" line, and the trailer --
     costing ~580 B of a ~1,360 B fixed baseline inside a ~3 KB injected room) -- only in the
-    fixed trailing "expand with" line -- never inside an individual pointer. Sole exception:
-    the "N more decision items" summary line further below can ALSO embed it, but only in the
-    FULL (`--out`) render, and only past `_MAX_DECISION_POINTERS` (400) elided decision items --
-    `decision_elided` is forced empty whenever `max_item_bytes is not None`, so the injected
-    copy (the one this fix's byte budget is about) never triggers that line at all.
+    fixed trailing "expand with" line -- never inside an individual pointer.
 
     `full_context_path`, when given (card 5 two-renderings, TRDD-RAEGS1D5): this render is a
     CAPPED companion to a separate, uncapped `compose()` call over the SAME `items`/`scores`
@@ -2125,62 +1838,46 @@ def compose(
       (2) evict NON-OWNER kept items (`kind != "user"`), lowest priority first, but only DOWN TO
           a floor of `_NON_OWNER_FLOOR` (3) -- stops short of the floor even if the doc still
           does not fit, deferring to (3) first;
-      (3) evict NON-GUARANTEED-OWNER kept items (`kind == "user"`, excluding the two guaranteed
-          slots below), lowest priority first;
+      (3) evict NON-GUARANTEED-OWNER kept items (`kind == "user"`, excluding the guaranteed
+          slot below), lowest priority first;
       (4) only once (2)+(3) together are still not enough, come back for the last
           `_NON_OWNER_FLOOR` non-owner items -- the SAME lowest-priority-first order (2) already
           computed and stopped partway through, now continued with no floor;
-      (5) truncate the digest text itself;
-      (6) the newest DECISION item -- the second guaranteed slot (owner ruling, commit
-          aabd8b0c) -- sacrificed on its own, distinct from (2)-(4), only once (1)-(5) are still
-          not enough, and only when it differs from the newest owner message.
+      (5) truncate the digest text itself.
     When `max_item_bytes` is unset (TRDD-RAEGS1D5: the `budget_tokens` eviction above now admits
     by an owner-share-capped order instead, but this narrower byte-only fallback keeps
-    `evict_key`'s plain (decision_passed, max_score) rule for (2)-(4), unchanged) -- lowest
-    first, oldest among ties -- never bare chronological order, so a decision-passed item (a
-    user instruction/correction) is not sacrificed ahead of a newer, lower-priority one just for
-    being older. The trailing "pointers expand with:" line is NEVER dropped by stages (1)-(6) --
+    `evict_key`'s plain (protected, max_score) rule for (2)-(4), unchanged) -- lowest
+    first, oldest among ties -- never bare chronological order, so an older kept item is not
+    sacrificed ahead of a newer, lower-priority one just for being older. The trailing
+    "pointers expand with:" line is NEVER dropped by stages (1)-(5) --
     it is the model's only way back to everything elided, and a blind `raw[:room]` slice
     downstream (`external_clear.compose_handoff`, before an earlier fix) used to cut it off
     along with the newest kept items because both sit at the tail of the joined string.
 
-    (7) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
+    (6) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
     -- header, section headings, that same trailing line -- embed `transcript_path` (TRDD-
     EFA4P42B: once, in the trailer, since the header/elided-line/full-context-line copies were
-    removed) and `full_context_path` once, so stages (1)-(6) alone cannot guarantee the fixed
+    removed) and `full_context_path` once, so stages (1)-(5) alone cannot guarantee the fixed
     skeleton itself fits a small `max_bytes` or survives a long transcript path. Only once
-    (1)-(6) still leave the render over budget, the ENTIRE document -- trailer included -- is
+    (1)-(5) still leave the render over budget, the ENTIRE document -- trailer included -- is
     replaced by `_render_minimal_fallback`'s constant-size marker plus the newest OWNER message
-    (`guaranteed_owner_items[0]`, the FIRST guaranteed slot) truncated to whatever room remains,
+    (from the conversation, else the guaranteed slot) truncated to whatever room remains,
     or `""` when nothing fits at all -- the one item no stage above ever sacrifices, per the
     owner ruling "the owner's newest message first" (fe38e095) -- it is dropped LAST, if at
     all. This is the function's actual, load-bearing guarantee: `max_bytes`, when given, is
     NEVER exceeded by the return value, not merely "usually" or "in the common case" above.
 
-    Within the `budget_tokens` admission itself (TRDD-RAEGS1D5, owner per-item token cap): an
-    owner item beyond the one guaranteed slot is admitted at its capped cost
-    (`_OWNER_ITEM_TOKEN_CAP`, `_owner_item_admission_cost`), rendering as a verbatim prefix plus
-    a pointer when it is over that cap, rather than an all-or-nothing admit/evict decision on
-    its full size -- see that constant's own docstring for the real-transcript defect this
-    fixes. An owner item that still does not fit at all, even capped, becomes an ordinary
-    elided pointer, but `decision_passed` ones get first claim on the limited pointer slots
-    over any merely-relevant item (`_pointer_priority`, used everywhere this function ranks or
-    trims the elided-pointer list) -- a stated decision the user gave is never silently
-    unreachable just because the item that carried it did not fit inline. In the FULL
-    (`--out`) render specifically (`max_item_bytes is None`), this goes further: every elided
-    `decision_passed` item gets a pointer, essentially uncapped -- `max_elided_pointers` governs
-    only the remaining, non-decision-passing elided items there (see `_MAX_ELIDED_POINTERS`'s
-    own docstring for the real-transcript defect this closes). It renders as a compact
-    `id: preview` line (`_format_decision_pointer`), not the ordinary `_format_pointer` shape,
-    to keep the size growth from potentially hundreds of extra lines down. Past
-    `_MAX_DECISION_POINTERS` (400) even that list is bounded -- the newest survive, the rest
-    fold into one summary line (see that constant's own docstring for why an unbounded
-    decision-pointer list would reproduce the exact failure `_MAX_ELIDED_POINTERS` exists to
-    prevent). The injected copy selects its own pointers -- see `max_item_bytes` below.
+    Within the `budget_tokens` admission itself (TRDD-R9UXOSR5): one flat priority fill --
+    protected segments first, then relevance -- over every kept item. An item that does not
+    fit becomes an ordinary elided pointer. TRDD-R9UXOSR5: the old decision-pointer uncap and hard ceiling (every
+    elided `decision_passed` item uncapped, then capped at 400 -- TRDD-RAEGS1D5) went with the
+    decision question; `_MAX_ELIDED_POINTERS` again caps every elided item alike, selected by
+    `_pointer_priority` (protected first, then score). The injected copy selects its own
+    pointers -- see `max_item_bytes` below.
 
     `max_item_bytes`, when given (the injected copy; `--out` never passes it): after the shared
     `budget_tokens` stage, what is shown inline, what gets a pointer and what is only counted is
-    decided by `_select_injected` (TRDD-BLGZTHQ9 + TRDD-U6C3YXEL), which fits the render to
+    decided by `_select_injected` (TRDD-BLGZTHQ9), which fits the render to
     `max_bytes` by construction; see its docstring for the fill order and why. Kept items then
     render in that selection's priority order, not chronologically, and a kept item over its
     per-item cap renders as a verbatim prefix plus a pointer to the rest. `evict_key` only
@@ -2217,40 +1914,16 @@ def compose(
     # "never inlined" is the compose-time invariant the spec actually cares about -- this
     # function is where inlining happens, so this is where the guard has to hold even if a
     # caller builds `scores` by hand (as the tests do) instead of via `score_items`.
+    # TRDD-R9UXOSR5: the old unconditional force-admit of the newest owner item (owner ruling
+    # fe38e095, "the owner's newest message first") went with the decision question -- no
+    # owner item is ever a scored candidate any more, so there is no owner slot to guarantee;
+    # owner prose reaches the document through `conversation` instead (TRDD-D7RLXAN1).
     kept_items = [
         it for it in items if scores[it.id].kept and not scores[it.id].oversized
     ]
 
-    # TRDD-RAEGS1D5 (jev newest+3, owner ruling fe38e095 "the owner's newest message first"):
-    # the chronologically newest owner (`kind == "user"`) item is admitted UNCONDITIONALLY,
-    # regardless of Jev's own kept/oversized gate -- card 6's own disclosure (TRDD-88DOI824)
-    # found `guaranteed_owner_items` below silently dropped it whenever Jev itself scored it
-    # below threshold: measured on the 258 MB transcript, item `92828da9...` (the transcript's
-    # chronologically last owner message, content "resume") scored relevance=0.29,
-    # decision=0.22, both under the 0.5 default thresholds, so `kept=False` and it never
-    # reached `kept_items` at all. Excludes only an `oversized` item -- its raw text was never
-    # even sent to Jev, and this function's own "never inlined" invariant (see
-    # `_oversized_preview`) must still hold for it; a `blocked` item (never scored, e.g. a
-    # provider firewall block) is NOT excluded -- its text is intact, and "whatever its score"
-    # includes "no score at all". Force-added to `kept_items` ITSELF (not just to
-    # `guaranteed_owner_items` below) so every downstream consumer -- `total_tokens`,
-    # `kept_ids`, `elided_items`, the `budget_tokens` eviction branch -- treats it uniformly
-    # with an item Jev actually kept, instead of needing its own special case at each site.
-    _newest_owner_ever = next(
-        (
-            it for it in sorted(items, key=lambda it: it.turn, reverse=True)
-            if it.kind == "user" and not scores[it.id].oversized
-        ),
-        None,
-    )
-    if _newest_owner_ever is not None and _newest_owner_ever.id not in {
-        it.id for it in kept_items
-    }:
-        kept_items = kept_items + [_newest_owner_ever]
-
     def max_score(it: Item) -> float:
-        s = scores[it.id]
-        return max(s.relevance, s.decision)
+        return scores[it.id].relevance
 
     # Card 6 follow-up (coordinator review of commit 3006e92f, addition 2): on a real 258 MB
     # transcript, 3 segments of ONE diff (`Item.protected`) outcompeted segments/whole items
@@ -2262,7 +1935,7 @@ def compose(
     # consecutive turns, so this is simply the first one). Any FURTHER segment of the same
     # source item competes purely by relevance/recency, the same tier a plain item gets.
     # The winner is chosen from `kept_items` ONLY, never from `items` (adversarial review of
-    # this change): `score_items` gives an oversized item relevance=1.0/decision=1.0 and
+    # this change): `score_items` gives an oversized item relevance=1.0 and
     # `kept=False`, so over `items` an oversized segment always wins the boost for its source
     # yet never reaches any ranking below -- leaving ZERO of that source's kept segments
     # boosted instead of one.
@@ -2280,127 +1953,42 @@ def compose(
     def _effective_protected(it: Item) -> bool:
         return it.protected and _protected_boost_id.get(_source_item_id(it.id)) == it.id
 
-    def evict_key(it: Item) -> tuple[bool, bool, float, int]:
-        # (decision_passed, protected, max_score, turn) ascending: a relevance-only item
-        # (`False`, `False`) sorts, and is dropped, BEFORE any item that passed the decision
-        # question -- "never let the budget undo the decision question" (a user-stated
-        # decision, constraint, correction or instruction the user gave later work must obey
-        # is worse to lose than merely-relevant background). Card 6 (TRDD-88DOI824): a
-        # `protected` segment (stacktrace/diff, see `Item.protected`) sits in its own tier
-        # between the two -- it is structurally important even when Jev scores it as
-        # merely-relevant, but never outranks an actual stated decision. Within each tier,
-        # lowest score first, oldest (smallest `turn`) among equal scores. `_effective_
-        # protected` (not the raw `it.protected`), per the "at most one segment per source
-        # item" cap above.
-        return (scores[it.id].decision_passed, _effective_protected(it), max_score(it), it.turn)
-
-    # TRDD-RAEGS1D5 (orchestrator rebalance) + coordinator ruling: TWO owner items are
-    # guaranteed a slot, uncapped, ahead of every per-item cap -- the chronologically newest
-    # owner message (by `turn`, unconditionally) AND the newest `decision_passed` owner item
-    # (if one exists and differs from the first; they may be the same item, in which case
-    # there is only one). Commit d4fa7685 narrowed the ORIGINAL single guaranteed slot to
-    # "newest decision-passing, else newest plain", which silently dropped the genuinely
-    # newest owner message whenever an OLDER decision-passing one existed (measured on the
-    # 258 MB transcript: item id `92828da9...`, the chronologically newest owner message, was
-    # absent from both the full and the injected copy) -- reintroducing, in the opposite
-    # direction, the same class of bug the pre-d4fa7685 "always newest" rule had (see
-    # `test_guaranteed_owner_slot_prefers_newest_decision_passed_over_newest_plain`'s own
-    # docstring/history for that earlier failure mode). Both guaranteed items now coexist:
-    # neither displaces the other.
-    #
-    # Computed here, from `kept_items` (BEFORE any eviction), because BOTH consumers need it
-    # regardless of whether `total_tokens > budget_tokens` ever triggers eviction below: the
-    # admission branch force-admits these ids at FULL size (never `_owner_item_admission_
-    # cost`-capped), and `render`'s per-item cap check (closing over this name) gives them
-    # `NEWEST_OWNER_ITEM_BYTES` instead of the general `max_item_bytes` in the injected copy
-    # even when NOTHING was evicted at the token level -- the byte-capped render is a
-    # separate, independent budget from `budget_tokens`. `kept_items` was already extended
-    # above (jev newest+3) with the unconditionally-guaranteed newest owner item when Jev
-    # itself did not keep it, so `owner_kept_all[0]` below is genuinely the newest owner item
-    # in `items`, not merely the newest one Jev happened to keep.
-    owner_kept_all = sorted(
-        (it for it in kept_items if it.kind == "user"), key=lambda it: it.turn, reverse=True,
-    )
-    guaranteed_owner_items: list[Item] = []
-    if owner_kept_all:
-        guaranteed_owner_items.append(owner_kept_all[0])  # newest owner message, always
-        newest_decision_owner_item = next(
-            (it for it in owner_kept_all if scores[it.id].decision_passed), None,
-        )
-        if (newest_decision_owner_item is not None
-                and newest_decision_owner_item.id != owner_kept_all[0].id):
-            guaranteed_owner_items.append(newest_decision_owner_item)
-    guaranteed_owner_ids: set[str] = {it.id for it in guaranteed_owner_items}
-    # TRDD-RAEGS1D5 (owner per-item token cap): item id -> the `_OWNER_ITEM_TOKEN_CAP` it was
-    # truncated to during the `budget_tokens` admission below -- declared here for the same
-    # reason `guaranteed_owner_ids` is (`render` closes over it and needs a name regardless of
-    # whether that admission branch ever runs). Empty means every kept item renders in full;
-    # only `--out` (which never sets `max_item_bytes`) actually reaches this in `render` --
-    # the injected copy's own byte cap is always tighter and fires first, see `render`'s
-    # per-item cap check.
-    token_truncated: dict[str, int] = {}
+    def evict_key(it: Item) -> tuple[bool, float, int]:
+        # (protected, max_score, turn) ascending: a relevance-only item sorts, and is
+        # dropped, BEFORE any `protected` segment. Card 6 (TRDD-88DOI824): a `protected`
+        # segment (stacktrace/diff, see `Item.protected`) is structurally important even when
+        # Jev scores it as merely-relevant. Within each tier, lowest score first, oldest
+        # (smallest `turn`) among equal scores. `_effective_protected` (not the raw
+        # `it.protected`), per the "at most one segment per source item" cap above.
+        # TRDD-R9UXOSR5: the old leading `decision_passed` term went with the decision
+        # question -- every scored item is now relevance-only.
+        return (_effective_protected(it), max_score(it), it.turn)
 
     total_tokens = sum(it.tokens for it in kept_items)
     kept_ids = {it.id for it in kept_items}
     if total_tokens > budget_tokens:
-        # TRDD-RAEGS1D5 (release blocker): admit by an owner-share-capped priority order
-        # instead of the old plain `evict_key` removal loop. `evict_key`'s (decision_passed,
-        # max_score, turn) ascending sort dropped every non-`decision_passed` item BEFORE any
-        # `decision_passed` one, no matter how relevant -- and `decision_passed` can only
-        # ever be True for a "user" item (`DECISION_QUESTION` above is never sent to any
-        # other kind). Measured on this repo's own 49 MB transcript (d30bf250,
-        # reports/compaction-replacement/): its 28 `decision_passed` "user" items alone
-        # total 14298 tokens, already over the 8000-token default `budget_tokens`, so every
-        # one of the 158 relevance-passing tool/assistant/event items (of 4141/1725/171
-        # scored) was evicted first and NONE survived -- a resumed session then only ever
-        # saw what the owner asked, never what was done. This mirrors the byte-tier
-        # owner-share ceiling (`_OWNER_SHARE`) below at the TOKEN level, so the FULL
-        # (`--out`) rendering -- which never sets `max_item_bytes` and so never reaches that
-        # byte tier -- gets the same guarantee as the injected copy, not a narrower one.
-        #
-        # TRDD-RAEGS1D5 (owner per-item token cap, review of this admission order): beyond the
-        # guaranteed slot, each owner item competes for the SHARE at its capped cost
-        # (`_owner_item_admission_cost`), not its full size -- an admit-whole-or-evict-whole
-        # decision on the full token count let a HANDFUL of huge owner messages consume the
-        # entire share themselves (measured on the 258 MB transcript: 58 owner items kept fell
-        # to 45), evicting every other owner item outright, decision-passing ones included,
-        # long before the share was actually spent. A capped item still costs its slot in the
-        # share and renders as a verbatim prefix + pointer (`token_truncated` below) instead of
-        # disappearing whole.
-        # `owner_kept_all`/`guaranteed_owner_items`/`guaranteed_owner_ids` were computed above
-        # `render`'s own name lookup, from `kept_items` -- reused here unchanged (same filter,
-        # same order) rather than recomputed, so the admission decision and the render-cap
-        # exemption can never disagree about which ids are guaranteed.
-        owner_kept = owner_kept_all
+        # TRDD-RAEGS1D5 (release blocker): admit by a priority order instead of the old plain
+        # `evict_key` removal loop. Measured on this repo's own 49 MB transcript (d30bf250,
+        # reports/compaction-replacement/): under the pre-card-5 evict_key sort, 28 "user"
+        # items alone totaled 14298 tokens, already over the 8000-token default
+        # `budget_tokens`, so every one of the 158 relevance-passing tool/assistant/event
+        # items (of 4141/1725/171 scored) was evicted first and NONE survived -- a resumed
+        # session then only ever saw what the owner asked, never what was done.
+        # TRDD-R9UXOSR5: the old owner-share stage on top of this went with the decision
+        # question -- `score_items` no longer produces a "user" group, so the token
+        # admission is one flat priority fill over every kept item.
         admitted: list[Item] = []
         admitted_tokens = 0
-        for guaranteed_it in guaranteed_owner_items:
-            admitted.append(guaranteed_it)
-            admitted_tokens += guaranteed_it.tokens
-        rest_of_owner_kept = [it for it in owner_kept if it.id not in guaranteed_owner_ids]
-        owner_token_budget = int(budget_tokens * _OWNER_SHARE)
-        token_owner_overflow: list[Item] = []
         for it in sorted(
-            rest_of_owner_kept,
-            key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
-        ):
-            cost, truncated = _owner_item_admission_cost(it)
-            if admitted_tokens + cost > owner_token_budget:
-                token_owner_overflow.append(it)  # may still fit once non-owner items are placed
-                continue
-            admitted.append(it)
-            admitted_tokens += cost
-            if truncated:
-                token_truncated[it.id] = _OWNER_ITEM_TOKEN_CAP
-        for it in sorted(
-            (it for it in kept_items if it.kind != "user"),
+            (it for it in kept_items),
             # Card 6 (TRDD-88DOI824): `_effective_protected(it)` (stacktrace/diff, capped to
-            # one segment per source item -- see that helper's own comment) slots in between
-            # `decision_passed` and plain relevance -- same tier as `evict_key`/
-            # `_pointer_priority` above, so a structurally-important segment is not starved
-            # out of the budget by a merely-more-relevant sibling.
+            # one segment per source item -- see that helper's own comment) ranks above plain
+            # relevance -- same tier as `evict_key`/`_pointer_priority` above, so a
+            # structurally-important segment is not starved out of the budget by a
+            # merely-more-relevant sibling. TRDD-R9UXOSR5: the old owner-share stage went
+            # with the decision question -- one flat priority fill.
             key=lambda it: (
-                scores[it.id].decision_passed, _effective_protected(it), max_score(it), it.turn,
+                _effective_protected(it), max_score(it), it.turn,
             ),
             reverse=True,
         ):
@@ -2408,40 +1996,19 @@ def compose(
                 continue  # a smaller lower-priority item further down may still fit
             admitted.append(it)
             admitted_tokens += it.tokens
-        for it in token_owner_overflow:
-            # TRDD-RAEGS1D5: still capped, not restored to full size -- an item that did not
-            # fit the owner share even truncated gets the SAME capped shot at the leftover
-            # general budget, never a second chance to be admitted whole.
-            cost, truncated = _owner_item_admission_cost(it)
-            if admitted_tokens + cost > budget_tokens:
-                continue
-            admitted.append(it)
-            admitted_tokens += cost
-            if truncated:
-                token_truncated[it.id] = _OWNER_ITEM_TOKEN_CAP
         kept_ids = {it.id for it in admitted}
         total_tokens = admitted_tokens
 
-    def _pointer_priority(it: Item) -> tuple[bool, bool, float]:
-        # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): "evicted decision-passing
-        # items get first claim on the pointer slots" -- an owner item the budget admission
-        # above could not fit even truncated (see `token_truncated`) still names a decision,
-        # constraint or correction the user gave; it must not lose its one remaining pointer
-        # slot to a merely-relevant item just because the latter scores marginally higher.
-        # Card 6 (TRDD-88DOI824): a `protected` segment (stacktrace/diff) gets the same
-        # middle-tier claim `evict_key` gives it -- same rationale, same ordering; capped to
-        # one segment per source item, per `_effective_protected`'s own comment.
-        return (scores[it.id].decision_passed, _effective_protected(it), max_score(it))
+    def _pointer_priority(it: Item) -> tuple[bool, float]:
+        # Card 6 (TRDD-88DOI824): a `protected` segment (stacktrace/diff) gets first claim on
+        # the pointer slots over any merely-more-relevant item; capped to one segment per
+        # source item, per `_effective_protected`'s own comment. TRDD-R9UXOSR5: the old
+        # leading `decision_passed` term went with the decision question.
+        return (_effective_protected(it), max_score(it))
 
-    # TRDD-BLGZTHQ9 (amendment S4): the per-item cap `render()` gives BOTH guaranteed owner
-    # items in the injected copy. `NEWEST_OWNER_ITEM_BYTES` until the injected selection below
-    # shrinks it to its share of the room; it has to be a name `render()` reads at call time
-    # (not a render() argument) because every later render -- the backstop's included -- must
-    # use the same cap the selection costed, or the exact-fit arithmetic breaks.
-    guaranteed_item_cap = NEWEST_OWNER_ITEM_BYTES
     # TRDD-SK490HKU: per-id cap override for an item the second fill pass (`_select_injected`
-    # step 6b) admitted WHOLE past its normal `non_owner_item_bytes` cap -- a name `render()`
-    # reads at call time, like `guaranteed_item_cap`/`token_truncated` above, so every render
+    # step 2b) admitted WHOLE past its normal `non_owner_item_bytes` cap -- a name `render()`
+    # reads at call time, so every render
     # (the backstop's re-renders included) agrees with what the selection actually costed. Set
     # below once `selection.whole` is known; empty here so the pre-selection baseline render
     # (which has no kept items yet) is unaffected.
@@ -2449,13 +2016,6 @@ def compose(
 
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
-    # Shared by both "N more not listed" summary lines below (the pre-existing one and the
-    # decision-ceiling one) -- same underlying `expand --list` command either way, so it is
-    # built once instead of twice.
-    expand_list_cmd = (
-        'uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
-        f"{transcript_path} --list --grep TEXT"
-    )
 
     # TRDD-D7RLXAN1: the conversation section and the READ FIRST line -- FIXED text for render(),
     # which reads both names at call time. Filled in below, after the injected render's baseline
@@ -2465,7 +2025,6 @@ def compose(
 
     def render(
         kept_order: list[Item], elided: list[Item], hidden: int, digest_text: str,
-        decision_hidden: int = 0,
     ) -> str:
         lines: list[str] = [
             *([read_first] if read_first else []),
@@ -2493,29 +2052,20 @@ def compose(
         lines.append("## Kept items")
         for it in kept_order:
             lines.append(f"-- {it.kind} {it.id} --")
-            # TRDD-RAEGS1D5 (orchestrator rebalance) + coordinator ruling: BOTH guaranteed
-            # owner items (the newest message, and the newest decision-passing one when it
-            # differs -- see `guaranteed_owner_ids`'s own docstring above) get the larger
-            # `guaranteed_item_cap` (`NEWEST_OWNER_ITEM_BYTES`, or its share of the room once
-            # the injected selection sets it) instead of the general `max_item_bytes` -- this
-            # includes the unconditionally-guaranteed newest owner item added above even when
-            # Jev itself never kept it (coordinator addition: "stays capped at the existing
-            # 1,500-byte newest-owner limit... prefix plus pointer beyond that"). A non-owner
-            # item, when `non_owner_item_bytes` is given, gets ITS OWN (smaller) cap instead
-            # of `max_item_bytes` -- see that parameter's own docstring; every OTHER owner
-            # item keeps `max_item_bytes` unchanged.
+            # A non-owner item, when `non_owner_item_bytes` is given, gets ITS OWN (smaller)
+            # cap instead of `max_item_bytes` -- see that parameter's own docstring. An owner
+            # item (a conversation-kind item a test built directly) keeps `max_item_bytes`.
+            # TRDD-R9UXOSR5: the old guaranteed-owner cap exception
+            # (`guaranteed_item_cap`, `NEWEST_OWNER_ITEM_BYTES` via
+            # `_INJECT_NEWEST_OWNER_SHARE`) went with the decision question.
             cap = (
-                guaranteed_item_cap
-                if max_item_bytes is not None and it.id in guaranteed_owner_ids
-                else (
-                    non_owner_item_bytes
-                    if (
-                        max_item_bytes is not None
-                        and non_owner_item_bytes is not None
-                        and it.kind != "user"
-                    )
-                    else max_item_bytes
+                non_owner_item_bytes
+                if (
+                    max_item_bytes is not None
+                    and non_owner_item_bytes is not None
+                    and it.kind != "user"
                 )
+                else max_item_bytes
             )
             # TRDD-SK490HKU: an item the second fill pass admitted WHOLE past its normal cap
             # must also RENDER whole, or the document shrinks while the item silently reverts
@@ -2531,7 +2081,6 @@ def compose(
                 lines.append(block)
                 continue
             text_bytes = it.text.encode("utf-8")
-            token_cap = token_truncated.get(it.id)
             if cap is not None and len(text_bytes) > cap:
                 # TRDD-SK490HKU: 90e890ce's "over-cap non-owner item is pointer-only" branch is
                 # deleted here -- `_select_injected` only ever inlines a tool/event item when it
@@ -2547,16 +2096,6 @@ def compose(
                 # evicted whole the way the old byte backstop did.
                 lines.append(_truncate_prefix_bytes(it.text, cap))
                 lines.append(_format_pointer(it))
-            elif token_cap is not None:
-                # TRDD-RAEGS1D5 (owner per-item token cap): the `--out` rendering never sets
-                # `max_item_bytes`, so the branch above never fires for it -- this is its own
-                # verbatim-prefix-plus-pointer lever, populated only for an owner item the
-                # `budget_tokens` admission above capped rather than admitted whole (see
-                # `_OWNER_ITEM_TOKEN_CAP`). For the injected copy the byte cap is always
-                # tighter (700-1500 B, well under this cap's ~1750-char worth), so the branch
-                # above fires first there and this one is effectively `--out`-only.
-                lines.append(_truncate_prefix_tokens(it.text, token_cap))
-                lines.append(_format_pointer(it))
             else:
                 lines.append(it.text)
 
@@ -2565,13 +2104,6 @@ def compose(
         elided_ids = {it.id for it in elided}
         for it in items:
             if it.id in elided_ids:
-                # TRDD-RAEGS1D5 (full-copy decision-pointer uncap): a decision-passing item
-                # is never oversized or blocked (`score_items` sets `decision_passed=False`
-                # on both paths -- see their own Scores construction), so the compact line is
-                # always the whole story for it; nothing below this branch ever applies.
-                if max_item_bytes is None and scores[it.id].decision_passed:
-                    lines.append(_format_decision_pointer(it))
-                    continue
                 lines.append(_format_pointer(it))
                 if scores[it.id].oversized:
                     # TRDD-RAEGS1D5 requirement 4: the 20-line oversized preview is fine in
@@ -2588,15 +2120,6 @@ def compose(
                     # cannot tell "Jev never got to see this" apart from "Jev saw it and it
                     # wasn't worth keeping", and only the former is worth a manual `expand`.
                     lines.append("unscored (provider firewall)")
-        if decision_hidden:
-            # TRDD-RAEGS1D5 (decision-pointer hard ceiling): the `_MAX_DECISION_POINTERS`
-            # trim's own summary line -- the OLDEST decision items past the ceiling, never
-            # named individually (see that constant's docstring for why), still reachable by
-            # the same `expand --list` command the "more items not listed" line below uses.
-            lines.append(
-                f"... and {decision_hidden} more decision items: run `{expand_list_cmd}` "
-                "to list them"
-            )
         if hidden:
             # Card 5 content-fit (TRDD-RAEGS1D5, item 3): a bare "N more items not listed" was
             # a dead end -- `expand` needs an id, and an id not shown here could never be
@@ -2664,13 +2187,6 @@ def compose(
         # monotone form of the count fix the TRDD-AW4XD53Q review had to revert.
         baseline = len(render([], [], len(items), digest_text).encode("utf-8"))
         available = None if max_bytes is None else max(0, max_bytes - baseline)
-        if available is not None:
-            # Amendment S4: never above 1,500 B, never below the general owner cap (a room too
-            # small for 35% of it to hold even an ordinary owner item is the backstop's case).
-            guaranteed_item_cap = min(
-                NEWEST_OWNER_ITEM_BYTES,
-                max(max_item_bytes, int(available * _INJECT_NEWEST_OWNER_SHARE)),
-            )
         non_owner_cap = non_owner_item_bytes if non_owner_item_bytes is not None else max_item_bytes
         cands: list[_InjectCandidate] = []
         for it in items:
@@ -2697,7 +2213,7 @@ def compose(
             # excerpt is never shown whole (see `_InjectCandidate.whole_cost`'s own docstring).
             whole_cost: int | None = None
             if it.kind == "user":
-                cap = guaranteed_item_cap if it.id in guaranteed_owner_ids else max_item_bytes
+                cap = max_item_bytes
                 # Amendment S1: only what the token stage kept may be inline -- the injected
                 # copy stays a subset of what Jev kept; everything else can only be pointed at.
                 inline_cost = _inline_cost(it, cap) if it.id in kept_ids else None
@@ -2766,7 +2282,6 @@ def compose(
                               and inline_cost is None else None)
             cands.append(_InjectCandidate(
                 id=it.id, kind=it.kind, turn=it.turn, score=max_score(it),
-                decision_passed=s.decision_passed, guaranteed=it.id in guaranteed_owner_ids,
                 inline_cost=inline_cost, pointer_cost=pointer_cost,
                 pointer_eligible=pointer_eligible, whole_cost=whole_cost,
             ))
@@ -2780,9 +2295,8 @@ def compose(
         relaxed_cap.update({i: len(by_id[i].text.encode("utf-8")) for i in selection.whole})
         kept_order_list = [by_id[i] for i in selection.kept]
         # render() walks `items` for the "## Elided" list, so pointers stay chronological.
-        shown_elided = [by_id[i] for i in (*selection.pointers, *selection.decision_pointers)]
+        shown_elided = [by_id[i] for i in selection.pointers]
         hidden_count = selection.hidden
-        decision_hidden_count = 0
     else:
         # `items` is already chronological, so filtering it (rather than re-sorting) keeps the
         # elided list chronological for free -- `max_elided_pointers` below only needs to pick
@@ -2790,46 +2304,26 @@ def compose(
         elided_items = [it for it in items if it.id not in kept_ids]
         hidden_count = 0
 
-        # TRDD-RAEGS1D5 (full-copy decision-pointer uncap): in the FULL render only
-        # (`max_item_bytes is None` -- the injected copy always passes it, see `render`'s per-item
-        # cap check elsewhere in this function), split off every elided decision-passing item
-        # BEFORE the cap is applied, so it is never competing for one of `max_elided_pointers`
-        # slots at all -- `decision_passed` can only ever be True for a "user"/owner item
-        # (`score_items` only ever asks the decision question of a "user" batch), so this already
-        # selects exactly "elided decision-passing owner item". `_MAX_ELIDED_POINTERS`'s own
-        # docstring above has the real-data motivation.
-        decision_elided = [it for it in elided_items if scores[it.id].decision_passed]
-        other_elided = [it for it in elided_items if not scores[it.id].decision_passed]
-
-        # TRDD-RAEGS1D5 (decision-pointer hard ceiling): see `_MAX_DECISION_POINTERS`'s own
-        # docstring for why this exists. Newest-first, unlike `_pointer_priority` elsewhere in
-        # this function -- every item here already shares one priority tier (decision_passed),
-        # so recency is what actually distinguishes them for a resumed session.
-        decision_hidden_count = 0
-        if len(decision_elided) > _MAX_DECISION_POINTERS:
-            newest_first = sorted(decision_elided, key=lambda it: it.turn, reverse=True)
-            shown_decision = newest_first[:_MAX_DECISION_POINTERS]
-            decision_hidden_count = len(decision_elided) - len(shown_decision)
-        else:
-            shown_decision = decision_elided
-
-        if len(other_elided) > max_elided_pointers:
-            # Highest priority first -- decision_passed items before any non-decision one,
-            # highest max(relevance, decision) as the tiebreak -- the items most worth a pointer
-            # are the ones the model was closest to keeping, not an arbitrary chronological
-            # head/tail.
+        # TRDD-R9UXOSR5: one pointer class again. The old decision-pointer uncap + hard
+        # ceiling (TRDD-RAEGS1D5) split elided items into `decision_elided`/`other_elided`
+        # and gave the former up to `_MAX_DECISION_POINTERS` compact `id: preview` lines;
+        # both went with the decision question, so `max_elided_pointers` caps every elided
+        # item alike, ranked by `_pointer_priority`.
+        if len(elided_items) > max_elided_pointers:
+            # Highest priority first -- protected segments before plain items, highest
+            # relevance as the tiebreak -- the items most worth a pointer are the ones the
+            # model was closest to keeping, not an arbitrary chronological head/tail.
             top_ids = {
                 it.id
-                for it in sorted(other_elided, key=_pointer_priority, reverse=True)[:max_elided_pointers]
+                for it in sorted(elided_items, key=_pointer_priority, reverse=True)[:max_elided_pointers]
             }
-            shown_other = [it for it in other_elided if it.id in top_ids]
-            hidden_count = len(other_elided) - len(shown_other)
+            shown_elided = [it for it in elided_items if it.id in top_ids]
+            hidden_count = len(elided_items) - len(shown_elided)
         else:
-            shown_other = other_elided
-        shown_elided = shown_decision + shown_other
+            shown_elided = elided_items
         kept_order_list = [it for it in items if it.id in kept_ids]  # `items` is chronological
 
-    doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+    doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
     if max_bytes is None or len(doc.encode("utf-8")) <= max_bytes:
         return doc
 
@@ -2838,18 +2332,18 @@ def compose(
     # previous ones were not enough; lists are popped from one end so this is bounded (at most
     # `len(items)` iterations total) and never loops forever.
 
-    # (1) pointers, lowest `_pointer_priority` first -- ties broken by lowest score, but a
-    # decision_passed pointer is never dropped ahead of a non-decision one (same "first claim"
-    # rule the two earlier pointer selections already use). Cheapest sacrifice: a dropped
-    # pointer's item is still recoverable via `expand --list --grep`, unlike a kept item
-    # evicted below, which vanishes with no trace at all.
+    # (1) pointers, lowest `_pointer_priority` first -- a protected segment's pointer is never
+    # dropped ahead of a plain one (same "first claim" rule the earlier pointer selections
+    # already use). Cheapest sacrifice: a dropped pointer's item is still recoverable via
+    # `expand --list --grep`, unlike a kept item evicted below, which vanishes with no trace
+    # at all.
     if len(doc.encode("utf-8")) > max_bytes and shown_elided:
         ranked = sorted(shown_elided, key=_pointer_priority)
         while ranked and len(doc.encode("utf-8")) > max_bytes:
             dropped = ranked.pop(0)
             shown_elided = [it for it in shown_elided if it.id != dropped.id]
             hidden_count += 1
-            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     # (2) non-owner kept items, lowest priority first, down to a floor of `_NON_OWNER_FLOOR` --
     # coordinator ruling (TRDD-RAEGS1D5, budget floor round 5, on the round 4 regression report):
@@ -2864,11 +2358,10 @@ def compose(
     # In injected mode this is the REVERSE of the non-owner slice of the priority order
     # `kept_order_list` already encodes above (`_select_injected`'s fill order).
     # Every other caller (`--out` never passes `max_item_bytes` in production; this branch only
-    # runs under direct test) keeps `evict_key` -- the SAME (decision_passed, max_score, turn)
+    # runs under direct test) keeps `evict_key` -- the SAME (protected, max_score, turn)
     # priority the `budget_tokens` eviction above already uses -- not by bare chronological
-    # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop a
-    # decision-passed item (a user instruction/correction the budget eviction deliberately
-    # protects) ahead of a newer, lower-priority relevance-only item just because it happens to
+    # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop an
+    # older item ahead of a newer, lower-priority relevance-only one just because it happens to
     # be older. Oldest-among-equal-priority is still the tiebreaker in both, matching the
     # "oldest kept items first" instruction wherever priority does not already decide it.
     if max_item_bytes is not None:
@@ -2886,31 +2379,24 @@ def compose(
     ):
         dropped_id = non_owner_evict_order.pop(0).id
         kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
-    # (3) non-guaranteed-owner kept items, lowest priority first -- `guaranteed_owner_items` (the
-    # newest owner message, always, plus the newest decision item when it differs) is excluded;
-    # see (6) and the terminal stage below for when either of those two is ever sacrificed. The
-    # floor from (2) is NOT touched here -- deferred to (4), only if this alone is not enough.
+    # (3) owner-kind kept items, lowest priority first -- reachable only under a hand-built
+    # `scores` (production `score_items` never yields one). The floor from (2) is NOT touched
+    # here -- deferred to (4), only if this alone is not enough.
     if len(doc.encode("utf-8")) > max_bytes:
         if max_item_bytes is not None:
-            non_guaranteed_owner_tier = [
-                it for it in kept_order_list
-                if it.kind == "user" and it.id not in guaranteed_owner_ids
-            ]
-            evict_order = list(reversed(non_guaranteed_owner_tier))
+            owner_tier = [it for it in kept_order_list if it.kind == "user"]
+            evict_order = list(reversed(owner_tier))
         else:
             evict_order = sorted(
-                (
-                    it for it in kept_order_list
-                    if it.kind == "user" and it.id not in guaranteed_owner_ids
-                ),
+                (it for it in kept_order_list if it.kind == "user"),
                 key=evict_key,
             )
         while evict_order and len(doc.encode("utf-8")) > max_bytes:
             dropped_id = evict_order.pop(0).id
             kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
-            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     # (4) the remaining non-owner items BELOW the floor -- only reached once (2)+(3) together
     # were not enough. Continues `non_owner_evict_order` (2) already built and stopped partway
@@ -2918,7 +2404,7 @@ def compose(
     while non_owner_evict_order and len(doc.encode("utf-8")) > max_bytes:
         dropped_id = non_owner_evict_order.pop(0).id
         kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     # (5) the digest, truncated to whatever room remains.
     if len(doc.encode("utf-8")) > max_bytes and digest_text:
@@ -2927,17 +2413,7 @@ def compose(
         note_bytes = len(_DIGEST_TRUNCATED_NOTE.encode("utf-8"))
         keep = max(0, len(digest_bytes) - overflow - note_bytes)
         digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
-
-    # (6) the newest DECISION item -- the second guaranteed slot (owner ruling, commit
-    # aabd8b0c) -- sacrificed on its own, distinct from (2)-(4), only once the digest is
-    # already spent and only when it still differs from the newest owner message (an empty
-    # `guaranteed_owner_items[1:]` means there is nothing here to drop).
-    if len(doc.encode("utf-8")) > max_bytes and len(guaranteed_owner_items) > 1:
-        decision_id = guaranteed_owner_items[1].id
-        if any(it.id == decision_id for it in kept_order_list):
-            kept_order_list = [it for it in kept_order_list if it.id != decision_id]
-            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     if len(doc.encode("utf-8")) > max_bytes:
         # TRDD-RAEGS1D5 (compose() budget floor round 3): every lever above only shrinks the
@@ -2951,8 +2427,7 @@ def compose(
         # TRDD-D7RLXAN1: owner messages now arrive in `conversation`, never in `items`, so the
         # newest one comes from there (owner ruling fe38e095 still holds at this last stage).
         conv_owner = [it for it in conversation or [] if it.kind == "user"]
-        newest_owner = (conv_owner[-1] if conv_owner
-                        else guaranteed_owner_items[0] if guaranteed_owner_items else None)
+        newest_owner = conv_owner[-1] if conv_owner else None
         doc = _render_minimal_fallback(newest_owner, max_bytes)
 
     return doc

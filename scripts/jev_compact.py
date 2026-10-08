@@ -31,10 +31,11 @@ Sub-commands:
                                       threshold T against the persisted shadow decision log
                                       (TRDD-N9LDHF7N card 7) -- no Jev call, no transcript
                                       walk, just the scores past `compact` runs already
-                                      logged. `--question relevance|decision` (default
-                                      "relevance") picks which of the two logged questions to
-                                      replay; see scripts/lib/jev_shadow_log.py's module
-                                      header for what each one means. Always exits 0 (an
+                                      logged. `--question relevance` (the only choice since
+                                      TRDD-R9UXOSR5 retired the decision question) selects
+                                      which logged question to replay; see
+                                      scripts/lib/jev_shadow_log.py's module header for what
+                                      it means. Always exits 0 (an
                                       empty/missing log just replays as zero decisions).
   compact --transcript P --out F   — compose the compacted context (card 3) and write it to
                                       F atomically. Exit code contract (a part C caller
@@ -173,7 +174,6 @@ _RATE_LIMIT_MAX_TTL_S = 300
 # mirror). Defaults match docs_dev/jev-compaction-spec.md card 3 / jev_compaction.py.
 _BUDGET_ENV = "CLAUDE_PLUGIN_OPTION_JEV_COMPACT_BUDGET_TOKENS"
 _RELEVANCE_ENV = "CLAUDE_PLUGIN_OPTION_JEV_RELEVANCE_THRESHOLD"
-_DECISION_ENV = "CLAUDE_PLUGIN_OPTION_JEV_DECISION_THRESHOLD"
 _DEFAULT_BUDGET_TOKENS = 8000
 
 
@@ -695,7 +695,6 @@ def cmd_compact(args: argparse.Namespace) -> int:
         scores = jc.score_items(
             scored, digest, client,
             relevance_threshold=args.relevance_threshold,
-            decision_threshold=args.decision_threshold,
         )
     except JevBudgetError as exc:
         # A budget violation is the planner's own bug (a request shape it should never have
@@ -735,7 +734,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         # unscored item is skipped before it, advisor finding E); the prose rows just vanish.
         jsl.log_decisions(
             scored, scores,
-            relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
+            relevance_threshold=args.relevance_threshold,
             # TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the
             # detached background lane can both `compact` the same just-closed session's
             # transcript -- `session_key` (already threaded through for the compose header) plus
@@ -864,7 +863,10 @@ def main(argv: list[str] | None = None) -> int:
         "replay", help="print ShadowStats for a hypothetical threshold (TRDD-N9LDHF7N card 7)"
     )
     p_replay.add_argument("--threshold", type=float, required=True)
-    p_replay.add_argument("--question", choices=["relevance", "decision"], default="relevance")
+    # TRDD-R9UXOSR5: only "relevance" remains. The old "decision" choice replayed the
+    # retrieve rows the retired decision question logged; old on-disk retrieve rows are now
+    # unselectable by design (no compatibility shim).
+    p_replay.add_argument("--question", choices=["relevance"], default="relevance")
 
     p_compact = sub.add_parser("compact", help="compose the compacted context (card 3)")
     p_compact.add_argument("--transcript", required=True)
@@ -879,10 +881,6 @@ def main(argv: list[str] | None = None) -> int:
     p_compact.add_argument(
         "--relevance-threshold", type=float,
         default=_coerce_float(state.plugin_option(_RELEVANCE_ENV), jc.DEFAULT_RELEVANCE_THRESHOLD),
-    )
-    p_compact.add_argument(
-        "--decision-threshold", type=float,
-        default=_coerce_float(state.plugin_option(_DECISION_ENV), jc.DEFAULT_DECISION_THRESHOLD),
     )
     # Card 5 two-renderings (TRDD-RAEGS1D5): `--out` is now ALWAYS the full, card-3-sized
     # document -- these two apply ONLY to the optional `--inject-out` rendering below, never to

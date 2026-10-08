@@ -50,12 +50,12 @@ def _item(id_: str, kind: str = "assistant", text: str = "hello", tokens: int = 
 
 
 def _score(
-    relevance: float = 0.9, decision: float = 0.0, oversized: bool = False,
-    kept: bool = True, decision_passed: bool = False, blocked: bool = False,
+    relevance: float = 0.9, oversized: bool = False,
+    kept: bool = True, blocked: bool = False,
 ) -> Any:
     return SimpleNamespace(
-        relevance=relevance, decision=decision, oversized=oversized, kept=kept,
-        decision_passed=decision_passed, blocked=blocked,
+        relevance=relevance, oversized=oversized, kept=kept,
+        blocked=blocked,
     )
 
 
@@ -76,7 +76,7 @@ def test_shadow_log_path_lands_in_state_dir_not_repo_tree(project_dir: Path) -> 
 def test_log_decisions_writes_under_the_state_dir(project_dir: Path) -> None:
     items = [_item("u-1:0", kind="user")]
     scores = {"u-1:0": _score()}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
     path = jsl.shadow_log_path()
     assert path.exists()
     assert path.parent == project_dir / ".janitor" / "state"
@@ -85,31 +85,28 @@ def test_log_decisions_writes_under_the_state_dir(project_dir: Path) -> None:
 # --- per-item, per-question logging shape -------------------------------------------------- #
 
 
-def test_log_decisions_logs_admit_for_every_item_and_retrieve_only_for_user(project_dir: Path) -> None:
+def test_log_decisions_logs_one_admit_row_per_item_and_never_a_retrieve_row(project_dir: Path) -> None:
+    """TRDD-R9UXOSR5: one row per scored item. The old per-"user"-item retrieve row is gone
+    with the decision question -- even a "user"-kind item gets exactly its admit row."""
     items = [
         _item("u-1:0", kind="user", text="a decision the user made"),
         _item("a-1:1", kind="assistant", text="an assistant reply"),
     ]
     scores = {
-        "u-1:0": _score(relevance=0.9, decision=0.8, kept=True, decision_passed=True),
-        "a-1:1": _score(relevance=0.1, decision=0.0, kept=False, decision_passed=False),
+        "u-1:0": _score(relevance=0.9, kept=True),
+        "a-1:1": _score(relevance=0.1, kept=False),
     }
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     rows = _read_jsonl(jsl.shadow_log_path())
     admit_rows = [r for r in rows if r["kind"] == "admit"]
     retrieve_rows = [r for r in rows if r["kind"] == "retrieve"]
     assert {r["item_id"] for r in admit_rows} == {"u-1:0", "a-1:1"}
-    # suffixed, never the bare id -- see jsl._RETRIEVE_ROW_ID_SUFFIX's own comment: sharing
-    # the admit row's bare item_id here would collide in ShadowLog.stats()'s/.replay()'s
-    # internal per-item action map (keyed by item_id alone), silently discarding the admit
-    # row's real "kept"/"elided" action for this item.
-    assert {r["item_id"] for r in retrieve_rows} == {"u-1:0#decision"}  # only the "user" item
+    assert retrieve_rows == []  # no "retrieve" row is ever logged again
 
     by_id = {r["item_id"]: r for r in admit_rows}
     assert by_id["u-1:0"]["action"] == "kept"
     assert by_id["a-1:1"]["action"] == "elided"
-    assert retrieve_rows[0]["action"] == "injected"
     # previews are transcript content -- capped at 200 chars (jevctx.shadow.PREVIEW_CHARS)
     assert len(by_id["u-1:0"]["text_preview"]) <= 200
 
@@ -120,7 +117,7 @@ def test_log_decisions_skips_blocked_and_oversized_items(project_dir: Path) -> N
         "b-1:0": _score(blocked=True),
         "o-1:0": _score(oversized=True),
     }
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
     path = jsl.shadow_log_path()
     # never scored for real -- logging the sentinel Scores would corrupt replay, so nothing
     # is written and the file is never even created.
@@ -133,7 +130,7 @@ def test_log_decisions_skips_blocked_and_oversized_items(project_dir: Path) -> N
 def test_expand_of_elided_id_counts_as_a_false_negative(project_dir: Path) -> None:
     items = [_item("a-1:1", kind="assistant")]
     scores = {"a-1:1": _score(relevance=0.1, kept=False)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     jsl.log_expand_outcome("a-1:1")
 
@@ -146,7 +143,7 @@ def test_expand_of_elided_id_counts_as_a_false_negative(project_dir: Path) -> No
 def test_expand_of_a_kept_id_is_not_a_false_negative(project_dir: Path) -> None:
     items = [_item("a-1:1", kind="assistant")]
     scores = {"a-1:1": _score(relevance=0.9, kept=True)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     jsl.log_expand_outcome("a-1:1")  # expanding a KEPT item is not evidence of over-elision
 
@@ -158,20 +155,21 @@ def test_expand_of_an_elided_user_item_is_still_a_false_negative_via_vendored_st
     project_dir: Path,
 ) -> None:
     """Regression test for a post-write review finding (TRDD-N9LDHF7N card 7): a "user" item
-    gets TWO rows (admit + retrieve). ShadowLog.stats() builds its internal per-item action
-    map as `{item_id: action ...}` -- a plain dict keyed ONLY by item_id, with no `kind` --
-    so two rows sharing one item_id collapse to one slot (last write wins). Before this was
-    fixed by suffixing the retrieve row's item_id (jsl._RETRIEVE_ROW_ID_SUFFIX), an elided
-    "user" item's admit row was silently overwritten by its own retrieve row in that map, and
+    USED TO get two rows (admit + retrieve). ShadowLog.stats() builds its internal per-item
+    action map as `{item_id: action ...}` -- a plain dict keyed ONLY by item_id, with no
+    `kind` -- so two rows sharing one item_id collapse to one slot (last write wins). Before
+    this was fixed by suffixing the retrieve row's item_id, an elided "user" item's admit row
+    was silently overwritten by its own retrieve row in that map, and
     `ShadowLog.load(path).stats().false_negatives` never counted its expand -- even though
     the SAME item's admit row, read directly off disk, plainly says action="elided". This
     test reads the raw file through the VENDORED module's own public `.stats()`, not this
-    module's kind-filtered `replay_stats` wrapper (which was never affected)."""
+    module's kind-filtered `replay_stats` wrapper (which was never affected).
+    TRDD-R9UXOSR5: the retrieve row no longer exists at all -- one row per item -- but the
+    stats path itself must keep counting an elided item's expand as a false negative."""
     items = [_item("u-1:0", kind="user")]
-    # relevance alone would elide it, and the decision gate does NOT rescue it either --
-    # both rows exist, and the admit row's real action must still be "elided".
-    scores = {"u-1:0": _score(relevance=0.1, decision=0.2, kept=False, decision_passed=False)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    # relevance alone elides it.
+    scores = {"u-1:0": _score(relevance=0.1, kept=False)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     rows = _read_jsonl(jsl.shadow_log_path())
     admit_row = next(r for r in rows if r["kind"] == "admit")
@@ -195,7 +193,7 @@ def test_replay_is_monotonic_in_threshold(project_dir: Path) -> None:
         it.id: _score(relevance=score, kept=score >= 0.5)
         for it, score in zip(items, [0.1, 0.3, 0.5, 0.7, 0.9])
     }
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     low = jsl.replay_stats(0.0, question="relevance")
     mid = jsl.replay_stats(0.5, question="relevance")
@@ -209,20 +207,29 @@ def test_replay_is_monotonic_in_threshold(project_dir: Path) -> None:
 
 
 def test_replay_question_filters_to_that_questions_own_rows(project_dir: Path) -> None:
-    """A "decision"-question replay must never be perturbed by the (unrelated) relevance
-    rows sharing the same file -- proven by giving the two questions scores that would
-    disagree if the filter leaked."""
+    """TRDD-R9UXOSR5: "relevance" is the only question. A replay over a log that still
+    carries a RETIRED "retrieve" row (an old run of a pre-R9UXOSR5 build) must stay
+    unperturbed by it -- the kind filter drops it, exactly as it would drop any other
+    question's rows."""
     items = [_item("u-1:0", kind="user")]
-    scores = {"u-1:0": _score(relevance=0.9, decision=0.1, kept=True, decision_passed=False)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    scores = {"u-1:0": _score(relevance=0.9, kept=True)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
+
+    # Simulate one old-build retrieve row landing in the same file (the pre-R9UXOSR5 shape).
+    path = jsl.shadow_log_path()
+    old_row = json.dumps({
+        "type": "decision", "kind": "retrieve", "item_id": "u-1:0#decision",
+        "score": 0.1, "threshold": 0.5, "action": "skipped",
+    })
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(old_row + "\n")
 
     relevance_stats = jsl.replay_stats(0.5, question="relevance")
-    decision_stats = jsl.replay_stats(0.5, question="decision")
 
-    assert relevance_stats.total == 1  # only the admit row
+    assert relevance_stats.total == 1  # only the admit row -- the retired row is filtered out
     assert relevance_stats.by_action["kept"] == 1
-    assert decision_stats.total == 1  # only the retrieve row
-    assert decision_stats.by_action["skipped"] == 1
+    with pytest.raises(ValueError):
+        jsl.replay_stats(0.5, question="decision")  # the question itself no longer exists
 
 
 def test_replay_stats_on_a_missing_log_is_empty(project_dir: Path) -> None:
@@ -248,7 +255,7 @@ def test_shadow_log_rotates_once_oversized(project_dir: Path, monkeypatch: pytes
 
     items = [_item("new-1:0")]
     scores = {"new-1:0": _score()}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     backup = path.with_name(path.name + ".1")
     assert backup.exists()
@@ -278,7 +285,7 @@ def test_log_decisions_redacts_a_literal_secret_in_the_preview_and_locks_file_mo
     # relevance == threshold -> |score - threshold| == 0, well within the far-from-threshold
     # margin, so the preview is kept (and therefore actually exercises redaction).
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     path = jsl.shadow_log_path()
     rows = _read_jsonl(path)
@@ -301,7 +308,7 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
     text = "x" * 190 + aws_key + "y" * 50
     items = [_item("u-1:0", kind="assistant", text=text)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}  # close to threshold -> preview kept
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
     assert aws_key[:10] not in preview  # the fragment a truncate-first order used to leak
@@ -384,7 +391,7 @@ def test_log_decisions_redacts_generic_secret_shapes(
     further to reuse) and must each come out redacted."""
     items = [_item("u-1:0", kind="assistant", text=text)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
     assert forbidden not in preview
@@ -403,7 +410,7 @@ def test_log_decisions_redacts_url_credentials_keeping_scheme_and_host(project_d
     )
     items = [_item("u-1:0", kind="assistant", text=text)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
     assert "dbadmin" not in preview
@@ -420,7 +427,7 @@ def test_safe_preview_boundary_mask_keeps_earlier_path_segments_intact(project_d
     tail = "very-long-directory-segment-name-that-keeps-going-" * 4  # crosses the 200-char cut
     items = [_item("u-1:0", kind="assistant", text=prefix + tail)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
     assert prefix in preview  # every earlier "/"-delimited segment survives, untouched
@@ -446,11 +453,11 @@ def test_log_decisions_opens_the_shadow_log_exactly_once_regardless_of_item_coun
 
     items = [_item(f"i-{i}:0", kind="user" if i % 2 == 0 else "assistant") for i in range(50)]
     scores = {it.id: _score() for it in items}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     assert len(calls) == 1, "one os.open per log_decisions() call, not one per record"
     rows = _read_jsonl(jsl.shadow_log_path())
-    assert len(rows) == 50 + 25  # 50 admit rows + 25 retrieve rows (the "user"-kind half)
+    assert len(rows) == 50  # TRDD-R9UXOSR5: 50 admit rows, one per item, no retrieve rows
 
 
 def test_log_decisions_dedupes_a_rerun_of_the_same_session_and_transcript_size(
@@ -465,16 +472,16 @@ def test_log_decisions_dedupes_a_rerun_of_the_same_session_and_transcript_size(
     scores = {"u-1:0": _score()}
 
     jsl.log_decisions(
-        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        items, scores, relevance_threshold=0.5,
         session_key="sess-1", transcript_path=transcript,
     )
     jsl.log_decisions(  # the "other lane", same session, same transcript size
-        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        items, scores, relevance_threshold=0.5,
         session_key="sess-1", transcript_path=transcript,
     )
 
     rows = _read_jsonl(jsl.shadow_log_path())
-    assert len(rows) == 2  # one admit + one retrieve -- from the FIRST call only
+    assert len(rows) == 1  # one admit row -- from the FIRST call only
 
 
 def test_log_decisions_does_not_dedupe_a_genuinely_grown_transcript(
@@ -488,17 +495,17 @@ def test_log_decisions_does_not_dedupe_a_genuinely_grown_transcript(
     scores = {"u-1:0": _score()}
 
     jsl.log_decisions(
-        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        items, scores, relevance_threshold=0.5,
         session_key="sess-1", transcript_path=transcript,
     )
     transcript.write_text("x" * 200, encoding="utf-8")  # the session grew
     jsl.log_decisions(
-        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        items, scores, relevance_threshold=0.5,
         session_key="sess-1", transcript_path=transcript,
     )
 
     rows = _read_jsonl(jsl.shadow_log_path())
-    assert len(rows) == 4  # both runs logged -- not the same (session_key, size) key
+    assert len(rows) == 2  # both runs logged -- not the same (session_key, size) key
 
 
 def test_log_decisions_lock_prevents_a_true_concurrent_race(
@@ -522,7 +529,7 @@ def test_log_decisions_lock_prevents_a_true_concurrent_race(
         try:
             barrier.wait(timeout=5)
             jsl.log_decisions(
-                items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+                items, scores, relevance_threshold=0.5,
                 session_key="sess-race", transcript_path=transcript,
             )
         except BaseException as exc:  # pragma: no cover - surfaced via the assertion below
@@ -536,7 +543,7 @@ def test_log_decisions_lock_prevents_a_true_concurrent_race(
 
     assert not errors
     rows = _read_jsonl(jsl.shadow_log_path())
-    assert len(rows) == 2  # one admit + one retrieve -- only ONE thread's run landed, not both
+    assert len(rows) == 1  # one admit row -- only ONE thread's run landed, not both
 
 
 def test_log_decisions_drops_preview_far_from_threshold_but_keeps_it_close(
@@ -554,7 +561,7 @@ def test_log_decisions_drops_preview_far_from_threshold_but_keeps_it_close(
         "close:0": _score(relevance=0.55, kept=True),  # |0.55 - 0.5| = 0.05 <= 0.3
         "far:0": _score(relevance=0.95, kept=True),  # |0.95 - 0.5| = 0.45 > 0.3
     }
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     rows = {r["item_id"]: r for r in _read_jsonl(jsl.shadow_log_path())}
     assert rows["close:0"]["text_preview"] != ""
@@ -572,17 +579,17 @@ def test_batched_records_round_trip_through_vendored_load_and_replay(project_dir
     `ShadowLog.load`'s own `except (ValueError, TypeError): continue`)."""
     items = [_item(f"i-{i}:0", kind="user" if i % 3 == 0 else "assistant") for i in range(10)]
     scores = {
-        it.id: _score(relevance=0.9, kept=True, decision=0.9, decision_passed=True)
+        it.id: _score(relevance=0.9, kept=True)
         for it in items
     }
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+    jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     log = ShadowLog.load(jsl.shadow_log_path())
-    # 10 admit rows + 4 retrieve rows (i=0,3,6,9 are "user"-kind) -- every line parsed, none
-    # silently dropped as malformed.
-    assert log.stats().total == 14
+    # TRDD-R9UXOSR5: 10 admit rows, one per item -- every line parsed, none silently dropped
+    # as malformed. (Pre-R9UXOSR5 this was 14: 4 "user"-kind items also got a retrieve row.)
+    assert log.stats().total == 10
     replayed = log.replay(0.5)
-    assert replayed.total == 14
+    assert replayed.total == 10
 
 
 def test_log_decisions_record_text_count_mismatch_raises_not_drops_silently(
@@ -606,7 +613,7 @@ def test_log_decisions_record_text_count_mismatch_raises_not_drops_silently(
     items = [_item("u-1:0", kind="assistant", text="hello")]
     scores = {"u-1:0": _score()}
     with pytest.raises(ValueError, match="zip"):
-        jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+        jsl.log_decisions(items, scores, relevance_threshold=0.5)
 
     assert not jsl.shadow_log_path().exists()  # nothing written, not even a partial batch
 
@@ -623,7 +630,7 @@ def test_log_decisions_write_failure_reports_stderr_and_does_not_raise(
     try:
         items = [_item("u-1:0")]
         scores = {"u-1:0": _score()}
-        jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)  # must not raise
+        jsl.log_decisions(items, scores, relevance_threshold=0.5)  # must not raise
     finally:
         janitor_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
 

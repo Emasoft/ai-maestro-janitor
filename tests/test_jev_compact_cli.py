@@ -570,9 +570,8 @@ def test_probe_ask_raises_429_writes_rate_limited_stamp(
 
 def _keep_only(*keywords: str):
     """A `FakeJevClient` answer function: keep an item iff its text contains one of
-    `keywords`, on BOTH the relevance and decision question. Keys arrive as `<ref>:rel` /
-    `<ref>:dec` (score_items sends both questions for an item in one request); the ref is
-    the part before the ':'."""
+    `keywords`, on the relevance question. Keys arrive as `<ref>:rel` (score_items sends one
+    question per item, TRDD-R9UXOSR5); the ref is the part before the ':'."""
 
     def answer(state: Any, questions: Any, key: str) -> float:
         ref = key.split(":", 1)[0]
@@ -716,7 +715,7 @@ def test_compact_reports_blocked_count_and_a_content_digest(
         # real contract for a blocked item (see its docstring): kept=False, oversized=False.
         first_id = items[0].id
         scores[first_id] = jev_compact.jc.Scores(
-            relevance=0.0, decision=0.0, oversized=False, kept=False, decision_passed=False,
+            relevance=0.0, oversized=False, kept=False,
             blocked=True,
         )
         return scores
@@ -1168,8 +1167,7 @@ def test_expand_round_trips_a_composed_pointer_id() -> None:
     against a tool item would be a false mismatch, not evidence of an indexing bug."""
     items = jc.extract_items(_FIXTURE, malformed_lines=[], segmentation_failures=[])
     scores = {
-        it.id: jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
-                          decision_passed=False)
+        it.id: jc.Scores(relevance=0.0, oversized=False, kept=False)
         for it in items
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
@@ -1613,9 +1611,10 @@ def test_replay_subcommand_prints_shadow_stats(
     assert code == 0
     assert "decisions" in output  # ShadowStats.__str__'s own wording
 
-    code, output = _run(["replay", "--threshold", "0.9", "--question", "decision"])
-    assert code == 0
-    assert "decisions" in output
+    # TRDD-R9UXOSR5: "decision" is no longer a --question choice -- argparse must refuse it
+    # (argparse exits 2 itself; a subprocess run would print the same refusal).
+    with pytest.raises(SystemExit):
+        _run(["replay", "--threshold", "0.9", "--question", "decision"])
 
 
 def test_replay_subcommand_on_an_empty_log_still_exits_0(

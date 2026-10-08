@@ -618,12 +618,11 @@ LANE_INJECTION_MAX_BYTES = 8192
 # ONLY to the `--inject-out` rendering, never to `--out`.
 #
 # 0c607b36 (TRDD-BLGZTHQ9) replaced the tiered injected-selection with `_select_injected`'s one
-# priority fill: this cap now bounds ONLY step 7's ORDINARY pointers (`_InjectSelection.pointers`
-# -- items that were never a decision/constraint/correction/instruction). A pointer to an
-# excluded DECISION item is a separate, capped-by-bytes-not-count reserve held BEFORE this tier
-# (`_InjectSelection.decision_pointers`, step 3: up to `_MAX_DECISION_POINTERS` of the newest
-# excluded decision items, within `_INJECT_DECISION_POINTER_SHARE` -- 25% -- of the room) and is
-# added ON TOP of the `LANE_MAX_ELIDED_POINTERS` ordinary pointers, not counted against it.
+# priority fill: this cap bounds the ORDINARY pointers (`_InjectSelection.pointers`).
+# TRDD-R9UXOSR5: the separate decision-pointer reserve (`_InjectSelection.decision_pointers`,
+# step 3, up to `_MAX_DECISION_POINTERS` of the newest excluded decision items within
+# `_INJECT_DECISION_POINTER_SHARE` -- 25% -- of the room) went with the decision question, so
+# this cap now governs every pointer the injected copy names.
 LANE_MAX_ELIDED_POINTERS = 12
 # The backstop forwarded to `jev_compact.py compact --inject-max-bytes` (via `run_compact`) --
 # see `jev_compaction.py::compose`'s own docstring for the drop-oldest-kept-first / drop-lowest-
@@ -705,7 +704,7 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # here were already wrong one commit after they were written.) With `max_bytes=0`, compose's
 # `available = ... max(0, max_bytes - baseline)` line yields 0, and `_select_injected`'s own
 # `fits()` helper only admits a candidate whose cost is 0 against a
-# 0-byte `available` -- so no kept item and no pointer (ordinary or decision) survives admission.
+# 0-byte `available` -- so no kept item and no pointer survives admission.
 # The digest is already forced
 # to `""` for every `--inject-out` render regardless of `--inject-max-bytes` (`cmd_compact`'s
 # unconditional `inject_header["digest"] = ""`), so compose's digest-truncation backstop never has

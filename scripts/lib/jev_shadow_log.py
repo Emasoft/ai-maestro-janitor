@@ -8,25 +8,15 @@
 # it is allowed to get, and what a write failure means for the caller it is observing (never
 # fail the compaction -- see log_decisions/log_expand_outcome).
 #
-# Two ShadowLog rows per fully-scored item, matching the two Noul questions
-# jev_compaction.py's own score_items() actually asks (see its `_score_batch` docstring):
+# One ShadowLog row per fully-scored item, matching the one Noul question
+# jev_compaction.py's own score_items() actually asks (TRDD-R9UXOSR5 retired the second):
 #   - "relevance" (jevctx's RETRIEVE_QUESTION -- `Scores.relevance` vs `relevance_threshold`)
 #     -> ShadowLog kind="admit", action mirrors the item's REAL kept/elided outcome
-#     (`Scores.kept`, the union of both gates) -- logged for every scored item, since every
-#     item is asked this question.
-#   - "decision" (DECISION_QUESTION -- `Scores.decision` vs `decision_threshold`) ->
-#     ShadowLog kind="retrieve" (this project's own reading of that generic label as "a
-#     signal that decides whether an item earns extra protection/retrievability" -- shadow.py
-#     itself only defines the generic injected/skipped action pair, it does not prescribe
-#     this mapping), action mirrors `Scores.decision_passed` -- logged ONLY for "user" items,
-#     because jev_compaction.py
-#     never sends a `:dec` question for any other kind (`_score_batch`: "a non-'user' item
-#     still never gets a :dec question sent for it"). Logging a spurious decision=0.0 row for
-#     every other item would be noise no threshold change could ever move.
-#
-# `replay_stats`'s own `--question relevance|decision` (the card's CLI surface) maps back onto
-# exactly these two kinds (_QUESTION_TO_KIND), so a caller can retune ONE threshold without the
-# OTHER question's rows (a different score/threshold pair entirely) skewing the counterfactual.
+#     (`Scores.kept`) -- logged for every scored item, since every item is asked this
+#     question. The old "decision" retrieve row (one per "user" item,
+#     `_RETRIEVE_ROW_ID_SUFFIX`-suffixed) went with the decision question; old on-disk
+#     retrieve rows are simply unselectable -- `replay --question` now only offers
+#     "relevance".
 #
 # A blocked or oversized item (`Scores.blocked`/`Scores.oversized`) was never actually sent to
 # Jev -- jev_compaction.py fills in a sentinel Scores for it precisely so `compose()` always
@@ -222,24 +212,10 @@ SHADOW_LOG_NAME = "jev-shadow.jsonl"
 #     would only ever widen the worst-case-vs-60MB gap above, not close it.
 MAX_SHADOW_LOG_BYTES = 30 * 1024 * 1024
 
-# Card 7: "replay --threshold T [--question relevance|decision]" -- maps the CLI's question
+# Card 7: "replay --threshold T [--question relevance]" -- maps the CLI's question
 # name onto the ShadowLog `kind` literal that carries that question's rows (see module header).
-_QUESTION_TO_KIND: Mapping[str, str] = {"relevance": "admit", "decision": "retrieve"}
-
-# Review fork finding (post-write review, TRDD-N9LDHF7N card 7): ShadowLog.stats()/.replay()
-# build their internal per-item action map as `{e.item_id: e.action ...}` -- a PLAIN dict
-# keyed only by item_id, with no `kind` in the key (shadow.py's own `stats`/`replay`). Logging
-# the admit AND retrieve rows for a "user" item under the SAME item_id therefore collapses to
-# ONE slot (last write wins -- the retrieve row, appended second), so the admit row's real
-# "kept"/"elided" action is silently discarded whenever the raw file is read through the
-# vendored module's own public `.stats()`/`.replay()` (not just through this module's own
-# kind-filtered `replay_stats`, which was already immune). Concretely: an elided "user" item
-# would stop counting as a false negative in `ShadowLog.load(path).stats()` the moment it also
-# got a retrieve row. Suffixing the retrieve row's item_id makes the two rows collision-proof
-# in ANY reader, not just this module's own filtered path -- `log_expand_outcome` never needs
-# to know about the suffix, since it always logs the bare id, which only the admit row (the
-# one "was this elided" is actually about) can ever match.
-_RETRIEVE_ROW_ID_SUFFIX = "#decision"
+# TRDD-R9UXOSR5: the "decision" -> "retrieve" mapping went with the decision question.
+_QUESTION_TO_KIND: Mapping[str, str] = {"relevance": "admit"}
 
 
 class ScoredItem(Protocol):
@@ -272,13 +248,9 @@ class ItemScore(Protocol):
     @property
     def relevance(self) -> float: ...
     @property
-    def decision(self) -> float: ...
-    @property
     def oversized(self) -> bool: ...
     @property
     def kept(self) -> bool: ...
-    @property
-    def decision_passed(self) -> bool: ...
     @property
     def blocked(self) -> bool: ...
 
@@ -393,8 +365,8 @@ _FAR_FROM_THRESHOLD_MARGIN = 0.3
 
 def _drop_preview_if_far_from_threshold(record: dict[str, Any]) -> None:
     """Mutates `record["text_preview"]` to "" when this row's own logged score/threshold pair
-    (both already on the record -- `admit` rows carry `relevance_threshold`, `retrieve` rows
-    carry `decision_threshold`, whichever `log_decisions` passed to `.decision()`) are far
+    (both already on the record -- `admit` rows carry `relevance_threshold`, whichever
+    `log_decisions` passed to `.decision()`) are far
     apart. `text_sha256` is left alone -- it is 64 bytes vs the preview's ~200, and a caller
     correlating identical content across records needs it regardless of how "close" a score
     is. Outcome rows have no `score`/`threshold` at all (see `ShadowLog.outcome`'s call
@@ -518,14 +490,12 @@ def log_decisions(
     scores: Mapping[str, ItemScore],
     *,
     relevance_threshold: float,
-    decision_threshold: float,
     session_key: str = "",
     transcript_path: str | Path | None = None,
 ) -> None:
-    """Append one "admit" row per scored item, plus one "retrieve" row for each item that was
-    actually asked the decision question -- see the module header for which is which. Called
-    once per real `compact` run, right after `jc.score_items` returns: this logs from the
-    scores jev_compact.py already has, never from a hook inside jev_compaction.py itself.
+    """Append one "admit" row per scored item -- see the module header for what it carries.
+    Called once per real `compact` run, right after `jc.score_items` returns: this logs from
+    the scores jev_compact.py already has, never from a hook inside jev_compaction.py itself.
 
     `session_key`/`transcript_path` (defect 3): when both are given, a run already logged for
     this exact (session, transcript size) is skipped entirely -- see the module-level comment
@@ -573,18 +543,9 @@ def log_decisions(
                     tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
                 )
                 raw_texts.append(it.text)
-                if it.kind == "user":
-                    # `_RETRIEVE_ROW_ID_SUFFIX`: keeps this row's item_id distinct from the
-                    # admit row just logged above -- see that constant's own comment for why
-                    # sharing `it.id` between the two corrupts the vendored
-                    # ShadowLog.stats()/.replay().
-                    log.decision(
-                        kind="retrieve", item_id=f"{it.id}{_RETRIEVE_ROW_ID_SUFFIX}",
-                        score=sc.decision, threshold=decision_threshold,
-                        action="injected" if sc.decision_passed else "skipped",
-                        tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
-                    )
-                    raw_texts.append(it.text)
+                # TRDD-R9UXOSR5: the old per-"user"-item "retrieve" row (decision score +
+                # threshold, `_RETRIEVE_ROW_ID_SUFFIX`-suffixed) went with the decision
+                # question -- one row per scored item now.
 
             records = log.entries()
             # Coordinator (fourth follow-up): "the zip-mismatch guard raises; it never drops
@@ -614,10 +575,8 @@ def log_expand_outcome(item_id: str, *, turn: int = 0) -> None:
     """Append an "expand" outcome row. An expand of an id `compact` had logged as elided is a
     false negative (see `ShadowLog.false_negative_rate`'s own docstring) -- this is the only
     hook `expand` needs; the matching against a prior decision happens later, by item_id, when
-    the log is read (`ShadowLog.stats`/`.replay`). `item_id` is always the BARE id (never
-    `_RETRIEVE_ROW_ID_SUFFIX`-suffixed): that matches only the admit row, which is the one
-    "was this elided" is actually about -- an item's retrieve row, if any, is a separate
-    question entirely (see `log_decisions`).
+    the log is read (`ShadowLog.stats`/`.replay`). `item_id` is always the BARE id: that
+    matches the admit row, which is the one "was this elided" is actually about.
 
     `turn` defaults to 0: a one-shot `expand` invocation has no live turn counter the way
     `compact` has each item's own `.turn` -- harmless, since no stats computation in ShadowLog
@@ -635,15 +594,18 @@ def log_expand_outcome(item_id: str, *, turn: int = 0) -> None:
 
 def replay_stats(threshold: float, *, question: str, path: Path | None = None) -> ShadowStats:
     """What `threshold` would have produced for just `question`'s own rows -- card 7's
-    `replay --threshold T --question relevance|decision`.
+    `replay --threshold T --question relevance` (TRDD-R9UXOSR5: the only question left).
 
     `ShadowLog.replay()` applies ONE threshold to every decision it holds regardless of
-    `kind` -- correct when a log only ever carries one question's rows, wrong here since
-    `log_decisions` logs two per item. So this filters the persisted JSONL down to the rows
-    for the requested question's `kind` (plus every outcome row, which carries no `kind` and
-    is always relevant to the false-negative count) into a scratch file, then delegates the
+    `kind` -- correct when a log only ever carries one question's rows. `log_decisions` used
+    to log two per item, so this still filters the persisted JSONL down to the rows for the
+    requested question's `kind` (plus every outcome row, which carries no `kind` and is
+    always relevant to the false-negative count) into a scratch file, then delegates the
     actual counterfactual math to the vendored `ShadowLog.load`/`.replay` -- no
-    reimplementation of its private `_counterfactual`.
+    reimplementation of its private `_counterfactual`. The filter also keeps old logs that
+    still carry retired "retrieve" rows readable: those rows are simply unselectable. The
+    comment above `_QUESTION_TO_KIND`'s one remaining entry still applies. One question or
+    two, the shape of the filter never changes.
     """
     if question not in _QUESTION_TO_KIND:
         raise ValueError(f"unknown question {question!r}, expected one of {sorted(_QUESTION_TO_KIND)}")
