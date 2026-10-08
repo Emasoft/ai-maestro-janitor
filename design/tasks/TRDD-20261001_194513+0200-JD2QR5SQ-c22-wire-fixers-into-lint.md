@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T00:56:15+0200
+updated: 2026-10-09T01:19:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -56,6 +56,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 review correction: the previous line is OVERBROAD — clippy named only the struct fields PageFix.attempted/fixed (test-only reads), so the residue IS removable in modified form: field-level allows (or #[expect(dead_code)]) on just those two fields would clear -D warnings while keeping tests compiling; plan_page_fix's fn-level allow was never independently tested and is plausibly droppable outright (it is called from the S4 --apply-fixes path). Full revert confirmed correct (dirty memgrep tree is a known publish-blocking hazard, FQVEILVK); no knowledge lost (/// text preserved in report + transcript + card).
 2026-10-09 second review correction: the #[expect(dead_code)] variant in the previous line is PROFILE-FRAGILE — under --all-targets or any -D-warnings test compile the fields are USED by their cfg(test) readers, the expectation goes unfulfilled, and the build errors (the same revert cycle again). Canonical residue fix: #[cfg_attr(not(test), allow(dead_code))] per field (or a plain field-level allow, blunter but correct in both profiles). plan_page_fix's allow stays 'droppable, to be proven by clippy -D warnings at removal time'.
 2026-10-09 third review verdict, NO further lore append: the cfg_attr recipe is rustc-sound in theory but UNPROVEN in this context — do not call it canonical until it survives BOTH 'cargo clippy -- -D warnings' AND 'cargo clippy --all-targets -- -D warnings'. Residue work folds into the next worker brief: (1) cfg_attr(not(test), allow(dead_code)) per field on PageFix.attempted/fixed, (2) proof under BOTH clippy invocations before claiming done, (3) the three /// lines near lint_label still owed, (4) plan_page_fix's fn-level allow droppable, proven by clippy at removal time. Nothing else in f9243837 amended.
+2026-10-09 RESIDUE REMOVED, commit e5dd8e50: all four items landed (three /// lines, plan_page_fix allow, per-field cfg_attr(not(test), allow(dead_code)) on PageFix.fixed/attempted, fixers/mod.rs module allow); verified by coordinator — both clippy gates clean, cargo test 444 unit + 244 cli pass. Two review rounds corrected the in-code comments (why fixed to test-only reads + field-scoping requirement with the three-field boundary in the commit message). Remaining known residue on this card: NONE in code; field use of lint --apply-fixes by C30/C31/C32 and the per-scope lock/ledger (TRDD-1T0W2ZVW) remain the card's open acceptance items.
 
 ## Approval log
 
