@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:42:01+0200
 project-id: ai-maestro-janitor
 review-after: 2026-10-17
 parent-trdd: K9AHY1ZB
-blocker-probe: trddgrep --porcelain show K9AHY1ZB | cut -f3
+blocker-probe: trddgrep --porcelain show K9AHY1ZB | cut -f3   # probe is VESTIGIAL: this card is NOT blocked (no blocked-by, column testing); parent-trdd K9AHY1ZB is LINEAGE, not a blocker claim — re-verify the actual chain before treating a release as go-ahead
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
