@@ -1,9 +1,9 @@
 ---
 trdd-id: BUR8AW77
 title: Dependency and tool updates wait out a release-age observation period before install
-column: human_review
+column: complete
 created: 2026-09-24T08:11:55+0200
-updated: 2026-10-07T04:44:34+0200
+updated: 2026-10-09T22:34:24+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -15,7 +15,8 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:11:55+0200
 status: tasked
-implementation-commits: [0ddc41e5]
+implementation-commits: [e8ff8fd7]
+release-via: publish
 ---
 
 # Dependency and tool updates wait out a release-age observation period before install
@@ -29,6 +30,8 @@ OWNER DECISION 2026-09-27 (verbatim, condensed): 'the observation delay for all 
 - 2026-09-27T14:47:51+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); hook landed fd1e39c5 with tests re-verified by main; hooks.json registration is the remaining step and needs the owner's restart consent
 REVIEW ROUND 1 CURES (2026-09-27, adversarial fork on fd1e39c5) — (a) knob default verified OFF in source (RELEASE_AGE_HOOK_ALLOW_USER_OVERRIDE, rotator.py:84-86 of the hook): default is warning-only, faithful to the owner's 'warning not blocking'; 'ask' is the opt-in enforce-a-review mechanism. (b) timeout=2.5s is explicit on every urlopen call (hook :122) — fail-hang not possible; hook budget matches the 10s hooks.json cap. (c) 7200-min window is a PROVISIONAL DEFAULT with env override CLAUDE_PLUGIN_OPTION_RELEASE_AGE_OBSERVATION_MINUTES — the owner's number is still pending; this line records the provenance. (d) pyright findings in the test file fixed (ec079567, gate fails closed); test server binds ephemeral port 0. Remaining: hooks.json registration (owner restart consent).
 2026-10-04 — 0ddc41e5: test fixture date _NOWISH is now computed at import (UTC minus 10 minutes) so it cannot age out of the 7200-minute window; the nine early-release tests pass again.
+2026-10-09 DONE by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself'): implemented in e8ff8fd7, verified by the main session (diff read, tests re-run). Ships with the next release; release-via set to publish.
+- 2026-10-09T22:34:24+0200 — column → complete by main-agent@ai-maestro-janitor. implemented in e8ff8fd7; waits on the next release
 
 ## Acceptance
 
@@ -36,6 +39,8 @@ REVIEW ROUND 1 CURES (2026-09-27, adversarial fork on fd1e39c5) — (a) knob def
 - [x] early-release finding emits a WARNING and never denies; escalation is permissionDecision "ask" via the git-safety confirm mechanism (grep-verified: zero deny paths)
 - [x] local/user-authored installs exempt without lookup (fail-open)
 - [x] hooks/hooks.json registration deferred to the owner (needs Claude restart; exact JSON in the worker report)
+- [x] The release-age guard hook is registered in hooks/hooks.json and passes its tests (506 selected tests, 2026-10-09).
+- [x] The observation period is decided: keep 7200 minutes, warning-only; the owner can change it through the env override.
 
 ## Known defects
 
