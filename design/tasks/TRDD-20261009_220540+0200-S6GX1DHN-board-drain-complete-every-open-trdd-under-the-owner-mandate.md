@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-09T22:05:40+0200
+updated: 2026-10-09T22:06:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -36,7 +36,7 @@ WAVES:
 4. todo (81) and dev (1): implement, ranked by trddgrep next (unblock count first). Code changes get the full gate before commit: ruff, mypy, pyright, uv run pytest.
 5. blocked (27): re-evaluate each blocked-by after waves 1 to 4; a blocker that names a closed card is cleared.
 6. design (4), verify_assumptions (1), live_auditing (1): advance each one step or record why it cannot move.
-7. backburner (93): decide each on the facts — do it, or cancel it with the reason recorded. Deferred is not a resting place under this mandate.
+7. backburner (93): NO cancellations. Backburner is this board's deliberate deferral and the owner's words ('complete all TRDDs') do not say to cancel parked intent; cancelling is terminal and archived cards are immutable. Pull a backburner card into work only when it is ready and worth doing on the facts; otherwise leave it with a dated one-line reason. Cancelling any card needs the owner's explicit word.
 
 OWNER-QUESTION CARDS now mine to decide: C30 I4MOD020 (discovery trigger: lint-driven surface versus extending repair_has_work to consult lint) — decide by measuring both on a scratch corpus.
 
@@ -52,3 +52,7 @@ KNOWN CONSTRAINTS: every paid account was at its usage limit at 2026-10-09 eveni
 ## Approval log
 
 - 2026-10-09T22:05:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Rules added by the review of 4de85716
+
+2026-10-09 — these bind every wave and win over the wave text where they differ: (1) COST BEFORE FAN-OUT: no wave launches workers until one card of that wave has been done and its cost measured (tokens, wall-clock), a maximum card count and a deadline are written here, and the stop condition is checked before each card. (2) ORDER inside a wave follows trddgrep next (unblock count first), not column listing. (3) EVENT-GATED cards are exempt from 'back to todo on fail' BY KIND, not by id: any card whose completion waits on an external event stays where it is with a machine-checkable unblock-when. (4) HUMAN-ONLY cards (an act only the owner can perform, such as running a command in a live interactive session) stay in human_review with that reason; the mandate does not make them agent-decidable. (5) The working figure is 275 live cards: 361 includes the 86 already in the complete column. (6) This card sits in dev because the main session is working it; if the session stalls on usage limits, re-column it to todo with the date.
