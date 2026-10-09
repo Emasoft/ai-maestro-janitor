@@ -1,10 +1,10 @@
 ---
 trdd-id: IYNS7H83
 title: The shared heartbeat-reply predicate hides real assistant messages from the recent-turns tail
-column: todo
+column: testing
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-10-09T23:22:37+0200
+updated: 2026-10-09T23:38:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T18:15:09+0200
-implementation-commits: [f9587fd0]
+implementation-commits: [f9587fd0, ee539e7a]
 ---
 
 # The shared heartbeat-reply predicate hides real assistant messages from the recent-turns tail
@@ -31,6 +31,8 @@ Fix at the root: one predicate, not two. First decide the actual question the wi
 - 2026-09-24T18:15:09+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 BACK TO todo (board drain, wave 3): the card's own acceptance check FAILS. A worker's scratch probe built a transcript with one substantive assistant message followed by 20 (and 40) replies of the form 'janitor heartbeat' plus a status line; external_clear.recent_messages returned 13 lines with the substantive message absent. The narrow predicate (scripts/lib/transcript_roles.py:408 is_heartbeat_reply) is in place and released (f9587fd0); what is missing is a cap on consecutive heartbeat-plus-status replies in the tail. Not yet reproduced by the main session; the fix starts with a failing test. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
 - 2026-10-09T23:22:37+0200 — column → todo by main-agent@ai-maestro-janitor. its own acceptance check fails; needs a cap on consecutive heartbeat-plus-status replies
+2026-10-09 FIXED on main in ee539e7a: external_clear.recent_messages keeps the newest 2 of each run of consecutive short heartbeat status replies (transcript_roles.is_heartbeat_status_reply, at most 400 chars). The acceptance case is now a test: one substantive assistant message followed by 20 status replies stays in the result (tests/test_external_clear.py, failed before the fix per the worker, passes now on the main session's re-run; 348 passed across the tests of every recent_messages caller). Known limits: a short reply three or more fires back in an unbroken run is dropped even when its text differs (the identical-text alternative was rejected: 10 of 14 real status replies in session 8a11fda7 differ); no line cap helps once the message is outside the 512 KiB tail. The same exposure in jev_compaction and the pre-compact hook is TRDD-U119W52S. Full suite running on ee539e7a; not yet seen in a real clear handoff.
+- 2026-10-09T23:38:33+0200 — column → testing by main-agent@ai-maestro-janitor. fixed in ee539e7a; waits on the full suite run on that commit
 
 ## Related
 
