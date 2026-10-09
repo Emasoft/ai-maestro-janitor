@@ -33,12 +33,8 @@ changes `ocd`, never merges/splits/deletes.
    naming every violation. If the installed memgrep does not know a verb
    (unknown-command / usage refusal), ABSTAIN and report the gap — never fall back to
    Edit/Write or the txn core.
-
-   > There is deliberately **no `--op enrich`** in the txn core. An enrich edit has the
-   > identical shape to a repair — exactly ONE write at the page's own path, zero deletes —
-   > and the write gate already proves the four things enrich needs (every `[^N]` lesson
-   > survives, no frontmatter key is dropped, `ocd` is unchanged, `lmd` does not regress).
-   > A second name for one guarantee would only drift.
+   Why there is no `--op enrich`:
+   [enrich-background](references/enrich-background.md#why-there-is-no---op-enrich).
 3. **`keywords:` and page `description:` ONLY.** Never touch an atom's `desc:` — that field
    has a 200-char cap enforced by `memory_edit_verify`, so padding it hands `repair` a defect
    to undo and the two passes ping-pong on the same page forever.
@@ -95,13 +91,8 @@ changes `ocd`, never merges/splits/deletes.
 
    **An EMPTY list is a correct, cheap abstain — report it and stop.**
 
-   > **Why this does NOT contradict the janitor#227 rule.** Sibling skills say "run the
-   > scheduler's predicate, NOT `memgrep lint`". Here the CLI *is* lint-backed, and that is
-   > the same rule, not an exception to it: #227 is about the gate and the arbiter
-   > DISAGREEING. These defects **are** lint rules — the thresholds, the phrase splitting and
-   > the duplicate normalization all live in Rust — so deferring to lint is what makes gate
-   > and arbiter identical here. Counting keyphrases yourself in Python would *create* the
-   > #227 disagreement, not avoid it.
+   Why a lint-backed list respects janitor#227:
+   [enrich-background](references/enrich-background.md#why-lint-backed-candidates-respect-janitor227).
 
    Bound the run to the **top-K worst pages** (K ≈ 5).
 
