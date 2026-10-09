@@ -4,7 +4,7 @@ title: C31 — shrink repair skill
 column: testing
 status: tasked
 created: 2026-10-01T19:45:18+0200
-updated: 2026-10-09T03:59:33+0200
+updated: 2026-10-09T04:00:44+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -65,3 +65,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 fourteenth review round (2853b3d7): sound as landed, zero mandatory actions. Two optional card-close notes: phrase the reconciliation as 'three superseded lines converging to the by-measurement discharge' (the FOUR-item count is ambiguous — the fourth named item is the survivor, not a superseded line); confirm the JD2QR5SQ deferral pointer stays resolvable when that card archives (trddgrep resolves archived refs, so expected to hold).
 2026-10-09 sixteenth review round (27c529b4): sound as landed, zero mandatory actions. One optional line, applied now since this card is the backstop it names: the archive-time pointer check on JD2QR5SQ is honor-system at the moment the card freezes (nothing enforces the grep before the move; terminal columns are frozen after it, leaving a skipped check unexecutable). THIS CARD'S close-list pass is the explicit backstop: if JD2QR5SQ ever archives without a recorded pointer-check resolution, the final-truth paragraph must notice the pointer's fate went unverified and record it.
 2026-10-09 seventeenth review round (08b480f0): sound as landed, zero mandatory actions. One optional clause recorded for the close-list pass, closing the case analysis the review mapped: the pointer fate has THREE cases — (a) JD2QR5SQ archived with no resolution recorded anywhere: the backstop fires, record as unverified; (b) JD2QR5SQ archived WITH a resolution: it can only live in git history (the card froze at the move), so the closing session must grep the git log of JD2QR5SQ's file, not the card; (c) JD2QR5SQ not yet archived: backstop moot, silent. The final-truth paragraph must handle case (b) via history, not card-reading.
+2026-10-09 eighteenth review round (d44ff0dc): sound as landed, zero mandatory actions. VERDICT: the obligation chain has reached its fixed point — every review finding has a recorded card line, no mandatory actions remain, and the close-list pass itself is the next real event, not another round. One robustness clause for case (b) recorded now: the closing session should INSPECT the recent git history of JD2QR5SQ's file around the archive commit (read the last few commit messages), not term-grep for 'pointer' — the archiving session's resolution will be free prose a term-grep could miss.
