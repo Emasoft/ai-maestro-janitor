@@ -1,10 +1,10 @@
 ---
 trdd-id: 1HXEAHY7
 title: C32 — shrink enrich skill
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:19+0200
-updated: 2026-10-09T19:03:08+0200
+updated: 2026-10-09T21:26:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: todo
 blocker-probe: [trddgrep, why, 1HXEAHY7]
 blocker-holds-if: not-match:READY
+implementation-commits: [c18ee75d, cf5125fa]
 ---
 
 # C32 — shrink enrich skill
@@ -27,7 +28,7 @@ Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C32, wave W3.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-09
 
-NEXT ACTION (re-corrected 2026-10-09 after measuring, supersedes every earlier text of this block): OWNER DECISION, nothing developable until it is made. Task is done (c18ee75d replaced the duplicate-removal rows with the fixer instruction). Verify clause is MET, measured: test_every_skill_body_stays_under_the_context_token_cap (tests/test_rules_installer.py) passes when run by name, and the before/after count in that test's own unit is 3089 to 3318 tokens against a 5000 cap. What is NOT met is the title: the card says 'shrink' and the file grew by 229 tokens. The owner chooses: accept the growth and close the card, or ask for a trim (unscoped; the two-pass text may not fit in the space of the four-row table it replaced). This card is NOT evidence for C22 (JD2QR5SQ).
+NEXT ACTION: none, the card is DONE (2026-10-09). Owner ruling the same day, verbatim: 'the limit of 5000 tokens per skill cannot be violated. but you can create reference files and move some text there'. Applied in cf5125fa: the two rationale blocks (no --op enrich; why lint-backed candidates respect janitor#227) moved to skills/janitor-memory-enrich/references/enrich-background.md, each leaving a one-line pointer. Measured with the cap test's own counter: 3089 tokens before the card, 3318 after c18ee75d, 3081 after cf5125fa, cap 5000. Task done, Verify met, title met. This card is NOT evidence for C22 (JD2QR5SQ).
 
 Writes (exclusive): skills/janitor-memory-enrich/SKILL.md
 Task: Same as C31, for the dedupe items
@@ -47,3 +48,11 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 CORRECTION to the 11:45 entry above — three claims withdrawn. (1) 'satisfies C22's awaited evidence event' is FALSE: C22's gate needs a pipeline dispatch with a claim record and at least one observed refusal; this was a manual main-session run with zero refusals (see the correction on JD2QR5SQ). (2) 'Card verify-clause (Same as C31) met on the real root' is FALSE: C31's Verify reads 'The token-cap test passes; the before/after count is recorded' — a field run is not that clause. (3) What the run does show, and only this: the command the new skill text instructs (memgrep lint --apply-fixes) exists on the PATH binary and runs clean on the real PROJECT root. VERIFY CLAUSE, measured now: before/after count of skills/janitor-memory-enrich/SKILL.md — before (c18ee75d^) 9775 bytes, 168 lines, 1530 words; after (c18ee75d) 10525 bytes, 183 lines, 1644 words. The skill GREW by 750 bytes / 114 words: this card is titled 'shrink' and its change did not shrink the file. Token-cap test: the full suite passed (18231 passed, 2 skipped) on the tree content that became c18ee75d, so no cap test failed; the specific cap test was not individually identified or run.
 2026-10-09 second correction (review of 77a7d06a): the previous correction's 'Verify clause is NOT met' was itself too strong and its sizes were a byte/word proxy. Measured in the cap test's own unit: 3089 tokens before (c18ee75d^), 3318 after, cap 5000; test_every_skill_body_stays_under_the_context_token_cap passes run by name. Verify clause MET; title intent (shrink) NOT met, +229 tokens. Also: the earlier dispositions on this card that call a zero-refusal outcome 'the already-ruled clean-corpus case' state an EXPECTATION (nothing to refuse on a clean corpus), never that C22's gate accepts silence; d9737c0c misread that phrase.
 - 2026-10-09T19:03:08+0200 — column → human_review. verify clause met, title intent unmet (+229 tokens); owner accepts the growth or asks for a trim
+2026-10-09 CLOSED on the owner's ruling (quoted in STATE): rationale moved to a reference file in cf5125fa; skill 3081 tokens, below its pre-card 3089; cap test and 545 skill/reference/link tests pass. Task second half checked: C31's 'offer the injection-guard restore' does not apply here — git log -S'injection' on this skill returns no commit, it never carried one.
+- 2026-10-09T21:26:29+0200 — COMPLETE by main-agent@ai-maestro-janitor. owner ruling applied; task, verify and title all met.
+
+## Acceptance
+
+- [x] The duplicate-removal rows of the enrich skill are replaced by the fixer instruction (c18ee75d: Pass 1 runs memgrep lint --apply-fixes on the claimed paths).
+- [x] The token-cap test passes: test_every_skill_body_stays_under_the_context_token_cap, run by name on cf5125fa.
+- [x] The before/after count is recorded and the skill shrank: 3089 tokens before the card, 3081 after cf5125fa, cap 5000.
