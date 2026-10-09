@@ -1,10 +1,10 @@
 ---
 trdd-id: QX59MA4H
 title: C33 — hook-timeout-scan detector
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:20+0200
-updated: 2026-10-08T20:37:19+0200
+updated: 2026-10-09T23:22:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -43,8 +43,14 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-08T20:33:13+0200 — column → todo. blocker B9YPSF02 absorbed by this card per its own SCOPE EXTENSION line; tree quiet; 2026-10-07 owner delegation covers code edits
 - 2026-10-08T20:33:36+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
 - 2026-10-08T20:37:19+0200 — column → testing. worker verified all deliverables on disk (detector, registry, codes, 18 tests; pytest 18+23 passed, ruff clean) — reports_dev/20261008-fanout-qx59ma4h.md; acceptance fixture evidence recorded in report
+2026-10-09 CLOSED by the main session (board drain, wave 3). Fix commits ab1548c9, fa5b8a24, 95806856, 4e9a4694 are ancestors of the v3.8.11 tag; tests/test_hook_timeout_scan.py passes (18). Field, the card's own case: the findings ledger holds 19 HOOK-001 records, the newest 'hook UserPromptSubmit was killed for exceeding its timeout (6027ms of 5000ms)' from this session on 2026-10-09. HOOK-002 was not looked for. NOT assessed here: the later requirement from TRDD-U32EVMI9 (every cancelled guard hook recorded and its check replayed); that stays with U32EVMI9. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
+- 2026-10-09T23:22:36+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.
 
 ## STATE
 
 2026-10-07: requirement added from TRDD-U32EVMI9: every cancelled guard hook must become a recorded finding, and where possible the guard's own check is replayed afterwards over the recorded input so that a harmless cancellation is told apart from a real miss.
 2026-10-07: the dangling-blocker finding on B9YPSF02 is pre-existing: blocked-by: [B9YPSF02] is identical in this card at 714f72c9^ and now, and B9YPSF02 was superseded and archived on 2026-10-01 (a5d99c10), before today's work; the blocker was not changed.
+
+## Acceptance
+
+- [x] See the Approval log entry of 2026-10-09 for the evidence per promise.

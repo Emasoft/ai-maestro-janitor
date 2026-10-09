@@ -1,10 +1,10 @@
 ---
 trdd-id: IYNS7H83
 title: The shared heartbeat-reply predicate hides real assistant messages from the recent-turns tail
-column: testing
+column: todo
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-10-07T22:07:41+0200
+updated: 2026-10-09T23:22:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -29,6 +29,8 @@ Fix at the root: one predicate, not two. First decide the actual question the wi
 ## Approval log
 
 - 2026-09-24T18:15:09+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 BACK TO todo (board drain, wave 3): the card's own acceptance check FAILS. A worker's scratch probe built a transcript with one substantive assistant message followed by 20 (and 40) replies of the form 'janitor heartbeat' plus a status line; external_clear.recent_messages returned 13 lines with the substantive message absent. The narrow predicate (scripts/lib/transcript_roles.py:408 is_heartbeat_reply) is in place and released (f9587fd0); what is missing is a cap on consecutive heartbeat-plus-status replies in the tail. Not yet reproduced by the main session; the fix starts with a failing test. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
+- 2026-10-09T23:22:37+0200 — column → todo by main-agent@ai-maestro-janitor. its own acceptance check fails; needs a cap on consecutive heartbeat-plus-status replies
 
 ## Related
 

@@ -1,15 +1,15 @@
 ---
 trdd-id: TNNII9S8
 title: publish.py must reconcile stale local tags before generating the changelog
-column: testing
+column: complete
 created: 2026-09-10T14:34:41+0200
-updated: 2026-10-07T09:35:21+0200
+updated: 2026-10-09T23:22:35+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
 implementation-commits: [266fd249, b175178f, 556b78be]
-status: tasked
+status: archived
 ---
 
 # publish.py must reconcile stale local tags before generating the changelog
@@ -43,12 +43,12 @@ In `scripts/publish.py`, run the stale-tag decision (currently step 10's `_stale
 
 ## Acceptance criteria
 
-- [ ] A test in `tests/test_publish_stale_tag_recovery.py` reproduces the bug: a stale local
+- [x] A test in `tests/test_publish_stale_tag_recovery.py` reproduces the bug: a stale local
       tag left over from an interrupted publish, followed by a normal re-run, must NOT produce
       two `## [<N>]` sections for the same version in the generated changelog.
-- [ ] The same test confirms the fix does not delete or skip a tag that IS published on the
+- [x] The same test confirms the fix does not delete or skip a tag that IS published on the
       remote (only proven-unpublished stale tags are reconciled).
-- [ ] Full gate green (ruff, mypy, pyright, pytest) after the fix.
+- [x] Full gate green (ruff, mypy, pyright, pytest) after the fix.
 
 ## Notes and lessons learned
 2026-10-07: the bug was still present (git-cliff ran before the stale-tag step, duplicate changelog section reproduced); publish.py now drops a local tag before git-cliff only when origin provably lacks it (_remote_tag_state is False; a failed query gives None and leaves the tag for step 10 to refuse).
@@ -58,3 +58,5 @@ In `scripts/publish.py`, run the stale-tag decision (currently step 10's `_stale
 ## Approval log
 
 - 2026-10-07T08:45:11+0200 — column → testing by main-agent@ai-maestro-janitor. B7 merged and gated at b175178f
+2026-10-09 CLOSED by the main session (board drain, wave 3). Boxes ticked on: box 1 test_changelog_has_one_section_when_a_stale_unpublished_tag_exists and test_stale_unpushed_tag_is_repointed_at_head; box 2 test_changelog_step_keeps_a_tag_that_is_published_on_origin and test_stale_tag_already_on_origin_blocks_the_publish (tests/test_publish_stale_tag_recovery.py, 16 passed today, git-cliff present locally); box 3 the full gate of 2026-10-09 on 5c81abf3 and f623da67 (ruff, mypy, pytest 18232 passed; pyright 0 errors after f623da67). Fix commits 266fd249, b175178f, 556b78be are ancestors of the v3.8.11 tag. The card names no field observation; not exercised: a real publish with a stale local tag. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
+- 2026-10-09T23:22:35+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.

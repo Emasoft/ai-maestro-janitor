@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-05T10:18:32+0200
+updated: 2026-10-09T23:22:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,6 +37,7 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T03:41:53+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T10:52:46+0200 — column → dev. C4 in progress
 - 2026-10-03T10:58:30+0200 — column → testing. code ready; field check after release: after a janitor clear of a session with an unmet goal, /goal is typed once and the goal is active in the new session
+2026-10-09 STAYS in testing (board drain, wave 3): tests pass (tests/test_clear_trigger.py, 62) and the code is released, but the live event has not succeeded: the only 'goal' line in .janitor/logs/clear-trigger.log is a FAILED attempt of 2026-10-05 03:17 ('not sent: gave up after 3600s, field not empty'). Waits on one janitor clear of a session with an unmet goal. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 

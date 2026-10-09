@@ -4,7 +4,7 @@ title: The CLAUDE.md writer and the rules installer left their files at mode 060
 column: testing
 status: tasked
 created: 2026-10-06T19:23:42+0200
-updated: 2026-10-07T04:31:08+0200
+updated: 2026-10-09T23:22:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ scripts/repomap_generate.py _atomic_replace (every project's CLAUDE.md wikimem i
 ## Approval log
 
 - 2026-10-06T19:23:42+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 STAYS in testing (board drain, wave 3): tests pass (test_repomap_generate.py 24, test_rules_installer.py 39) and the code is released, but no instance of the card's own case has been seen: a file that was mode 0600 being rewritten to 0644. This repo's CLAUDE.md was already 644, which looks the same on the old code. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
 
 ## STATE
 
