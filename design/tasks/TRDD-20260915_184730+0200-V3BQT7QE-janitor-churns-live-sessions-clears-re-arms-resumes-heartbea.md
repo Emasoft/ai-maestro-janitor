@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: testing
 created: 2026-09-15T18:47:30+0200
-updated: 2026-10-06T22:08:06+0200
+updated: 2026-10-09T23:50:54+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: audit
@@ -70,6 +70,7 @@ Child ids: R=2MLFZ7DL, C-b=11GAS4LC, E-2=6P0KUSO9.
 - 2026-09-16T10:31:45+0200 — column dev → testing. Shipped: 3.5.1 (60bedabc) and 3.5.2 (191678a2, CI green, installed locally). Landed this session on this card: F-4 nudge key, dead TTL-regime removal, claim resolution from the CLAIMED record, CI exec-bit fix + gate test, claim CLI prints its close block (2bb6c99a), inline close-claim step in all 8 memory skills (42404659, TRDD-0KOIJ3SK complete). Remaining work is in the EHT children PA9E2GJ1 / 7ZMQSXO6 / NEVQOHGS (todo) and one open structural item: a spawner- or sweep-side auto-close of a claim whose report exists — to be filed as its own card. Testing means: the next heartbeat-dispatched memory chore must leave a done record without a hand close; that is the acceptance for this card's memory half.
 - 2026-09-16T10:31:46+0200 — column → testing by session-as-approver. code landed and published; verification is the next live chore closing its own claim
 - 2026-09-16T10:38:54+0200 — 3.5.3 published (93326486) carrying the claim-CLI close block and the inline close step in all 8 memory skills. CAVEAT for the testing acceptance: this session still runs plugin 3.5.0 (the local update to 3.5.2/3.5.3 says 'restart to apply'), so a curator spawned from here reads the OLD skills and runs the OLD claim CLI; the acceptance can only be observed from a session started after the upgrade. Until then a hand close after each chore is expected, not a regression.
+2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. HUMAN-ONLY: this hub closes when its child PA9E2GJ1 closes, and that needs the owner to press Esc in a live pane (armed and disarmed, three times each) or to waive it. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
 
 ## Measured (2026-09-15)
 

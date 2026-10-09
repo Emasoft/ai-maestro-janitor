@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-10-07T04:30:41+0200
+updated: 2026-10-09T23:50:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -337,3 +337,4 @@ nor its effect-handler (EHT), which is all `parent-trdd:` encodes.
 ## Approval log
 
 - 2026-09-16T13:05:00+0200 — stays in testing: the last box is a 7-day daemon.log observation under 3.5.5 (REFUSED-by-pane-policy lines present, zero FIRED esc_nudge pane=working lines); review-after 2026-09-23 parks it from drift until then.
+2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. LIVE box not re-verifiable today: the 11 refusals at a working pane found on 2026-10-07 have rotated out of the daemon log, and the card's own 7-day soak ends 2026-10-11 at the earliest. DETECT (a): grep -E 'REFUSED by the pane policy .* would esc_nudge.*\(pane=working\)' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log* must be non-empty; (b) grep -E 'FIRED esc_nudge .*pane=working' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log* must stay empty. Assessment: reports/board/20261009_234031+0200-wave3-batchI.md.

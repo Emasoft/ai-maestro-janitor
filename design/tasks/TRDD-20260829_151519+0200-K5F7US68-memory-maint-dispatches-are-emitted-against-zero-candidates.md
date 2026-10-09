@@ -1,10 +1,10 @@
 ---
 trdd-id: K5F7US68
 title: The memory-maint dispatch queue does not drain dedup or expire
-column: testing
+column: todo
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-10-07T09:38:03+0200
+updated: 2026-10-09T23:50:56+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -203,3 +203,5 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
 ## Approval log
 
 - 2026-10-07T09:35:39+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+2026-10-09 BACK TO todo (board drain, wave 3): drain and dedup are shipped and evidenced (tests pass per the assessing worker; two drained records logged in other projects on 2026-10-08), but the card's own note says items 2 and 3 are not done: consolidate still groups on same tier and type only, with no subject evidence (scripts/lib/memory_content_precheck.py consolidate_group_defect), and no test for 'empty candidates, no marker' was found. Five pending records remain in this repo, two from 2026-09-03 of kinds that never drain by design. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
+- 2026-10-09T23:50:56+0200 — column → todo by main-agent@ai-maestro-janitor. items 2 and 3 of the card are not done

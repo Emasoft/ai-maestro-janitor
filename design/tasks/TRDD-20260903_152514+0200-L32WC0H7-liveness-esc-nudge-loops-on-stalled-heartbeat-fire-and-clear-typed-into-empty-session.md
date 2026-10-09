@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-10-07T05:15:38+0200
+updated: 2026-10-09T23:50:55+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -302,5 +302,6 @@ Mechanism, verified in code + transcript:
 - 2026-09-17T05:54:34+0200 — column → testing by main session (owner standing permission 2026-09-03). F0-F6 code-complete and shipped in v3.4.14; F5 needs one real stalled-fire observation post-publish, cannot be manufactured.
 - 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
 - 2026-09-23T19:06:42+0200 — column → testing. card 1 of the Jev spec landed 2026-09-22; only the F5 live stalled-fire observation remains, per this card's STATE
+2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. Three live boxes open: a stalled fire recovering with one nudge has not been observed with transcript evidence. DETECT: grep -E '\[frozen\] attempt=[0-9]' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log* per episode, then count interrupt records in that project's transcript. The 3 GIVING UP lines of 2026-10-09 are cron_dead diagnoses, a different case. Assessment: reports/board/20261009_234031+0200-wave3-batchI.md.
 
 ## Notes and lessons learned

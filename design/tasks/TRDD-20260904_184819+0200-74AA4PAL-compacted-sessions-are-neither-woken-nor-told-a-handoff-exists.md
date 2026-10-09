@@ -1,9 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: testing
+column: todo
 created: 2026-09-04T18:48:19+0200
-updated: 2026-10-05T11:12:08+0200
+updated: 2026-10-09T23:50:56+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -18,6 +18,7 @@ eht: []
 implementation-commits: []
 external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
 review-after: 2026-09-24
+status: tasked
 ---
 
 # Compacted sessions are neither woken nor told a handoff exists
@@ -238,6 +239,8 @@ trading that away.
 - 2026-09-17T05:51:26+0200 — column → testing by board-drain-worker. GAP 1 fix (deferred push, TRDD-74AA4PAL) already landed in ff6a7810 and is unchanged by every later compaction commit (a96f7ef1, f07f7ed0, c1bcf97a, 5efa8d82) verified via git log; tests/test_post_compact_resume_hook.py 34/34 pass this session; remaining work is an observation (live confirmation the deferred push actually wakes a session) plus GAP 2 tracked separately under OES0NN3F
 - 2026-09-17T05:53:44+0200 — column → todo by board-drain-worker. revert my own testing move (adversarial review + full-text re-read via git show found what trddgrep show truncates): acceptance box 3 requires 'verified from the logs on a real compaction, not only unit test' — a live observation, not something this bounded session did or can claim. The board's own 2026-09-16 triage already reverted an identical premature testing->todo for the same reason (7-13 days idle in testing); reclaiming testing now without anyone positioned to watch a real compaction would repeat that exact mistake.
 - 2026-09-17T06:07:31+0200 — column → testing by main session (owner standing permission 2026-09-03). GAP 1 fix (ff6a7810) shipped in 3.4.15; boxes 2/4 ticked, box 1 struck; box 3 parked pending a live auto-compaction observation
+2026-10-09 BACK TO todo (board drain, wave 3): the card's own field check FAILS, per the assessing worker's log counts, not yet reproduced by the main session. Across the projects' .janitor/logs/post-compact-resume.log: 184 'resume push deferred (attended)' lines, 14 outcome lines, all 14 'deferred push moot'; 0 'resume push fired after', 0 'deferral gave up', 0 're-armed'. The code says every deferred child logs exactly one outcome after its 60 s sleep, so 170 deferrals ended with no line. Cause unproven; candidates: the child's import fails once the versioned plugin dir is gone after an update (main() returns 0 silently on an import failure, child output goes to DEVNULL), or a crash in the child. First step: log on that silent return and write the child's stderr to a log, with an end-to-end test of the real argv re-entry. Assessment: reports/board/20261009_234031+0200-wave3-batchI.md.
+- 2026-10-09T23:50:56+0200 — column → todo by main-agent@ai-maestro-janitor. field check fails: 170 of 184 deferred pushes have no outcome line
 
 ## STATE
 
