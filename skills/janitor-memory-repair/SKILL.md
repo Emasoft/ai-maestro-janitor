@@ -131,7 +131,7 @@ re-lint, and only what lint still reports is yours.
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md):
   `memgrep update-mem-atom --page <page> --atom <id> --desc "<text>"`. Before trimming
   a `desc:`, check every cut symptom/cause/name is in that atom's `keywords:`.
-  Grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
+  Grammar + incident: [repair-background § desc](references/repair-background.md#desc-quoting-grammar-trdd-3soo1rwe)
 
 **WRITE DOWN EVERY defect you judge unfixable** — unrecorded, it re-flags every
 run and starves the pages you CAN fix. Record it:

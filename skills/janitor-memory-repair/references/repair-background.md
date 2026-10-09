@@ -52,9 +52,9 @@ memgrep's `atom-unquoted-desc` check (`[a-z0-9_]+` only). Quote unquoted-prose
 descs verbatim rather than rewording them; trim an over-cap desc by tightening,
 never by dropping a fact the body lacks elsewhere.
 
-When a trim cuts a symptom/cause/name that IS load-bearing, ADD it to the atom's
-`keywords:` — a keyword naming a fact already in the atom body is derivation from
-existing content (rule 5), not fabrication; never drop the phrase silently.
+When a trim cuts a symptom/cause/name, ADD it to the atom's `keywords:` — a
+keyword naming a fact already in the atom body is derivation from existing
+content (rule 5), not fabrication; never drop the phrase silently.
 
 ## Description trims keep recall
 
