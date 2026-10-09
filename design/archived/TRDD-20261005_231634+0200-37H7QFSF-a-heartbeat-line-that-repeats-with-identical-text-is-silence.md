@@ -1,10 +1,10 @@
 ---
 trdd-id: 37H7QFSF
 title: A heartbeat line that repeats with identical text is silenced for ever by the dispatcher's own line dedupe
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T23:16:34+0200
-updated: 2026-10-07T08:21:22+0200
+updated: 2026-10-09T23:33:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,8 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 - 2026-10-07T07:47:59+0200 — column → testing by main-agent@ai-maestro-janitor. implemented in batch B5, awaiting verification
 2026-10-07: DECISION: the per-fire forget (a3583bbf, merge f1910cc4) was reverted in 876296de because detectors exit 0 silently while a condition holds (throttle, offline, own dedupe). Now four self-deduping detectors (oauth-login-needed, stale-index-lock, system-daemon-runaway, trdd-cross-card-blindspot) bypass the dispatcher dedupe = fixed for them. Every other detector's key carries the local date = bounded to one day, not fixed: a standing line of a non-exempt detector without its own dedupe now repeats once a day, and after the next release every standing line prints once (key format change). Merge 864864ba. Moved to testing by main-agent@ai-maestro-janitor.
 2026-10-07: shipped in v3.8.4; release observation starts.
+2026-10-09 CLOSED by the main session (board drain, wave 3). Commits 876296de, f1910cc4, 864864ba and 6e623375 are ancestors of the v3.8.11 tag (git merge-base, run today). Pinning tests re-run today: tests/test_drift_dedupe.py 5 passed; tests/test_dispatch_phases.py -k drift_line_dedupe 1 passed. The 2026-10-07 DECISION on this card accepted the one-day bound as the general rule. The three items it left (inbox error log, three oauth-login-needed day keys, three leftover seen files) and the missing exemption-contract test moved to TRDD-ALEX1X2P. FIELD CASE UNOBSERVED: no swallowed-then-reprinted line was ever observed in a live fire, before or after the fix. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
+- 2026-10-09T23:33:39+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; follow-ups in TRDD-ALEX1X2P.
 
 ## Corrections
 
@@ -43,3 +45,7 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 2026-10-07: trdd-cross-card-blindspot's never-forgotten pairs are fixed on main by TRDD-61PLV7WS (merge 6e623375), shipping in the next release; removing it from _SELF_DEDUPING_DETECTORS is blocked: fastedit cannot target a module-level constant, plain edits not authorised (owner asked 2026-10-07).
 2026-10-07: CORRECTION to the line above: TRDD-61PLV7WS (merge 6e623375) makes trdd-cross-card-blindspot forget cleared pairs, so it now meets the exemption contract and stays in _SELF_DEDUPING_DETECTORS; the earlier 'silent forever' note for it is fixed on main, shipping in the next release.
 2026-10-07: correction: TRDD-61PLV7WS (merge 6e623375) makes trdd-cross-card-blindspot forget cleared pairs, so it now meets the exemption contract and stays in _SELF_DEDUPING_DETECTORS; nothing needs removing, and the line above saying its removal is blocked is superseded.
+
+## Acceptance
+
+- [x] a repeated identical drift line is no longer silenced for ever: self-deduping detectors bypass the dispatcher dedupe and every other key carries the local day (tests/test_drift_dedupe.py, 5 passed 2026-10-09)
