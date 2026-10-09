@@ -81,8 +81,8 @@ distinction: [repair-background § Execution context and what this is](reference
 
 ## What makes a page malformed (the repair checklist)
 
-For each candidate page, diagnose and fix ONLY what is wrong. TWO passes, in order:
- 
+For each candidate page, fix ONLY what is wrong. TWO passes, in order:
+
 **Pass 1 — mechanical fixes (run the fixer pipeline FIRST):** `memgrep lint
 --apply-fixes <the claimed candidate page paths>` applies every registered Safe
 fixer through the write gate, under the scope lock: missing Notes section,
@@ -90,8 +90,10 @@ unquoted atom `desc:`, duplicated atom keywords, duplicated description phrases,
 superseded atoms above / missing the `## Superseded` delimiter, and an unused
 suppression comment. A refused plan is recorded once in the unfixed ledger and
 the page is left untouched by that fix — on a refusal, hand-fix per the notes in
-Pass 2 below, then record via memory_refusal_cli.py (below). Re-lint afterwards;
-only what lint still reports is yours.
+Pass 2 below (superseded atoms: repair-background §
+[delimiter mechanics](references/repair-background.md#superseded-atom-delimiter-mechanics)
+— VERBATIM move, never reword), then record via memory_refusal_cli.py (below),
+re-lint, and only what lint still reports is yours.
 
 **Pass 2 — semantic fixes (no fixer exists):**
 
@@ -117,22 +119,22 @@ only what lint still reports is yours.
   mirror error.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
   search will use, losing no recall phrase (repair-background § Description trims keep recall).
-- **A page's OWN one-sided link** → a PRE-REPLACE fix, run live before the whole-page
+- **A page's OWN one-sided link** → a PRE-REPLACE fix, live before the whole-page
   write — MANDATORY read
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md)
-  for details, `--base-sha256` and refusal handling:
-  `memgrep reference-mem-topic --page <this page> --to <target page>` (wires both ends
-  of the `[[wikilink]]`; repair is single-page, so only the reciprocal FROM this page).
+  for details, `--base-sha256` and refusals:
+  `memgrep reference-mem-topic --page <this page> --to <target page>` (wires both
+  ends of the `[[wikilink]]`; single-page repair, so only the reciprocal FROM here).
 - **Atom `desc:` incomplete** → backfill by SUMMARIZING the atom's own body (rule 5:
   infer, never invent) as a PRE-REPLACE fix, live before the whole-page replace —
   MANDATORY read
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md):
   `memgrep update-mem-atom --page <page> --atom <id> --desc "<text>"`. Before trimming
-  a `desc:`, check every cut symptom/cause/name is in that atom's `keywords:` — add it
-  if not. Grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
+  a `desc:`, check every cut symptom/cause/name is in that atom's `keywords:`.
+  Grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
 
-**WRITE DOWN EVERY defect you judge unfixable** — unrecorded, it re-flags every run
-and starves the pages you CAN fix. Record before moving on:
+**WRITE DOWN EVERY defect you judge unfixable** — unrecorded, it re-flags every
+run and starves the pages you CAN fix. Record it:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
@@ -140,9 +142,8 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
   --page <slug>.md --reason "<why this defect cannot be durably fixed>"
 ```
 
-It re-arms when the page's bytes change, and after 7 days. `--reason` must let the
-next reader re-check it.
- 
+It re-arms on changed bytes and after 7 days; `--reason` must let the next reader re-check it.
+
 ## PRE-REPLACE verb fixes — REQUIRED when applicable
 
 **PRE-REPLACE verb fixes — REQUIRED when the checklist finds a page's own one-sided
