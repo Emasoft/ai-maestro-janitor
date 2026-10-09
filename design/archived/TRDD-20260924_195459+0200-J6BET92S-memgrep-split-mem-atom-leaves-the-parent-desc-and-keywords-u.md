@@ -1,10 +1,10 @@
 ---
 trdd-id: J6BET92S
 title: memgrep split-mem-atom leaves the parent desc and keywords unchanged and truncates the new desc mid-word
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-24T19:54:59+0200
-updated: 2026-10-07T09:35:39+0200
+updated: 2026-10-09T23:29:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -50,7 +50,14 @@ The exact defect is preserved for review in `.claude/project/memory/claude-code-
 
 - 2026-09-24T19:54:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T09:35:39+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+2026-10-09 CLOSED by the main session (board drain, wave 3). Fix commits 7f308b2f, 1296ccde and 65081d77 are ancestors of the v3.8.11 tag (git merge-base, run today). Pinning tests re-run today: cargo test retune in scripts/memgrep, 2 passed (omitting_orig_retune_warns_and_supplying_both_does_not, orig_keywords_and_desc_are_retuned_without_rebuilding_the_marker). The card names no field check beyond the release, which is out. FIELD CASE UNOBSERVED: no real split-mem-atom on a live page was run after the fix, and the refusal path of 65081d77 for an over-cap desc was not traced. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
+- 2026-10-09T23:29:27+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.
 
 ## Implementation notes
 
 2026-10-07: split-mem-atom warns when the original description/keywords are left unchanged; the mid-word cut was already fixed by 65081d77. Merged at 1296ccde.
+
+## Acceptance
+
+- [x] split-mem-atom warns when the original desc and keywords are left unchanged (mem_split.rs orig_retune_warning; cargo test retune, 2 passed 2026-10-09)
+- [x] a desc is never cut mid-word: write verbs refuse a desc over the cap (65081d77, in v3.8.11)

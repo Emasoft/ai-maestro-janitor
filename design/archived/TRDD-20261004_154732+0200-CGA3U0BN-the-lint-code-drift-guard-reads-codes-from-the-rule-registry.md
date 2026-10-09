@@ -1,10 +1,10 @@
 ---
 trdd-id: CGA3U0BN
 title: The lint-code drift guard reads codes from the rule registry instead of scraping memory.rs
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-04T15:47:32+0200
-updated: 2026-10-07T09:35:40+0200
+updated: 2026-10-09T23:29:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -42,6 +42,8 @@ Not before. 3.7.1 is published and C21 has landed, so the registry shape is fina
 - 2026-10-07T08:19:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on owner decision: plain edits for module-level constants fastedit cannot target
 - 2026-10-07T08:19:38+0200 — column → backburner by main-agent@ai-maestro-janitor. reverted: blocked-by naming a decision gives lint errors; owner question recorded in body Cleared blocked-by (--clear-blocker override).
 - 2026-10-07T09:35:40+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+2026-10-09 CLOSED by the main session (board drain, wave 3). Fix commits 0977cf1f, 269a6d7e and 15e8053e are ancestors of the v3.8.11 tag (git merge-base, run today). Pinning test re-run today: tests/test_memory_lint_gate_coverage.py, 5 passed. The Done-when mutation proof is recorded in the commit bodies (a registry name without its space fails 46 vs 47; mutations verified both ways); it was not re-run today. The card names no field check.
+- 2026-10-09T23:29:28+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; test re-run; see Approval log 2026-10-09.
 
 ## Open defects carried here
 
@@ -56,3 +58,8 @@ The comment above _PUSH_BLOCK_RE (commit bc2bfb65) says the run-on 'only adds te
 ## Implementation notes
 
 2026-10-07: guard reads the 47-name registry; 8 names classified with what handles each; a second count guards the parser; plain edits used under the owner's delegation (owner 2026-10-07, verbatim: 'do it as you think its best. but go on. you are late.'; main agent's decision: plain Edit only for module-level constants, comment blocks or docstrings fastedit cannot target). Merged at 15e8053e.
+
+## Acceptance
+
+- [x] the drift guard reads codes from the rule registry, all 47 names classified, scraper regexes and their comment deleted (tests/test_memory_lint_gate_coverage.py, 5 passed 2026-10-09; no _PUSH_BLOCK_RE left in the file)
+- [x] a registry change without a table edit fails the test (mutations both ways recorded in the commit bodies of 269a6d7e and 15e8053e)
