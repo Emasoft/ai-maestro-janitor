@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T01:59:04+0200
+updated: 2026-10-09T02:00:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -60,6 +60,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 CORRECTION (review of 775cd2fc): the previous line's 'Remaining known residue on this card: NONE in code' is OVERBROAD — it scoped only the S3+S4 residue list. Still open, recorded on this card: (1) S1 gap — a fixer_for arm whose name matches no rule is not detected by any test; (2) S1 follow-up — a test where the ledger path is a directory (the read must fail fast); (3) WM-LINT-10 wording defect ownership (possibly mooted by PLAN v2's flag contract, unrecorded); (4) per-finding labels deferred 'once it applies the fixes' — --apply-fixes is now wired, deferral due, status unrecorded. Items 1-2 are developable test items; the next pull works them or re-columns explicitly.
 2026-10-09 second completeness correction (review of f3ddb04a): that append's (1)-(4) was a selection, not the full ledger. ADDED to the open list: KTD3N7H6 (suppression location, lint-only vs lint_page_text/write-gate) — this card's to settle per its own STATE, unresolved, and coupled to item 4 label correctness; C21-(c) publish-globally-autofix-runs-regardless-of-selection decision — unresolved; the unused-noqa label clause of the item-4 deferral — disposition unrecorded. COLUMN: 'testing' remains true because the completion condition is event-gated (dependent field use of --apply-fixes + per-scope lock/ledger per TRDD-1T0W2ZVW); the developable residue is exactly items 1-2 of f3ddb04a (the two test items). No further enumeration appends owed.
 2026-10-09 TEST ITEMS LANDED, commit b21881dd: (1) the S1 gap is covered at the level its review settled — every_fixer_for_arm_name_is_a_registered_rule pins each fixer_for arm against the rule table (typo'd EXISTING arm detected); documented ceiling: an arm ADDED to fixer_for without extending the test's ARM_NAMES list is undetected; (2) the S1 ledger fail-fast item is covered as the WRITE-path variant (record_unfixed on a directory-ledger errors, not NotFound — the reader treats NotFound as empty and would write through); the card text's literal READ-path pin remains untested if anyone wants it; (3) one S2 blank line removed, remaining stragglers fold forward per the no-more-enumeration policy. Verified: both clippy gates clean, cargo test 447 unit + 244 cli pass. Card open items after this: field use by C30/C31/C32 + per-scope lock/ledger (TRDD-1T0W2ZVW), KTD3N7H6, C21-(c), unused-noqa label clause, WM-LINT-10.
+2026-10-09 two-line correction (review of 96dd2b16): (1) the open-items list there silently dropped the per-finding-labels deferral — still live and unrecorded (the safe-fix label remains a whole-rule answer at HEAD while --apply-fixes now applies fixes); restored to the open list alongside the unused-noqa clause. (2) 'if anyone wants it' replaced by the accurate form: the ledger READ-path pin remains OPEN; the write-path pin is accepted as the load-bearing half, the read-path deliberately unpinned.
 
 ## Approval log
 
