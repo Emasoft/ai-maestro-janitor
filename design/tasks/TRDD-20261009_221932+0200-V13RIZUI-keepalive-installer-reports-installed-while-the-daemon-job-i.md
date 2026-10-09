@@ -1,0 +1,35 @@
+---
+trdd-id: V13RIZUI
+title: keepalive installer reports installed while the daemon job is left unloaded
+column: todo
+status: tasked
+created: 2026-10-09T22:19:32+0200
+updated: 2026-10-09T22:19:32+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: bugfix
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-09T22:19:32+0200
+---
+
+# keepalive installer reports installed while the daemon job is left unloaded
+
+Measured 2026-10-09 on this Mac with the installed 3.8.11 copy of scripts/keepalive_install.sh (the repo copy has the same lines, 291 to 293): 'bash keepalive_install.sh install' on a host whose job was loaded and running (pid 73460) printed 'keepalive: installed (macos)' and exited 0, but afterwards 'launchctl print gui/UID/com.ai-maestro-janitor.daemon' found no job, 'launchctl list' had no janitor entry, no daemon process existed, and the script's own 'status' answered 'not installed (macos)'. The plist on disk was correct and passed plutil -lint. A plain 'launchctl bootstrap gui/UID <plist>' a minute later exited 0 and the daemon ran (pid 6931). The daemon, which owns OAuth rotation and machine-wide updates, was down for about one minute and would have stayed down until the next session-driven recovery.
+
+Mechanism, read from the code, not yet proven by a failing test: install_macos runs 'launchctl bootout ... || true' and then immediately 'launchctl bootstrap ... 2>/dev/null || launchctl load -w ... 2>/dev/null || true'. Both failures are discarded and nothing checks that the job is loaded before 'installed' is printed. The likely cause of the bootstrap failure is that bootout had not finished tearing the job down; that is an inference.
+
+## Acceptance
+
+- [ ] A test reproduces it: install over an already-loaded job leaves the job loaded (or the installer exits non-zero).
+- [ ] install_macos verifies the job is loaded (launchctl print) after bootstrap, retrying briefly after bootout, and exits non-zero with the launchctl error when it is not; it never prints 'installed' for an unloaded job.
+- [ ] The Linux path is checked for the same pattern.
+- [ ] ruff, mypy, pyright and uv run pytest pass; the strict validator still exits 0 (this file is scanned and has a ProgramArguments invariant).
+
+## Approval log
+
+- 2026-10-09T22:19:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

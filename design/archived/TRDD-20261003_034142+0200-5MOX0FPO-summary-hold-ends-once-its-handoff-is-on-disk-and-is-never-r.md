@@ -1,10 +1,10 @@
 ---
 trdd-id: 5MOX0FPO
 title: Summary hold ends once its handoff is on disk and is never re-taken over one
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-07T04:44:33+0200
+updated: 2026-10-09T22:19:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -53,3 +53,11 @@ Parent plan: TRDD-K9AHY1ZB
 
 - 2026-10-03T03:41:42+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-06T21:08:28+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
+2026-10-09 DECISION by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests'): KEEP the shipped default, a template handoff ends the summary hold (this reverses K8YF2WQ5 decision 3). Basis: tests/test_external_handoff_clear.py re-run today, 44 passed; _release_summary_hold has zero remaining references under scripts/ and tests/; the 2026-10-06 field check saw no hold line on a 3.7.4 clear. Not re-verified today: dispatcher logs after 2026-10-06. Assessment report: reports/board/20261009_221808+0200-wave2-5MOX0FPO.md.
+- 2026-10-09T22:19:56+0200 — COMPLETE by main-agent@ai-maestro-janitor. owner decision delegated and taken: keep the shipped default.
+
+## Acceptance
+
+- [x] The summary hold ends once a handoff for the session key is on disk and is never re-taken over one (tests/test_external_handoff_clear.py, 44 passed on 2026-10-09).
+- [x] _release_summary_hold is gone (zero references under scripts/ and tests/).
+- [x] The default (a template handoff ends the hold) is decided: kept, 2026-10-09.

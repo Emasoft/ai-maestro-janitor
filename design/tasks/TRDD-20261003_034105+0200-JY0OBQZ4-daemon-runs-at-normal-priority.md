@@ -1,10 +1,10 @@
 ---
 trdd-id: JY0OBQZ4
 title: Daemon runs at normal priority
-column: human_review
+column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-07T04:44:34+0200
+updated: 2026-10-09T22:19:45+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -46,3 +46,5 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03T06:22:33+0200 — column → testing. code committed; only field acceptance after release remains
 2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.
 - 2026-10-06T21:08:30+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
+2026-10-09 HOST STEP N2 DONE by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself'). Before: installed plist ProcessType Background, daemon pid 73460 at pri 4. Ran the installed 3.8.11 keepalive_install.sh install (plist backed up to docs_dev/ first). After: plist ProcessType Standard (plutil), daemon pid 6931 at pri 20 (ps). The log paths in the plist also moved from the retired ~/.claude/janitor-global-state to the plugin DATA global-state dir. The install left the job UNLOADED and the daemon down for about a minute until a manual launchctl bootstrap; that defect is carded as TRDD-V13RIZUI. The stale item 'full uv run pytest after R4c' belongs to TRDD-3OS6AXV3, not here. REMAINING, event-gated: daemon.log tick wall times under 30 s across a high-load period on the Standard job (earlier baseline: 4 of 66 ticks at 30 s or more). Assessment report: reports/board/20261009_221754+0200-wave2-JY0OBQZ4.md.
+- 2026-10-09T22:19:45+0200 — column → testing by main-agent@ai-maestro-janitor. host step done; waits on the tick-time field check under load
