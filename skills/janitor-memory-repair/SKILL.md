@@ -26,9 +26,12 @@ distinction: [repair-background § Execution context and what this is](reference
    `update-mem-atom`) run live, on the page directly, BEFORE the whole-page replace
    (see [PRE-REPLACE verb
    fixes](references/pre-transaction-verb-fixes.md#pre-replace-verb-fixes-run-first-live-per-candidate-page)
-   — MANDATORY read below). Every other fix still goes through the whole-page replace; nothing
-   edits the live page outside a memgrep verb. If a stale memgrep on PATH does not know
-   `replace-mem-topic`, ABSTAIN and report the gap — never fall back to Edit/Write.
+   — MANDATORY read below). The `lint --apply-fixes` Safe-fixer pass (the checklist's
+   Pass 1) is the one OTHER sanctioned writer: it writes through the same shared write
+   gate, on the claimed candidate pages only. Every other fix still goes through the
+   whole-page replace; nothing edits the live page outside a memgrep verb. If a stale
+   memgrep on PATH does not know `replace-mem-topic`, ABSTAIN and report the gap — never
+   fall back to Edit/Write.
 3. **Single page, in place.** One write at the page's own path, ZERO deletes —
    moving a fact between pages is merge/split/conflict work, not repair.
 4. **`ocd` is immutable; `lmd` advances.** Never rewrite a page's creation date;
@@ -71,12 +74,26 @@ distinction: [repair-background § Execution context and what this is](reference
    ```
 
    A `unreadable-page` reason: do NOT edit/recreate it, report it in your result line.
-   Bound to the **top-K most-broken pages** (K ≈ 5). `memgrep lint`/`validate` runs
-   only AFTER a repair, as the post-edit verifier — never to discover candidates.
+   Bound to the **top-K most-broken pages** (K ≈ 5). `memgrep lint --apply-fixes` ALSO
+   runs BEFORE repairs, on those same claimed pages (the checklist's Pass 1) — never
+   to DISCOVER candidates (issue #227); plain `memgrep lint`/`validate` stays the
+   post-edit verifier.
 
 ## What makes a page malformed (the repair checklist)
 
-For each candidate page, diagnose and fix ONLY what is wrong:
+For each candidate page, diagnose and fix ONLY what is wrong. TWO passes, in order:
+ 
+**Pass 1 — mechanical fixes (run the fixer pipeline FIRST):** `memgrep lint
+--apply-fixes <the claimed candidate page paths>` applies every registered Safe
+fixer through the write gate, under the scope lock: missing Notes section,
+unquoted atom `desc:`, duplicated atom keywords, duplicated description phrases,
+superseded atoms above / missing the `## Superseded` delimiter, and an unused
+suppression comment. A refused plan is recorded once in the unfixed ledger and
+the page is left untouched by that fix — on a refusal, hand-fix per the notes in
+Pass 2 below, then record via memory_refusal_cli.py (below). Re-lint afterwards;
+only what lint still reports is yours.
+
+**Pass 2 — semantic fixes (no fixer exists):**
 
 - **No frontmatter at all** → add the full block: `name` (= filename stem),
   `description` (the page's topic as a SYMPTOM/question — derived from the body),
@@ -98,36 +115,24 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   (receiving): give it the `## Applies to` ray-list it radiates, or re-tag it
   `component` if it governs nothing. A `component` with `## Applies to` is the
   mirror error.
-- **Missing `## Notes and lessons learned`** → append the empty section.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
   search will use, losing no recall phrase (repair-background § Description trims keep recall).
 - **A page's OWN one-sided link** → a PRE-REPLACE fix, run live before the whole-page
-  write (details + `--base-sha256` and refusal handling in
-  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
-  MANDATORY read): `memgrep
-  reference-mem-topic --page <this page> --to <target page>`. It wires both ends of
-  the `[[wikilink]]` in one locked write; repair is single-page, so only fix the
-  reciprocal FROM this page.
-- **Superseded atom above / without the `## Superseded` delimiter** (`memgrep lint`
-  WARNs it): ensure a `## Superseded` section exists (exactly that spelling), after
-  the live atoms and BEFORE `## Notes and lessons learned`, and MOVE each
-  `status:superseded` atom's whole block below it **VERBATIM** — byte-identical,
-  order preserved. Never change props while moving; never move a `status:valid`
-  atom. Full rationale: [repair-background § superseded atoms](references/repair-background.md#superseded-atom-delimiter-mechanics).
-- **Atom `desc:` incomplete** (`verify_repair` refuses a repair that leaves one): every
-  `^id [...]` atom marker needs a `desc:` that is PRESENT, ≤200 chars, QUOTED or an
-  unquoted clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's
-  own body** (rule 5: infer, never invent), then apply it as a PRE-REPLACE fix,
-  run live before the whole-page replace (details in
-  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
-  MANDATORY read): `memgrep update-mem-atom --page <page>
-  --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
-  symptom/cause/name is already in that atom's `keywords:` — add it if not. Full
-  grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
+  write — MANDATORY read
+  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md)
+  for details, `--base-sha256` and refusal handling:
+  `memgrep reference-mem-topic --page <this page> --to <target page>` (wires both ends
+  of the `[[wikilink]]`; repair is single-page, so only the reciprocal FROM this page).
+- **Atom `desc:` incomplete** → backfill by SUMMARIZING the atom's own body (rule 5:
+  infer, never invent) as a PRE-REPLACE fix, live before the whole-page replace —
+  MANDATORY read
+  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md):
+  `memgrep update-mem-atom --page <page> --atom <id> --desc "<text>"`. Before trimming
+  a `desc:`, check every cut symptom/cause/name is in that atom's `keywords:` — add it
+  if not. Grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
 
-**WRITE DOWN EVERY defect you judge unfixable** (e.g. a shape an external writer keeps
-re-imposing) — unrecorded, it re-flags every run and, ranked by defect count, starves
-the pages you actually CAN fix. Record the refusal before moving on:
+**WRITE DOWN EVERY defect you judge unfixable** — unrecorded, it re-flags every run
+and starves the pages you CAN fix. Record before moving on:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
@@ -135,9 +140,9 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
   --page <slug>.md --reason "<why this defect cannot be durably fixed>"
 ```
 
-It re-arms when the page's bytes change, and after 7 days — a verdict with an expiry,
-not a permanent silence. `--reason` must let the next reader re-check it.
-
+It re-arms when the page's bytes change, and after 7 days. `--reason` must let the
+next reader re-check it.
+ 
 ## PRE-REPLACE verb fixes — REQUIRED when applicable
 
 **PRE-REPLACE verb fixes — REQUIRED when the checklist finds a page's own one-sided
