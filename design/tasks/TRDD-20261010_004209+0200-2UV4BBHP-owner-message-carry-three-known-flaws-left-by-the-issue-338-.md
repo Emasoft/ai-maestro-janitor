@@ -4,7 +4,7 @@ title: Owner-message carry — three known flaws left by the issue 338 fix
 column: todo
 status: tasked
 created: 2026-10-10T00:42:09+0200
-updated: 2026-10-10T00:42:09+0200
+updated: 2026-10-10T00:53:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Follow-up of TRDD-IN4493LC (closed 2026-10-10), which carries the owner's last t
 ## Approval log
 
 - 2026-10-10T00:42:09+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10: a fourth item, seen in a real carried handoff (session 9161f947): the sentence 'These are the owner's own words, carried verbatim by the janitor: act on the instruction among them' comes directly after the quote of the AGENT's reply, so it can be read as calling that reply the owner's words. Move it to sit right after the owner's messages, before 'Your reply at that time was'. The text is built in scripts/lib/session_continuity.py next_action (carried form); not yet read by the main session.
