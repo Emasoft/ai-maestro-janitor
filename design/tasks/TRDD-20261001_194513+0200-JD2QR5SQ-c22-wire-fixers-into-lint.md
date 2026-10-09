@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T03:48:46+0200
+updated: 2026-10-09T03:52:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -63,6 +63,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 two-line correction (review of 96dd2b16): (1) the open-items list there silently dropped the per-finding-labels deferral — still live and unrecorded (the safe-fix label remains a whole-rule answer at HEAD while --apply-fixes now applies fixes); restored to the open list alongside the unused-noqa clause. (2) 'if anyone wants it' replaced by the accurate form: the ledger READ-path pin remains OPEN; the write-path pin is accepted as the load-bearing half, the read-path deliberately unpinned.
 2026-10-09 C22-evidence coupling (from OLNPXGBC post-commit review M2): per-scope lock engagement on PATH-SCOPED lint --apply-fixes runs is unmeasured (S6 tested scratch roots; the parent's field run passed the whole USER root). C31's skill now instructs path-scoped Pass-1 runs. COMPLETION CONDITION SHARPENED: a real repair dispatch must show the per-scope lock AND the ledger engaging before this card completes — a ledger-only observation is insufficient evidence.
 2026-10-09 field-dispatch clarification: the 03:36 LOCAL memory-repair dispatch (claim 1791509743-d88caada) did NOT run Pass 1 (lint --apply-fixes) — its two findings both had no fixer, and the agent went straight to the gated replace-mem-topic verb. That dispatch is NOT the completion evidence this card needs: the gate still requires a real repair dispatch whose Pass 1 actually runs on claimed pages on a real root, with the per-scope lock AND the unfixed ledger both seen engaging. No evidence claimed from that dispatch.
+2026-10-09 completion-condition CORRECTION (twelfth review round): the gate's evidence event is NOT 'a dispatch whose Pass 1 runs' — the unfixed ledger writes lines on REFUSALS, not on runs, so a clean no-op Pass 1 engages the lock but writes nothing (ledger silence = working-unexercised or broken, non-discriminating). The evidence event this card actually needs: Pass 1 run on a real root (per-scope lock seen engaging) AND at least one refusal/ledger line OBSERVED — on a clean corpus a rare, refusal-shaped event. OPEN OWNER QUESTION the cards must surface: if fixers always apply cleanly, the gate as sharpened may wait forever; either accept that, or rule that lock + clean pass + zero-refusal note suffices (re-sharpening the earlier gate wording). Confirmation obligation anchored to DURABLE ARTIFACTS per the tenth-round F1 lesson: any future session discharges it by reading the dispatch's claim record (.janitor/state/memory-maint-claimed-*.json) and report (reports/janitor-memory-subconscious-agent/), not by being the session that saw a notification.
 
 ## Approval log
 
