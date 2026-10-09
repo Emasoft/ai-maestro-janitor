@@ -27,7 +27,7 @@ Still stop for: destructive or irreversible acts, anything outward-facing (push,
 
 BOARD MEASURED 2026-10-09 (trddgrep board, 361 open cards in design/tasks): backburner 93, complete-but-unarchived 86, todo 81, testing 57, blocked 27, human_review 10, design 4, dev 1, verify_assumptions 1, live_auditing 1.
 
-NEXT ACTION: run the waves below in order. One worker per card, one writer per file set, the main session alone touches git (stage by name, commit per card with the card id in the subject). Every decision rests on a measurement recorded on the card it closes.
+NEXT ACTION: FIRST read the section '## Rules added by the review of 4de85716' at the end of this card — its six rules BIND every wave below and win over the wave text (cost measured on one card and a cap written before any worker launches; order by trddgrep next; event-gated and human-only cards stay put; no cancellations). THEN start wave 1 with ONE card done by the main session, record its cost here, and write the cap and deadline before any fan-out. No cap or deadline is written yet. run the waves below in order. One worker per card, one writer per file set, the main session alone touches git (stage by name, commit per card with the card id in the subject). Every decision rests on a measurement recorded on the card it closes.
 
 WAVES:
 1. complete-but-unarchived (86): for each, find why trddgrep did not archive it (missing acceptance checklist, open box, release-via) and either archive it or re-column it with the reason. Cheap, clears a quarter of the board.
