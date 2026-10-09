@@ -4,7 +4,7 @@ title: The shared heartbeat-reply predicate hides real assistant messages from t
 column: testing
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-10-09T23:51:22+0200
+updated: 2026-10-10T00:04:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -34,6 +34,7 @@ Fix at the root: one predicate, not two. First decide the actual question the wi
 2026-10-09 FIXED on main in ee539e7a: external_clear.recent_messages keeps the newest 2 of each run of consecutive short heartbeat status replies (transcript_roles.is_heartbeat_status_reply, at most 400 chars). The acceptance case is now a test: one substantive assistant message followed by 20 status replies stays in the result (tests/test_external_clear.py, failed before the fix per the worker, passes now on the main session's re-run; 348 passed across the tests of every recent_messages caller). Known limits: a short reply three or more fires back in an unbroken run is dropped even when its text differs (the identical-text alternative was rejected: 10 of 14 real status replies in session 8a11fda7 differ); no line cap helps once the message is outside the 512 KiB tail. The same exposure in jev_compaction and the pre-compact hook is TRDD-U119W52S. Full suite running on ee539e7a; not yet seen in a real clear handoff.
 - 2026-10-09T23:38:33+0200 — column → testing by main-agent@ai-maestro-janitor. fixed in ee539e7a; waits on the full suite run on that commit
 2026-10-09 REVISED in 13650a48 and STAYS in testing: the 400-character rule of ee539e7a classed short work notes as status (measured on session 8a11fda7), so a reply is now status only when every line after the phrase is a dispatcher line (the 'N background worker(s) running' line or a lower-case bracket tag) in a single text block; 7 of the 14 real replies measured are status by this rule. Reason for staying: the acceptance names a real clear handoff taken after 20 or more consecutive fires, and none has been observed; the recent-messages tail of a handoff is not logged anywhere, so no machine check exists yet (same gap as DS3WDTPV). KNOWN LIMITS: a reply carrying any prose line is never capped, so a chatty session can still crowd the window; a drift line that starts with a letter or with the defanged bracket is content; a reply sent as two blocks is never capped; nothing helps once the message is outside the 512 KiB tail. Checks by the main session: nine test files, 620 passed; ruff, mypy, pyright clean; full suite running on 13650a48 (reports/board/full-suite-13650a48.txt). ee539e7a never had a full-suite result.
+2026-10-10: full suite green on 13650a48 (18238 passed, 2 skipped). The card still stays in testing for the reason above. Owed in code, to do with TRDD-U119W52S: the comment above the cap call in recent_messages says a dispatcher line starts with a digit or a bracket, which is looser than the rule; and the bracket-tag half of the rule is pinned only by hand-written strings, with no test against real dispatcher output.
 
 ## Related
 

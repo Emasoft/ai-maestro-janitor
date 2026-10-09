@@ -4,7 +4,7 @@ title: Carry the owner last assignment across consecutive clears (GitHub issue 3
 column: testing
 status: tasked
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-09T23:50:55+0200
+updated: 2026-10-10T00:04:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,6 +40,7 @@ PARKED: TRDD-A8DRRW0I wave 2 until 3.8.11 is out; wave 1 commits 1c045352 and 22
 
 - 2026-10-07T22:37:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3): reported closeable by the assessing worker on field evidence of its own case (six post-clear sessions on 2026-10-09 carried the owner's messages and kept working), but the card's own demand comes first: mint cards for its three known flaws and for issue 338 proposals 2, 3 and 5, and re-run tests/test_session_continuity.py and tests/test_dispatch_phases.py. Not yet done. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
+2026-10-10 CORRECTION to the line above: the two test files are not owed; tests/test_session_continuity.py and tests/test_dispatch_phases.py both passed in the main session's 620-test run before commit 13650a48 and in the full suite on it (18238 passed). Still owed before closing: cards for the three known flaws and for issue 338 proposals 2, 3 and 5, and the main session's own check of the field evidence (the worker's caveat: the heartbeat nudge also quotes the owner, so 'kept working with no typed message' does not isolate the carried handoff).
 
 ## Review findings to build in
 
