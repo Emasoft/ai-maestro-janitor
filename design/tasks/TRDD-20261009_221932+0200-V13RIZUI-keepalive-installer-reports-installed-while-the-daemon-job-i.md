@@ -4,7 +4,7 @@ title: keepalive installer reports installed while the daemon job is left unload
 column: testing
 status: tasked
 created: 2026-10-09T22:19:32+0200
-updated: 2026-10-09T22:29:24+0200
+updated: 2026-10-09T22:32:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,3 +35,7 @@ Mechanism, read from the code, not yet proven by a failing test: install_macos r
 
 - 2026-10-09T22:19:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-09T22:29:24+0200 — column → testing by main-agent@ai-maestro-janitor. fix committed; box 4 (mypy, pyright, full suite, strict validator) still to run
+
+## Notes
+
+2026-10-09 after the review of 1393ae8a, measured by the main session: (1) the new test is RED on the old script (1 failed, 1 passed with 1393ae8a^'s keepalive_install.sh swapped in) and green on the fix (2 passed); the fixed file was restored and git shows it unmodified. (2) The caller, scripts/lib/launchd_keepalive.py activate(), returns the installer's result as a (bool, message) tuple through _run, so exit 1 is reported, not raised; _run itself was not read. RESIDUAL, not fixed: (a) if the booted-out job is still present after the 5 s wait and bootstrap fails as already loaded, launchctl print still succeeds and install returns 0 with the OLD job loaded and the new plist unapplied; (b) on Linux, is-active right after enable --now can see a unit still activating and report a false failure, and no Linux host has run this; (c) launchctl print proves loaded, not healthy; (d) the code comment states the bootout race as the cause, which remains an inference. Box 3 was ticked on a code change with no Linux run.
