@@ -1,10 +1,10 @@
 ---
 trdd-id: AZ32D1MK
 title: Rotator tick stderr tail in daemon log starts mid-line
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T04:32:02+0200
-updated: 2026-10-07T04:57:06+0200
+updated: 2026-10-09T23:14:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,6 +37,8 @@ Related: TRDD-JSQSJ3PZ (observation (a) of its live check is owned here). Code i
 - 2026-10-07T04:32:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:32:24+0200 — column → dev by main-agent@ai-maestro-janitor. code is on a worktree branch, not merged yet
 - 2026-10-07T04:57:06+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release and one live log line
+2026-10-09 CLOSED by the main session (board drain, wave 3) on three checks it ran itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today; field condition: daemon.log has 4 rotator-tick lines whose stderr tail starts with the cut marker on a line boundary, newest 2026-10-09T22:28:03; tests/test_daemon_rotator_tick_log.py passes. Assessment: reports/board/20261009_231333+0200-wave3-batchB.md.
+- 2026-10-09T23:14:22+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11, tests re-run, field condition met.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 

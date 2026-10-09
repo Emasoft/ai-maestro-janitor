@@ -1,10 +1,10 @@
 ---
 trdd-id: QXG8SRVD
 title: C25 — autorecall HOOK-003
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-08T20:01:57+0200
+updated: 2026-10-09T23:14:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -38,7 +38,13 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:13+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on B9YPSF02 per DSN035UN wave order
 - 2026-10-07T09:35:40+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
 - 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
+2026-10-09 CLOSED by the main session (board drain, wave 3) on three checks it ran itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today; field condition: the findings ledger holds 2 real HOOK-003 records (2026-10-07 and 2026-10-08); tests/test_autorecall_hook003.py passes. Assessment: reports/board/20261009_231333+0200-wave3-batchB.md.
+- 2026-10-09T23:14:22+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11, tests re-run, field condition met.
 
 ## Implementation notes
 
 2026-10-07: HOOK-003 recorded at most once a day when the autorecall limit trips; fail-open. Merged at 053c63f2.
+
+## Acceptance
+
+- [x] the findings ledger holds 2 real HOOK-003 records (2026-10-07 and 2026-10-08); tests/test_autorecall_hook003.py passes.

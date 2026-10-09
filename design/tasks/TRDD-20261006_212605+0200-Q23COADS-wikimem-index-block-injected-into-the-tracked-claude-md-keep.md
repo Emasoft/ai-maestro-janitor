@@ -4,7 +4,7 @@ title: Wikimem index block injected into the tracked CLAUDE.md keeps the file pe
 column: testing
 status: tasked
 created: 2026-10-06T21:26:05+0200
-updated: 2026-10-07T02:38:10+0200
+updated: 2026-10-09T23:14:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,4 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#328 (opened 2026-10-03). Part of
 
 - 2026-10-06T21:26:05+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-06T22:08:22+0200 — column → testing by main-agent@ai-maestro-janitor.
+2026-10-09 STAYS in testing (board drain, wave 3): the code part is released and tests/test_claudemd_slim.py passes (21), but the card waits on the decision recorded on proposal TRDD-Q9MU9CWK (whether a generated index block belongs in CLAUDE.md), and issue 328 is open for it. Not yet taken up by the drain. Assessment: reports/board/20261009_231333+0200-wave3-batchB.md.

@@ -1,10 +1,10 @@
 ---
 trdd-id: 4P8R2JLQ
 title: The heartbeat reports a background worker as running for hours after it stopped
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T22:08:48+0200
-updated: 2026-10-07T22:06:22+0200
+updated: 2026-10-09T23:14:20+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,8 +28,14 @@ Observed: for about four hours, though not on every fire, the heartbeat printed 
 
 - 2026-10-05T22:08:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T09:35:38+0200 — column → testing by main-agent@ai-maestro-janitor. built and merged on main; release observation
+2026-10-09 CLOSED by the main session (board drain, wave 3) on three checks it ran itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today; field condition: the stalled-worker tests pass (17 selected in tests/test_dispatch_phases.py); in this session's heartbeats on 2026-10-09 the running-worker count fell from 3 to 0 as workers finished and no stale entry lingered. The original hours-long stale entry was not re-created. Assessment: reports/board/20261009_231333+0200-wave3-batchB.md.
+- 2026-10-09T23:14:20+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11, tests re-run, field condition met.
 
 ## Implementation notes
 
 2026-10-07: stalled workers are not counted as running; their 'silent for N min' line still prints (scripts/dispatch.py:1651), pinned by a test. Merged at 1296ccde.
 2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('eight hours' and 'every heartbeat fire' to 'about four hours, though not on every fire'; 'two resume cues' to 'one resume cue'); the correction was not re-measured.
+
+## Acceptance
+
+- [x] the stalled-worker tests pass (17 selected in tests/test_dispatch_phases.py); in this session's heartbeats on 2026-10-09 the running-worker count fell from 3 to 0 as workers finished and no stale entry lingered. The original hours-long stale entry was not re-created.
