@@ -1,10 +1,10 @@
 ---
 trdd-id: D5BPUFIV
 title: the integrity re-pin chore reports a healthy pin as stuck
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T13:10:40+0200
-updated: 2026-10-07T04:44:32+0200
+updated: 2026-10-09T23:41:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,12 +31,14 @@ Origin: written by the janitor repair agent working the ticket, which died befor
 ## Approval log
 
 - 2026-10-05T13:10:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 CLOSED by the main session (board drain, wave 3). Commits 8a5619f7 and a6a79a28 are ancestors of the v3.8.11 tag (git merge-base, run today). Pinning test re-run today: tests/test_daemon_integrity_repin.py, 4 passed. LIVE box, the card's own case, read by the main session in daemon.log and daemon.log.1: the fire of 2026-10-07T23:52:41 certified last-good=3.8.11, and the five following fires (2026-10-08 05:52, 11:52, 17:52, 23:53 and 2026-10-09 05:53) each logged only starting and done; 0 lines match 'integrity-repin: declined', 'filing a ticket' or SELFINT-004 in either file. Not verified: that 3.8.11 stayed the running version for all five fires (no version update is logged between them). Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
+- 2026-10-09T23:41:39+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; test re-run; live box observed in daemon.log.
 
 ## Acceptance
 
 - [x] A pin that already names the running version is never counted as a decline (test in tests/test_daemon_integrity_repin.py).
 - [x] A real refusal is still ticketed once, on the third fire (same test file).
-- [ ] LIVE: on an install carrying the fix, the daemon log shows no stuck-anchor finding across four consecutive re-pin fires while the pin names the running version.
+- [x] LIVE: on an install carrying the fix, the daemon log shows no stuck-anchor finding across four consecutive re-pin fires while the pin names the running version.
 
 ## STATE
 

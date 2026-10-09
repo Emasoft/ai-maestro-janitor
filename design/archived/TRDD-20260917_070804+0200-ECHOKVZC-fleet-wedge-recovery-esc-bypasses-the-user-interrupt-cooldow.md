@@ -1,9 +1,9 @@
 ---
 trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
-column: testing
+column: complete
 created: 2026-09-17T07:08:04+0200
-updated: 2026-10-05T11:12:08+0200
+updated: 2026-10-09T23:41:40+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -15,6 +15,7 @@ approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-17T07:08:04+0200
 priority: high
+status: archived
 ---
 
 # Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
@@ -50,6 +51,8 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 - 2026-09-17T19:08:00+0200 — fifth review round (own review forks, doc-only): separated item 1 (state_dir realpath wrapping, closes NO observed functional bug, kept only because the coordinator explicitly directed it, flagged as a one-line revert if unwanted) from item 3 (transcript-path realpath, closes a REAL idempotency/churn bug, independent of item 1) — previous report text had blurred the two together. Swept for other unverified confident claims; found none beyond the one already corrected. No code changed. (janitor-main-session via lean-worker)
 - 2026-09-17T19:09:29+0200 — close-out: added test_record_pane_transcript_default_round_trips_under_a_plain_project (36/36 in file, 104/104 scoped, ruff+pyright clean); acceptance box 1 ticked; follow-up TRDD-HFDM1HHP minted (backburner, refactor, parent-trdd: ECHOKVZC, validate/lint clean). (janitor-main-session via lean-worker)
 - 2026-09-17T19:11:41+0200 — close-out review fork: docstring precision fix on the new test (complementary to, not duplicating, the plain-project state_dir-parity test); confirmed HFDM1HHP's parent-trdd carries no npt/eht claim so it cannot trip GRAPH-* validators against ECHOKVZC; noted mypy intentionally omitted this round per the narrower instruction. 36/36 tests, ruff+pyright clean after the docstring edit. (janitor-main-session via lean-worker)
+2026-10-09 CLOSED by the main session (board drain, wave 3). Commits 8059663a and e72b70e8 are ancestors of the v3.8.11 tag (git merge-base, run today). Pinning tests re-run today: tests/test_pane_actuate.py and tests/test_user_intent_interrupt.py, 81 passed. The live line the STATE asked for, the card's own case, read by the main session in the daemon log: six 'rotation-esc: ai-maestro pane-policy: rotation_landed deferred — target session interrupted Ns ago (user-interrupt cooldown)' lines on 2026-10-09 from 19:57:20 (66s) to 20:01:01 (287s), then 'rotation-esc: DONE ESC → iterm for ai-maestro' at 20:02:19, after the 300 s window. Not verified: that a human Esc caused that interrupt record. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
+- 2026-10-09T23:41:40+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; live deferral observed in daemon.log.
 
 ## Acceptance
 
