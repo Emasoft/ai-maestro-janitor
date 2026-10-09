@@ -25,6 +25,10 @@ blocker-holds-if: not-match:READY
 
 Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C32, wave W3.
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-09
+
+NEXT ACTION: the Pass-1 field run — run the NEW enrich skill's Pass 1 (memgrep lint --apply-fixes on the claimed candidate paths, then Pass 2 additive fixes, then the plain re-lint verifier) on a real scope root; this run is ALSO the evidence event C22's (JD2QR5SQ) completion gate awaits. A zero-refusal outcome is the already-ruled clean-corpus case (JD2QR5SQ escalation clause), not a failure. Implementation is COMMITTED (c18ee75d); the skill's lint --apply-fixes surface verified on PATH 2026-10-09. Move the column per the field run's outcome (success → testing/ai_review; only dev while the run is imminent). Owner may correct.
+
 Writes (exclusive): skills/janitor-memory-enrich/SKILL.md
 Task: Same as C31, for the dedupe items
 Verify: Same as C31
