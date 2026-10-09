@@ -1,10 +1,10 @@
 ---
 trdd-id: 1HXEAHY7
 title: C32 — shrink enrich skill
-column: dev
+column: testing
 status: tasked
 created: 2026-10-01T19:45:19+0200
-updated: 2026-10-09T17:21:46+0200
+updated: 2026-10-09T17:22:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
