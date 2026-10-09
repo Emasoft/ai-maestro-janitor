@@ -132,7 +132,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-pkg-guard.py",
-            "timeout": 30
+            "timeout": 60
           }
         ]
       },
@@ -142,12 +142,12 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
-            "timeout": 30
+            "timeout": 60
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-agent-generator-guard.py",
-            "timeout": 30
+            "timeout": 60
           }
         ]
       },
@@ -157,12 +157,12 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-publish-lock.py",
-            "timeout": 30
+            "timeout": 60
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-wikimem-write-path.py",
-            "timeout": 30
+            "timeout": 60
           }
         ]
       },
@@ -171,7 +171,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-context-usage.py",
-            "timeout": 5
+            "timeout": 30
           }
         ]
       },
@@ -180,7 +180,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-token-budget.py",
-            "timeout": 5
+            "timeout": 30
           }
         ]
       }
