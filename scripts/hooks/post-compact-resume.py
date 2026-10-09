@@ -443,6 +443,36 @@ def _fire_push(plugin_root: str, transcript_path: str | None = None) -> None:
     )
 
 
+
+
+def _spawn_deferred_child(state, plugin_root: str, elapsed_s: int, transcript_path: str | None) -> None:  # noqa: ANN001
+    """Spawn the detached `_DEFER_ARG` re-entry child with its output in a file.
+
+    WHY not DEVNULL: DEVNULL hid every traceback of the detached child, which
+    is how 200 deferrals ended with no outcome line and no clue (TRDD-74AA4PAL).
+    """
+    # shortcut: nothing rotates post-compact-resume.child.log, add it to the log purge if it grows past a few hundred KB
+    log_file = None
+    try:
+        log_dir = state.log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_dir / "post-compact-resume.child.log", "ab", buffering=0)  # noqa: SIM115
+    except Exception:  # noqa: BLE001 - opening a diagnostics file must never stop the spawn itself
+        pass
+    out = log_file if log_file is not None else subprocess.DEVNULL
+    try:
+        subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(elapsed_s), transcript_path or ""],
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=out,
+            start_new_session=True,
+        )
+    finally:
+        if log_file is not None:
+            log_file.close()  # the child holds its own copy
+
+
 # ---- Deferred push retry (TRDD-74AA4PAL, GAP 1 fix) -----------------------
 # Recheck interval and the total bound on how long we keep re-arming before
 # giving up. The bound matters, not the exact interval: past it,
@@ -473,13 +503,7 @@ def _defer_push(state, plugin_root: str, transcript_path: str | None = None) -> 
     to `_fire_push` — dropping it here would silently reopen the no-cooldown
     gap for every deferred (attended-at-compaction-time) resume.
     """
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, "0", transcript_path or ""],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    _spawn_deferred_child(state, plugin_root, 0, transcript_path)
     state.log_line(
         "post-compact-resume",
         f"resume push deferred (attended); recheck in {_PUSH_DEFER_RECHECK_S}s",
@@ -524,13 +548,7 @@ def _run_deferred_recheck(
             "post-compact-resume", f"resume push deferral gave up after {total}s (still attended)"
         )
         return
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(total), transcript_path or ""],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    _spawn_deferred_child(state, plugin_root, total, transcript_path)
     state.log_line("post-compact-resume", f"resume push re-armed (+{_PUSH_DEFER_RECHECK_S}s)")
 
 
@@ -540,6 +558,19 @@ def main() -> int:
     # compaction stamp): this process is a re-check, not a fresh compaction.
     if len(sys.argv) >= 4 and sys.argv[1] == _DEFER_ARG:
         plugin_root_arg = sys.argv[2]
+        # WHY print first: stdout is the child log file the PARENT opened, so these lines
+        # show up even if this child resolves a different state dir than the parent and its
+        # own log_line output lands elsewhere (TRDD-74AA4PAL).
+        try:
+            cwd_text = os.getcwd()
+        except OSError:
+            cwd_text = "?"
+        print(
+            f"post-compact-resume child: pid={os.getpid()} cwd={cwd_text} "
+            f"CLAUDE_PROJECT_DIR={os.environ.get('CLAUDE_PROJECT_DIR', '')} "
+            f"plugin_root={plugin_root_arg} elapsed={sys.argv[3]}",
+            flush=True,
+        )
         try:
             elapsed_arg = int(sys.argv[3])
         except ValueError:
@@ -551,9 +582,30 @@ def main() -> int:
         sys.path.insert(0, str(Path(plugin_root_arg) / "scripts"))
         try:
             from lib import state as state_mod  # noqa: E402 - local package, not PyPI
-        except Exception:  # noqa: BLE001 - a broken re-entry must never crash noisily
+        except Exception as exc:  # noqa: BLE001 - a broken re-entry must never crash noisily
+            print(
+                f"post-compact-resume: deferred recheck could not import lib.state from {plugin_root_arg}: {exc}",
+                file=sys.stderr,
+            )
             return 0
-        _run_deferred_recheck(state_mod, plugin_root_arg, elapsed_arg, transcript_arg)
+        try:
+            print(f"post-compact-resume child: state_dir={state_mod.state_dir()}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            print(f"post-compact-resume child: state_dir lookup failed: {exc}", flush=True)
+        state_mod.log_line(
+            "post-compact-resume",
+            f"deferred recheck child started (pid {os.getpid()}, elapsed {elapsed_arg}s)",
+        )
+        try:
+            _run_deferred_recheck(state_mod, plugin_root_arg, elapsed_arg, transcript_arg)
+        except Exception as exc:  # noqa: BLE001 - the detached child's exception is an outcome to record
+            try:
+                state_mod.log_line(
+                    "post-compact-resume",
+                    f"deferred recheck raised: {type(exc).__name__}: {exc} (an outcome line above, if any, still stands)",
+                )
+            except Exception:  # noqa: BLE001, S110 - a logging failure must not raise out of the child
+                pass
         return 0
 
     # Drain stdin (PostCompact delivers a JSON payload there). We mainly rely on

@@ -723,3 +723,142 @@ def test_deferred_recheck_moot_when_flag_already_consumed(
     calls = _patch_popen(monkeypatch, hook)
     hook._run_deferred_recheck(state, str(_PROJECT_ROOT), 0, sleep_fn=lambda _s: None)
     assert calls == [], "a consumed flag means the push target is gone; nothing may fire"
+
+def _drive_reentry_main(hook, monkeypatch: pytest.MonkeyPatch, recheck) -> tuple[int, str]:
+    """Run hook.main() in re-entry form with `recheck` standing in for the child's work; return (rc, log text)."""
+    monkeypatch.setattr(hook, "_run_deferred_recheck", recheck)
+    monkeypatch.setattr(sys, "argv", [str(_HOOK_PATH), hook._DEFER_ARG, str(_PROJECT_ROOT), "0", ""])
+    monkeypatch.setattr(sys, "path", list(sys.path))  # main() inserts the plugin root; undo it at teardown
+    for name in ("lib.state", "lib"):
+        monkeypatch.delitem(sys.modules, name, raising=False)  # restored at teardown
+    rc = hook.main()
+    lib_state = sys.modules["lib.state"]
+    return rc, (lib_state.log_dir() / "post-compact-resume.log").read_text(encoding="utf-8")
+
+
+
+def test_deferred_child_logs_its_start_before_the_recheck(state_mod, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The re-entry child logs a start line, then runs the recheck exactly once."""
+    hook = _import_hook()
+    calls: list = []
+    rc, log = _drive_reentry_main(hook, monkeypatch, lambda *a, **k: calls.append(a))
+    assert rc == 0 and len(calls) == 1
+    assert "deferred recheck child started" in log
+
+
+
+def test_deferred_child_exception_is_logged_as_an_outcome(state_mod, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raising recheck is caught in main(), logged, and the child still exits 0."""
+    hook = _import_hook()
+
+    def boom(*_a, **_k) -> None:
+        raise RuntimeError("boom")
+
+    rc, log = _drive_reentry_main(hook, monkeypatch, boom)
+    assert rc == 0
+    assert "deferred recheck raised: RuntimeError: boom" in log
+
+
+
+def test_defer_push_child_output_goes_to_a_file_not_devnull(state_mod, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_defer_push gives the child one shared append-mode log file for stdout/stderr instead of DEVNULL."""
+    _project, state = state_mod
+    hook = _import_hook()
+    seen: list = []
+
+    def record(argv, **kw) -> None:
+        # The handle is closed once Popen returns, so read its facts at call time.
+        out = kw["stdout"]
+        seen.append((out.name, out.mode, out is kw["stderr"]))
+
+    monkeypatch.setattr(hook.subprocess, "Popen", record)
+    hook._defer_push(state, str(_PROJECT_ROOT))
+    name, mode, same = seen[0]
+    assert name == str(state.log_dir() / "post-compact-resume.child.log")
+    assert "a" in mode
+    assert same
+
+
+
+def test_rearm_spawn_passes_child_log_and_accumulated_elapsed(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-arming from the recheck passes the child log as stdout and the accumulated elapsed seconds in argv."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    _no_pane(monkeypatch)
+    monkeypatch.setenv("HOME", str(home))
+    _write_presence(home, int(time.time()) - 5)  # still attended → re-arm
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    _write_resume_flag(state)
+    seen: list = []
+
+    def record(argv, **kw) -> None:
+        seen.append((list(argv), kw["stdout"].name))
+
+    monkeypatch.setattr(hook.subprocess, "Popen", record)
+    hook._run_deferred_recheck(state, str(_PROJECT_ROOT), 120, sleep_fn=lambda _s: None)
+    assert len(seen) == 1
+    argv, out_name = seen[0]
+    assert out_name == str(state.log_dir() / "post-compact-resume.child.log")
+    assert argv[argv.index(hook._DEFER_ARG) + 2] == str(120 + hook._PUSH_DEFER_RECHECK_S)
+
+
+def test_defer_push_falls_back_to_devnull_when_child_log_cannot_open(
+    state_mod, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OSError opening the child log still spawns the child (DEVNULL) and still logs the deferral."""
+    import builtins
+
+    _project, state = state_mod
+    hook = _import_hook()
+    real_open = builtins.open
+
+    def failing_open(file, *args, **kw):
+        if str(file).endswith("post-compact-resume.child.log"):
+            raise OSError("simulated")
+        return real_open(file, *args, **kw)
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    kwargs: list = []
+    monkeypatch.setattr(hook.subprocess, "Popen", lambda argv, **kw: kwargs.append(kw))
+    hook._defer_push(state, str(_PROJECT_ROOT))
+    assert len(kwargs) == 1
+    assert kwargs[0]["stdout"] is subprocess.DEVNULL and kwargs[0]["stderr"] is subprocess.DEVNULL
+    log = (state.log_dir() / "post-compact-resume.log").read_text(encoding="utf-8")
+    assert "resume push deferred" in log
+
+
+
+def test_reentry_reports_an_unimportable_plugin_root_on_stderr(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A plugin root without lib.state makes the child print the import failure to stderr and exit 0."""
+    hook = _import_hook()
+    monkeypatch.setattr(sys, "argv", [str(_HOOK_PATH), hook._DEFER_ARG, str(tmp_path / "nope"), "0", ""])
+    monkeypatch.setattr(sys, "path", list(sys.path))  # main() inserts the plugin root; undo it at teardown
+    # scripts/ is already on sys.path in this test process, so the nonexistent root alone would still
+    # import; a None entry in sys.modules makes the import fail, and monkeypatch restores both entries.
+    for name in ("lib.state", "lib"):
+        monkeypatch.setitem(sys.modules, name, None)
+    assert hook.main() == 0
+    assert "could not import lib.state" in capsys.readouterr().err
+
+
+def test_reentry_prints_identity_lines_to_stdout(
+    state_mod, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The re-entry child prints its pid/env line and its resolved state_dir line to stdout (the child log)."""
+    hook = _import_hook()
+    monkeypatch.setattr(hook, "_run_deferred_recheck", lambda *a, **k: None)
+    monkeypatch.setattr(sys, "argv", [str(_HOOK_PATH), hook._DEFER_ARG, str(_PROJECT_ROOT), "0", ""])
+    monkeypatch.setattr(sys, "path", list(sys.path))  # main() inserts the plugin root; undo it at teardown
+    for name in ("lib.state", "lib"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    assert hook.main() == 0
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("post-compact-resume child:")]
+    assert len(lines) == 2
+    assert "pid=" in lines[0] and "CLAUDE_PROJECT_DIR=" in lines[0]
+    assert "state_dir=" in lines[1]
