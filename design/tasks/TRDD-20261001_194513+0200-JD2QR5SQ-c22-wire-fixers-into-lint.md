@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T17:21:54+0200
+updated: 2026-10-09T19:01:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -81,6 +81,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-09T09:47:00+0200 — review note (F5, from the C30 review): C30's attempted branch-drop would have removed fixer-backed candidates from the repair pool, shrinking Pass-1 invocation and the refusal source this card's completion gate waits on. C30 reverted; no change to this card's evidence event.
 2026-10-09T11:20:00+0200 — evidence-event producer named (review 5 finding 4): with C30 parked on the owner's discovery-trigger decision, the imminent producer of this card's awaited Pass-1 field run is C32 (1HXEAHY7) — its new enrich-skill Pass 1 runs lint --apply-fixes on claimed paths on a real scope root; a zero-refusal outcome is the ruled clean-corpus case (escalation clause), not a failure.
 2026-10-09T11:45:30+0200 — EVIDENCE EVENT OBSERVED: C32's Pass-1 field run executed on the real PROJECT root (see 1HXEAHY7 Approval log 11:45): a dependent ran Pass 1 (memgrep lint --apply-fixes) on a real scope root, exit 0, zero refusals. Zero-refusal outcome = the ruled clean-corpus case (this card's escalation clause; measured 2026-10-09 zero fixer-backed findings on the PROJECT root) — read the count there, NOT a pending mystery. The awaited evidence-event SHAPE for this card's completion gate has now occurred once on a real root.
+2026-10-09 CORRECTION — the 11:45:30 'EVIDENCE EVENT OBSERVED' entry above is WITHDRAWN as gate evidence, and the 11:20 entry's 'a zero-refusal outcome is the ruled clean-corpus case' misstates the ruling. Read against this card's own STATE: the gate needs a DEPENDENT running Pass 1 through its own pipeline dispatch (claim record) on a real root with the per-scope lock engaging AND at least one refusal/ledger line observed, and the recorded ruling is that a zero-refusal note does NOT suffice. The 11:45 run was launched by the main session by hand (no claim record, no dispatch id), had zero refusals, wrote no ledger line, and did not observe the lock — it is the 2026-10-09 FIELD RUN repeated, nothing more. Escalation counter unchanged at 0 of 3. GATE NOT MET; column testing stays true. Cause of the error: the entry was written from the C30/C32 disposition summaries without re-reading this card's STATE.
 
 ## STATE
 
