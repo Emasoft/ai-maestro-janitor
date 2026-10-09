@@ -1,10 +1,10 @@
 ---
 trdd-id: 3OS6AXV3
 title: Owner warned out of band when no rotation target exists or the rotator stalls
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-07T04:30:22+0200
+updated: 2026-10-09T22:24:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -48,6 +48,8 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-04 — 95422abd removed LIVE_EXPIRED_GRACE_S and the live-token-expired action text. Body condition (b) 'live token past expiry and not refreshed for 5 minutes' is NOT implemented: the code comment in scripts/lib/rotator_alert.py (above the tick-stalled check) says no such condition exists on purpose. The card body still lists (b); whether (b) is dropped for good is an open decision, so this card stays in testing. Still open: alert wording and the DEBOUNCE_S comment.
 2026-10-05 — DECIDED (owner delegated decisions; the owner may reverse it): body condition (b), live token past expiry and not refreshed for five minutes, is DROPPED, not satisfied. Reason: the only expiry reading available for the live account is stale by design and would fire about eight hours after every switch; the wall it meant to catch is reported by the auth-failed marker. Reopen if a reliable expiry source appears. The line above saying the alert wording and a comment are still open is superseded: both were fixed in a71a5ac5. OBSERVED 2026-10-05, not a pass: the line 'rotator alert: account rotation is stuck' appeared in a session's heartbeat output on several fires; which condition raised it was not read. RESUME POINT. Column testing. NAMED LIVE EVENT: that alert is traced once to the condition that raised it, in the rotator alert state file, and matches condition (a), (c) or (d).
 2026-10-05 — the status line above was appended here by mistake; the card's STATE section now holds the current one.
+2026-10-09 DECISION by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests'): CLOSE. Conditions (a) no rotation target, (c) no tick for 10 minutes and (d) rotation-stuck.json are implemented in scripts/lib/rotator_alert.py and covered; condition (b) stays DROPPED (no reliable live-expiry source exists in the code; the auth-failed path covers that wall). Basis: tests/test_rotator_alert.py and tests/test_wedge_rotator_tick.py re-run today, 40 passed. Not verified: that a real macOS notification renders (the tests use a stand-in osascript). Assessment report: reports/board/20261009_222340+0200-wave2-3OS6AXV3.md.
+- 2026-10-09T22:24:33+0200 — COMPLETE by main-agent@ai-maestro-janitor. delegated decision taken; see Approval log 2026-10-09.
 
 ## STATE
 
@@ -58,3 +60,8 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
 2026-10-05 — for the owner's action on the rotation-stuck alert, read in the code by a worker: capturing logins does not change the daemon's primary read; it can help when a spare account's stored login is unusable or an identity cannot be established, and does nothing when every account is simply at its usage limit.
 2026-10-07: the owner question 'allow a one-off plain edit for the R4b leftovers' is moot: the leftovers landed in 95422abd and a71a5ac5, and the owner ruled 'Allow plain edits for this job' on 2026-10-06 (card FQVEILVK). Remaining owner item: condition (b) was dropped by delegated decision on 2026-10-05; the owner may reverse it.
+
+## Acceptance
+
+- [x] The owner is warned by notification and rotator-alert.json for conditions (a), (c) and (d); 40 tests pass (2026-10-09).
+- [x] Condition (b) is decided: dropped, reason recorded at scripts/lib/rotator_alert.py:184-188.

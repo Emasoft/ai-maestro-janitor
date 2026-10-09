@@ -4,7 +4,7 @@ title: Session beacon mirrors the live token so the daemon can probe usage
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-07T04:44:35+0200
+updated: 2026-10-09T22:24:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -51,6 +51,7 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03T03:41:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:22:35+0200 — column → testing. code committed; only field acceptance after release remains
 - 2026-10-06T21:08:32+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
+2026-10-09 STAYS in human_review, decided by the main session: the code is done (17 beacon and livebak tests pass today) but the card's remaining gate is an attribute-only look at a real keychain item, which the owner reserved to their own word, and the drain card's host-action rule (TRDD-S6GX1DHN rule 7) leaves live-service actions marked as the owner's to the owner. Field criterion unobserved: daemon.log has 0 usage lines. Assessment report: reports/board/20261009_221816+0200-wave2-G9Z8PXCM.md.
 
 ## Review notes
 

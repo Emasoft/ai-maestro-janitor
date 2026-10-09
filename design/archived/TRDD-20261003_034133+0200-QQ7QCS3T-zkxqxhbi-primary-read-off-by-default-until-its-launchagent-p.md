@@ -1,10 +1,10 @@
 ---
 trdd-id: QQ7QCS3T
 title: ZKXQXHBI primary read off by default until its LaunchAgent probe passes
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:41:33+0200
-updated: 2026-10-07T04:44:34+0200
+updated: 2026-10-09T22:24:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,3 +39,10 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:33+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 DECISION by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests'): CLOSE with the default left OFF. The condition for turning the daemon's primary keychain read on is that ZKXQXHBI's LaunchAgent probe passes, and that probe has never been run, so default-on has no evidence behind it. Opt-in stays JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 (scripts/daemon.py:934-935); the test at tests/test_wedge_rotator_tick.py:260-272 passes (40 passed with test_rotator_alert.py today). Flipping the default belongs to TRDD-ZKXQXHBI; the log-wording item is TRDD-A2JLFIQ5. Assessment report: reports/board/20261009_222340+0200-wave2-QQ7QCS3T.md.
+- 2026-10-09T22:24:34+0200 — COMPLETE by main-agent@ai-maestro-janitor. delegated decision taken; see Approval log 2026-10-09.
+
+## Acceptance
+
+- [x] The daemon's primary keychain read is off unless JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 (scripts/daemon.py:934-935), with a test that fails without the gate.
+- [x] The default is decided: stays off until TRDD-ZKXQXHBI's LaunchAgent probe passes.
