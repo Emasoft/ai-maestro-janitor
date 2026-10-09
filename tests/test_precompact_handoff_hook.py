@@ -954,7 +954,7 @@ def test_recent_turns_keeps_first_turn_when_seek_lands_on_a_line_boundary(tmp_pa
     l1 = json.dumps(_umsg("first")).encode() + b"\n"
     l2 = json.dumps(_amsg("second")).encode() + b"\n"
     tx.write_bytes(l0 + l1 + l2)
-    hook._TAIL_BYTES = len(l1) + len(l2)
+    setattr(hook, "_TAIL_BYTES", len(l1) + len(l2))
     turns = hook._recent_turns(str(tx), n=10)
     assert turns == [("user", "first"), ("assistant", "second")]
 
@@ -962,8 +962,8 @@ def test_recent_turns_backward_seek_stops_at_the_cap_with_none_found(tmp_path: P
     """No human turn inside the capped doubling window: the walk stops at the byte cap and
     returns the 'none found' placeholder (no endless loop)."""
     hook = _hook()
-    hook._TAIL_BYTES = 1000
-    hook._MAX_BACKWARD_SEEK_BYTES = 4000
+    setattr(hook, "_TAIL_BYTES", 1000)
+    setattr(hook, "_MAX_BACKWARD_SEEK_BYTES", 4000)
     tx = tmp_path / "t.jsonl"
     hb = _umsg("[janitor-heartbeat]\n/path/to/stub")
     _write_jsonl(tx, [_umsg("ancient owner ask"), *([hb, _amsg("work " + "x" * 60)] * 120)])
@@ -977,7 +977,7 @@ def test_recent_turns_backward_seek_widens_across_damage(tmp_path: Path) -> None
     """Damage lines inside the first window do not stop the widening: the older owner turn and
     real turns on both sides of the damage still appear."""
     hook = _hook()
-    hook._TAIL_BYTES = 1000
+    setattr(hook, "_TAIL_BYTES", 1000)
     tx = tmp_path / "t.jsonl"
     hb = json.dumps(_umsg("[janitor-heartbeat]\n/path/to/stub")).encode()
     body = b"\n".join(
