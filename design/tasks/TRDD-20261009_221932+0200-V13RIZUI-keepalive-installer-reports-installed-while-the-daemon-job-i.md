@@ -1,10 +1,10 @@
 ---
 trdd-id: V13RIZUI
 title: keepalive installer reports installed while the daemon job is left unloaded
-column: todo
+column: testing
 status: tasked
 created: 2026-10-09T22:19:32+0200
-updated: 2026-10-09T22:19:32+0200
+updated: 2026-10-09T22:29:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-09T22:19:32+0200
+implementation-commits: [1393ae8a]
 ---
 
 # keepalive installer reports installed while the daemon job is left unloaded
@@ -25,11 +26,12 @@ Mechanism, read from the code, not yet proven by a failing test: install_macos r
 
 ## Acceptance
 
-- [ ] A test reproduces it: install over an already-loaded job leaves the job loaded (or the installer exits non-zero).
-- [ ] install_macos verifies the job is loaded (launchctl print) after bootstrap, retrying briefly after bootout, and exits non-zero with the launchctl error when it is not; it never prints 'installed' for an unloaded job.
-- [ ] The Linux path is checked for the same pattern.
+- [x] A test reproduces it: install over an already-loaded job leaves the job loaded (or the installer exits non-zero).
+- [x] install_macos verifies the job is loaded (launchctl print) after bootstrap, retrying briefly after bootout, and exits non-zero with the launchctl error when it is not; it never prints 'installed' for an unloaded job.
+- [x] The Linux path is checked for the same pattern.
 - [ ] ruff, mypy, pyright and uv run pytest pass; the strict validator still exits 0 (this file is scanned and has a ProgramArguments invariant).
 
 ## Approval log
 
 - 2026-10-09T22:19:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-09T22:29:24+0200 — column → testing by main-agent@ai-maestro-janitor. fix committed; box 4 (mypy, pyright, full suite, strict validator) still to run

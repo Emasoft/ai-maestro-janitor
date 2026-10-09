@@ -1,9 +1,9 @@
 ---
 trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
-column: human_review
+column: complete
 created: 2026-09-22T21:32:55+0200
-updated: 2026-10-06T21:28:40+0200
+updated: 2026-10-09T22:29:25+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -18,7 +18,7 @@ npt: [541CBN36]
 relevant-rules: []
 implementation-commits: [012b091e, 051625a4, 0b883373, 0cf40380, 1b5ceec8, 1e36e9bc, 2353a88a, 23713d53, 29dd5501, 2c32448a, 2f463d3b, 40cc06d1, 434530ab, 44fdec8c, 49d733b7, 4a65338d, 4b8ba762, 522f1e3c, 54ea73bc, 6eba6f58, 6fd3e531, 82860cc7, 83fae099, 862d30d4, 88aea2d9, 8950ba16, 8c5db5e0, 9dfc409b, 9f7c86fe, aa038127, aabd8b0c, b058292d, b0e3e6a2, b0e94f43, b171d337, b2154831, c406c9b3, c560ca76, c5eac23d, d3364c01, d4fa7685, d67b10c1, d8c80b16, eb49e933, eba1f1ff, ef06432e, f4bc9541, fa6ceedd, fe38e095]
 eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR, DQXMND59]
-status: tasked
+status: archived
 ---
 
 # Jev compaction replaces the janitor's automatic compaction
@@ -114,6 +114,8 @@ commits per card with the WHY in the message.
 OWNER DECISION 2026-09-27 (verbatim, condensed, decision 7): 'except for plugins, that must pass the strict cpv validation of the canon, there should be no quality gate enforced by default. the user decides (or the MANAGER if inside the ai-maestro harness). of course the janitor must continue warning the main agent of any problem or issue detected in the code at all time, so those cases are prevented.' Resolution of the matrix-gate reconciliation: the DQXMND59 matrix-gate condition ('release only after BLGZTHQ9+U6C3YXEL re-measure') does NOT bind by default — no enforced quality gate beyond the plugin CPV-strict canon; the janitor's warning lane stays on. Publish still waits on the owner's explicit yes (unchanged).
 AGENT-NOTE 2026-09-27 (review round — restores a clause dropped in condensation, NOT owner words from this message): decision 7's owner text includes the decision-authority grant 'the user decides (or the MANAGER if inside the ai-maestro harness)' — load-bearing for every future gate proposal on this card. The publish-waits-on-explicit-yes clause is a restatement of the card's own standing 2026-09-25 rule, not new owner words.
 - 2026-10-01T04:13:46+0200 — column → human_review by main-agent@ai-maestro-janitor. code landed and verified (full suite + V3/V12 at HEAD); only owner decisions remain: matrix-gate reconciliation and 3.6.3 ratify/revert — dev column was untrue
+2026-10-09 DECISION by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests'): CLOSE this umbrella card. 3.6.3 is ratified (reverting it is moot: releases through v3.8.11 shipped on top of it); the pane-key question is left as is; the union of implementation commits is accepted. Basis, from the read-only assessment reports/board/20261009_222732+0200-wave2-RAEGS1D5.md: the code landed, every dependent card is terminal, v3.8.11 is released, issue 306 is closed. The open quality problem of the Jev-injected context (READ FIRST not followed) is NOT closed by this; it stays on TRDD-D7RLXAN1 and TRDD-2MU62A5F. Not verified by the main session: the dependent cards' columns and the issue state are the worker's readings; llm-externalizer issue 15 was not checked.
+- 2026-10-09T22:29:25+0200 — COMPLETE by main-agent@ai-maestro-janitor. delegated decision taken; see Approval log 2026-10-09.
 
 ## Design
 
@@ -153,3 +155,8 @@ The publish criterion "at least 3 non-owner items inline" is gameable by one-lin
 ## Publish authorization disposition (2026-09-26)
 
 DQXMND59 reached complete and left this card's eht list — its matrix work is real and terminal. This umbrella card remains in dev. The publish authorization history: 3.6.3 was published on the owner's ambiguous single-word resume read against the 2026-09-24 delegation (i leave the decisions to you and the ai-maestro claude. plan well. always verify.); the adversarial review flagged the reading as analogy, not explicit grant; ratify/revert was left open with the owner (revert path = tag-deletion + corrective release, recorded here so it survives the closed card and compacted context).
+
+## Acceptance
+
+- [x] Jev compaction is the janitor's automatic compaction: code landed and released through v3.8.11 (assessment 2026-10-09).
+- [x] Every dependent card is terminal and issue 306 is closed (assessment 2026-10-09, worker reading).
