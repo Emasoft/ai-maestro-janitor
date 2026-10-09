@@ -1,10 +1,10 @@
 ---
 trdd-id: BW4Q08J8
 title: Add the zsh path variable pitfall to the global shell-pitfalls rule
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T04:32:35+0200
-updated: 2026-10-07T04:32:43+0200
+updated: 2026-10-09T22:17:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -43,9 +43,15 @@ Placement: a new section after "Counting or listing files with a glob" and befor
 The target is the owner global rule file outside this repo: the owner approves and the change is applied there. Unverified: the tie was demonstrated for path only, not for fpath, cdpath, manpath, module_path.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
-2026-10-07: waiting for the owner to approve the paragraph; it is applied to the global rule file, outside this repo. NEXT ACTION: owner decision.
+2026-10-09: DONE. Decided under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests'). The section 'Never name a zsh variable path' is in ~/.claude/rules/shell-pitfalls.md, between the glob section and the absolute-paths section. The card's one unverified claim was tested first: zsh reports array-tied-special for path, fpath, cdpath, manpath and module_path alike; the loop with path left ls not found (PATH=b) and the loop with target did not. The edit is additive: diff against the pre-edit backup (docs_dev/shell-pitfalls.md.before-BW4Q08J8-*) removes zero lines. NEXT ACTION: none.
 
 ## Approval log
 
 - 2026-10-07T04:32:35+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:32:43+0200 — column → human_review by main-agent@ai-maestro-janitor. the target is the owner global rule file; the owner approves the paragraph
+- 2026-10-09T22:17:02+0200 — COMPLETE by main-agent@ai-maestro-janitor. applied under the owner mandate of 2026-10-09 after verifying the one open claim.
+
+## Acceptance
+
+- [x] The tie is verified for all five names, not only path (zsh -c, 2026-10-09).
+- [x] The section is in the global shell-pitfalls rule file at the drafted placement, and the edit removes no existing line.
