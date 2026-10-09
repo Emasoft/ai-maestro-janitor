@@ -727,6 +727,12 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     """
     path = Path(transcript)
     window_lines = _classified_tail_lines(path, _RECENT_MESSAGES_TAIL_BYTES)
+    # WHY: status replies repeat every fire and crowd the last substantive assistant message
+    # out of the count-capped window (TRDD-IYNS7H83); the newest 2 of a run are kept.
+    # shortcut: a short (<=400 chars) heartbeat reply 3 or more fires back in an unbroken run
+    # is dropped from this view even when its text differs, upgrade to a text-aware rule if
+    # distinct drift lines must survive here (they are also recorded in the findings ledger).
+    window_lines = _cap_heartbeat_status_runs(window_lines)
     guaranteed_human = _recent_human_lines(path, target=_HUMAN_TARGET_COUNT)
     window_part = [ln for ln in window_lines[-limit:] if ln not in guaranteed_human]
     protected = guaranteed_human if guaranteed_human else [_NO_HUMAN_IN_WINDOW]
@@ -739,6 +745,28 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
         return _keep_newest_by_bytes(protected, _RECENT_MESSAGES_MAX_TOTAL_BYTES)
     kept_window = _keep_newest_by_bytes(window_part, _RECENT_MESSAGES_MAX_TOTAL_BYTES - protected_bytes)
     return [*protected, *kept_window]
+
+
+_MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2
+_ASSISTANT_LINE_PREFIX = "ASSISTANT: "
+
+
+def _cap_heartbeat_status_runs(lines: list[str]) -> list[str]:
+    """Keep only the newest `_MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of consecutive
+    heartbeat status replies; every other line passes through in order."""
+    kept_rev: list[str] = []
+    run = 0
+    for ln in reversed(lines):
+        is_status = ln.startswith(_ASSISTANT_LINE_PREFIX) and transcript_roles.is_heartbeat_status_reply(
+            ln[len(_ASSISTANT_LINE_PREFIX):]
+        )
+        run = run + 1 if is_status else 0
+        if is_status and run > _MAX_CONSECUTIVE_HEARTBEAT_STATUS:
+            continue
+        kept_rev.append(ln)
+    kept_rev.reverse()
+    return kept_rev
+
 
 _POINTER_EXPAND_PREFIX = "pointers expand with:"
 

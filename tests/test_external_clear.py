@@ -1076,6 +1076,79 @@ def test_recent_messages_keeps_a_heartbeat_reply_that_carries_content(tmp_path):
     assert ec.recent_messages(str(t)) == ["USER: status?", "ASSISTANT: janitor heartbeat The live account is X"]
 
 
+def _status_run_records(start: int, pairs: int, reply: str = "janitor heartbeat\n1 background worker running") -> list[dict]:
+    out: list[dict] = []
+    for i in range(start, start + pairs):
+        out.append({"type": "user", "uuid": f"hb-{i}",
+                    "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nrun the stub {i}"}})
+        out.append({"type": "assistant", "uuid": f"hb-reply-{i}",
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": reply}]}})
+    return out
+
+
+def _substantive(uuid: str, text: str) -> dict:
+    return {"type": "assistant", "uuid": uuid,
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def test_recent_messages_status_replies_do_not_crowd_out_the_last_substantive_message(tmp_path):
+    """TRDD-IYNS7H83: 20 consecutive heartbeat status replies keep only 2 and the real message survives."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "status?"}]}},
+        _substantive("a1", "Deployed the fix, all green."),
+        *_status_run_records(0, 20),
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert "ASSISTANT: Deployed the fix, all green." in got, got
+    assert got.count("ASSISTANT: janitor heartbeat 1 background worker running") == 2, got
+
+
+def test_recent_messages_a_long_reply_starting_with_the_heartbeat_phrase_is_kept(tmp_path):
+    """TRDD-IYNS7H83: a >400-char reply that begins with the phrase is real work, never collapsed."""
+    t = tmp_path / "s.jsonl"
+    long_reply = "janitor heartbeat\n" + "did real work. " * 40
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+        *_status_run_records(0, 3),
+        {"type": "user", "uuid": "hb-x", "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nx"}},
+        _substantive("long", long_reply),
+        *_status_run_records(10, 3),
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert any(ln.startswith("ASSISTANT: janitor heartbeat did real work.") for ln in got), got
+
+
+def test_recent_messages_two_status_runs_split_by_a_substantive_message_keep_two_each(tmp_path):
+    """TRDD-IYNS7H83: the keep-newest-2 cap applies per consecutive run, not globally."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+        *_status_run_records(0, 5),
+        _substantive("mid", "Midway result."),
+        *_status_run_records(10, 5),
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    status = "ASSISTANT: janitor heartbeat 1 background worker running"
+    assert got == ["USER: go", status, status, "ASSISTANT: Midway result.", status, status], got
+
+
+def test_is_heartbeat_status_reply_shape_boundaries():
+    """TRDD-IYNS7H83: the predicate rejects the bare phrase and other text, accepts phrase+status up to 400 chars."""
+    pred = ec.transcript_roles.is_heartbeat_status_reply
+    at_limit = "janitor heartbeat " + "x" * (400 - len("janitor heartbeat "))
+    over_limit = at_limit + "x"
+    assert len(" ".join(at_limit.split())) == 400 and len(" ".join(over_limit.split())) == 401
+    assert pred("janitor heartbeat") is False
+    assert pred("hello there") is False
+    assert pred("janitor heartbeat\n1 worker running") is True
+    assert pred(at_limit) is True
+    assert pred(over_limit) is False
+
+
 def test_recent_messages_a_task_notification_never_appears_as_a_human_line(tmp_path):
     """A `<task-notification>` delivery is not the human's own words and must never surface as
     a USER: line -- it must not appear in the output at all."""

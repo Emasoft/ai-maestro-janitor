@@ -26,6 +26,7 @@ __all__ = [
     "HEARTBEAT_PREFIX",
     "classify_record",
     "is_heartbeat_reply",
+    "is_heartbeat_status_reply",
     "is_control_input",
 ]
 
@@ -416,3 +417,22 @@ def is_heartbeat_reply(text: str) -> bool:
     to 2 lines) hid 9 real assistant messages on session b2bf5b7b (TRDD-IYNS7H83).
     """
     return text.strip() == _HEARTBEAT_REPLY_TEXT
+
+
+# A heartbeat-triggered turn that did real work and wrote a long reply is content, never
+# collapsed; only short "phrase + status line" replies are repetitive status noise.
+_HEARTBEAT_STATUS_MAX_CHARS = 400
+
+
+def is_heartbeat_status_reply(text: str) -> bool:
+    """True iff `text` is "janitor heartbeat" plus a short status payload (not the bare phrase).
+
+    NOT a drop rule (only `is_heartbeat_reply` drops a reply): it only tells a caller that a
+    reply has the short phrase-plus-status shape so runs of them can be capped.
+    """
+    norm = " ".join(text.split())
+    return (
+        norm.startswith(_HEARTBEAT_REPLY_TEXT)
+        and norm != _HEARTBEAT_REPLY_TEXT
+        and len(norm) <= _HEARTBEAT_STATUS_MAX_CHARS
+    )
