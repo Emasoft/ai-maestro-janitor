@@ -105,14 +105,29 @@ changes `ocd`, never merges/splits/deletes.
 
    Bound the run to the **top-K worst pages** (K ≈ 5).
 
-## The two defect shapes
+## The defect checklist
+
+For each candidate page, fix ONLY its enrich-class finding. TWO passes, in order:
+
+**Pass 1 — mechanical fixes (run the fixer pipeline FIRST):** `memgrep lint
+--apply-fixes <the claimed candidate page paths>` applies every registered Safe
+fixer through the write gate, under the scope lock: `atom-keywords-duplicated`
+(the same keyphrase twice) and `page-description-duplicated-phrases` (the same
+description phrase twice) — duplicates are REMOVED, never padded to compensate.
+A refused plan lands in the unfixed ledger and the page is left untouched by
+that fix — on a refusal, hand-fix the duplicate through the write verbs (rule
+2), or record it via memory_refusal_cli.py if the verb refuses too; re-lint,
+and only what lint still reports is yours.
+
+**Pass 2 — additive fixes (no fixer exists):**
 
 | slug | what is wrong | what to do |
 |---|---|---|
 | `atom-keywords-too-few` | an atom/lesson carries < 10 distinct keyphrases | ADD the symptom phrasings for THAT atom's fact |
 | `page-description-too-few-phrases` | page `description:` carries < 15 distinct `/`-separated phrases | ADD alternative phrasings of the page's SUBJECT |
-| `atom-keywords-duplicated` | the same keyphrase twice | REMOVE the duplicate — do not pad to compensate |
-| `page-description-duplicated-phrases` | the same description phrase twice | REMOVE the duplicate |
+
+**Verify:** a plain `memgrep lint` after the pass is the post-edit verifier —
+run it on the claimed paths, never to DISCOVER candidates (issue #227).
 
 ## How to write a phrase that actually earns its place
 
