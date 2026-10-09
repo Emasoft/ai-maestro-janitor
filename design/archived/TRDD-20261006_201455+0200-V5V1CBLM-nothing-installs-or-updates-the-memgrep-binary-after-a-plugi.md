@@ -1,10 +1,10 @@
 ---
 trdd-id: V5V1CBLM
 title: Nothing installs or updates the memgrep binary after a plugin update, so a machine keeps a stale build
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-06T20:14:55+0200
-updated: 2026-10-08T20:39:50+0200
+updated: 2026-10-09T23:19:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,7 +27,13 @@ The plugin ships the Rust source and plugin.json tells the user to run cargo ins
 - 2026-10-06T20:14:55+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-08T20:33:39+0200 — column → dev. batch fan-out from main session; owner 2026-10-07 delegation covers code edits
 - 2026-10-08T20:39:50+0200 — column → testing. worker verified detector+tests per settled design; added 2 missing diverged cases (19 pass, ruff clean) — reports_dev/20261008-fanout-v5v1cblm.md
+2026-10-09 CLOSED by the main session (board drain, wave 3). Checked by the main session itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today. Field: no field observation needed for the acceptance: the detector scripts/detectors/memgrep-binary-stale.py is released and tests/test_memgrep_binary_stale.py passes (19). One commit, f5e658d8, is test-and-card only and is on main, not in the tag. Not run: the detector against this host. Assessment: reports/board/20261009_231646+0200-wave3-batchC.md.
+- 2026-10-09T23:19:08+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.
 
 ## Design
 
 2026-10-07 design: a new detector scripts/detectors/memgrep-binary-stale.py. Inputs: `memgrep --version` stamp (build.rs already prints '<ver> (<commit7>, <date>)'), and the user-scope janitor entry's gitCommitSha in ~/.claude/plugins/installed_plugins.json. Equal commits, or the stamp an ancestor-equal of the installed sha with no memgrep change: quiet. Different: ask `gh api repos/Emasoft/ai-maestro-janitor/compare/<stamp>...<installed>` and report STALE only when status is 'ahead' or 'diverged' AND some file under scripts/memgrep/ changed; status 'behind' (a dev build newer than the release) is quiet. Can't tell (memgrep absent, stamp 'unknown', gh missing or failing, no user-scope entry): one advisory line, never a fixable proposal. Machine-global binary: dedupe machine-wide per (stamp, installed sha), never once per project. No Rust and no publish.py change.
+
+## Acceptance
+
+- [x] no field observation needed for the acceptance: the detector scripts/detectors/memgrep-binary-stale.py is released and tests/test_memgrep_binary_stale.py passes (19). One commit, f5e658d8, is test-and-card only and is on main, not in the tag. Not run: the detector against this host.

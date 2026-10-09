@@ -4,7 +4,7 @@ title: Spare accounts stop decaying (account B root cause, spare-age alert)
 column: testing
 status: tasked
 created: 2026-10-03T03:41:36+0200
-updated: 2026-10-08T19:02:21+0200
+updated: 2026-10-09T23:19:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,6 +33,7 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03T03:41:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T11:22:38+0200 — column → dev. R8 code in progress
 - 2026-10-03T11:52:07+0200 — column → testing. code ready; field check after release: daemon.log shows the dead spares probed every 6 h instead of every tick, and one spare-stale alarm
+2026-10-09 STAYS in testing (board drain, wave 3): its field case has not been seen: refresh-failed lines about 6 hours apart for a dead spare, and one spare-stale alarm. Both greps return 0 on the current rotator logs, which begin 2026-10-09. review-after 2026-10-17 stands. Assessment: reports/board/20261009_231646+0200-wave3-batchC.md.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 

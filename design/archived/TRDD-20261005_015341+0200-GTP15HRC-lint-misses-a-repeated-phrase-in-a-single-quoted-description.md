@@ -1,10 +1,10 @@
 ---
 trdd-id: GTP15HRC
 title: Lint misses a repeated phrase in a single-quoted description
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T01:53:41+0200
-updated: 2026-10-07T08:11:25+0200
+updated: 2026-10-09T23:19:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,7 +28,13 @@ Found 2026-10-05 in the review of C17 (archived TRDD-KSCAFSLD). For description:
 - 2026-10-07T07:01:32+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
 2026-10-07: follow-up: the fixer refuses a description whose quotes do not match (1f4b1439, merge 1799a001); 0 memory pages newly flagged, counted on copies of the three stores.
 2026-10-07: shipped in v3.8.4; release observation starts.
+2026-10-09 CLOSED by the main session (board drain, wave 3). Checked by the main session itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today. Field: no field observation pending (the card records 0 pages newly flagged); cargo test single_quoted passes (1 passed) in scripts/memgrep. Assessment: reports/board/20261009_231646+0200-wave3-batchC.md.
+- 2026-10-09T23:19:07+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.
 
 ## STATE
 
 2026-10-07 merged on main (b6d5db58): lint unquotes a single-quoted YAML description (doubled quote collapsed to one) before splitting, so a repeated first phrase is caught; the dedup fixer keeps single quotes. The old test pinned the miss and was reversed. Open before release: the fixer may emit an unbalanced quote for a value single-quoted only at the start (it should refuse); and existing memory pages that were clean may now be flagged, uncounted. Not in a release yet.
+
+## Acceptance
+
+- [x] no field observation pending (the card records 0 pages newly flagged); cargo test single_quoted passes (1 passed) in scripts/memgrep.

@@ -1,10 +1,10 @@
 ---
 trdd-id: 45ZUV5ZD
 title: A rotator tick exited with status 1 at 20h45 and nothing says why
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T22:08:59+0200
-updated: 2026-10-07T22:06:23+0200
+updated: 2026-10-09T23:19:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,9 +28,15 @@ Observed in the daemon log between two memory spikes, at 20h45: the rotator tick
 
 - 2026-10-05T22:08:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T08:45:09+0200 — column → testing by main-agent@ai-maestro-janitor. B7 merged and gated at b175178f
+2026-10-09 CLOSED by the main session (board drain, wave 3). Checked by the main session itself: fix commits are ancestors of the v3.8.11 tag; the card's tests pass on a re-run today. Field: the card names no field observation and concedes the original 20h45 cause is unprovable; the retry line now carries the reason (scripts/daemon.py:569-570, 871) and tests/test_daemon_rotator_tick_log.py passes. Assessment: reports/board/20261009_231529+0200-wave3-batchA.md.
+- 2026-10-09T23:19:03+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; tests re-run; see Approval log 2026-10-09.
 
 ## Implementation notes
 
 2026-10-07: cause of the original failure unprovable (no daemon log from that day); only the retry log line improved: it now carries the failed attempt's masked stderr tail.
 2026-10-07: shipped in v3.8.5; release observation starts.
 2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('during a memory spike' to 'between two memory spikes'); the correction was not re-measured.
+
+## Acceptance
+
+- [x] the card names no field observation and concedes the original 20h45 cause is unprovable; the retry line now carries the reason (scripts/daemon.py:569-570, 871) and tests/test_daemon_rotator_tick_log.py passes.

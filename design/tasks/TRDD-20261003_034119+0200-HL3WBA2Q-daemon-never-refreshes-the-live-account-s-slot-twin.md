@@ -4,7 +4,7 @@ title: Daemon never refreshes the live account's slot twin
 column: testing
 status: tasked
 created: 2026-10-03T03:41:19+0200
-updated: 2026-10-06T21:05:37+0200
+updated: 2026-10-09T23:19:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,6 +34,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 STAYS in testing (board drain, wave 3): its field case has not been seen: a rotation of the live account by Claude Code with no token refresh of the slot twin. The rotator log holds only today's lines and has 0 'refusing to refresh' entries. Guard and real-socket test are in place (15 selected tests pass). Assessment: reports/board/20261009_231646+0200-wave3-batchC.md.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 

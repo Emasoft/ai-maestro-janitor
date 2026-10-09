@@ -4,7 +4,7 @@ title: the resume shows the tool and event items Jev kept even on a thin session
 column: testing
 status: tasked
 created: 2026-10-05T10:57:06+0200
-updated: 2026-10-07T09:35:57+0200
+updated: 2026-10-09T23:19:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -29,6 +29,7 @@ Wanted: the resume injects the tool and event items Jev kept, not only the token
 
 - 2026-10-05T10:57:06+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T09:35:57+0200 — column → testing by main-agent@ai-maestro-janitor. built; the real-session re-render is still outstanding
+2026-10-09 STAYS in testing (board drain, wave 3): its second acceptance box is open: the two real thin sessions named on TRDD-D7RLXAN1 must be re-rendered and show 3 kept items; that re-render sends real transcript text to the Jev provider and has not been run. Tests pass (tests/test_jev_compaction.py, 123). Assessment: reports/board/20261009_231529+0200-wave3-batchA.md.
 
 ## Acceptance
 
