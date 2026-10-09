@@ -3513,6 +3513,23 @@ def test_background_worker_progress_running_worker_prints_exactly_one_line(env_i
     assert str(sd) not in out, "no path belongs on the quiet-fire surface"
 
 
+
+def test_background_worker_progress_line_is_a_heartbeat_status_reply(env_isolation: dict) -> None:
+    """Pins the dispatcher's real progress line to the status predicate so the two cannot drift apart silently (TRDD-IYNS7H83)."""
+    dispatch = _import_dispatch()
+    import pending_agents
+    import transcript_roles
+
+    sd = _seed_state_dir(dispatch)
+    for count in (1, 2):
+        transcript = sd / f"agent-{count}.jsonl"
+        _touch_transcript(transcript, mtime=time.time())
+        pending_agents.add(f"agent-{count}", description="test worker", transcript=str(transcript))
+        line = _capture_stdout(dispatch._phase_background_worker_progress).strip()
+        assert f"{count} background worker" in line, line
+        assert transcript_roles.is_heartbeat_status_reply("janitor heartbeat\n" + line), line
+
+
 def test_background_worker_progress_idle_session_prints_nothing(env_isolation: dict) -> None:
     """Acceptance box 3: no pending agents at all → the zero-noise contract holds."""
     dispatch = _import_dispatch()

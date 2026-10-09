@@ -419,20 +419,22 @@ def is_heartbeat_reply(text: str) -> bool:
     return text.strip() == _HEARTBEAT_REPLY_TEXT
 
 
-# A heartbeat-triggered turn that did real work and wrote a long reply is content, never
-# collapsed; only short "phrase + status line" replies are repetitive status noise.
-_HEARTBEAT_STATUS_MAX_CHARS = 400
+# A dispatcher status line: "N background worker(s) running..." or a lowercase "[tag]" (e.g. "[findings]").
+_DISPATCHER_LINE_RE = re.compile(r"\d+ background workers? running|\[[a-z]")
 
 
 def is_heartbeat_status_reply(text: str) -> bool:
-    """True iff `text` is "janitor heartbeat" plus a short status payload (not the bare phrase).
+    """True iff `text` is "janitor heartbeat" then only dispatcher lines ("N background worker(s) running" or a lowercase "[tag]").
 
     NOT a drop rule (only `is_heartbeat_reply` drops a reply): it only tells a caller that a
-    reply has the short phrase-plus-status shape so runs of them can be capped.
+    reply has the repetitive status shape so runs of them can be capped. Any prose line after
+    the phrase makes the reply content, and so does a work note that merely starts with a
+    number ("3 cards closed; 2 stay") or an upper-case tag ("[DONE] ..."). WHY shape, not
+    length: length was tried first and dropped short real work notes (TRDD-IYNS7H83, measured
+    on session 8a11fda7).
     """
-    norm = " ".join(text.split())
-    return (
-        norm.startswith(_HEARTBEAT_REPLY_TEXT)
-        and norm != _HEARTBEAT_REPLY_TEXT
-        and len(norm) <= _HEARTBEAT_STATUS_MAX_CHARS
-    )
+    lines = text.strip().splitlines()
+    if not lines or lines[0].strip() != _HEARTBEAT_REPLY_TEXT:
+        return False
+    rest = [ln.lstrip() for ln in lines[1:] if ln.strip()]
+    return bool(rest) and all(_DISPATCHER_LINE_RE.match(ln) for ln in rest)

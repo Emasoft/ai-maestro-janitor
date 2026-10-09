@@ -1105,20 +1105,39 @@ def test_recent_messages_status_replies_do_not_crowd_out_the_last_substantive_me
     assert got.count("ASSISTANT: janitor heartbeat 1 background worker running") == 2, got
 
 
-def test_recent_messages_a_long_reply_starting_with_the_heartbeat_phrase_is_kept(tmp_path):
-    """TRDD-IYNS7H83: a >400-char reply that begins with the phrase is real work, never collapsed."""
+
+def test_recent_messages_a_short_prose_note_after_the_phrase_is_never_capped(tmp_path):
+    """TRDD-IYNS7H83: a short "janitor heartbeat" + prose note is real work, so a run of them is kept."""
     t = tmp_path / "s.jsonl"
-    long_reply = "janitor heartbeat\n" + "did real work. " * 40
     records = [
         {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
-        *_status_run_records(0, 3),
-        {"type": "user", "uuid": "hb-x", "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nx"}},
-        _substantive("long", long_reply),
-        *_status_run_records(10, 3),
+        _substantive("a1", "Started the suite."),
+        *_status_run_records(0, 20, reply="janitor heartbeat\nThe full test suite is still running."),
     ]
     t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
     got = ec.recent_messages(str(t))
-    assert any(ln.startswith("ASSISTANT: janitor heartbeat did real work.") for ln in got), got
+    assert got.count("ASSISTANT: janitor heartbeat The full test suite is still running.") > 2, got
+
+
+
+def test_recent_messages_a_two_block_status_lookalike_reply_is_never_capped(tmp_path):
+    """TRDD-IYNS7H83: a reply with a status block plus a prose text block is real work, never capped."""
+    t = tmp_path / "s.jsonl"
+    two_block = [
+        {"type": "text", "text": "janitor heartbeat\n1 background worker running"},
+        {"type": "text", "text": "Closed TRDD-X after re-running its tests."},
+    ]
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+    ]
+    for i in range(20):
+        records.append({"type": "user", "uuid": f"hb-{i}",
+                        "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nrun the stub {i}"}})
+        records.append({"type": "assistant", "uuid": f"hb-reply-{i}",
+                        "message": {"role": "assistant", "content": two_block}})
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert sum("Closed TRDD-X" in m for m in got) > 2, got
 
 
 def test_recent_messages_two_status_runs_split_by_a_substantive_message_keep_two_each(tmp_path):
@@ -1136,17 +1155,21 @@ def test_recent_messages_two_status_runs_split_by_a_substantive_message_keep_two
     assert got == ["USER: go", status, status, "ASSISTANT: Midway result.", status, status], got
 
 
+
 def test_is_heartbeat_status_reply_shape_boundaries():
-    """TRDD-IYNS7H83: the predicate rejects the bare phrase and other text, accepts phrase+status up to 400 chars."""
+    """TRDD-IYNS7H83: the predicate accepts phrase + dispatcher lines only, never prose, numbered notes or one-liners."""
     pred = ec.transcript_roles.is_heartbeat_status_reply
-    at_limit = "janitor heartbeat " + "x" * (400 - len("janitor heartbeat "))
-    over_limit = at_limit + "x"
-    assert len(" ".join(at_limit.split())) == 400 and len(" ".join(over_limit.split())) == 401
     assert pred("janitor heartbeat") is False
     assert pred("hello there") is False
-    assert pred("janitor heartbeat\n1 worker running") is True
-    assert pred(at_limit) is True
-    assert pred(over_limit) is False
+    assert pred("janitor heartbeat\n1 background worker running") is True
+    assert pred("janitor heartbeat\n[findings] HIGH X\n3 background workers running") is True
+    assert pred("janitor heartbeat\n[findings] HIGH X\nThat is a different hook.") is False
+    assert pred("janitor heartbeat\nThe full test suite is still running.") is False
+    assert pred("janitor heartbeat 1 worker running") is False
+    assert pred("janitor heartbeat\n3 cards closed; 2 stay") is False
+    assert pred("janitor heartbeat\n[DONE] batch F") is False
+    assert pred("janitor heartbeat\n2 background workers running; newest activity under 1 min ago") is True
+    assert pred("janitor heartbeat\n[findings] HIGH X") is True
 
 
 def test_recent_messages_a_task_notification_never_appears_as_a_human_line(tmp_path):

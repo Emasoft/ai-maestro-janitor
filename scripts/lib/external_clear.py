@@ -610,23 +610,51 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
 
 
 
-def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
-    """`f"{role}: {text}"` for every kept record in the last `max_bytes` of `path`, oldest to
-    newest. The one shared parse+classify loop both `recent_messages` and
-    `_recent_human_lines` build on. [] on a missing/unreadable file (never raises --
-    `recent_messages` is on the SessionStart injection path). The byte-safe tail read and its
+def _is_status_record(rec: dict[str, Any]) -> bool:
+    """True iff `rec` is a kept assistant record whose RAW text has the heartbeat status shape.
+    Called only on records `_classify_line` kept."""
+    if rec.get("isSidechain") or rec.get("isApiErrorMessage"):
+        return False
+    msg = rec.get("message") or {}
+    if (rec.get("type") or msg.get("role") or "") != "assistant":
+        return False
+    content = msg.get("content")
+    # `_record_text` joins blocks with a space, so a prose block would be glued onto the last
+    # dispatcher line and capped with it.
+    if isinstance(content, list) and sum(
+        1 for b in content if isinstance(b, dict) and b.get("type") == "text" and str(b.get("text") or "").strip()
+    ) > 1:
+        return False
+    text = _record_text(content, drop_heartbeat_reply=True)
+    return transcript_roles.is_heartbeat_status_reply(text)
+
+
+def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, bool]]:
+    """`(f"{role}: {text}", is_status)` for every kept record in the last `max_bytes` of `path`,
+    oldest to newest. [] on a missing/unreadable file. This is the one shared parse+classify
+    loop behind both `recent_messages` and `_recent_human_lines`, and it never raises
+    (`recent_messages` is on the SessionStart injection path). The byte-safe tail read and its
     partial-first-line rule live in `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I): it never
     raises on a non-UTF-8 byte, a non-object line or a half-written last line."""
     try:
         entries = jsonl_walk.read_jsonl_tail(path, max_bytes, malformed_lines=[])
     except OSError:
         return []
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []
     for rec in entries:
         classified = _classify_line(rec)
         if classified is not None:
-            out.append(f"{classified[0]}: {classified[1]}")
+            out.append((f"{classified[0]}: {classified[1]}", _is_status_record(rec)))
     return out
+
+
+
+
+def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
+    """`f"{role}: {text}"` for every kept record in the last `max_bytes` of `path`, oldest to
+    newest: the lines-only view of `_classified_tail`, used by `_recent_human_lines`. [] on a
+    missing/unreadable file (never raises)."""
+    return [line for line, _ in _classified_tail(path, max_bytes)]
 
 
 # Follow-up review finding on TRDD-0UQSAFCW's original fix (card 2a): after a long unattended
@@ -726,13 +754,13 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     record count, protecting against one oversized message alone (point 4 of the fix).
     """
     path = Path(transcript)
-    window_lines = _classified_tail_lines(path, _RECENT_MESSAGES_TAIL_BYTES)
-    # WHY: status replies repeat every fire and crowd the last substantive assistant message
-    # out of the count-capped window (TRDD-IYNS7H83); the newest 2 of a run are kept.
-    # shortcut: a short (<=400 chars) heartbeat reply 3 or more fires back in an unbroken run
-    # is dropped from this view even when its text differs, upgrade to a text-aware rule if
-    # distinct drift lines must survive here (they are also recorded in the findings ledger).
-    window_lines = _cap_heartbeat_status_runs(window_lines)
+    # WHY: status replies (every line after the phrase is a dispatcher line: starts with a digit
+    # or "[") repeat every fire and crowd the last substantive assistant message out of the
+    # count-capped window (TRDD-IYNS7H83); the newest 2 of a run are kept; a reply with any
+    # prose line is never capped.
+    # shortcut: older dispatcher lines of a long run are dropped from this view, upgrade to a
+    # text-aware rule if distinct drift lines must survive here (the findings ledger records them).
+    window_lines = _cap_heartbeat_status_runs(_classified_tail(path, _RECENT_MESSAGES_TAIL_BYTES))
     guaranteed_human = _recent_human_lines(path, target=_HUMAN_TARGET_COUNT)
     window_part = [ln for ln in window_lines[-limit:] if ln not in guaranteed_human]
     protected = guaranteed_human if guaranteed_human else [_NO_HUMAN_IN_WINDOW]
@@ -748,18 +776,14 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
 
 
 _MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2
-_ASSISTANT_LINE_PREFIX = "ASSISTANT: "
 
 
-def _cap_heartbeat_status_runs(lines: list[str]) -> list[str]:
+def _cap_heartbeat_status_runs(tail: list[tuple[str, bool]]) -> list[str]:
     """Keep only the newest `_MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of consecutive
-    heartbeat status replies; every other line passes through in order."""
+    heartbeat status records; every other line passes through in order. Returns the kept lines."""
     kept_rev: list[str] = []
     run = 0
-    for ln in reversed(lines):
-        is_status = ln.startswith(_ASSISTANT_LINE_PREFIX) and transcript_roles.is_heartbeat_status_reply(
-            ln[len(_ASSISTANT_LINE_PREFIX):]
-        )
+    for ln, is_status in reversed(tail):
         run = run + 1 if is_status else 0
         if is_status and run > _MAX_CONSECUTIVE_HEARTBEAT_STATUS:
             continue
