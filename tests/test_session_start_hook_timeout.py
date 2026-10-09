@@ -44,6 +44,7 @@ def test_pretooluse_guard_hooks_get_more_time_than_advisory_hooks() -> None:
         "pre-tool-agent-generator-guard.py",
         "pre-tool-publish-lock.py",
         "pre-tool-wikimem-write-path.py",
+        "pre-tool-release-age-guard.py",
     ]
     advisory = ["pre-tool-context-usage.py", "pre-tool-token-budget.py"]
     data = json.loads(HOOKS_JSON.read_text())
