@@ -1,10 +1,10 @@
 ---
 trdd-id: 61PLV7WS
 title: trdd-cross-card-blindspot never forgets a cleared pair, so a pair that returns stays silent forever
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T08:09:11+0200
-updated: 2026-10-07T09:35:16+0200
+updated: 2026-10-09T23:23:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,6 +26,8 @@ Found by the per-key forget check on TRDD-37H7QFSF (2026-10-07): scripts/detecto
 
 - 2026-10-07T08:09:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T08:19:09+0200 — column → testing by main-agent@ai-maestro-janitor. implemented in batch B6, merged 6e623375, awaiting verification
+2026-10-09 CLOSED by the main session (board drain, wave 3). Checked by the main session: fix commits are ancestors of the v3.8.11 tag; the pinning tests pass on a re-run today. All four acceptance boxes were already ticked; pinning tests in tests/test_trdd_cross_card_blindspot.py pass (cleared-then-returns, unreadable-card-forgets-nothing). The card names no field observation. Assessment: reports/board/20261009_232221+0200-wave3-batchD.md.
+- 2026-10-09T23:23:38+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; pinning tests re-run; see Approval log 2026-10-09.
 
 
 ## Acceptance

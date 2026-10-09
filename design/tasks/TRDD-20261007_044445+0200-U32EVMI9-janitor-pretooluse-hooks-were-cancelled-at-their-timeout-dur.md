@@ -4,7 +4,7 @@ title: Janitor PreToolUse hooks were cancelled at their timeout during host stal
 column: testing
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-07T05:15:55+0200
+updated: 2026-10-09T23:23:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,6 +36,7 @@ TRDD-QX59MA4H (the detector half), TRDD-9438CGJZ.
 - 2026-10-07T04:44:45+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:57:25+0200 — column → dev by main-agent@ai-maestro-janitor. first step merged; detector and lighter start-up path pending
 - 2026-10-07T05:15:55+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release
+2026-10-09 STAYS in testing (board drain, wave 3): its one acceptance box says the security agent's verdict is recorded privately; that private record was deliberately not read by the assessment and its existence is not verified, so the box is not ticked. The chosen response is in place: guard hooks at 60 s and advisory hooks at 30 s (f21ffbff, on main, unreleased), with tests/test_session_start_hook_timeout.py passing. Assessment: reports/board/20261009_232221+0200-wave3-batchD.md.
 
 ## STATE
 

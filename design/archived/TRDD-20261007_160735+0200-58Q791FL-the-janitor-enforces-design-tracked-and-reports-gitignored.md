@@ -1,10 +1,10 @@
 ---
 trdd-id: 58Q791FL
 title: The janitor enforces design tracked and reports gitignored
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T16:07:35+0200
-updated: 2026-10-07T19:05:36+0200
+updated: 2026-10-09T23:23:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,9 +33,15 @@ Plan: new detector design-tracked (probe design paths with check-ignore --no-ind
 ## Approval log
 
 - 2026-10-07T16:07:35+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 CLOSED by the main session (board drain, wave 3). Checked by the main session: fix commits are ancestors of the v3.8.11 tag; the pinning tests pass on a re-run today. Pinning test: test_later_root_rule_hiding_design_gets_negations_reappended_once in tests/test_design_tracked.py (file passes). The card names no field observation; FIELD CASE UNOBSERVED here: the hidden design/ case happened in another repo and was not re-run there. Assessment: reports/board/20261009_232221+0200-wave3-batchD.md.
+- 2026-10-09T23:23:36+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; pinning tests re-run; see Approval log 2026-10-09.
 
 ## Corrections
 
 2026-10-07: when design/ is hidden because a parent folder is excluded, the append path still writes !/design/ and !/design/** to the root .gitignore, re-probes, finds it still hidden and warns, leaving a .gitignore edit that achieves nothing. Fix: check that the negations would take effect (or revert the append) before keeping it.
 2026-10-07T18:41:17+0200: CORRECTION to the line above: the excluded-parent case does not happen for design/. It sits at the repo root, and a root .gitignore with * followed by !/design/ and !/design/** leaves design files NOT ignored (measured, reports/board/20261007_160605+0200-gitignore-precedence-measure.md case 3a). Only a nested .gitignore defeats the repair, and the detector already leaves that case unedited.
 2026-10-07T18:41:57+0200: a second unrepaired case (from reading _append_negations): when the root .gitignore already holds !/design/ and !/design/** but a LATER line in it hides design/ again (design/, /design/tasks/, or * after the negations), nothing is appended because both lines are present, and the detector only warns. Fix: append the negations again at the end whenever the hiding rule's line number is after them.
+
+## Acceptance
+
+- [x] See the Approval log entry of 2026-10-09 for the evidence per promise.

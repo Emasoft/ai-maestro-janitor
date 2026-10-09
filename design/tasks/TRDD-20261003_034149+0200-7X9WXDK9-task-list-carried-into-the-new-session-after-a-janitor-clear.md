@@ -4,7 +4,7 @@ title: Task list carried into the new session after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:49+0200
-updated: 2026-10-05T11:12:07+0200
+updated: 2026-10-09T23:23:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -39,6 +39,7 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T10:37:08+0200 — column → dev. C3 in progress
 - 2026-10-03T10:44:40+0200 — column → testing. code ready; field check after release: after a janitor clear the new session's TaskList shows the open tasks
 - 2026-10-03 C3 revision: new dir counts as having tasks only if it holds a json file; highwatermark raised never lowered. NOTE: the no-sidecar, env-set, no-json and no-overwrite tests passed trivially before the change; they are not regression proof.
+2026-10-09 STAYS in testing (board drain, wave 3), one of two field checks now observed. (a) OBSERVED by the main session in session 8a11fda7, cleared at 09:40 on 2026-10-09: jev-post-clear-hook.log reads 'carried 2 task file(s)', and the first task reminder of the new session listed tasks 1 and 2 with their subjects and states. (b) NOT established: that the carried files still exist after the new session creates its first task; the session's task directory holds no json now, with all its tasks completed. Assessment: reports/board/20261009_232221+0200-wave3-batchD.md.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
