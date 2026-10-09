@@ -4,7 +4,7 @@ title: C32 — shrink enrich skill
 column: dev
 status: tasked
 created: 2026-10-01T19:45:19+0200
-updated: 2026-10-09T05:53:46+0200
+updated: 2026-10-09T17:21:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -43,3 +43,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-09T05:31:52+0200 — column → todo. Same deadlock resolution as C30 (I4MOD020): the C22 dependency is a completion-event coupling — C32's Pass-1 run is C22's awaited evidence, so blocking C32 on C22 deadlocks the circle. Freeze treated as lifted (agent inference, owner may correct). C32 unblocked.
 2026-10-09 dependency disposition (per the review on 6e450b80): the body 'Depends on: C22' is SATISFIED-THEN-COUPLED, not blocking — C22's code exists and C32's Pass-1 run is the evidence EVENT SHAPE C22's gate awaits, with the same evidence expectation as C30: on the present clean corpus a run has nothing to refuse; a zero-refusal outcome is the already-ruled clean-corpus case tracked by JD2QR5SQ's escalation clause — read the count there; not a pending mystery. The work itself (shrink the enrich skill, same methodology as C31 with the cap re-measure) is unblocked and developable.
 - 2026-10-09T05:53:46+0200 — column → dev. unblocked per 2026-10-09 SATISFIED-THEN-COUPLED disposition; fan-out worker starts
+2026-10-09T11:45:00+0200 — Pass-1 FIELD RUN executed (coordinator, on the real PROJECT memory root .claude/project/memory): pre-lint 111 findings none-ERROR with ZERO fixer-owned hits (atom-keywords-duplicated: 0, page-description-duplicated-phrases: 0); memgrep lint --apply-fixes exit 0, no pages modified, zero refusals; post-lint verifier 111 findings, sorted diff vs pre-lint = 0; git tree clean. This is the ruled CLEAN-CORPUS outcome (JD2QR5SQ escalation clause) — the run also satisfies C22's awaited evidence event. Implementation committed c18ee75d; lint --apply-fixes surface verified on PATH. Card verify-clause (Same as C31) met on the real root.
