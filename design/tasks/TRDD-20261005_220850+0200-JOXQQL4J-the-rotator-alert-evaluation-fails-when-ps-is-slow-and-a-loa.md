@@ -4,7 +4,7 @@ title: The rotator alert evaluation fails when ps is slow and a load stall is re
 column: testing
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-07T22:06:23+0200
+updated: 2026-10-09T23:30:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ Observed under very high load: the daemon logged 'rotator-alert: evaluation fail
 - 2026-10-05T22:08:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:31:38+0200 — column → dev by main-agent@ai-maestro-janitor. fix is on a worktree branch, not merged yet
 - 2026-10-07T05:15:55+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release and a stalled-ps event in the daemon log
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a stalled ps handled by claude_running(); 0 matches for 'assuming Claude is running' in the daemon log, whose older entries have rotated out. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 
 ## STATE
 

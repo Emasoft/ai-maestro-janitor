@@ -4,7 +4,7 @@ title: SessionStart hooks share a 5 s budget a loaded host exceeds, so the STATE
 column: testing
 status: tasked
 created: 2026-10-06T18:33:18+0200
-updated: 2026-10-07T04:30:55+0200
+updated: 2026-10-09T23:30:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ On 2026-10-05 (ORCHESTRATOR /clear, transcript 05acb47b) every SessionStart hook
 ## Approval log
 
 - 2026-10-06T18:33:18+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a slow SessionStart showing hook success for all three hooks past 5000 ms; only proxies so far. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 
 ## STATE
 

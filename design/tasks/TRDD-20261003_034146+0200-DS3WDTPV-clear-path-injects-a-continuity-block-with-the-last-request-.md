@@ -4,7 +4,7 @@ title: Clear path injects a continuity block with the last request and own reply
 column: testing
 status: tasked
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-06T21:05:40+0200
+updated: 2026-10-09T23:30:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -54,6 +54,7 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T03:41:46+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-05 — Code is in v3.7.0 (cc48b42f). RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on an installed release carrying it, with a sidecar present, where the injected handoff must show a Continuity block and a NEXT ACTION quoting the last human message and the agent's own reply.
 2026-10-05 — the status line above was appended here by mistake; the card's STATE section now holds it.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). The 2026-10-05 named event IS observed: the janitor clear of 2026-10-09 23:25 on 3.8.11 injected a Continuity block and a NEXT ACTION quoting the owner's last message and the agent's own reply (read by the main session in its own SessionStart context). The 2026-10-06 named check is NOT yet seen: that clear's last reply did not end on a question. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 
 ## STATE
 

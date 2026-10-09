@@ -4,7 +4,7 @@ title: trdd-state-reconciliation flags testing cards that are correctly waiting 
 column: testing
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-07T04:44:35+0200
+updated: 2026-10-09T23:30:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,6 +44,7 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 ## Approval log
 
 - 2026-10-07T00:45:39+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Waits on the first weekly audit on 3.8.2 or later, and on the choice between design A and design B, which the owner's mandate of 2026-10-09 leaves to the main session; not yet decided. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 
 ## Implementation commits
 

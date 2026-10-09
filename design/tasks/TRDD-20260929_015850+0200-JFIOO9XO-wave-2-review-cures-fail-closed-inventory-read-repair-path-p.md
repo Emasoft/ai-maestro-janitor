@@ -4,7 +4,7 @@ title: wave-2 review CUREs — fail-closed inventory read repair-path policy REU
 column: testing
 status: tasked
 created: 2026-09-29T01:58:50+0200
-updated: 2026-10-05T10:59:54+0200
+updated: 2026-10-09T23:30:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,6 +32,7 @@ Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573
 
 - 2026-09-29T01:58:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-09-29 — review-of-record verdict HOLDS; sequenced to dev before any step-6 dispatch.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a real update-mem-topic --replace-all repair of a control-byte page exiting 0 and passing memgrep validate. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 
 ## Review addenda
 

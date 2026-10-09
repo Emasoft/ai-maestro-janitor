@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-07T04:34:41+0200
+updated: 2026-10-09T23:30:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -41,6 +41,7 @@ Related: supersedes the default chosen in TRDD-5OJX3SCF; parent umbrella TRDD-JS
 - 2026-10-04 — DESIGN DECISION for this card: unset or empty variable means ON; an explicit falsy value (0, false, no, off) stays as an emergency stop. The owner did not ask to remove the stop or the three-launch cap; both stay until the owner says otherwise.
 - 2026-10-04 — KNOWN LIMIT: the re-login cannot help a daemon that cannot read the keychain. On 2026-10-04 09:03 the daemon lost keychain access after the macOS login session was replaced; see the sibling card created the same day.
 - 2026-10-04T20:10:59+0200 — column → testing. Code landed (default ON, refusal refund and alert in c91af837); nobody is writing code for it. Awaiting end-to-end observation on this machine after 3.7.1 is installed; open items stay listed on the card.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: 0 matches for 'auto-bootstrap: launch' in the daemon log. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 
 ## Open items carried past the first release (2026-10-04)
 

@@ -4,7 +4,7 @@ title: A quiet heartbeat never re-engages a session that sits idle with work sti
 column: testing
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-07T04:32:49+0200
+updated: 2026-10-09T23:30:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -37,6 +37,7 @@ A quiet heartbeat fire makes the session reply only 'janitor heartbeat' with no 
 ## Approval log
 
 - 2026-10-06T18:16:49+0200 — MANDATE issued by lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6 (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: an idle session in a pane the owner is not typing in receiving a resume within two fires; the 49 'keep-going: nudge emitted' lines are proxies. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 
 ## STATE
 

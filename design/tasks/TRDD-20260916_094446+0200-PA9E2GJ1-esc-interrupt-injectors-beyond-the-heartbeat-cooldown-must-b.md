@@ -3,7 +3,7 @@ trdd-id: PA9E2GJ1
 title: Esc interrupt injectors beyond the heartbeat cooldown must be found and closed
 column: testing
 created: 2026-09-16T09:44:46+0200
-updated: 2026-09-17T07:12:28+0200
+updated: 2026-10-09T23:30:43+0200
 current-owner: session
 created-by: session
 task-type: spike
@@ -35,6 +35,7 @@ Evidence: owner complaint 2026-09-15; TRDD-6P0KUSO9 (dispatch.py _phase_interrup
 
 - 2026-09-16T09:44:46+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T06:42:16+0200 — column → testing by session. boxes 2+3 landed with code+tests; box 1 (live armed-vs-disarmed reproduction) is a human/live-session observation, parked for the orchestrator
+2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). HUMAN-ONLY: box 1 needs the owner to press Esc during a live turn, armed and disarmed, three times each. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
