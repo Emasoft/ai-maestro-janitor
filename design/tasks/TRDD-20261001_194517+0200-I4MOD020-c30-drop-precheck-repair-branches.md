@@ -4,7 +4,7 @@ title: C30 — drop precheck repair branches
 column: todo
 status: tasked
 created: 2026-10-01T19:45:17+0200
-updated: 2026-10-09T10:09:09+0200
+updated: 2026-10-09T19:03:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -49,3 +49,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-09T09:38:15+0200 — column → todo. implementation reverted per adversarial review F1 (pipeline hole); needs a design decision on the fixer discovery trigger before re-attempt
 2026-10-09T10:05:00+0200 — patch given a git-restorable home (review F2): reports_dev copy is now ALSO at design/specs/c30-reverted-implementation/20261009_c30-reverted-implementation-patch.diff (git-tracked). NEXT ACTION for re-dispatch (decision, not mechanical drop): EITHER mint a design card for a lint-driven discovery surface feeding C22-style fixers (then this card's drop becomes safe), OR extend repair_has_work to consult memgrep lint for fixer-backed codes; owner decides which path.
 2026-10-09T10:55:00+0200 — record correction on 583e2e60: the STATE block sits after the Derived-from line and BEFORE the Writes/Task/Verify lines (it splits the intro block), not immediately after the title. The body Task/Verify lines still describe the rejected framing; the STATE block supersedes them per TRDD governance. reports_dev twin renamed to *.STALE-REVERTED-DO-NOT-APPLY-use-design-specs-copy so the warning sits at the grep surface (review 4 finding 1: a README sentence on the tracked side never reaches a reports_dev grep).
+2026-10-09 reading note (review of 77a7d06a): this card's 2026-10-09 dependency disposition calls a zero-refusal Pass-1 outcome 'the already-ruled clean-corpus case'. That phrase states an EXPECTATION (a clean corpus gives the fixers nothing to refuse); it does NOT say C22's (JD2QR5SQ) gate accepts a zero-refusal run. C22's gate still needs a pipeline dispatch with an observed refusal.
