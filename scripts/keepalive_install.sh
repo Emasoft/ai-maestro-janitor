@@ -286,11 +286,26 @@ EOF
   # — for a staged-but-not-activated install, a dry run, and side-effect-free tests.
   [ -n "${KEEPALIVE_SKIP_ACTIVATION:-}" ] && return 0
   uid="$(id -u)"
-  # Clear any stale instance first so bootstrap never collides; both are best-effort —
-  # a load failure must not abort the installer (the daemon's caller treats it best-effort).
+  # Clear any stale instance first so bootstrap never collides. TRDD-V13RIZUI: bootout returns
+  # before launchd finished tearing the job down, so an immediate bootstrap failed silently and
+  # left the job UNLOADED while we printed "installed" — wait for the job to vanish, retry the
+  # load, then VERIFY it is loaded and fail loudly otherwise (callers treat non-zero as best-effort).
   launchctl bootout "gui/$uid/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "gui/$uid" "$PLIST" 2>/dev/null ||
-    launchctl load -w "$PLIST" 2>/dev/null || true
+  n=0
+  while launchctl print "gui/$uid/$LABEL" >/dev/null 2>&1 && [ "$n" -lt 25 ]; do
+    sleep 0.2
+    n=$((n + 1))
+  done
+  n=0
+  lerr=""
+  while [ "$n" -lt 5 ]; do
+    lerr="$(launchctl bootstrap "gui/$uid" "$PLIST" 2>&1 || launchctl load -w "$PLIST" 2>&1)" || true
+    launchctl print "gui/$uid/$LABEL" >/dev/null 2>&1 && return 0
+    n=$((n + 1))
+    sleep 1
+  done
+  echo "keepalive: launchctl could not load $LABEL: $lerr" >&2
+  return 1
 }
 
 install_linux() {
@@ -324,8 +339,12 @@ EOF
   execstart_bake_interpreter "$UNIT"
   # See install_macos: write-config-only mode for staged installs / dry runs / tests.
   [ -n "${KEEPALIVE_SKIP_ACTIVATION:-}" ] && return 0
+  # TRDD-V13RIZUI: same discard-and-claim bug as install_macos — verify the unit is active.
   systemctl --user daemon-reload 2>/dev/null || true
-  systemctl --user enable --now "$LABEL.service" 2>/dev/null || true
+  if ! lerr="$(systemctl --user enable --now "$LABEL.service" 2>&1)" || ! systemctl --user is-active --quiet "$LABEL.service"; then
+    echo "keepalive: systemctl could not start $LABEL.service: $lerr" >&2
+    return 1
+  fi
 }
 
 uninstall_macos() {

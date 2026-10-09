@@ -34,3 +34,37 @@ def test_generated_plist_process_type_is_standard(tmp_path: Path) -> None:
         assert plistlib.load(fh)["ProcessType"] == "Standard"
     if shutil.which("plutil"):
         subprocess.run(["plutil", "-lint", str(plist)], check=True, capture_output=True)
+
+
+def test_install_over_loaded_job_never_claims_installed_while_unloaded(tmp_path: Path) -> None:
+    """TRDD-V13RIZUI: bootout lags, so a naive bootstrap fails; install must end loaded or exit non-zero."""
+    script = tmp_path / "keepalive_install.sh"
+    shutil.copy(SCRIPT, script)
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    state = tmp_path / "launchd-state"
+    state.mkdir()
+    (state / "loaded").touch()
+    (shim_dir / "uname").write_text("#!/bin/sh\necho Darwin\n")
+    # WHY a stateful fake launchctl: after bootout the job still shows in `print` for 3 more polls and
+    # `bootstrap` fails (as the real launchd did) until it is gone; `load` always fails.
+    (shim_dir / "launchctl").write_text(
+        f"""#!/bin/sh
+S="{state}"
+n=$(cat "$S/pending" 2>/dev/null || echo 0)
+case "$1" in
+bootout) echo 3 > "$S/pending"; rm -f "$S/loaded"; exit 0 ;;
+print) if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$S/pending"; exit 0; fi; [ -e "$S/loaded" ] ;;
+bootstrap) if [ "$n" -gt 0 ]; then echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; fi; touch "$S/loaded" ;;
+*) exit 1 ;;
+esac
+"""
+    )
+    for shim in shim_dir.iterdir():
+        shim.chmod(0o755)
+    env = {**os.environ, "HOME": str(tmp_path), "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"}
+    env.pop("KEEPALIVE_SKIP_ACTIVATION", None)
+    proc = subprocess.run(["bash", str(script), "install"], env=env, capture_output=True, text=True)
+    loaded = (state / "loaded").exists()
+    assert loaded or proc.returncode != 0, f"claimed install with the job unloaded: {proc.stdout!r}"
+    assert not ("installed" in proc.stdout and not loaded)
