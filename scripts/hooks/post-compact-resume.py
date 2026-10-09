@@ -449,7 +449,7 @@ def _spawn_deferred_child(state, plugin_root: str, elapsed_s: int, transcript_pa
     """Spawn the detached `_DEFER_ARG` re-entry child with its output in a file.
 
     WHY not DEVNULL: DEVNULL hid every traceback of the detached child, which
-    is how 200 deferrals ended with no outcome line and no clue (TRDD-74AA4PAL).
+    is how 251 deferrals left only 17 outcome lines across the 25 logs on the dev machine (measured 2026-10-10), with no clue why (TRDD-74AA4PAL).
     """
     # shortcut: nothing rotates post-compact-resume.child.log, add it to the log purge if it grows past a few hundred KB
     log_file = None

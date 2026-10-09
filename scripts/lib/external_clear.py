@@ -754,8 +754,8 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     record count, protecting against one oversized message alone (point 4 of the fix).
     """
     path = Path(transcript)
-    # WHY: status replies (every line after the phrase is a dispatcher line: starts with a digit
-    # or "[") repeat every fire and crowd the last substantive assistant message out of the
+    # WHY: status replies (every line after the phrase is a dispatcher line: the "N background
+    # worker(s) running" line or a line starting with a lower-case "[tag]") repeat every fire and crowd the last substantive assistant message out of the
     # count-capped window (TRDD-IYNS7H83); the newest 2 of a run are kept; a reply with any
     # prose line is never capped.
     # shortcut: older dispatcher lines of a long run are dropped from this view, upgrade to a

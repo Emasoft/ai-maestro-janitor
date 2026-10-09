@@ -3530,6 +3530,18 @@ def test_background_worker_progress_line_is_a_heartbeat_status_reply(env_isolati
         assert transcript_roles.is_heartbeat_status_reply("janitor heartbeat\n" + line), line
 
 
+
+def test_findings_render_line_is_a_heartbeat_status_reply(env_isolation: dict) -> None:
+    """Pins the real findings_ledger.render_line output to the bracket-tag half of the status predicate."""
+    import findings_ledger
+    import transcript_roles
+
+    line = findings_ledger.render_line({"sev": "info", "code": "x-code", "src": "x-src", "msg": "a message", "ref": "-"}, now=0)
+    assert line.startswith("[findings]"), line
+    assert transcript_roles.is_heartbeat_status_reply("janitor heartbeat\n" + line), line
+    assert not transcript_roles.is_heartbeat_status_reply("janitor heartbeat\n" + line + "\nI am fixing it now.")
+
+
 def test_background_worker_progress_idle_session_prints_nothing(env_isolation: dict) -> None:
     """Acceptance box 3: no pending agents at all → the zero-noise contract holds."""
     dispatch = _import_dispatch()

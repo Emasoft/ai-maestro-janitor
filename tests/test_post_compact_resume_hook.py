@@ -832,6 +832,30 @@ def test_defer_push_falls_back_to_devnull_when_child_log_cannot_open(
 
 
 
+def test_defer_push_still_spawns_when_child_log_open_raises_a_non_oserror(
+    state_mod, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-OSError failure opening the child log (RuntimeError) still spawns the child with DEVNULL."""
+    import builtins
+
+    _project, state = state_mod
+    hook = _import_hook()
+    real_open = builtins.open
+
+    def failing_open(file, *args, **kw):
+        if str(file).endswith("post-compact-resume.child.log"):
+            raise RuntimeError("simulated")
+        return real_open(file, *args, **kw)
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    kwargs: list = []
+    monkeypatch.setattr(hook.subprocess, "Popen", lambda argv, **kw: kwargs.append(kw))
+    hook._defer_push(state, str(_PROJECT_ROOT))
+    assert len(kwargs) == 1
+    assert kwargs[0]["stdout"] is subprocess.DEVNULL and kwargs[0]["stderr"] is subprocess.DEVNULL
+
+
+
 def test_reentry_reports_an_unimportable_plugin_root_on_stderr(
     state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
