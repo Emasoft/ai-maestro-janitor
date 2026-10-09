@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T02:59:24+0200
+updated: 2026-10-09T03:48:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -62,6 +62,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09 TEST ITEMS LANDED, commit b21881dd: (1) the S1 gap is covered at the level its review settled — every_fixer_for_arm_name_is_a_registered_rule pins each fixer_for arm against the rule table (typo'd EXISTING arm detected); documented ceiling: an arm ADDED to fixer_for without extending the test's ARM_NAMES list is undetected; (2) the S1 ledger fail-fast item is covered as the WRITE-path variant (record_unfixed on a directory-ledger errors, not NotFound — the reader treats NotFound as empty and would write through); the card text's literal READ-path pin remains untested if anyone wants it; (3) one S2 blank line removed, remaining stragglers fold forward per the no-more-enumeration policy. Verified: both clippy gates clean, cargo test 447 unit + 244 cli pass. Card open items after this: field use by C30/C31/C32 + per-scope lock/ledger (TRDD-1T0W2ZVW), KTD3N7H6, C21-(c), unused-noqa label clause, WM-LINT-10.
 2026-10-09 two-line correction (review of 96dd2b16): (1) the open-items list there silently dropped the per-finding-labels deferral — still live and unrecorded (the safe-fix label remains a whole-rule answer at HEAD while --apply-fixes now applies fixes); restored to the open list alongside the unused-noqa clause. (2) 'if anyone wants it' replaced by the accurate form: the ledger READ-path pin remains OPEN; the write-path pin is accepted as the load-bearing half, the read-path deliberately unpinned.
 2026-10-09 C22-evidence coupling (from OLNPXGBC post-commit review M2): per-scope lock engagement on PATH-SCOPED lint --apply-fixes runs is unmeasured (S6 tested scratch roots; the parent's field run passed the whole USER root). C31's skill now instructs path-scoped Pass-1 runs. COMPLETION CONDITION SHARPENED: a real repair dispatch must show the per-scope lock AND the ledger engaging before this card completes — a ledger-only observation is insufficient evidence.
+2026-10-09 field-dispatch clarification: the 03:36 LOCAL memory-repair dispatch (claim 1791509743-d88caada) did NOT run Pass 1 (lint --apply-fixes) — its two findings both had no fixer, and the agent went straight to the gated replace-mem-topic verb. That dispatch is NOT the completion evidence this card needs: the gate still requires a real repair dispatch whose Pass 1 actually runs on claimed pages on a real root, with the per-scope lock AND the unfixed ledger both seen engaging. No evidence claimed from that dispatch.
 
 ## Approval log
 
