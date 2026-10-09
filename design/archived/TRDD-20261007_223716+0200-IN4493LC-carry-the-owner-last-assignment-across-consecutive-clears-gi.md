@@ -1,10 +1,10 @@
 ---
 trdd-id: IN4493LC
 title: Carry the owner last assignment across consecutive clears (GitHub issue 338)
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-10T00:04:26+0200
+updated: 2026-10-10T00:42:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -41,6 +41,8 @@ PARKED: TRDD-A8DRRW0I wave 2 until 3.8.11 is out; wave 1 commits 1c045352 and 22
 - 2026-10-07T22:37:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3): reported closeable by the assessing worker on field evidence of its own case (six post-clear sessions on 2026-10-09 carried the owner's messages and kept working), but the card's own demand comes first: mint cards for its three known flaws and for issue 338 proposals 2, 3 and 5, and re-run tests/test_session_continuity.py and tests/test_dispatch_phases.py. Not yet done. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
 2026-10-10 CORRECTION to the line above: the two test files are not owed; tests/test_session_continuity.py and tests/test_dispatch_phases.py both passed in the main session's 620-test run before commit 13650a48 and in the full suite on it (18238 passed). Still owed before closing: cards for the three known flaws and for issue 338 proposals 2, 3 and 5, and the main session's own check of the field evidence (the worker's caveat: the heartbeat nudge also quotes the owner, so 'kept working with no typed message' does not isolate the carried handoff).
+2026-10-10 CLOSED by the main session (board drain, wave 3). (1) Fix commit 6da0149f is an ancestor of the v3.8.11 tag (git merge-base, run today). (2) Its tests passed in the main session's runs (tests/test_session_continuity.py and tests/test_dispatch_phases.py, inside the 620-test run and the full suite on 13650a48). (3) Field check, the card's own case, measured by the main session in the transcripts of five consecutive post-clear sessions of this project on 2026-10-09 (ids 8364ed18, a18f6126, 1cd5b1e2, 9161f947, f2dd0f96): each received a SessionStart attachment holding the owner's messages 'carried verbatim by the janitor', none had a typed owner message afterwards, and each went on to make 340, 95, 177, 61 and 196 tool calls. As the card says, the heartbeat nudge also quotes the owner, so this shows the whole system works and does not isolate the handoff carry. The typed-message test used the records' origin and promptSource fields. Items moved out before closing: the three known flaws to TRDD-2UV4BBHP; issue 338 proposals 2, 3 and 5 and the owed link to TRDD-0TSG80CL. The owner decision on TRDD-HKUOS0DV stays open there.
+- 2026-10-10T00:42:14+0200 — COMPLETE by main-agent@ai-maestro-janitor. released in v3.8.11; field check observed in five post-clear sessions; leftovers moved to their own cards.
 
 ## Review findings to build in
 
@@ -58,3 +60,7 @@ Not verified: no real clear has yet run under 3.8.11, so the carried messages ha
 Field check to move this card to complete (outcome, not mechanism; issue 338 itself reported 5/5 PASS on an idle agent): under 3.8.11, clear 1 is of a session where the owner typed a message (this writes the record), and clear 2 is of the next session after it ran with no owner message. Pass when, after clear 2, the new session's handoff quotes the owner's messages from before clear 1 (clipped long messages count) and the session either continues work with no typed owner message or, if it declines, states the open-board counts by column. Clear 1 qualifies when .janitor/state/owner-messages/<new-session-id>.json exists after it (the 3.8.11 hook ran); clear 2 qualifies when the cleared transcript holds no owner message. A pass shows the whole system works; the heartbeat nudge also quotes the owner, so it does not isolate the handoff carry.
 Items that must outlive this card when it closes: the three known flaws above, issue 338 proposals 2 (partly done), 3 and 5, and the owed issue link. Move them to their own cards before this card goes to complete.
 SUPERSEDED: the PARKED line about TRDD-A8DRRW0I wave 2 in the body; wave 2 resumed and landed on 2026-10-07 (62cac384, 1afd8b43).
+
+## Acceptance
+
+- [x] after a clear of a session with no owner message, the new session's handoff quotes the owner's earlier messages and the session continues with no typed message (five consecutive sessions on 2026-10-09; the heartbeat nudge also quotes the owner, so the carry is not isolated)
