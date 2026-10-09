@@ -1,9 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: testing
+column: blocked
 created: 2026-09-04T18:48:19+0200
-updated: 2026-10-10T00:25:22+0200
+updated: 2026-10-10T00:26:51+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -17,8 +17,10 @@ npt: []
 eht: []
 implementation-commits: [ff6a7810, 3deaf13c]
 external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
-review-after: 2026-09-24
+review-after: 2026-10-24
 status: tasked
+unblock-when: [log:.janitor/logs/post-compact-resume.log matches deferred recheck child started]
+pre-block-column: todo
 ---
 
 # Compacted sessions are neither woken nor told a handoff exists
@@ -245,6 +247,9 @@ trading that away.
 2026-10-10 CORRECTION to the investigation line above (its point 4 and its inference about the direct push are WITHDRAWN). A wider join shows the injector log cannot tell a dead push from a successful one: of 207 'resume push fired' lines that fall inside the span of their project's terminal_trigger.log, only 18 have a same-session injector line in the following 62 minutes, and that was already so in August (16 of 130), when the push is known to have run (lines such as 'inject gave up after 3600s'). The lines that do exist are give-ups, cancels and deferrals; a successful send through this path appears to log nothing, which was not confirmed by reading inject_until_sent in full. So silence there proves nothing, the count of '2 lines' was wrong (at least six exist), and whether the direct push works today is UNKNOWN. What STANDS: the deferred child logs exactly one outcome on every path when run by hand, yet in the field 218 deferrals show 16 outcomes, all 'moot'. Not tested: the installed cache layout as plugin root, and the hook's own environment. DECIDED NEXT STEP, a diagnostic change and not yet a fix: the child logs one line when it starts (before the sleep), its stdout and stderr go to a log file under .janitor/logs/ and not to DEVNULL, and an exception in the recheck is caught and logged as an outcome. After a release, the next real compactions will show whether the child never starts, dies during the sleep, or raises.
 2026-10-10 DIAGNOSTIC shipped on main in 3deaf13c, NOT a fix: it shows whether the deferred child starts, reaches an outcome, or raises; it does not make a push more likely to fire. Machine-wide count that day: 251 deferrals, 17 outcomes, all 'moot', and no log holds outcomes without deferrals, so the lines are not landing in another project's log. The card's two open boxes stay open. WAITS on the first real compactions on a host that has the next release installed AND whose session started after the update (running sessions keep the old hook); an empty child log before that means nothing. DETECT, per project: grep -c 'resume push deferred' .janitor/logs/post-compact-resume.log against grep -c 'deferred recheck child started' in the same file over the same dates, and read .janitor/logs/post-compact-resume.child.log. READING IT: a deferral with no start line and an empty child log = the child never ran; a 'pid=' line in the child log with no start line in the main log = it ran and logged elsewhere (its 'state_dir=' line says where); a start line with no outcome within about 70 s = it died during the sleep; a 'deferred recheck raised' line or a traceback = it raised; a start line plus one of the four outcomes = it works. Checks: 398 passed in both test orders, ruff, mypy, pyright clean; full suite running (reports/board/full-suite-3deaf13c.txt).
 - 2026-10-10T00:25:22+0200 — column → testing by main-agent@ai-maestro-janitor. diagnostic in 3deaf13c; waits on real compactions after the next release
+- 2026-10-10T00:26:51+0200 — column → todo by main-agent@ai-maestro-janitor. testing was the wrong column: the code is known not to deliver the card's promise
+- 2026-10-10T00:26:51+0200 — column → blocked by main-agent@ai-maestro-janitor. no fix can be chosen until the diagnostic of 3deaf13c has produced field data; that needs a release, an update and restarted sessions
+2026-10-10 COLUMN CORRECTED (review of d437fc1b): testing means code believed done and waiting to be verified, and this code is known not to deliver the card's promise, so the card is blocked from todo. It returns by itself when this repo's .janitor/logs/post-compact-resume.log first holds a 'deferred recheck child started' line (unblock-when), or comes up for review on 2026-10-24. READING GUIDE, CORRECTED and replacing the one above. The child's order is: print the pid line; insert the plugin root on sys.path; import lib.state; print the state_dir line; log the start line; run the recheck. So, in post-compact-resume.child.log and post-compact-resume.log: (1) deferral, no start line, empty child log = the child never ran, OR the child log could not be opened (then every case looks like this one); (2) a pid line plus 'could not import lib.state' = the plugin root was unusable, for example the versioned cache dir was removed by an update; (3) a pid line and a state_dir line but no start line in this project's log = it ran and logged elsewhere, the state_dir line says where; or the start log call itself raised, in which case a traceback is in the child log; (4) a start line with no outcome within about 70 s = it died during the sleep; (5) a 'deferred recheck raised' line or a traceback = it raised; that line can follow a real outcome line; (6) a start line plus one of the four outcomes = it works. A 're-armed' outcome is followed by a NEW start line from a new pid, and such a chain is normal for up to 15 minutes; a second hop's child log is opened by the first child at the path it resolves. Compare first-hop start lines ('elapsed 0s') with deferral lines, since start lines are per hop. Checked after the commit: the final bodies of _spawn_deferred_child (start_new_session and the finally close are present) and _drive_reentry_main were read in full by the main session.
 
 ## STATE
 
