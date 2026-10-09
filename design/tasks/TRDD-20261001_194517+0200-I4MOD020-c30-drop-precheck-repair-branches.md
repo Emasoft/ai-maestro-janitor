@@ -4,7 +4,7 @@ title: C30 — drop precheck repair branches
 column: todo
 status: tasked
 created: 2026-10-01T19:45:17+0200
-updated: 2026-10-09T19:03:08+0200
+updated: 2026-10-09T21:35:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -27,7 +27,7 @@ Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C30, wave W3.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-09
 
-NEXT ACTION: C30 is a DESIGN DECISION, not a mechanical drop. Re-attempt ONLY after one of: (a) a design card exists for a lint-driven discovery surface feeding C22-style fixers, or (b) repair_has_work is extended to consult memgrep lint for fixer-backed codes. Until then the two precheck repair branches STAY (they are the standing discovery trigger; review F1 confirmed). The reverted implementation is preserved at design/specs/c30-reverted-implementation/20261009_c30-reverted-implementation-patch.diff — KNOWN-REJECTED evidence, do NOT apply without the discovery-trigger decision. Owner decides the path.
+NEXT ACTION: C30 is a DESIGN DECISION, not a mechanical drop. Re-attempt ONLY after one of: (a) a design card exists for a lint-driven discovery surface feeding C22-style fixers, or (b) repair_has_work is extended to consult memgrep lint for fixer-backed codes. Until then the two precheck repair branches STAY (they are the standing discovery trigger; review F1 confirmed). The reverted implementation is preserved in git history only (read it with: git show 583e2e60:design\/specs\/c30-reverted-implementation\/20261009_c30-reverted-implementation-patch.diff; removed from the working tree 2026-10-09 because the file made the release validator report 9 MAJOR findings) — KNOWN-REJECTED evidence, do NOT apply without the discovery-trigger decision. Owner decides the path.
 
 Writes (exclusive): scripts/lib/memory_content_precheck.py, its tests
 Task: Drop repair_defect branches whose defect now has a SAFE fixer
@@ -50,3 +50,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-09T10:05:00+0200 — patch given a git-restorable home (review F2): reports_dev copy is now ALSO at design/specs/c30-reverted-implementation/20261009_c30-reverted-implementation-patch.diff (git-tracked). NEXT ACTION for re-dispatch (decision, not mechanical drop): EITHER mint a design card for a lint-driven discovery surface feeding C22-style fixers (then this card's drop becomes safe), OR extend repair_has_work to consult memgrep lint for fixer-backed codes; owner decides which path.
 2026-10-09T10:55:00+0200 — record correction on 583e2e60: the STATE block sits after the Derived-from line and BEFORE the Writes/Task/Verify lines (it splits the intro block), not immediately after the title. The body Task/Verify lines still describe the rejected framing; the STATE block supersedes them per TRDD governance. reports_dev twin renamed to *.STALE-REVERTED-DO-NOT-APPLY-use-design-specs-copy so the warning sits at the grep surface (review 4 finding 1: a README sentence on the tracked side never reaches a reports_dev grep).
 2026-10-09 reading note (review of 77a7d06a): this card's 2026-10-09 dependency disposition calls a zero-refusal Pass-1 outcome 'the already-ruled clean-corpus case'. That phrase states an EXPECTATION (a clean corpus gives the fixers nothing to refuse); it does NOT say C22's (JD2QR5SQ) gate accepts a zero-refusal run. C22's gate still needs a pipeline dispatch with an observed refusal.
+2026-10-09 — the tracked patch file is REMOVED from the working tree: cpv-remote-validate --strict (v5.16.2) reported 9 MAJOR TOOL_SHADOW findings on it (the diff quotes test code), which would block every publish. It stays restorable from git: git show 583e2e60:design/specs/c30-reverted-implementation/20261009_c30-reverted-implementation-patch.diff (320 lines, verified). The README beside it now gives that command. Earlier log lines naming the design/specs path as the live location are superseded by this one.
