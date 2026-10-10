@@ -4,7 +4,7 @@ title: A resume-after-clear flag whose clear was never observed stays unarmed un
 column: testing
 status: tasked
 created: 2026-10-06T18:16:48+0200
-updated: 2026-10-10T03:48:10+0200
+updated: 2026-10-10T03:50:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -38,6 +38,7 @@ A resume-after-clear flag whose /clear was never observed (no clear-observed sta
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a SessionStart where on-session-start.py ran over 5000 ms and still succeeded; the clears of 2026-10-09 on 3.8.11 are proxies because hook duration is not logged. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: hook duration is not logged; session-start.log has one-second stamps and no end-of-hook line, so a SessionStart over 5000 ms that still succeeded cannot be read from any file.
 2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). The step (iv) line 'NO DETECT POSSIBLE: duration not logged' is probably wrong: the findings ledger records killed hooks with their duration as HOOK-001 (8 UserPromptSubmit and 2 Stop kills in this repo's ledger, no SessionStart). CANDIDATE DETECT, unverified that the scanner sees SessionStart kills: grep HOOK-001 .janitor/state/findings-ledger.ndjsonl | grep -c SessionStart.
+2026-10-10 03:49 caveat on the candidate DETECT above: a 0 is uninformative until one SessionStart kill has been seen recorded at least once (the scanner reads a transcript attachment, and a hook killed at session start may leave none); the ledger keeps 500 lines; this repo's ledger holds 20 HOOK-001 lines, of which 10 matched the 'was killed' phrasing counted above.
 
 ## STATE
 

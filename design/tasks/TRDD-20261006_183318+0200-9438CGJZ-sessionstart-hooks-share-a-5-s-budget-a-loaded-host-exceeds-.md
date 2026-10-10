@@ -4,7 +4,7 @@ title: SessionStart hooks share a 5 s budget a loaded host exceeds, so the STATE
 column: testing
 status: tasked
 created: 2026-10-06T18:33:18+0200
-updated: 2026-10-10T03:48:11+0200
+updated: 2026-10-10T03:50:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ On 2026-10-05 (ORCHESTRATOR /clear, transcript 05acb47b) every SessionStart hook
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a slow SessionStart showing hook success for all three hooks past 5000 ms; only proxies so far. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: no hook duration is logged and a kill is silent; the only trigger is a hook_cancelled timedOut record found in a session transcript, which names no stable log.
 2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). The step (iv) line 'NO DETECT POSSIBLE' is probably wrong for the same reason as on TRDD-KVUVV9D2: HOOK-001 ledger lines carry a killed hook's duration. CANDIDATE DETECT, unverified for SessionStart: grep HOOK-001 .janitor/state/findings-ledger.ndjsonl | grep -c SessionStart.
+2026-10-10 03:49 caveat on the candidate DETECT above: a 0 is uninformative until one SessionStart kill has been seen recorded at least once; see the same caveat on TRDD-KVUVV9D2.
 
 ## STATE
 
