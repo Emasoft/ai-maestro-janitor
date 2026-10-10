@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest â
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T04:10:47+0200
+updated: 2026-10-10T03:36:26+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -810,3 +810,4 @@ on Q8PNPRTW for being plausible.
   would destroy the reasoning that catches the next wrong fix, and would be a rewrite of text
   that may need another. A second collapse TRDD before the first has run is speculative
   machinery.
+2026-10-10 OCCURRENCE, full suite on dd70abcd (reports/board/full-suite-dd70abcd.txt; 44 minutes against the usual 27; 15-minute load average 23.8 shortly after): 2 failed of 18252. (1) tests/test_capture_all_logins.py::test_capture_one_kills_the_whole_tree_and_reports_timeout: the pid file was never written; captured child stderr and stdout were both empty strings. (2) tests/test_memgrep_binary_stale.py::test_real_404_has_its_own_reason: the detector answered 'the memgrep build carries no commit stamp' for a stub shell script that prints one, which reads as the same symptom (a spawned shell that produced nothing); that the two share a cause is INFERRED, not shown. Both passed 3 of 3 when re-run alone.
