@@ -573,6 +573,24 @@ def _truncate_utf8_lines(text: str, max_bytes: int) -> str:
     cut = truncated.rfind("\n")
     return truncated[:cut] if cut != -1 else truncated
 
+
+
+def _read_first_target(sd: Path, handoff: Path) -> Path:
+    """The file the truncated-handoff pointer names for `handoff`.
+
+    TRDD-D7RLXAN1: one clear must name ONE read-first file. When `jev-compacted-<key>.md` is a
+    byte copy of the handoff it is the file the READ FIRST line names, so name it, not the copy.
+    """
+    import filecmp  # noqa: PLC0415
+
+    import handoff_files  # noqa: PLC0415 - sys.path gains scripts/lib only inside main()
+
+    parsed = handoff_files.parse(handoff.name)  # None for the legacy unkeyed `agent-handoff.md`
+    if parsed is None:
+        return handoff
+    jev = sd / f"jev-compacted-{parsed[0]}.md"
+    return jev if jev.is_file() and filecmp.cmp(jev, handoff, shallow=False) else handoff
+
 # Measured: this hook can ALSO print its OWN unrelated content after the handoff injection in
 # the same process (e.g. `_cron_liveness_nudge`'s heartbeat self-check, up to ~550 B on a fresh
 # project with no cron armed yet) -- `_HANDOFF_BODY_MAX_BYTES` alone only accounts for each
@@ -643,7 +661,8 @@ def _handoff_body(state, sd: Path) -> str | None:  # noqa: ANN001 - local module
     # boundary and never mid multi-byte character (`_truncate_utf8_lines`), plus one line
     # naming where the rest lives -- worded like the jev_compaction.py trailer (same review):
     # read the rest ONLY if what's shown above does not already cover it.
-    names = ", ".join(str(p) for p in paths)
+    # TRDD-D7RLXAN1: one clear must name ONE read-first file (see _read_first_target).
+    names = ", ".join(dict.fromkeys(str(_read_first_target(sd, p)) for p in paths))
     pointer = (
         f"\n\n[janitor-handoff] truncated to fit -- {len(body.encode('utf-8'))} bytes total, "
         "showing the leading excerpt only; read the rest ONLY if what you need is not shown "

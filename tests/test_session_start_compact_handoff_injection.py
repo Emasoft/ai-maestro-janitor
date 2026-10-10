@@ -444,3 +444,31 @@ def test_a_huge_compact_handoff_is_capped_within_the_stdout_ceiling(tmp_path: Pa
     )
     assert BODY_MARKER in proc.stdout, "the leading excerpt must still carry the marker"
     assert "truncated" in proc.stdout
+
+
+
+def test_truncated_pointer_names_the_jev_compacted_copy_not_the_agent_handoff(
+    tmp_path: Path,
+) -> None:
+    """TRDD-D7RLXAN1: a truncated handoff whose jev-compacted-<key>.md is its byte copy points
+    the reader at the jev-compacted file (the READ FIRST target), never at the handoff copy."""
+    project, env = _project(tmp_path)
+    sd = _arm(project)
+    huge = f"# STATE\n{BODY_MARKER}\n" + ("some kept text line\n" * 3000)
+    handoff = sd / "agent-handoff-abcd1234-20260904_190000+0200-4242.md"
+    handoff.write_text(huge, encoding="utf-8")
+    jev = sd / "jev-compacted-abcd1234.md"
+    jev.write_text(huge, encoding="utf-8")
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+    assert "Traceback" not in proc.stderr, f"hook crashed:\n{proc.stderr[:2000]}"
+    pointer = proc.stdout.split("[janitor-handoff] truncated to fit", 1)[1]
+    assert str(jev) in pointer
+    assert str(handoff) not in pointer
