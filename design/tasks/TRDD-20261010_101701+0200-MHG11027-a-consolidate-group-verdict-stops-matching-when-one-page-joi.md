@@ -4,7 +4,7 @@ title: A consolidate group verdict stops matching when one page joins the group 
 column: todo
 status: tasked
 created: 2026-10-10T10:17:01+0200
-updated: 2026-10-10T10:17:01+0200
+updated: 2026-10-10T10:34:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,7 @@ SMALLEST FIX TO WEIGH: a refused group key covers every pair inside it for the 7
 ## Approval log
 
 - 2026-10-10T10:17:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-10 10:36, from the review of 9f22b963: the MEASURED paragraph overstates. What the ledger printed supports: the LARGE bucket (95 then 97 pages) was refused twice, on 2026-10-08 and 2026-10-10. The keys of 2026-10-02 (43 pages), 2026-10-04 (42) and 2026-10-06 (23) are smaller groups; the 43 and 42 fit the SECOND bucket (44 or 43 pages on 10-08, 45 on 10-10), which was therefore refused about four times in eight days; the 23-page key fits neither. The reason texts differ from date to date; 'the same reason text each time' is withdrawn. Whether the two keys of 44 and 43 pages on 2026-10-08 are one bucket or two is not known. That re-listing is CAUSED by a page joining the group is an inference from the 95 to 97 growth; the card's first acceptance box is where it gets shown.

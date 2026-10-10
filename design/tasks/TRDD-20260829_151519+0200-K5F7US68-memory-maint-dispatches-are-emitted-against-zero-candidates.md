@@ -4,7 +4,7 @@ title: The memory-maint dispatch queue does not drain dedup or expire
 column: testing
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-10-10T10:17:28+0200
+updated: 2026-10-10T10:34:29+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -217,3 +217,4 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
 
 2026-10-10 10:14, not this card's field check (the machine runs the released 3.8.11, which lacks the fix): a consolidate pass on USER, dispatched by the 09:55 heartbeat, abstained on five groups (about 190 pages) and recorded one abstain per group while reporting that it did not open every page. Its own report: reports/janitor-memory-subconscious-agent/20261010_095531+0200-consolidate-user.md (gitignored). The ledger was NOT read by the main session, so which pages those keys name is unknown. If they name unread pages, those groups are silenced for 7 days on a partial read, which is what the new skill sentence (name only pages read in full) is meant to stop. It also reported claim 1791460073-1d22bb32 still in flight (TRDD-JYA0MFVY).
 2026-10-10 10:18: the ledger WAS then read by the main session. Today's USER pass wrote keys of 97, 45, 8, 6 and 2 pages in 56 seconds, so it named pages it did not read; and the same large groups had been refused on 2026-10-02, 04, 06 and 08. Carded as TRDD-MHG11027. Correction: '09:55' in the line above is the stamp of the pass's report, not of the heartbeat that dispatched it.
+2026-10-10 10:36 correction: 'the same large groups had been refused on 2026-10-02, 04, 06 and 08' overstates; see the Corrections section of TRDD-MHG11027 (the large bucket twice, the second bucket about four times).

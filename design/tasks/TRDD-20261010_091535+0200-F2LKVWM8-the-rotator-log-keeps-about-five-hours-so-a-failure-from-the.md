@@ -1,10 +1,10 @@
 ---
 trdd-id: F2LKVWM8
 title: The rotator log keeps about five hours so a failure from the day before cannot be read
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T09:15:35+0200
-updated: 2026-10-10T09:15:35+0200
+updated: 2026-10-10T10:34:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T09:15:35+0200
+implementation-commits: [967c6bac]
+release-via: publish
 ---
 
 # The rotator log keeps about five hours so a failure from the day before cannot be read
@@ -32,9 +34,14 @@ SMALLEST FIX TO WEIGH: keep more rotated copies, or log the two per-tick notices
 ## Acceptance
 
 - [ ] The rotator log on this machine holds at least 48 hours of ticks under the load measured above, shown by the earliest and latest timestamps after two days
-- [ ] A test pins the retention rule that was chosen
+- [x] A test pins the retention rule that was chosen
 - [ ] uv run pytest, ruff, mypy and pyright pass
 
 ## Approval log
 
 - 2026-10-10T09:15:35+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T10:34:31+0200 — column → testing. built in 967c6bac; waits for the gate, then a release and two days for box 1
+
+## Implementation
+
+2026-10-10 10:36 BUILT in 967c6bac (wave 5 card 2; shared one lean-worker with TRDD-ADIGRD0T's wording fix, 0.12 million tokens for both; whole diff read by the main session). MEASURED FIRST by the main session on the two log files (1982 lines at 10:30): about 73 percent of the lines are four per-tick notices that repeat unchanged (three 'primary live credential unreadable' lines from auto, capture and repair, and 'cascade: all alternates healthy'). DECISION: raise _LOG_MAX_BYTES from 256 KiB to 4 MiB (scripts/oauth_rotator/rotator.py:255) and leave the notices alone: one 256 KiB file is about 5 hours, so 4 MiB is about 78 hours, at most about 8 MiB on disk, and it is one constant; logging the notices only on a state change would touch several call sites for a target the constant already meets. READERS (worker-read): the only whole-file reader is scripts/handoff_clear_verify.py _rotator_log_tail, on demand for the post-clear report; nothing reads the file per tick or heartbeat; no test pinned 256 KiB. PINNING TEST: test_log_rotates_via_rename_when_over_cap in tests/test_oauth_rotator.py now asserts the constant is at least 4 MiB before it patches it down to exercise rotation (box 2). NOT VERIFIED: the 78 hours is arithmetic from one morning's rate; a quieter or busier day changes it. Box 1 needs a release and two days. Box 3 waits for the gate on 967c6bac (reports/board/gate-967c6bac.txt). FIELD CHECK after the release: ls -la on the two log files and the first and last timestamps; pass when they span at least 48 hours. A correction to this card's body: account addresses must not be copied from the log into any card; none were.
