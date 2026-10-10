@@ -90,7 +90,8 @@ failure duty 10 exists to undo.
 
 2. **HIT — any row whose line starts with a real `.md` path:** that page IS the destination,
    whatever its name. Mint nothing. Record in the report that the survey found it.
-3. **GENUINELY EMPTY across all three roots:** mint through the write verb (never a hand
+3. **GENUINELY EMPTY across all three roots:** first record in your report that the
+   three-root survey was empty, then mint through the write verb (never a hand
    scaffold), routing scope by what the ATOM carries — the atom's own scope decides; UNSURE →
    `local`. The `description:` is the new page's RECALL SURFACE: build it from SYMPTOM
    phrasings — the words a future session arrives with when the problem recurs (error text, the
@@ -103,11 +104,11 @@ failure duty 10 exists to undo.
    ```
 
    The verb refuses to overwrite, validates the description floor, and writes atomically.
-   Record in your report that the three-root survey was empty before you mint.
-   If it refuses because the page appeared after your survey, run the 3-root survey once more
-   and use the page it now finds as the destination. If that second survey is still empty,
-   open the page the refusal named: use it as the destination if it owns the topic, otherwise
-   record a refusal. Do not retry.
+   If the verb refuses with "already exists" (the page appeared after your survey), run the
+   3-root survey once more and use the page it now finds as the destination. If that second
+   survey is still empty, do NOT move the atom: record a refusal that names the page path
+   the "already exists" error printed, so a later pass or a human decides. Any other refusal
+   (for example the description floor) is fixed and re-run, not treated as a race.
 4. Then run the normal MOVE (above) with the minted page as `--to`.
 
 If memgrep is missing, do NEITHER: no survey, no mint, no move — record a refusal instead.

@@ -1722,6 +1722,8 @@ def relocate_survey_then_create(
     `(False, <existing page>)` when the survey found the topic already owned. That also
     covers another agent creating the page between the survey and the mint: the verb
     refuses and one re-survey finds the page, but only when the topic query matches it.
+    When it does not, this returns `(False, None)`; the relocate skill then records a
+    refusal naming the page the verb's error printed (TRDD-BAK8B3C0).
     `(False, None)` when memgrep is missing or fails — fail CLOSED, the same shape as
     `enrich_pages`/`relocate_lesson_findings`:
     an agent with no binary can neither verify the survey nor trust a page it could

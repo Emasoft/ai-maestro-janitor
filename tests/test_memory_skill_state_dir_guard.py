@@ -123,3 +123,12 @@ def test_heartbeat_rule_spawn_prompt_carries_the_state_dir_placeholder():
         "an unresolvable STATE_DIR must abort the spawn rather than spawn an agent that "
         "will silently resolve the wrong project's pool"
     )
+
+
+
+def test_relocate_skill_records_empty_survey_and_handles_already_exists():
+    """TRDD-BAK8B3C0: relocate records the empty survey before minting and re-surveys on an
+    "already exists" refusal instead of retrying."""
+    text = (_SKILLS_DIR / "janitor-memory-relocate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "three-root survey was empty" in text
+    assert "already exists" in text
