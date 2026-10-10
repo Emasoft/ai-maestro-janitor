@@ -4,7 +4,7 @@ title: The daemon resume injection fails four times out of five across eight pro
 column: todo
 status: tasked
 created: 2026-10-10T03:51:17+0200
-updated: 2026-10-10T03:51:17+0200
+updated: 2026-10-10T04:12:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 ## Approval log
 
 - 2026-10-10T03:51:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 04:12 CORRECTIONS to the title and body (review of dfd28faa; counts and code read by the main session). (1) TEN projects, not eight: the list was cut; the other two are CLAUDE-PLUGIN-VALIDATION 4 and ai-maestro-plugin 4. (2) 'fails' is too strong: scripts/daemon.py 2355 to 2369 logs FIRE-FAILED for every outcome of pane_actuate.act other than DONE, which includes a deliberate refusal, and FIRED means the keystrokes were sent, not that the session resumed. So 107 of 130 injections were NOT DONE; the split between refused and failed is unread (the 'resume-wake: <project> pane-policy:' lines beside them should say).

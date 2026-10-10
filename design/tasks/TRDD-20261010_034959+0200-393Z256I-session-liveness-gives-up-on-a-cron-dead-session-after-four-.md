@@ -4,7 +4,7 @@ title: Session-liveness gives up on a cron_dead session after four attempts and 
 column: todo
 status: tasked
 created: 2026-10-10T03:49:59+0200
-updated: 2026-10-10T03:51:17+0200
+updated: 2026-10-10T04:12:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,4 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 
 - 2026-10-10T03:49:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 03:51 CORRECTION (review of af8d1b1e): the title's 'a human who is not there' is not read from anything; the log line only says a human must intervene. TRDD-FB84YUGT, cited as related, exists (archived); it was not read.
+2026-10-10 04:12 CORRECTION to the line above: TRDD-FB84YUGT is in design/tasks, not archived.

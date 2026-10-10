@@ -4,7 +4,7 @@ title: Two elided-id links of a post-clear handoff do not resolve
 column: todo
 status: tasked
 created: 2026-10-10T03:51:17+0200
-updated: 2026-10-10T03:51:17+0200
+updated: 2026-10-10T04:12:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Goal: investigate, verify and fix the root cause. Split from TRDD-JK2MLS8Z on 20
 ## Approval log
 
 - 2026-10-10T03:51:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 04:12 'The previous clear resolved 41 of 41' is taken from the compacted record of session 4487ea93, not re-read.
