@@ -318,3 +318,40 @@ def test_rotation_evidence_is_fail_CLOSED_on_absent_or_future_stamps(tmp_path, m
     assert gs.rotation_succeeded_within(600, now=now) is False       # future-dated
     gs.record_rotation_success(now)
     assert gs.rotation_succeeded_within(600, now=now) is True        # the positive control
+
+
+# --------------------------------------------------------------------------- #
+# the log names the outcome status, not a FIRED/FIRE-FAILED binary (TRDD-C0RSMPRG)
+# --------------------------------------------------------------------------- #
+def _daemon_log(tmp_path: Path) -> str:
+    return "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "logs").rglob("*") if p.is_file())
+
+
+def test_a_policy_refusal_is_logged_as_noop_not_fire_failed(tmp_path, monkeypatch) -> None:
+    """A pane showing a pending human decision is REFUSED by the policy: logged NOOP, no stamps."""
+    root = tmp_path / "proj"
+    sd = _rl(root)
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})])
+    frame = (_PROJECT_ROOT / "tests" / "fixtures" / "pane_frames"
+             / "synthetic-awaiting-permission.txt").read_text(encoding="utf-8")
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: frame)
+    daemon.task_session_liveness()
+
+    log = _daemon_log(tmp_path)
+    assert _resume_fires(fired) == []
+    assert "resume-wake: NOOP" in log and "FIRE-FAILED" not in log
+    assert not (sd / "daemon-resume-wake.ts").exists()
+    assert not (sd / "daemon-wake-covered.ts").exists()
+
+
+def test_a_channel_failure_is_logged_as_failed_with_no_stamps(tmp_path, monkeypatch) -> None:
+    """A keystroke the channel does not accept is logged FAILED, and no stamp is written."""
+    root = tmp_path / "proj"
+    sd = _rl(root)
+    _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})])
+    monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: False)
+    daemon.task_session_liveness()
+
+    assert "resume-wake: FAILED" in _daemon_log(tmp_path)
+    assert not (sd / "daemon-resume-wake.ts").exists()
+    assert not (sd / "daemon-wake-covered.ts").exists()

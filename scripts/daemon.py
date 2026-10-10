@@ -2367,21 +2367,28 @@ def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
                 # queueing it behind the wall; no dedupe/coverage stamp is written then, so
                 # dispatch keeps this session on the FAST cron (MF4 fail-open) and the cron
                 # stays the trigger — the same shape the pre-existing guards above take.
-                if pane_actuate.act(
+                outcome = pane_actuate.act(
                     inst.terminal,
                     pane_actuate.Event.RESUME_WAKE,
                     command=fleet_inject.action_to_command("resume"),
                     command_plan=plan,
                     project_dir=root,
                     log=lambda m, _l=label: state.log_line("daemon", f"resume-wake: {_l} {m}"),
-                ).status is pane_actuate.OutcomeStatus.DONE:
+                )
+                if outcome.status is pane_actuate.OutcomeStatus.DONE:
                     state.atomic_write(dedupe, str(since))  # dedupe: injected for THIS window
                     state.atomic_write(covered, str(now))   # coverage PROVEN → dispatch may demote
                     state.log_line(
                         "daemon", f"resume-wake: FIRED /janitor-resume → {plan['channel']} for {label}"
                     )
                 else:
-                    state.log_line("daemon", f"resume-wake: FIRE-FAILED /janitor-resume for {label}")
+                    # The status word, not a binary: a policy refusal (NOOP) and a broken channel
+                    # (FAILED) are different facts for the reader of this log (TRDD-C0RSMPRG).
+                    state.log_line(
+                        "daemon",
+                        f"resume-wake: {outcome.status.value.upper()} /janitor-resume → "
+                        f"{plan['channel']} for {label} (touched={outcome.touched})",
+                    )
             else:
                 # Already injected /janitor-resume for THIS window; the enqueued command is the
                 # armed wake. Re-stamp coverage EVERY beat so the session's cron stays demoted
