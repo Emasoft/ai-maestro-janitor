@@ -4,7 +4,7 @@ title: The janitor clear-then-reload chain runs SessionStart from the old plugin
 column: backburner
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-10T23:17:46+0200
+updated: 2026-10-10T23:21:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,8 +16,8 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T04:44:45+0200
 review-after: 2026-12-10
-blocker-probe: ls ~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor
-blocker-holds-if: not-match:^(3\.8\.(1[2-9]|[2-9][0-9])|3\.(9|[1-9][0-9])\.|[4-9]\.)
+blocker-probe: ls ~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor | grep -E '^(3\.8\.(1[2-9]|[2-9][0-9])|3\.(9|[1-9][0-9])\.|[4-9]\.)'
+blocker-holds-if: not-match:[0-9]
 ---
 
 # The janitor clear-then-reload chain runs SessionStart from the old plugin version

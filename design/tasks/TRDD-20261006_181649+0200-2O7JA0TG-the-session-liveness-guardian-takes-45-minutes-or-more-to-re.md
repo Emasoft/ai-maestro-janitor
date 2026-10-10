@@ -4,7 +4,7 @@ title: The session-liveness guardian waits three heartbeat intervals before re-a
 column: backburner
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-10T23:17:47+0200
+updated: 2026-10-10T23:21:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -19,7 +19,7 @@ parent-trdd: K60FT7PJ
 derived: true
 derived-kind: eht
 review-after: 2026-12-10
-blocker-probe: python3 -c "import re,time;P='.janitor/logs/';T=lambda s:time.mktime(time.strptime(s[:19],'%Y-%m-%dT%H:%M:%S'));c=[T(m) for m in re.findall(r'\[(\S+?)\] \[s:\w+\] source=clear\n',open(P+'session-start.log').read())];f=[int(x) for x in re.findall(r'fire epoch=(\d+)',open(P+'heartbeat-fires.log').read())];print('LONGGAP' if any(t>1791664800 and min([x-t for x in f if x>=t] or [time.time()-t])>2700 for t in c) else 'NOGAP')"
+blocker-probe: python3 -c "import re,time;P='.janitor/logs/';T=lambda s:time.mktime(time.strptime(s[:19],'%Y-%m-%dT%H:%M:%S'));c=[T(m) for m in re.findall(r'\[(\S+?)\] \[s:\w+\] source=clear\n',open(P+'session-start.log').read())];f=[int(x) for x in re.findall(r'fire epoch=(\d+)',open(P+'heartbeat-fires.log').read())];print('LONGGAP' if any(t>1791664800 and min([x-t for x in f if x>=t] or [0])>2700 for t in c) else 'NOGAP')"
 blocker-holds-if: match:NOGAP
 blocker-probe-canary: match:GAP
 ---
