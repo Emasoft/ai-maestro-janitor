@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-10T13:53:35+0200
+updated: 2026-10-10T14:11:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -41,6 +41,7 @@ WAVES:
 OWNER-QUESTION CARDS now mine to decide: C30 I4MOD020 (discovery trigger: lint-driven surface versus extending repair_has_work to consult lint) — decide by measuring both on a scratch corpus.
 
 KNOWN CONSTRAINTS: every paid account was at its usage limit at 2026-10-09 evening (rotator alert), so worker fan-out may stall until a window resets; the strict publish validator needs PLUGIN_SKIP_GITHUB_INTEGRITY=1 in the environment and exits 0 on main as of 746da19b.
+2026-10-10 14:12, session after the clear of 14:10 (post-clear check 5 of 5 pass; context 507k to 178k). GATE GREEN (18306 passed, 2 skipped; ruff, mypy, pyright exit 0) and STRICT VALIDATOR exit 0 on 0449b637; no code commit is behind the validator. TRDD-A2JLFIQ5 stays in testing (its field check needs a release); box 2 now carries its narrowing. Wave 7 is closed: 4 cards worked, 3 minted. WAVE 8 CAP, checked before each card: at most 4 cards before 18:00 local, taken by trddgrep next (re-run it first; YVC3F06V was next in the last ranking); every wave 6 and 7 rule stands; NEW: the commit is made in one response and its review fork is spawned in the NEXT, so the fork can see it; a review of the BRIEF runs while the worker builds; a sub-agent's change is read before it is committed; a fork demanded for a sub-agent's memory write is asked for 100 words; stop on a usage-limit refusal, a failing gate, or two unusable worker reports. Owner items 1 to 15 stand. Nothing is pushed or published.
 
 ## Acceptance
 
