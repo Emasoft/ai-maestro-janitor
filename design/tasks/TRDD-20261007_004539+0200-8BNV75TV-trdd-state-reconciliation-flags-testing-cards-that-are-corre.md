@@ -4,7 +4,7 @@ title: trdd-state-reconciliation flags testing cards that are correctly waiting 
 column: testing
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-10T03:36:07+0200
+updated: 2026-10-10T03:38:45+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T00:45:39+0200
 implementation-commits: [b9a2377e, b0247a30, dab24584, 67d29e91, 91fca406, 8b587dd1, d737816c, 8d1f1929, a5930dfc, 6958622d, 7308719f]
+release-via: publish
 ---
 
 # trdd-state-reconciliation flags testing cards that are correctly waiting on a live event
@@ -41,6 +42,7 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 2026-10-07 (sizing report, not on any other card): false-positive root causes outside check3/check4. R2 partially-shipped-review fires on any open card with a released commit plus a remaining-work marker (56 rows, 19 carry a next step, 37 need none): fire only when the column asserts no work and the card is idle. R5 check5 dead-symbol: a wrapped obituary sentence escapes the line-scoped exemption and the imperative 'Delete' is not an exempt verb (2 of 3 cards: AR9IUGIJ, 5MOX0FPO). R1 trdd-drift: 51 of 53 idle rows are backburner cards; options are exempt backburner or stamp a default review-after on entry; owner decision.
 2026-10-07: owner decision (A) or (B) still open; nothing changed today; neither merges new code, main keeps the narrower check3 and check4 of 3.8.2, and the rejected branch stays unmerged.
 2026-10-10 03:45 DECIDED AND LANDED (supersedes every 'owner picks' and 'NEXT ACTION' line above; the owner's mandate of 2026-10-09 left the choice to the main session): design B, in 7308719f. Both prose classes (check 3 prose-blocked; check 4 blocker named only in prose) leave the report rows and the drift line and become one ledger note per card ever (TRDD-PROSE-BLOCKED, TRDD-PROSE-STALE-BLOCKER); a stale blocker in the blocked-by FIELD is still a row. Design A was chosen first and overturned in review: of 16 check-3 flags on today's board 1 was real (TRDD-6NMQ95TQ, corrected by hand the same day; TRDD-VIFQ1LKI is a stale heading, not a mismatch) and A caught it only after the rule was widened to fit that sentence; of 2 check-4 flags none was real. Check 4's prose half was NOT deleted, though the review suggested it, because its history names one true hit (TRDD-3XS3PDCF, commit 7786f140), a record as thin as check 3's. OLD VERSUS NEW, real detector on two clones of this board (reports/board/20261010_0334-8BNV75TV-real-detector-*): rows 68 to 60; prose evidence lines 16 to 0; stale-blocker evidence lines 2 to 0; ledger notes plus 16 and plus 2, same cards; TRDD-9UORH472 stays a row under shipped-unreleased-review. TRDD-JD2QR5SQ, the one real flag of 2026-10-07, is absent today because its blocked-by was cleared on 2026-10-06 and its STATE rewritten on 2026-10-09. KNOWN LIMITS: one note per card ever, a later re-declaration is not re-noted; the seen-key is written before the ledger write; the ledger keeps 500 lines, so an evicted note is gone; nobody reads these notes until TRDD-6ESS2MGE routes them; a card with another class too re-emits one drift line once; a card with no id keeps both classes as rows. STAYS in testing: waits on the first weekly audit run by a release that contains 7308719f. DETECT: grep -c TRDD-PROSE-BLOCKED .janitor/state/findings-ledger.ndjsonl prints a number above 0 in this repo after that release is installed.
+2026-10-10 04:05 CORRECTIONS to the 03:45 line above (review of 7308719f and c463d2ac). (1) 'TRDD-VIFQ1LKI is a stale heading' is the reading of a review fork from one quoted log line, not re-read by the main session. (2) 'one true hit (TRDD-3XS3PDCF)' is what the message of 7786f140 says; whether it was a correct catch was not re-verified. (3) TRDD-JD2QR5SQ is absent today LIKELY because of the two edits named; check 3 was not run on its old text. (4) Replace the DETECT of that line with: after a release containing 7308719f is installed and a weekly audit has run, the newest reports/trdd-reconciliation/*-board.md contains neither 'prose says blocked' nor a stale-blocker line for a card whose blocked-by is empty. (5) BY CARD: eight ids leave the report and none enter (5Q24T9SO, 6CF3L7IJ, 8SC3YEIG, AHKL0L4H, M9XGH2KB, MMUSDJHQ, S6GX1DHN, VT332PJG); the other ten flagged cards stay as rows under another class. (6) release-via set to publish: the code reaches users only through a release; the card still waits in testing on the field check above and on the older closeable wait (first weekly audit on 3.8.2 or later), two field checks.
 
 ## Approval log
 
@@ -51,6 +53,7 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 ## Implementation commits
 
 8d1f1929 (closeable becomes a one-time ledger note), 9bc0cf20 (merge of that branch), a5930dfc (tests: mixed-class and no-closeable-in-report guards).
+7308719f (both prose classes become one-time ledger notes; design B).
 
 ## Known gaps (accepted)
 

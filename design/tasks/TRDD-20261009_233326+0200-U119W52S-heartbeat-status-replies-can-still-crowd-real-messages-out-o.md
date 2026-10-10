@@ -4,7 +4,7 @@ title: Heartbeat status replies can still crowd real messages out of the Jev new
 column: complete
 status: tasked
 created: 2026-10-09T23:33:26+0200
-updated: 2026-10-10T03:36:26+0200
+updated: 2026-10-10T03:38:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ Sibling of TRDD-IYNS7H83, found by its adversarial review on 2026-10-09 and NOT 
 
 - 2026-10-09T23:33:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-10T03:36:26+0200 — column → complete. fix on main (8d1b205e, dd70abcd), its tests pass, release-via publish; field case unobserved, see STATE
+2026-10-10 04:00 — pinning tests named and re-run by the main session after the move to complete: test_select_exchanges_caps_heartbeat_status_run_in_the_injected_view, test_full_render_keeps_every_heartbeat_status_reply, test_select_exchanges_gap_counts_skipped_status_replies_when_the_real_note_does_not_fit (tests/test_jev_compaction.py), test_recent_turns_caps_consecutive_heartbeat_status_replies (tests/test_precompact_handoff_hook.py), test_cap_status_runs_keeps_newest_two_of_each_run (tests/test_transcript_roles.py): 5 passed. Not shown: which test pins the half of the marker defect where the real note fits and no marker was printed.
 
 ## STATE
 

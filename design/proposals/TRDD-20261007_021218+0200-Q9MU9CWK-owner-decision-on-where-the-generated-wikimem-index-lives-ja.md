@@ -4,7 +4,7 @@ title: Owner decision on where the generated wikimem index lives (janitor#328)
 column: proposal
 status: proposed
 created: 2026-10-07T02:12:18+0200
-updated: 2026-10-07T05:35:02+0200
+updated: 2026-10-10T03:38:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -27,6 +27,7 @@ Golden PRRD rules G7.1 and G10.1 require the wikimem index fence in CLAUDE.md an
 2026-10-07: owner decision still open; nothing changed today; default is to wait: change nothing and leave issue 328 open.
 2026-10-07 DECIDED by the main agent under the owner's directive to resolve every open issue: option (a). GitHub issue 328 was closed with a comment: the every-run churn was fixed in v3.8.0 (980c3891, with a byte-identical test); the block still changes when PROJECT memory changes, which the rules require. Option (b), narrowing the block to root topics, stays open as this card's remaining work; option (c) needs a rules change and is the owner's. Not addressed: CLAUDE.md has no project-map fence, which rules G7.1 and G10.1 require; that contradiction is the owner's to resolve.
 2026-10-07 CORRECTION of the 2026-10-07 line above that says option (a) was decided and issue 328 closed: the issue was reopened within the hour. Commit 980c3891 adds only the test, not a fix to the index writer; no commit citing the issue changes the writer; and the symptom in the issue title persists whenever PROJECT memory changes. Closing as completed was wrong. Option (b), narrowing the block to root topics, is PROPOSED here and awaits the owner: this card stays in proposal because the board holds proposals for owner approval. The main agent reads the owner's 2026-10-07 directive to fix all GitHub issues as approval of (b), the only option that is a fix, and will build it only if the result still lists every root topic and edits no rule text; say otherwise to stop it. The missing project-map fence stays the owner's question.
+2026-10-10 04:05 REVERSAL of the 2026-10-07 CORRECTION line's intent to build option (b) unless told otherwise: the main session will NOT build it. This card is min-approval-requirement user and approved false, and whether a block limited to root topics satisfies golden rule G10.1 is a reading of a golden rule, which is the owner's alone; the mandate of 2026-10-09 (quoted on TRDD-S6GX1DHN) keeps human-only acts with the owner. The question was put to the owner in the session's replies of 2026-10-10 about 03:55 and 04:00; no answer yet. NEXT ACTION: wait for the owner's yes or no on option (b).
 
 ## Background
 
