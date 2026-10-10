@@ -3495,10 +3495,12 @@ def _process_size_watch_pass(
     # must never be the reason the watch does nothing (a full disk would otherwise kill every
     # pass at its first line), and one write a minute instead of one every 5 s keeps a
     # watched state folder quiet.
+    stamp_rewritten = False
     try:
         stamp = gs.global_state_dir() / "process-size-watch.last-pass.ts"
         if not stamp.exists() or time.time() - stamp.stat().st_mtime > 60:
             state.atomic_write(stamp, str(int(time.time())))
+            stamp_rewritten = True
     except OSError as exc:
         state.log_line("daemon", f"process-size-watch: stamp write failed: {exc}")
     if gs.kill_switch_present() or not state.is_truthy_env(
@@ -3513,6 +3515,26 @@ def _process_size_watch_pass(
         return
     if rows is None:
         rows = proc_scan.scan_same_user()
+    # WHY (hang of 2026-10-05 left no evidence of which processes were large; TRDD-63BJOH4H):
+    # one `process-top` line a minute (about 0.4 MB a day, so the 1 MiB log with one backup
+    # holds two to five days) naming the 5 largest processes. Same-user processes only: that
+    # is all the scan sees. A record, not an alert, so protected pids are included. Not
+    # written when the ceiling is disabled (early return above), by choice.
+    if stamp_rewritten and rows:
+        try:
+            t = now if now is not None else int(time.time())
+            top = sorted(rows, key=lambda r: max(r.footprint_b, r.resident_b), reverse=True)[:5]
+            state.log_line(
+                "process-top",
+                "top5: " + "; ".join(
+                    f"pid={r.pid} {proc_scan.label_from_argv(r.exe, proc_scan.argv_of(r.pid))} "
+                    f"footprint={r.footprint_b // (1 << 20)}MB resident={r.resident_b // (1 << 20)}MB "
+                    f"age={max(0, t - r.start_s)}s"
+                    for r in top
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            state.log_line("daemon", f"process-size-watch: top record failed: {exc}")
     protected = frozenset({os.getpid(), os.getppid()})
     mb = 1 << 20
     for r in proc_scan.over_ceiling(rows, ceiling_b, protected):

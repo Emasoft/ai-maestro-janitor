@@ -163,6 +163,32 @@ def test_alert_summary_has_pid_label_start_and_no_size() -> None:
     )
 
 
+
+def _top_log(tmp_path: Path) -> str:
+    log = tmp_path / "logs" / "process-top.log"
+    return log.read_text() if log.exists() else ""
+
+
+def test_first_pass_records_the_five_largest_processes_once_a_minute(tmp_path: Path) -> None:
+    """A first pass over 7 rows writes one top5 line naming the 5 largest pids in descending
+    order; a second pass at once writes no second line (the 60 s gate)."""
+    rows = [_r(10 + i, (i + 1) * MB, 1) for i in range(7)]  # pids 10..16, 16 is largest
+    _pass(set(), rows, _Recorder())
+    lines = [ln for ln in _top_log(tmp_path).splitlines() if "top5:" in ln]
+    assert len(lines) == 1
+    named = [seg.split("pid=")[1].split()[0] for seg in lines[0].split("top5: ")[1].split("; ")]
+    assert named == ["16", "15", "14", "13", "12"]
+    _pass(set(), rows, _Recorder())
+    assert len([ln for ln in _top_log(tmp_path).splitlines() if "top5:" in ln]) == 1
+
+
+def test_top_record_is_silent_under_the_kill_switch(tmp_path: Path) -> None:
+    """With the kill switch present a first pass writes no top5 line."""
+    gs.set_kill_switch("test")
+    _pass(set(), [_r(10 + i, (i + 1) * MB, 1) for i in range(7)], _Recorder())
+    assert "top5:" not in _top_log(tmp_path)
+
+
 # ---- macOS: real processes ------------------------------------------------------------
 
 
