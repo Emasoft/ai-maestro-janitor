@@ -211,6 +211,20 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _forget_cleared(seen: Path, live: set[str]) -> None:
+    """Drop every reported-finding key (and the legacy constant `runaway` key) not in `live`.
+
+    TRDD-IJR1OBZO: dedupe keys are per finding, so each is forgotten only once ITS
+    finding is gone; a missing or unreadable seen file is a no-op."""
+    try:
+        lines = seen.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        if (line == "runaway" or line.startswith("runaway:")) and line not in live:
+            dedupe.emit_forget(seen, line)
+
+
 def main() -> int:
     state.init_state()
 
@@ -222,16 +236,16 @@ def main() -> int:
     streak_file = state.state_dir() / "system-daemon-runaway-streaks.json"
     sample_file = state.state_dir() / "system-daemon-runaway-cpu-samples.json"
     if ps_text is None:
-        # Could not gather a snapshot at all — fail open (no findings), and forget any
-        # prior dedupe key so a genuine runaway re-emits once `ps` is available again
-        # rather than staying silently deduped against a stale bucket.
+        # Could not gather a snapshot at all — fail open (no findings). The dedupe file
+        # is left UNTOUCHED too (TRDD-IJR1OBZO): keys are per finding and the next good
+        # snapshot clears every stale one, so forgetting on one `ps` hiccup would
+        # re-report every live program.
         #
         # The streak map is deliberately left UNTOUCHED here: a failed snapshot is not
         # evidence that a burst ended, and clearing it would reset a legitimate streak
         # on a transient `ps` hiccup, delaying a real alarm. Carrying it costs at most
         # one fire's worth of staleness, which errs toward alarming — the correct
         # direction for a safety net.
-        dedupe.emit_forget(seen, "runaway")
         return 0
 
     rows = dr.parse_ps_rows(ps_text)
@@ -274,6 +288,10 @@ def main() -> int:
     # makes an ended burst stop counting instead of resuming its streak days later.
     reportable, streaks = dr.sustained_findings(findings, _load_streaks(streak_file))
     _save_streaks(streak_file, streaks)
+    # TRDD-IJR1OBZO: forget a reported key only when ITS finding left the PRE-GATE list.
+    # A program still over the bar under a new pid (respawn resets its streak, so it is
+    # absent from `reportable` for a fire) must keep its key, or it is re-reported.
+    _forget_cleared(seen, {dr.report_key(f) for f in findings})
 
 
     # NLHVLGEP: difference cumulative CPU time against the previous fire's sample so the
@@ -297,10 +315,6 @@ def main() -> int:
     _save_samples(sample_file, samples)
 
     if not reportable:
-        # Nothing over the bar this beat — forget the dedupe key so a FUTURE runaway
-        # (even by the same process/command) re-arms instead of staying deduped
-        # against an episode that already cleared.
-        dedupe.emit_forget(seen, "runaway")
         state.rotate_log_if_big(_LOG)
         return 0
 
@@ -311,19 +325,20 @@ def main() -> int:
     # normally, and a best-effort emit-time probe must not rewrite persisted state.
     reportable = dr.alive_findings(reportable, _pid_alive)
     if not reportable:
-        # Every over-the-bar process exited between snapshot and emit — same handling as
-        # nothing over the bar: forget the dedupe key so a genuine future runaway re-arms.
-        dedupe.emit_forget(seen, "runaway")
         state.rotate_log_if_big(_LOG)
         return 0
 
-    line = dr.format_drift_line(reportable, disk_danger, disk_free_pct, streaks=streaks, measured=measured)
-    if line is None:  # pragma: no cover — unreachable when reportable is non-empty
-        return 0
-
-    emitted = dedupe.emit_once(seen, "runaway", line)
-    if emitted is not None:
-        print(emitted)
+    # One line per fire, headlined by a finding not yet reported (TRDD-IJR1OBZO): a
+    # constant key silenced a second, different runaway while the first stayed over the bar.
+    for f in reportable:
+        line = dr.format_drift_line(
+            [f] + [g for g in reportable if g is not f],
+            disk_danger, disk_free_pct, streaks=streaks, measured=measured,
+        )
+        emitted = dedupe.emit_once(seen, dr.report_key(f), line) if line is not None else None
+        if emitted is not None:
+            print(emitted)
+            break
     state.rotate_log_if_big(_LOG)
     return 0
 

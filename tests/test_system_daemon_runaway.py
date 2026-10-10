@@ -413,3 +413,96 @@ def test_corrupt_streak_file_degrades_to_no_history_not_a_crash(tmp_path: Path) 
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
     assert streaks.read_text() == '{"74805:node": 1}'
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)).startswith("[system-daemon-runaway] HOST-002 node ")
+
+
+
+# --------------------------------------------------------------------------- #
+# Per-program dedupe (TRDD-IJR1OBZO)
+# --------------------------------------------------------------------------- #
+
+
+def _seen_file(project: Path) -> Path:
+    return project / ".janitor" / "state" / "system-daemon-runaway-seen.txt"
+
+
+def _cpu_ps(*rows: tuple[int, str]) -> str:
+    return "".join(f"{pid} 1 512000 161.0 /usr/local/bin/{cmd}\n" for pid, cmd in rows)
+
+
+def _rss_ps(*rows: tuple[int, str]) -> str:
+    return "".join(f"{pid} 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/{cmd}\n" for pid, cmd in rows)
+
+
+def test_rss_second_pid_of_same_command_alarms_but_same_pid_is_silent(tmp_path: Path) -> None:
+    """RSS is deduped per process: a new ballooning pid alarms, the same pid stays quiet."""
+    assert "(pid 100)" in _out(_run(tmp_path, ps_snapshot=_rss_ps((100, "fseventsd"))))
+    assert _out(_run(tmp_path, ps_snapshot=_rss_ps((100, "fseventsd")))) == ""
+    assert "(pid 200)" in _out(_run(tmp_path, ps_snapshot=_rss_ps((100, "fseventsd"), (200, "fseventsd"))))
+    assert _out(_run(tmp_path, ps_snapshot=_rss_ps((100, "fseventsd"), (200, "fseventsd")))) == ""
+
+
+def test_legacy_constant_seen_key_is_dropped_and_does_not_suppress(tmp_path: Path) -> None:
+    """A seen file with the old `runaway` line neither blocks a report nor survives it."""
+    seen = _seen_file(tmp_path)
+    seen.parent.mkdir(parents=True, exist_ok=True)
+    seen.write_text("runaway\nunrelated\n")
+    assert "HOST-002 fseventsd " in _out(_run(tmp_path, ps_snapshot=_rss_ps((100, "fseventsd"))))
+    assert "runaway" not in seen.read_text().splitlines()
+    assert "unrelated" in seen.read_text().splitlines()
+
+
+def test_report_key_is_per_program_for_cpu_and_per_process_for_rss() -> None:
+    """report_key ignores the pid for a cpu finding but keeps it for an rss finding."""
+    cpu_a = dr.Finding(1, "JumpHelper", 10.0, 161.0, "cpu", False)
+    cpu_b = dr.Finding(2, "JumpHelper", 10.0, 161.0, "cpu", False)
+    rss_a = dr.Finding(1, "JumpHelper", 5000.0, 1.0, "rss", False)
+    rss_b = dr.Finding(2, "JumpHelper", 5000.0, 1.0, "rss", False)
+    assert dr.report_key(cpu_a) == dr.report_key(cpu_b) == "runaway:cpu:JumpHelper"
+    assert dr.report_key(rss_a) == "runaway:rss:1:JumpHelper"
+    assert dr.report_key(rss_a) != dr.report_key(rss_b)
+
+
+def test_report_key_is_per_process_for_generic_interpreters_and_shells() -> None:
+    """An interpreter or shell command keeps the pid in its cpu key; others do not."""
+    for cmd in ("python3.12", "Python", "node", "ruby", "perl", "java", "deno", "bun", "bash", "zsh", "sh"):
+        assert dr.report_key(dr.Finding(7, cmd, 10.0, 161.0, "cpu", False)) == f"runaway:cpu:7:{cmd}"
+    assert dr.report_key(dr.Finding(7, "shellcheck", 10.0, 161.0, "cpu", False)) == "runaway:cpu:shellcheck"
+
+
+def test_respawned_cpu_program_under_a_new_pid_is_not_reported_again(tmp_path: Path) -> None:
+    """A helper that respawns under a new pid while still over the bar stays deduped."""
+    assert _out(_run(tmp_path, ps_snapshot=_cpu_ps((100, "worker")))) == ""
+    assert "HOST-002 worker " in _out(_run(tmp_path, ps_snapshot=_cpu_ps((100, "worker"))))
+    assert _out(_run(tmp_path, ps_snapshot=_cpu_ps((101, "worker")))) == ""
+    assert _out(_run(tmp_path, ps_snapshot=_cpu_ps((101, "worker")))) == ""
+
+
+def test_cpu_program_that_cleared_and_returned_is_reported_again(tmp_path: Path) -> None:
+    """A quiet fire forgets the program's key, so a later episode alarms afresh."""
+    snap = _cpu_ps((100, "worker"))
+    assert _out(_run(tmp_path, ps_snapshot=snap)) == ""
+    assert "HOST-002 worker " in _out(_run(tmp_path, ps_snapshot=snap))
+    assert _out(_run(tmp_path, ps_snapshot=_PS_QUIET)) == ""
+    assert _out(_run(tmp_path, ps_snapshot=snap)) == ""
+    assert "HOST-002 worker " in _out(_run(tmp_path, ps_snapshot=snap))
+
+
+def test_second_program_is_reported_while_the_first_persists(tmp_path: Path) -> None:
+    """A different program crossing the bar is not silenced by the first one's key."""
+    first = _cpu_ps((100, "worker"))
+    both = _cpu_ps((100, "worker"), (200, "builder"))
+    assert _out(_run(tmp_path, ps_snapshot=first)) == ""
+    assert "HOST-002 worker " in _out(_run(tmp_path, ps_snapshot=first))
+    assert _out(_run(tmp_path, ps_snapshot=both)) == ""
+    assert "HOST-002 builder " in _out(_run(tmp_path, ps_snapshot=both))
+
+
+def test_two_python_pids_over_the_cpu_bar_are_each_reported_once(tmp_path: Path) -> None:
+    """A second unrelated python process is not silenced by the first one's report."""
+    one = _cpu_ps((100, "python3.12"))
+    both = _cpu_ps((100, "python3.12"), (200, "python3.12"))
+    assert _out(_run(tmp_path, ps_snapshot=one)) == ""
+    assert "(pid 100)" in _out(_run(tmp_path, ps_snapshot=one))
+    assert _out(_run(tmp_path, ps_snapshot=both)) == ""
+    assert "(pid 200)" in _out(_run(tmp_path, ps_snapshot=both))
+    assert _out(_run(tmp_path, ps_snapshot=both)) == ""

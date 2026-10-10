@@ -22,6 +22,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+# WHY: `ps comm` gives only the executable name, so these hide which script runs and
+# must be deduped per pid, not per name (TRDD-IJR1OBZO). The `node` prefix also catches
+# names such as `nodemon`, which errs toward per-process (more reports, never fewer).
+_GENERIC_PREFIXES: tuple[str, ...] = ("python", "node")
+_GENERIC_EXACT: frozenset[str] = frozenset(
+    {"ruby", "perl", "java", "deno", "bun", "bash", "zsh", "sh"}
+)
+
 # The FS-event + Spotlight class the parent incident belongs to (TRDD-ZNN0UK5K was
 # `fseventsd`). Membership here only changes a finding's WORDING (a watched name is
 # called out explicitly as "a known FS-churn daemon") — it never changes whether a
@@ -137,6 +145,26 @@ def finding_key(finding: Finding) -> str:
     exists to prevent.
     """
     return f"{finding.pid}:{finding.command}"
+
+
+def report_key(finding: Finding) -> str:
+    """The identity the dedupe file remembers a REPORTED finding under (TRDD-IJR1OBZO).
+
+    A CPU finding is one report per PROGRAM: a helper that respawns under a new pid
+    resets its pid-keyed streak, and keying the report on the pid too re-alarmed the same
+    program once per pid (76 lines for one program under 57 pids). An RSS finding stays
+    per PROCESS: RSS is the incident class this detector exists for, and a second process
+    of the same name ballooning is a new leak that must still alarm. A generic interpreter
+    or shell (`_GENERIC_PREFIXES`, `_GENERIC_EXACT`) is also per process: `ps comm` names
+    only the executable, so unrelated scripts would otherwise share one key and silence
+    each other.
+    """
+    if finding.kind == "rss":
+        return f"runaway:rss:{finding.pid}:{finding.command}"
+    cmd = finding.command.lower()
+    if cmd.startswith(_GENERIC_PREFIXES) or cmd in _GENERIC_EXACT:
+        return f"runaway:cpu:{finding.pid}:{finding.command}"
+    return f"runaway:cpu:{finding.command}"
 
 
 def sustained_findings(
