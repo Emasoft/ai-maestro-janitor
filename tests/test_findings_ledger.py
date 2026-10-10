@@ -155,7 +155,6 @@ def test_surface_block_caps_folds_and_acks(_isolate: Path) -> None:
     assert fl.surface_block(None) == "", "surfacing advances the cursor — no repeat"
 
 
-
 def test_surface_block_shows_an_old_high_before_newer_low_lines(_isolate: Path) -> None:
     """TRDD-6ESS2MGE: a HIGH recorded before 12 newer LOW lines is the FIRST line, not folded away."""
     fl.record(sev="HIGH", code="OLD-HIGH", src="d", msg="old but serious", now=100)
@@ -190,17 +189,42 @@ def test_severity_first_orders_newest_first_within_one_severity(_isolate: Path) 
     assert "HIGH-NEW" in lines[0] and "HIGH-OLD" in lines[1]
 
 
-def test_severity_first_sorts_missing_or_non_string_sev_last(_isolate: Path) -> None:
-    """An entry with no `sev` or a non-string `sev` does not raise and sorts after a LOW."""
+def test_severity_first_ranks_missing_or_non_string_sev_with_medium(_isolate: Path) -> None:
+    """Entries with no `sev` or a non-string `sev` do not raise, sort after a HIGH and before a LOW."""
     # record() always stringifies sev, so write what an older/foreign writer could have left.
     path = fl.ledger_path(None)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"ts": 300, "code": "NO-SEV", "src": "d", "ref": "-", "msg": "x"}) + "\n")
         fh.write(json.dumps({"ts": 400, "sev": 7, "code": "INT-SEV", "src": "d", "ref": "-", "msg": "y"}) + "\n")
-    fl.record(sev="LOW", code="LOW-1", src="d", msg="l", now=100)
+    fl.record(sev="LOW", code="LOW-1", src="d", msg="l", now=500)
+    fl.record(sev="HIGH", code="HIGH-1", src="d", msg="h", now=100)
     lines, total = fl.unread_entries(None, severity_first=True)
-    assert total == 3 and "LOW-1" in lines[0]
+    assert total == 4 and len(lines) == 4
+    assert "HIGH-1" in lines[0] and "INT-SEV" in lines[1] and "NO-SEV" in lines[2] and "LOW-1" in lines[3]
+
+def test_surface_block_shows_an_old_catalog_error_before_newer_low_lines(_isolate: Path) -> None:
+    """A catalog `ERROR` recorded before 12 newer LOW lines is the FIRST line of the block."""
+    fl.record(sev="ERROR", code="OLD-ERROR", src="d", msg="catalog error", now=100)
+    for i in range(12):
+        fl.record(sev="LOW", code=f"LOW-{i:02d}", src="d", msg=f"minor {i}", now=200 + i)
+    assert "OLD-ERROR" in fl.surface_block(None).splitlines()[0]
+
+
+def test_severity_first_sorts_info_after_low(_isolate: Path) -> None:
+    """A newer INFO entry sorts after an older LOW one."""
+    fl.record(sev="LOW", code="LOW-1", src="d", msg="l", now=100)
+    fl.record(sev="INFO", code="INFO-1", src="d", msg="i", now=200)
+    lines, _total = fl.unread_entries(None, severity_first=True)
+    assert "LOW-1" in lines[0] and "INFO-1" in lines[1]
+
+
+def test_severity_first_sorts_critical_before_high(_isolate: Path) -> None:
+    """An older CRITICAL entry precedes a newer HIGH one."""
+    fl.record(sev="CRITICAL", code="CRIT-1", src="d", msg="c", now=100)
+    fl.record(sev="HIGH", code="HIGH-1", src="d", msg="h", now=200)
+    lines, _total = fl.unread_entries(None, severity_first=True)
+    assert "CRIT-1" in lines[0] and "HIGH-1" in lines[1]
 
 
 def test_surface_block_silent_on_empty_inbox(_isolate: Path) -> None:

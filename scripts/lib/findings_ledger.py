@@ -359,13 +359,21 @@ def _read_cursor(project_dir: str | os.PathLike[str] | None = None) -> tuple[int
     except Exception:  # noqa: BLE001 -- absent/corrupt cursor = nothing surfaced yet
         return 0, 0
 
-_SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "MED": 2, "LOW": 3}
+
+_SEV_RANK = {
+    "CRITICAL": 0,
+    "HIGH": 1, "ERROR": 1, "MAJOR": 1,
+    "MEDIUM": 2, "MED": 2, "WARN": 2, "WARNING": 2,
+    "LOW": 3, "MINOR": 3,
+    "INFO": 4,
+}
 
 
 def _sev_rank(entry: dict) -> int:
-    # Case-normalised: the real ledger holds both `MEDIUM` and lowercase `medium`.
+    # Case-normalised (ledger holds `MEDIUM` and `medium`); unknown/missing/non-string ranks 2
+    # with MEDIUM so a typo or new level name is never buried under LOW lines.
     sev = entry.get("sev")
-    return _SEV_RANK.get(sev.strip().upper(), 4) if isinstance(sev, str) else 4
+    return _SEV_RANK.get(sev.strip().upper(), 2) if isinstance(sev, str) else 2
 
 
 def unread_entries(
@@ -378,7 +386,7 @@ def unread_entries(
 ) -> tuple[list[str], int]:
     """(rendered unread lines, capped by count AND byte budget; total unread count).
     Order: NEWEST first by default; with `severity_first`, by severity rank (CRITICAL,
-    HIGH, MEDIUM, LOW, unknown) and NEWEST first within one severity. Read-only —
+    HIGH/ERROR/MAJOR, MEDIUM/WARN/WARNING and unknown, LOW/MINOR, INFO) and NEWEST first within one severity. Read-only —
     `advance_cursor()` is the separate ack, so a surfacing path that crashes mid-print
     re-surfaces instead of losing entries.
 
