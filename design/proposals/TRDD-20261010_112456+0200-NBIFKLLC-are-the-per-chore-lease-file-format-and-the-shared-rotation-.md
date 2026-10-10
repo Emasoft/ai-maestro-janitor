@@ -4,7 +4,7 @@ title: Are the per-chore lease file format and the shared rotation policy file f
 column: proposal
 status: proposed
 created: 2026-10-10T11:24:56+0200
-updated: 2026-10-10T11:24:56+0200
+updated: 2026-10-10T15:30:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -29,3 +29,7 @@ WHAT WAITS ON IT: the janitor-side lease write and renew (item c), the lease hal
 - [ ] TRDD-4XND73XD's blocked-by is cleared or the card is re-scoped on the answers
 
 ## Approval log
+
+## Questions added
+
+2026-10-10 15:30, from TRDD-O66GZTWE: (4) ownership of the yielded chores flips about 8 times a day on this host because the server's liveness stamp goes 92 to 148 s old under load (threshold 90 s); in the resume windows the daemon runs memory-guard and fleet-stop itself. Should safety chores such as memory-guard be claimed by the server at all, and does the lease prevent both sides running a long chore (version-update) across such a flip?
