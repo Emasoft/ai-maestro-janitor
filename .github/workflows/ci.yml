@@ -87,6 +87,16 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # git-cliff (TRDD-PRFE29KT): the two stale-tag changelog tests in
+      # tests/test_publish_stale_tag_recovery.py skip where it is absent, so on this
+      # runner they never ran. Installed from PyPI at an exact version with the uv that
+      # is already here (no third-party action to pin); the tool bin dir is put on PATH
+      # explicitly so the step does not depend on what setup-uv exports.
+      - name: Install git-cliff (pinned)
+        run: |
+          uv tool install git-cliff==2.14.2
+          uv tool dir --bin >> "$GITHUB_PATH"
+
       # `--extra dev` is load-bearing: pytest and pytest-xdist live in
       # [project.optional-dependencies].dev. A bare `uv run pytest` succeeds
       # locally only because the developer's .venv already has them installed, so
