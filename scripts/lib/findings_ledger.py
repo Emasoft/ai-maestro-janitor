@@ -359,6 +359,14 @@ def _read_cursor(project_dir: str | os.PathLike[str] | None = None) -> tuple[int
     except Exception:  # noqa: BLE001 -- absent/corrupt cursor = nothing surfaced yet
         return 0, 0
 
+_SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "MED": 2, "LOW": 3}
+
+
+def _sev_rank(entry: dict) -> int:
+    # Case-normalised: the real ledger holds both `MEDIUM` and lowercase `medium`.
+    sev = entry.get("sev")
+    return _SEV_RANK.get(sev.strip().upper(), 4) if isinstance(sev, str) else 4
+
 
 def unread_entries(
     project_dir: str | os.PathLike[str] | None = None,
@@ -366,10 +374,13 @@ def unread_entries(
     cap: int = SURFACE_CAP_LINES,
     budget_bytes: int = SURFACE_BUDGET_BYTES,
     exclude_codes: frozenset[str] = frozenset(),
+    severity_first: bool = False,
 ) -> tuple[list[str], int]:
-    """(rendered unread lines, NEWEST first, capped by count AND byte budget;
-    total unread count). Read-only — `advance_cursor()` is the separate ack, so a
-    surfacing path that crashes mid-print re-surfaces instead of losing entries.
+    """(rendered unread lines, capped by count AND byte budget; total unread count).
+    Order: NEWEST first by default; with `severity_first`, by severity rank (CRITICAL,
+    HIGH, MEDIUM, LOW, unknown) and NEWEST first within one severity. Read-only —
+    `advance_cursor()` is the separate ack, so a surfacing path that crashes mid-print
+    re-surfaces instead of losing entries.
 
     Cursor semantics: the primary mark is the consumed BYTE OFFSET (exact). When the
     structural trim rewrote the file smaller than the stored offset, the offset no
@@ -413,9 +424,12 @@ def unread_entries(
     if exclude_codes:
         unread = [e for e in unread if e.get("code") not in exclude_codes]
     total = len(unread)
+    ordered = list(reversed(unread))  # newest first
+    if severity_first:
+        ordered.sort(key=_sev_rank)  # stable: newest-first is kept inside one severity
     lines: list[str] = []
     used = 0
-    for e in reversed(unread):  # newest first
+    for e in ordered:
         line = render_line(e)
         if len(lines) >= cap or used + len(line.encode("utf-8")) > budget_bytes:
             break
@@ -447,7 +461,8 @@ def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
     piles up into a permanent backlog. `/janitor-findings` reads `unread_entries()`
     directly with no `exclude_codes`, so the data itself is never lost, only unpushed.
     """
-    lines, total = unread_entries(project_dir, exclude_codes=NEVER_SURFACE_CODES)
+    # severity_first: a HIGH must not fold behind newer LOW lines (TRDD-6ESS2MGE).
+    lines, total = unread_entries(project_dir, exclude_codes=NEVER_SURFACE_CODES, severity_first=True)
     if lines:
         folded = total - len(lines)
         out = list(lines)
