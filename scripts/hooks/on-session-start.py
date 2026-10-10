@@ -574,22 +574,25 @@ def _truncate_utf8_lines(text: str, max_bytes: int) -> str:
     return truncated[:cut] if cut != -1 else truncated
 
 
-
 def _read_first_target(sd: Path, handoff: Path) -> Path:
     """The file the truncated-handoff pointer names for `handoff`.
 
     TRDD-D7RLXAN1: one clear must name ONE read-first file. When `jev-compacted-<key>.md` is a
     byte copy of the handoff it is the file the READ FIRST line names, so name it, not the copy.
     """
-    import filecmp  # noqa: PLC0415
+    try:
+        import filecmp  # noqa: PLC0415
 
-    import handoff_files  # noqa: PLC0415 - sys.path gains scripts/lib only inside main()
+        import handoff_files  # noqa: PLC0415 - sys.path gains scripts/lib only inside main()
 
-    parsed = handoff_files.parse(handoff.name)  # None for the legacy unkeyed `agent-handoff.md`
-    if parsed is None:
+        parsed = handoff_files.parse(handoff.name)  # None for the legacy unkeyed `agent-handoff.md`
+        if parsed is None:
+            return handoff
+        jev = sd / f"jev-compacted-{parsed[0]}.md"
+        return jev if jev.is_file() and filecmp.cmp(jev, handoff, shallow=False) else handoff
+    except Exception:  # noqa: BLE001 -- a pointer line must never cost the injection (TRDD-D7RLXAN1)
         return handoff
-    jev = sd / f"jev-compacted-{parsed[0]}.md"
-    return jev if jev.is_file() and filecmp.cmp(jev, handoff, shallow=False) else handoff
+
 
 # Measured: this hook can ALSO print its OWN unrelated content after the handoff injection in
 # the same process (e.g. `_cron_liveness_nudge`'s heartbeat self-check, up to ~550 B on a fresh
