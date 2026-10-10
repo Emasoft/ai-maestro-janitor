@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import os
+import stat
 import struct
 import sys
 import time
@@ -142,6 +143,40 @@ def argv_of(pid: int) -> list[str]:
         return []
 
 
+
+def largest_arg_file_kb(args: list[str]) -> int | None:
+    """Size in whole kB of the largest existing regular file among the absolute-path args.
+
+    The caller decides which arguments count (argv[0] and an interpreter's script are not
+    inputs). An argument `--flag=/abs/path` counts as that path.
+
+    SIZE ONLY: no argument text and no file name is returned, because arguments can hold
+    secrets (same reason `label_from_argv` shows none). The new field adds no name; the
+    script name `label_from_argv` already shows for an interpreter run is unchanged.
+    None when no argument qualifies.
+    """
+    # shortcut: a relative-path argument is not seen (the process cwd is not read) and a
+    # file passed on stdin is not seen; upgrade when a field detection shows `none` for a
+    # process known to edit a file. Symlinks are followed; any absolute-path argument counts,
+    # so a model or config file passed by absolute path can be the figure. os.stat runs on the
+    # watch thread once per detection, so an argument on a hung network mount would stall the
+    # 5 s watch for that call; upgrade to a stat with a timeout if a watch stall is ever
+    # traced here.
+    sizes: list[int] = []
+    for arg in args:
+        if not arg.startswith("/") and "=" in arg:
+            arg = arg.split("=", 1)[1]
+        if not arg.startswith("/"):
+            continue
+        try:
+            st = os.stat(arg)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode):
+            sizes.append(st.st_size)
+    return max(sizes) // 1024 if sizes else None
+
+
 def label_from_argv(exe: str, argv: list[str]) -> str:
     """Executable name, plus the script name for an interpreter run on a script file.
 
@@ -149,10 +184,16 @@ def label_from_argv(exe: str, argv: list[str]) -> str:
     show the executable alone.
     """
     label = exe
-    # lower(): the Homebrew framework interpreter is named "Python" with a capital P.
-    if exe.lower().startswith(("python", "node")) and len(argv) > 1 and not argv[1].startswith("-"):
+    if is_script_run(exe, argv):
         label = f"{exe} {os.path.basename(argv[1])}"
     return state.sanitize_for_drift_line(label[:_LABEL_MAX])
+
+
+
+def is_script_run(exe: str, argv: list[str]) -> bool:
+    """True when argv is an interpreter (python, node) run on a script file in argv[1]."""
+    # lower(): the Homebrew framework interpreter is named "Python" with a capital P.
+    return exe.lower().startswith(("python", "node")) and len(argv) > 1 and not argv[1].startswith("-")
 
 
 def over_ceiling(

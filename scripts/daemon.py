@@ -3546,11 +3546,22 @@ def _process_size_watch_pass(
         # hide the other oversized processes behind it.
         alerted.add(key)
         try:
-            label = proc_scan.label_from_argv(r.exe, proc_scan.argv_of(r.pid))
+            argv = proc_scan.argv_of(r.pid)
+            label = proc_scan.label_from_argv(r.exe, argv)
+            # WHY (TRDD-DYXXL1BG): age and the largest file among its absolute-path arguments
+            # (the interpreter's script excluded) let a detection be judged afterwards (big
+            # legitimate edit vs runaway on a small file). Size only: no argument text and no
+            # file name reaches the line.
+            largest = proc_scan.largest_arg_file_kb(
+                argv[2:] if proc_scan.is_script_run(r.exe, argv) else argv[1:]
+            )
+            largest_txt = "none" if largest is None else f"{largest}kB"
+            age_s = max(0, (now if now is not None else int(time.time())) - r.start_s)
             state.log_line(
                 "daemon",
                 f"process-size-watch: pid={r.pid} {label} footprint={r.footprint_b // mb}MB "
-                f"resident={r.resident_b // mb}MB ceiling={ceiling_b // mb}MB",
+                f"resident={r.resident_b // mb}MB ceiling={ceiling_b // mb}MB "
+                f"age={age_s}s largest_arg_file={largest_txt}",
             )
             outcome = notify.push(
                 sev="CRITICAL", code="PROCESS-SIZE", project="process-size-watch",

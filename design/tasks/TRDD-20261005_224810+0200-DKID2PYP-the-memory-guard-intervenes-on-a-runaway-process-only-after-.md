@@ -1,10 +1,10 @@
 ---
 trdd-id: DKID2PYP
 title: The memory guard intervenes on a runaway process only after it has verified the work can be resumed
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-05T22:48:10+0200
-updated: 2026-10-10T20:20:40+0200
+updated: 2026-10-10T20:27:45+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,7 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:48:10+0200
 npt: [DYXXL1BG]
-blocked-by: [DYXXL1BG]
+blocked-by: []
 blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show DYXXL1BG --porcelain | cut -f3
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 pre-block-column: todo
@@ -30,6 +30,7 @@ Goal: investigate, verify and then design the guard's intervention on a runaway 
 
 - 2026-10-05T22:48:10+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-10T20:20:40+0200 — column → blocked. waits on TRDD-DYXXL1BG: no detection can be classified until the watch line carries the age and the input size
+- 2026-10-10T20:27:23+0200 — column → todo. the park was wrong: several owed items do not depend on DYXXL1BG
 
 ## Measured facts carried over
 
@@ -47,3 +48,4 @@ Provenance and corrections (review, 2026-10-05): the paragraph above is from a f
 2026-10-10 15:05 MEASURED (item 3 above; reports/board/20261010_143856+0200-fastedit-footprint-measure.md, a worker's run, report read by the main session). One ordinary fastedit edit that really generated (51-line scratch file, --replace on one function, 882 tokens, 9 attempts, 21.9 s, the edit refused and the file unchanged) peaked at 4756 MB footprint and 4498 MB resident, the two counters within 6 percent, one process, no child. Three other runs were refused before any model use (0 tokens, under 35 MB). So: (i) the reading 'every healthy fastedit run reads 16 GB on the footprint field' is REFUTED for a small edit; (ii) the 8 field detections (16.4 to 17.4 GB footprint with 1.8 to 2.1 GB resident) differ from this run in two ways, a footprint 3.5 times larger and a resident less than half, so they are not this kind of run; a footprint far above resident is what memory that has been compressed or paged out looks like, which was NOT verified here; (iii) whether those 8 were runaways or large legitimate edits is still not known: the file size and target of each are not in the daemon log. NOT MEASURED: a generating run on a large file; more than one generating run; what the footprint field counts. STILL OPEN: item (4), the old guard's 0 s return. NEXT for this card: make the watch's log line carry enough to judge a detection afterwards (the command's target file size, or the process age), since today a detection cannot be classified from the log; that is a design step, not built.
 2026-10-10 18:38. Three facts. (1) One of the 8 detections is now classified: the system memory report of 2026-10-10 09:53:11 names python3.12 pid 51537 as its largest process at 13.7 GB of real pages, and the watch logged the same pid 20 s later at 16645 MB footprint and 1802 MB resident. So that process was genuinely large and its low resident figure is memory compressed or paged out; the other seven remain unclassified. The report was triggered by another process exceeding its own limit, not shown to be system pressure. (2) Item 4 has a candidate answer, not verified for 2026-10-05: the daemon's start line of 2026-10-09 22:19 lists memory-guard among the chores yielded to the ai-maestro server, and neither retained daemon log holds a single 'memory-guard: free' line; a yielded guard does nothing here. (3) Handed over from TRDD-1BLC5HB8: a longer sample of fastedit concurrency on a working day is owed here; first data point, the snapshot of 2026-10-05 18:07 with five at once at 2.1 GB each. The per-minute record of TRDD-63BJOH4H will carry the growth of a detected process once released.
 2026-10-10 20:20 DESIGN STEP (the NEXT named on 2026-10-10 15:05), read in scripts/daemon.py and scripts/lib/proc_scan.py by the main session. The detection line already carries pid, label, footprint, resident and ceiling; the per-minute process-top record already carries the age, but only for the five largest at that minute. What is missing to classify a detection afterwards: how long the process had run, and how large its input was. DECIDED: add age=<seconds> (already in the scanned row, no new read) and largest_arg_file=<kB or none> (the size of the largest existing regular file among the absolute-path arguments) to the one detection line. SIZE ONLY, never a file name or an argument: label_from_argv shows no argument on purpose, since arguments can hold secrets, and the earlier wording on this card ('the command's target file size') must not be read as leave to log the target's name. Limits: a relative-path argument and a file on stdin are not seen. The build is TRDD-DYXXL1BG (derived, a prerequisite of this card), because this card's mandate covers measuring and designing only. WHAT THIS CARD STILL OWES after that: the classification of future detections from the new fields; the unmeasured items listed in Findings 2026-10-05; item (4); the notification-cap decision; the fastedit concurrency sample. None of it can advance before a release carries DYXXL1BG and a detection occurs, so the card waits on DYXXL1BG.
+2026-10-10 20:27 CORRECTION, from the review of a3c8fd4a: this card was parked as blocked on TRDD-DYXXL1BG for about half an hour, and the sentence above 'None of it can advance before a release' is FALSE. Back in todo. Workable NOW, with no dependence on DYXXL1BG: item (4), verifying the candidate answer for the old guard's 0 s return; the decision whether a process-size alert is exempt from the daily notification cap or folded into a digest; the longer fastedit concurrency sample; the kill and freeze cases listed as NOT MEASURED in Findings 2026-10-05. Waiting on DYXXL1BG (built in this commit's parent, in testing until a release): only the classification of future detections. DYXXL1BG stays this card's prerequisite. The probe fields left in the frontmatter are inert while the card is not blocked.

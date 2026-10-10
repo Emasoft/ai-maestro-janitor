@@ -406,3 +406,121 @@ def test_thread_passes_while_main_is_blocked_survives_a_raise_and_stops(
         t.shutdown(5)
     assert not t.is_alive()
     assert threading.active_count() >= 1
+
+
+
+def _sized_file(directory: Path, name: str, size: int) -> Path:
+    f = directory / name
+    f.write_bytes(b"x" * size)
+    return f
+
+
+def test_largest_arg_file_kb_returns_the_larger_file_in_whole_kb(tmp_path: Path) -> None:
+    """Two real absolute-path files give the larger size in whole kB; every argument counts."""
+    big = _sized_file(tmp_path, "big.txt", 5 * 1024 + 100)
+    small = _sized_file(tmp_path, "small.txt", 1024)
+    assert proc_scan.largest_arg_file_kb([str(small), str(big)]) == 5
+    assert proc_scan.largest_arg_file_kb([str(big), str(small)]) == 5
+    assert proc_scan.largest_arg_file_kb(["-x", "relative", str(small)]) == 1
+
+
+def test_largest_arg_file_kb_is_none_without_a_qualifying_file(tmp_path: Path) -> None:
+    """Relative path, missing absolute path, a directory and empty args all give None."""
+    _sized_file(tmp_path, "rel.txt", 4096)
+    assert proc_scan.largest_arg_file_kb(["rel.txt", "./rel.txt"]) is None
+    assert proc_scan.largest_arg_file_kb([str(tmp_path / "missing")]) is None
+    assert proc_scan.largest_arg_file_kb([str(tmp_path)]) is None
+    assert proc_scan.largest_arg_file_kb([]) is None
+
+
+
+def test_largest_arg_file_kb_reads_the_path_after_equals(tmp_path: Path) -> None:
+    """`--flag=/abs/path` counts as that path; `--flag=relative` and `a=b/c` do not."""
+    f = _sized_file(tmp_path, "cfg.dat", 3 * 1024)
+    assert proc_scan.largest_arg_file_kb([f"--config={f}"]) == 3
+    assert proc_scan.largest_arg_file_kb(["--config=rel.dat", "a=b/c"]) is None
+
+
+def test_is_script_run_matches_the_label_rule() -> None:
+    """Interpreter plus a non-flag argv[1] is a script run; flags, other exes and short argv are not."""
+    assert proc_scan.is_script_run("python3.12", ["python3.12", "/x/run.py"])
+    assert proc_scan.is_script_run("Python", ["Python", "/x/run.py"])
+    assert proc_scan.is_script_run("node", ["node", "s.js", "a"])
+    assert not proc_scan.is_script_run("python3", ["python3", "-c", "x"])
+    assert not proc_scan.is_script_run("python3", ["python3"])
+    assert not proc_scan.is_script_run("ssh", ["ssh", "host"])
+
+
+@darwin_only
+def test_detection_line_ignores_the_interpreters_script(tmp_path: Path) -> None:
+    """For `python script data` with a script larger than the data, the logged size is the data file."""
+    script = tmp_path / "bigscript.py"
+    script.write_text(_CHILD_SRC + "# pad\n" * 4000)
+    data = _sized_file(tmp_path, "data.dat", 3 * 1024)
+    assert script.stat().st_size > 20 * 1024
+    child = subprocess.Popen(
+        [sys.executable, str(script), str(data)], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "ready"
+        _pass(set(), [_row(child.pid)], _Recorder())
+    finally:
+        _reap(child)
+    assert _detection_line(tmp_path).endswith(" largest_arg_file=3kB")
+
+
+def _detection_line(tmp_path: Path) -> str:
+    log = (tmp_path / "logs" / "daemon.log").read_text()
+    return next(ln for ln in log.splitlines() if "process-size-watch: pid=" in ln)
+
+
+@darwin_only
+def test_detection_line_carries_age_and_the_largest_arg_file_size(tmp_path: Path) -> None:
+    """The detection line ends with a plausible age and the exact kB of the argv file."""
+    target = _sized_file(tmp_path, "edited.dat", 7 * 1024)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _CHILD_SRC, str(target)], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "ready"
+        _pass(set(), [_row(child.pid)], _Recorder())
+    finally:
+        _reap(child)
+    line = _detection_line(tmp_path)
+    assert line.endswith(" largest_arg_file=7kB")
+    age = int(line.split(" age=")[1].split("s ")[0])
+    assert 0 <= age < 60
+
+
+@darwin_only
+def test_detection_line_reports_none_without_an_argv_file(tmp_path: Path) -> None:
+    """A child with no file argument logs largest_arg_file=none."""
+    child = _spawn()
+    try:
+        _pass(set(), [_row(child.pid)], _Recorder())
+    finally:
+        _reap(child)
+    assert _detection_line(tmp_path).endswith(" largest_arg_file=none")
+
+
+
+@darwin_only
+def test_detection_line_never_shows_an_argument_or_a_file_name(tmp_path: Path) -> None:
+    """With argv[1] being `-c`, a secret-looking argument and the data file name never appear in the line."""
+    # argv[1] is "-c" on purpose: the label may show a script name there by design.
+    target = _sized_file(tmp_path, "private-name-xyz.dat", 2048)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _CHILD_SRC, "--token=SECRET-abc123", str(target)],
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "ready"
+        _pass(set(), [_row(child.pid)], _Recorder())
+    finally:
+        _reap(child)
+    line = _detection_line(tmp_path)
+    assert "largest_arg_file=2kB" in line
+    assert "SECRET" not in line and "private-name-xyz" not in line and "abc123" not in line
