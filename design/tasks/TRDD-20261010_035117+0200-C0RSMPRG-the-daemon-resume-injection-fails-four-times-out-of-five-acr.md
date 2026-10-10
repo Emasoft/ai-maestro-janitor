@@ -1,10 +1,10 @@
 ---
 trdd-id: C0RSMPRG
-title: The daemon resume injection fails four times out of five across eight projects
+title: The daemon resume injection is not done four times out of five across ten projects
 column: todo
 status: tasked
 created: 2026-10-10T03:51:17+0200
-updated: 2026-10-10T04:12:48+0200
+updated: 2026-10-10T04:16:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
