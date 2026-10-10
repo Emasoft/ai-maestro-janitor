@@ -4,6 +4,7 @@ import os
 import plistlib
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -68,3 +69,82 @@ esac
     loaded = (state / "loaded").exists()
     assert loaded or proc.returncode != 0, f"claimed install with the job unloaded: {proc.stdout!r}"
     assert not ("installed" in proc.stdout and not loaded)
+
+
+def _run_installer(tmp_path: Path, uname_out: str, shims: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run a copy of the installer with stand-in executables first on PATH (activation enabled)."""
+    script = tmp_path / "keepalive_install.sh"
+    shutil.copy(SCRIPT, script)
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    shims = {"uname": f"#!/bin/sh\necho {uname_out}\n", **shims}
+    for name, body in shims.items():
+        (shim_dir / name).write_text(body)
+        (shim_dir / name).chmod(0o755)
+    env = {**os.environ, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg"), "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"}
+    env.pop("KEEPALIVE_SKIP_ACTIVATION", None)
+    return subprocess.run(["bash", str(script), "install"], env=env, capture_output=True, text=True)
+
+
+def test_macos_install_fails_when_old_job_never_unloads(tmp_path: Path) -> None:
+    """A job that stays loaded after bootout must fail the install without calling bootstrap."""
+    calls = tmp_path / "calls"
+    launchctl = f"""#!/bin/sh
+echo "$1" >> "{calls}"
+case "$1" in
+print) exit 0 ;;
+*) exit 0 ;;
+esac
+"""
+    proc = _run_installer(tmp_path, "Darwin", {"launchctl": launchctl})
+    assert proc.returncode != 0, proc.stdout
+    assert "bootstrap" not in calls.read_text().split()
+    assert "did not unload" in proc.stderr and "NOT applied" in proc.stderr
+
+
+def test_linux_install_succeeds_when_unit_is_still_activating(tmp_path: Path) -> None:
+    """is-active failing the first two polls then succeeding must still be a successful install."""
+    count = tmp_path / "active-calls"
+    systemctl = f"""#!/bin/sh
+case "$2" in
+is-active)
+  n=$(cat "{count}" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "{count}"
+  [ "$n" -gt 2 ] ;;
+*) exit 0 ;;
+esac
+"""
+    proc = _run_installer(tmp_path, "Linux", {"systemctl": systemctl})
+    assert proc.returncode == 0, proc.stderr
+    assert count.read_text().strip() == "3"
+
+
+def test_linux_install_fails_after_bounded_polling_when_never_active(tmp_path: Path) -> None:
+    """A unit that never becomes active fails the install after about 5 s of polling, not more."""
+    systemctl = """#!/bin/sh
+case "$2" in
+is-active) exit 3 ;;
+*) exit 0 ;;
+esac
+"""
+    start = time.monotonic()
+    proc = _run_installer(tmp_path, "Linux", {"systemctl": systemctl})
+    assert proc.returncode != 0
+    assert time.monotonic() - start < 8
+    assert "could not start" in proc.stderr
+
+
+def test_linux_install_fails_at_once_when_enable_fails(tmp_path: Path) -> None:
+    """A failing enable must fail immediately without any is-active polling."""
+    calls = tmp_path / "calls"
+    systemctl = f"""#!/bin/sh
+echo "$2" >> "{calls}"
+case "$2" in
+enable) echo boom >&2; exit 1 ;;
+*) exit 0 ;;
+esac
+"""
+    start = time.monotonic()
+    proc = _run_installer(tmp_path, "Linux", {"systemctl": systemctl})
+    assert proc.returncode != 0
+    assert "is-active" not in calls.read_text().split()
+    assert time.monotonic() - start < 3

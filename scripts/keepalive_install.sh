@@ -286,9 +286,10 @@ EOF
   # — for a staged-but-not-activated install, a dry run, and side-effect-free tests.
   [ -n "${KEEPALIVE_SKIP_ACTIVATION:-}" ] && return 0
   uid="$(id -u)"
-  # Clear any stale instance first so bootstrap never collides. TRDD-V13RIZUI: bootout returns
-  # before launchd finished tearing the job down, so an immediate bootstrap failed silently and
-  # left the job UNLOADED while we printed "installed" — wait for the job to vanish, retry the
+  # Clear any stale instance first so bootstrap never collides. TRDD-V13RIZUI: the likely cause (inferred,
+  # not established) of the original failure: bootout returns before launchd finished tearing the
+  # job down, so an immediate bootstrap failed silently and left the job UNLOADED while we
+  # printed "installed" — wait for the job to vanish, retry the
   # load, then VERIFY it is loaded and fail loudly otherwise (callers treat non-zero as best-effort).
   launchctl bootout "gui/$uid/$LABEL" 2>/dev/null || true
   n=0
@@ -296,6 +297,12 @@ EOF
     sleep 0.2
     n=$((n + 1))
   done
+  # A job still present here is the OLD one: bootstrap would fail as already-loaded and the
+  # print below would then succeed on the old job, claiming an install that never applied the new plist.
+  if launchctl print "gui/$uid/$LABEL" >/dev/null 2>&1; then
+    echo "keepalive: previous $LABEL job did not unload within 5 s; the new plist was NOT applied" >&2
+    return 1
+  fi
   n=0
   lerr=""
   while [ "$n" -lt 5 ]; do
@@ -341,7 +348,17 @@ EOF
   [ -n "${KEEPALIVE_SKIP_ACTIVATION:-}" ] && return 0
   # TRDD-V13RIZUI: same discard-and-claim bug as install_macos — verify the unit is active.
   systemctl --user daemon-reload 2>/dev/null || true
-  if ! lerr="$(systemctl --user enable --now "$LABEL.service" 2>&1)" || ! systemctl --user is-active --quiet "$LABEL.service"; then
+  # A unit still in "activating" reads as not active, so poll (5 s max) instead of checking once.
+  ok=""
+  if lerr="$(systemctl --user enable --now "$LABEL.service" 2>&1)"; then
+    n=0
+    while [ "$n" -lt 10 ]; do
+      systemctl --user is-active --quiet "$LABEL.service" && { ok=1; break; }
+      n=$((n + 1))
+      sleep 0.5
+    done
+  fi
+  if [ -z "$ok" ]; then
     echo "keepalive: systemctl could not start $LABEL.service: $lerr" >&2
     return 1
   fi
