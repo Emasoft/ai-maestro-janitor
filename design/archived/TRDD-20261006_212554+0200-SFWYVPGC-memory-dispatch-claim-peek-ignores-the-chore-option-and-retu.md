@@ -1,10 +1,10 @@
 ---
 trdd-id: SFWYVPGC
 title: memory_dispatch_claim peek ignores the chore option and returns the first candidate
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-06T21:25:54+0200
-updated: 2026-10-06T21:25:54+0200
+updated: 2026-10-10T21:50:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,13 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#319 (opened 2026-09-29). Part of
 ## Approval log
 
 - 2026-10-06T21:25:54+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T21:50:42+0200 — COMPLETE by main-agent@ai-maestro-janitor. already fixed by aab05d1c in v3.7.1; issue 319 closed with commit and release.
+
+## Findings
+
+2026-10-10 21:50 CLOSED ON EVIDENCE, no new code. scripts/memory_dispatch_claim.py peek_one (line 182) applies payload_matches_chore, the same predicate claim_one uses; its docstring cites janitor#319. Commit aab05d1c of 2026-10-04 (git log -S'def peek_one'), first contained in tag v3.7.1. Tests in tests/test_memory_dispatch_claim.py: test_peek_with_chore_returns_the_matching_dispatch_not_the_oldest (line 1545), test_peek_with_a_chore_that_has_no_record_reports_nothing (1554), test_plain_peek_of_the_oldest_chore_is_unchanged (1563). Issue 319 is CLOSED (2026-10-06T20:44:57Z) and its last comment names aab05d1c and v3.7.1. NOT DONE by this session: the three tests were not run on their own today; they are part of the full suite, which passed at 18362 on 9b2b1299's tree.
+
+## Acceptance
+
+- [x] The symptom is gone in a test that failed before the fix (the three tests above; aab05d1c).
+- [x] A closing comment on the issue names the commit and the release (issue 319, closed 2026-10-06).
