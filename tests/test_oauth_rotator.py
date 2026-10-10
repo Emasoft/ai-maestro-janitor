@@ -2314,6 +2314,67 @@ def test_resolve_untrusted_live_trusts_beacon_confirmed_mirror(
     assert state["live_email"] == "real@x"
 
 
+
+_IDENTITY_KINDS = ("no-usable-slot-twin", "identity-unknowable")
+
+
+def test_clear_stuck_only_kinds_keeps_all_accounts_maxed_and_its_first_seen(
+        tmp_path: Path) -> None:
+    """TRDD-7T4J5T6Z: an identity-kind clear leaves an all-accounts-maxed marker, so first_seen survives."""
+    stuck = tmp_path / "rotation-stuck.json"
+    now = int(time.time())
+    stuck.write_text(json.dumps({"kind": "all-accounts-maxed", "detail": "d",
+                                 "first_seen_epoch": now - 5000, "last_seen_epoch": now - 10}))
+    rotator._clear_stuck(only_kinds=_IDENTITY_KINDS)
+    assert stuck.is_file()
+    rotator._mark_stuck("all-accounts-maxed", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] == now - 5000
+
+
+def test_clear_stuck_only_kinds_removes_an_identity_marker(tmp_path: Path) -> None:
+    """TRDD-7T4J5T6Z: the same identity-kind clear still removes a no-usable-slot-twin marker."""
+    rotator._mark_stuck("no-usable-slot-twin", "real@x")
+    rotator._clear_stuck(only_kinds=_IDENTITY_KINDS)
+    assert not (tmp_path / "rotation-stuck.json").is_file()
+
+
+
+def test_mark_stuck_starts_a_fresh_window_when_the_same_kind_prior_is_stale(
+        tmp_path: Path) -> None:
+    """TRDD-7T4J5T6Z: a same-kind marker last seen 2 h ago is a past episode, so first_seen restarts."""
+    stuck = tmp_path / "rotation-stuck.json"
+    now = int(time.time())
+    stuck.write_text(json.dumps({"kind": "all-accounts-maxed", "detail": "d",
+                                 "first_seen_epoch": now - 90000, "last_seen_epoch": now - 7200}))
+    rotator._mark_stuck("all-accounts-maxed", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] >= now
+
+
+def test_mark_stuck_keeps_first_seen_when_the_same_kind_prior_is_recent(
+        tmp_path: Path) -> None:
+    """TRDD-7T4J5T6Z: a same-kind marker seen 60 s ago is the same episode, so first_seen is kept."""
+    stuck = tmp_path / "rotation-stuck.json"
+    now = int(time.time())
+    stuck.write_text(json.dumps({"kind": "all-accounts-maxed", "detail": "d",
+                                 "first_seen_epoch": now - 5000, "last_seen_epoch": now - 60}))
+    rotator._mark_stuck("all-accounts-maxed", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] == now - 5000
+
+
+def test_beacon_confirmed_mirror_keeps_an_all_accounts_maxed_marker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-7T4J5T6Z: resolving the mirror via the beacon must not delete an all-accounts-maxed marker."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    mirror = _blob("SAME-CRED")
+    fp = rotator.fingerprint(mirror)
+    rotator.save_state({"live_email": "stale@x", "live_fp": fp, "slots": {}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": fp, "email": "real@x", "ts": 1.0})
+    rotator._mark_stuck("all-accounts-maxed", "d")
+    rotator._resolve_untrusted_live(mirror, rotator.load_state())
+    assert json.loads((tmp_path / "rotation-stuck.json").read_text())["kind"] == "all-accounts-maxed"
+
+
 def test_resolve_untrusted_live_probes_slot_twin_when_mirror_differs(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """F1+F2: beacon names a DIFFERENT account than the mirror → identity comes from the

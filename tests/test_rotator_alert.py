@@ -13,6 +13,7 @@ import json
 import os
 import stat
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,14 @@ def _stamp(root: Path, at: float) -> None:
     p = root / "tick-completed.ts"
     p.write_text(str(int(at)))
     os.utime(p, (at, at))  # the evaluator reads the stamp's mtime
+
+
+
+def _stuck(root: Path, at: float = NOW, **fields: object) -> None:
+    """Write a rotation-stuck marker the way the rotator does: kind plus a last_seen_epoch."""
+    payload = {"kind": "no-usable-slot-twin", "detail": SPARE, "first_seen_epoch": int(at), "last_seen_epoch": int(at)}
+    payload.update(fields)
+    (root / "rotation-stuck.json").write_text(json.dumps(payload))
 
 
 @pytest.fixture
@@ -143,12 +152,13 @@ def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
     assert ra.evaluate(root, now=NOW, claude_running=True, runner=Runner()) == ["tick-stalled"]
 
 
+
 def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
     """rotation-stuck.json present: alert regardless of the session (it is already a verdict)."""
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
     # TRDD-ZQ3GVI9Q: use a kind the rotator really writes (rotator.py _mark_stuck); the old
-    # 'all-exhausted' is never produced, so the test passed on a value production never emits.
-    (root / "rotation-stuck.json").write_text(json.dumps({"kind": "no-usable-slot-twin", "detail": SPARE}))
+    # all-exhausted kind is never produced, so the test passed on a value production never emits.
+    _stuck(root, NOW - 10)
     run = Runner()
     assert ra.evaluate(root, now=NOW, claude_running=False, runner=run) == ["rotation-stuck"]
     assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
@@ -156,38 +166,54 @@ def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
     assert SPARE not in json.dumps(run.argvs) and SPARE not in (root / ra.ALERT_NAME).read_text()
 
 
-
 def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) -> None:
     """A stuck marker of kind all-accounts-maxed tells the owner to wait, not to capture logins."""
-    (root / "rotation-stuck.json").write_text(
-        json.dumps({"kind": "all-accounts-maxed", "detail": "x", "first_seen_epoch": 1, "last_seen_epoch": 1})
-    )
+    _stuck(root, NOW, kind="all-accounts-maxed", detail="x")
     text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
     assert text == ra._STUCK_ALL_MAXED_TEXT
     assert "capture-all-logins" not in text
 
 
 def test_stuck_alert_for_other_kinds_keeps_the_capture_remedy(root: Path) -> None:
-    """Control: no kind, another kind, or a truncated marker keeps the capture-logins text."""
+    """Control: the identity kinds keep the capture-logins text."""
+    for kind in ("no-usable-slot-twin", "identity-unknowable"):
+        _stuck(root, NOW, kind=kind)
+        assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
+
+
+def test_stuck_marker_older_than_an_hour_does_not_alert_but_a_fresh_one_does(root: Path) -> None:
+    """TRDD-7T4J5T6Z: a marker last seen 2 h ago (recovered or stopped rotator) raises nothing; a fresh one does."""
+    _stuck(root, NOW - 7200)
+    assert "rotation-stuck" not in ra.active_conditions(root, NOW, False)
+    _stuck(root, NOW - 60)
+    assert "rotation-stuck" in ra.active_conditions(root, NOW, False)
+
+
+def test_stuck_marker_without_a_kind_or_unreadable_does_not_alert(root: Path) -> None:
+    """TRDD-7T4J5T6Z: a kindless, last_seen-less or truncated marker is not a verdict the rotator wrote."""
     for content in ("{}", json.dumps({"kind": "no-usable-slot-twin"}), "{\"kind\": \"all-acc"):
         (root / "rotation-stuck.json").write_text(content)
-        assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
+        assert "rotation-stuck" not in ra.active_conditions(root, NOW, False)
 
 
 def test_banner_backoff_first_then_hourly_then_daily(root: Path) -> None:
     """Notify at first sight, again after 1 h, then at most once per 24 h; the file updates
     on every evaluation and first_seen is preserved."""
-    (root / "rotation-stuck.json").write_text("{}")
     run = Runner()
-    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
-    ra.evaluate(root, now=NOW + 600, claude_running=False, runner=run)
+
+    def ev(t: float) -> None:
+        _stuck(root, t)  # the live rotator rewrites last_seen_epoch every stuck tick
+        ra.evaluate(root, now=t, claude_running=False, runner=run)
+
+    ev(NOW)
+    ev(NOW + 600)
     assert len(run.argvs) == 1
-    ra.evaluate(root, now=NOW + 3601, claude_running=False, runner=run)
+    ev(NOW + 3601)
     assert len(run.argvs) == 2
-    ra.evaluate(root, now=NOW + 3601 + 7200, claude_running=False, runner=run)
-    ra.evaluate(root, now=NOW + 3601 + 80000, claude_running=False, runner=run)
+    ev(NOW + 3601 + 7200)
+    ev(NOW + 3601 + 80000)
     assert len(run.argvs) == 2  # no 3rd banner inside 24 h of the 2nd
-    ra.evaluate(root, now=NOW + 3601 + 86400, claude_running=False, runner=run)
+    ev(NOW + 3601 + 86400)
     assert len(run.argvs) == 3
     saved = json.loads((root / ra.ALERT_NAME).read_text())["alerts"]["rotation-stuck"]
     assert saved["first_seen"] == int(NOW) and saved["last_notified"] == int(NOW + 3601 + 86400)
@@ -205,6 +231,7 @@ def test_no_spare_account_for_days_gives_a_handful_of_banners(root: Path) -> Non
     assert len(run.argvs) <= 5
 
 
+
 def test_a_change_of_the_condition_set_notifies_immediately(root: Path) -> None:
     """A second condition appearing inside the backoff window notifies at once."""
     _write_state(root, live_exp_s=NOW - 3600, spare_exp_s=NOW - 60)
@@ -212,11 +239,10 @@ def test_a_change_of_the_condition_set_notifies_immediately(root: Path) -> None:
     run = Runner()
     ra.evaluate(root, now=NOW, claude_running=True, runner=run)
     n = len(run.argvs)
-    (root / "rotation-stuck.json").write_text("{}")
+    _stuck(root, NOW + 60)
     _fresh_tick(root, NOW + 60)
     ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
     assert len(run.argvs) > n
-
 
 
 def test_a_condition_that_flaps_follows_the_backoff(root: Path) -> None:
@@ -224,26 +250,27 @@ def test_a_condition_that_flaps_follows_the_backoff(root: Path) -> None:
     DEBOUNCE_S -> notified (shared-login sessions flip the auth-failed marker on and off)."""
     stuck = root / "rotation-stuck.json"
     run = Runner()
-    stuck.write_text("{}")
+    _stuck(root, NOW)
     ra.evaluate(root, now=NOW, claude_running=False, runner=run)
     assert len(run.argvs) == 1
     stuck.unlink()
     ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
-    stuck.write_text("{}")
+    _stuck(root, NOW + 120)
     ra.evaluate(root, now=NOW + 120, claude_running=False, runner=run)
     assert len(run.argvs) == 1
     stuck.unlink()
     ra.evaluate(root, now=NOW + 180, claude_running=False, runner=run)
     ra.evaluate(root, now=NOW + 180 + ra.DEBOUNCE_S + 1, claude_running=False, runner=run)
-    stuck.write_text("{}")
+    _stuck(root, NOW + 180 + ra.DEBOUNCE_S + 2)
     ra.evaluate(root, now=NOW + 180 + ra.DEBOUNCE_S + 2, claude_running=False, runner=run)
     assert len(run.argvs) == 2
+
 
 
 def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:
     """Once nothing holds, rotator-alert.json is removed."""
     stuck = root / "rotation-stuck.json"
-    stuck.write_text("{}")
+    _stuck(root, NOW)
     ra.evaluate(root, now=NOW, claude_running=False, runner=Runner())
     assert (root / ra.ALERT_NAME).exists()
     stuck.unlink()
@@ -262,7 +289,7 @@ def test_real_fake_osascript_executable_receives_the_notification(
     exe.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{out}"\n')
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    (root / "rotation-stuck.json").write_text("{}")
+    _stuck(root, NOW)
     ra.evaluate(root, now=NOW, claude_running=False)
     lines = out.read_text().splitlines()
     assert lines[0] == "-e" and lines[1].startswith("display notification")
@@ -276,6 +303,7 @@ def test_scheduled_rotator_task_is_the_tick_plus_alarm() -> None:
     assert task.fn is daemon.task_oauth_rotator_beat
 
 
+
 def test_the_daemon_beat_writes_the_alert_file_for_a_stuck_rotator(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -283,7 +311,7 @@ def test_the_daemon_beat_writes_the_alert_file_for_a_stuck_rotator(
     import daemon  # type: ignore[import-not-found]
 
     (root / "opt-in.flag").write_text("")
-    (root / "rotation-stuck.json").write_text("{}")
+    _stuck(root, time.time())  # the daemon evaluates at the real clock
     monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)
     monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
     monkeypatch.setattr(daemon, "_run_workload", lambda *a, **k: None)
@@ -293,7 +321,6 @@ def test_the_daemon_beat_writes_the_alert_file_for_a_stuck_rotator(
     assert "rotation-stuck" in json.loads((root / ra.ALERT_NAME).read_text())["alerts"]
 
 
-
 def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -301,7 +328,7 @@ def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
     capped at 32 chars) and the alarm evaluation still runs; a valid value logs nothing."""
     import daemon  # type: ignore[import-not-found]
 
-    (root / "rotation-stuck.json").write_text("{}")
+    _stuck(root, time.time())  # the daemon evaluates at the real clock
     lines: list[str] = []
     monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)
     monkeypatch.setattr(daemon.notify, "_deliver", lambda *a, **k: None)
@@ -315,7 +342,6 @@ def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
     monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "6")
     daemon._evaluate_rotator_alert()
     assert not [m for m in lines if "ROTATOR_SPARE_STALE_AFTER_H" in m]
-
 
 
 def test_the_daemon_logs_a_malformed_spare_stale_env_only_when_it_changes(
@@ -476,9 +502,10 @@ def test_bad_spare_stale_env_falls_back_to_4h_and_keeps_other_conditions(
     would drop every alarm): other conditions still report and spare-stale uses the 4 h default."""
     monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "12h")
     _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 5 * 3600, "healthy-spare": NOW + 3 * 3600})
-    (root / "rotation-stuck.json").write_text("{}")
+    _stuck(root, NOW)
     active = ra.active_conditions(root, NOW, claude_running=True)
     assert "rotation-stuck" in active and "spare-stale" in active  # 5 h > the 4 h fallback
+
 
 
 def test_spare_stale_follows_the_due_backoff(root: Path) -> None:

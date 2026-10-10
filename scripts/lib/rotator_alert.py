@@ -157,6 +157,10 @@ def _tick_age(root: Path, now: float) -> float:
         return float("inf")  # never stamped: a tick that ran just before this would have stamped
 
 
+
+_STUCK_FRESH_S = 3600  # mirrors the oauth-login-needed detector gate and rotator.STUCK_MARKER_FRESH_S
+
+
 def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str, str]:
     """Condition name -> action text for every alarm that holds right now."""
     out: dict[str, str] = {}
@@ -190,13 +194,17 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         # `auth-failed` below, written by the session's StopFailure hook.
         if _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
-    if (root / "rotation-stuck.json").is_file():
+    # WHY (TRDD-7T4J5T6Z): only a marker the rotator rewrote within the last hour is a live verdict;
+    # one left by a recovered or stopped rotator must not alert forever. Mirrors the detector gate
+    # in oauth-login-needed.py.
+    stuck = _read_json(root / "rotation-stuck.json")
+    stuck_seen = _epoch(stuck.get("last_seen_epoch"))
+    if stuck.get("kind") and stuck_seen is not None and now - stuck_seen <= _STUCK_FRESH_S:
         # WHY: a login capture cannot help when every account is at its limit; on 2026-10-05 the
         # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
-        kind = _read_json(root / "rotation-stuck.json").get("kind")
         out["rotation-stuck"] = (
             _STUCK_ALL_MAXED_TEXT
-            if kind == "all-accounts-maxed"
+            if stuck.get("kind") == "all-accounts-maxed"
             else _ACTIONS["rotation-stuck"]
         )
     marker = _read_json(root / AUTH_FAILED_NAME)

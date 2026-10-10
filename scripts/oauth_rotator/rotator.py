@@ -270,6 +270,17 @@ def _stuck_file() -> Path:
     return ROOT / "rotation-stuck.json"
 
 
+
+#: The stuck kinds whose dead end an identity resolution proves over (TRDD-7T4J5T6Z).
+_IDENTITY_STUCK_KINDS = ("no-usable-slot-twin", "identity-unknowable")
+
+
+
+#: A stuck marker whose last_seen_epoch is older than this is a past episode (TRDD-7T4J5T6Z); keep in
+#: step with the detector gate (oauth-login-needed.py) and rotator_alert._STUCK_FRESH_S.
+STUCK_MARKER_FRESH_S = 3600
+
+
 def _mark_stuck(kind: str, detail: str) -> None:
     """Record that rotation cannot proceed. Best-effort; never raises.
 
@@ -283,7 +294,13 @@ def _mark_stuck(kind: str, detail: str) -> None:
     first = now
     try:
         prior = json.loads(_stuck_file().read_text(encoding="utf-8"))
-        if isinstance(prior, dict) and prior.get("kind") == kind:
+        # WHY the freshness gate (TRDD-7T4J5T6Z): the kind-scoped clear lets a maxed marker outlive
+        # a recovery that needed no rotation, and a later episode must not inherit its start time.
+        if (
+            isinstance(prior, dict)
+            and prior.get("kind") == kind
+            and now - int(prior.get("last_seen_epoch") or 0) <= STUCK_MARKER_FRESH_S
+        ):
             first = int(prior.get("first_seen_epoch") or now)
     except Exception:  # noqa: BLE001 -- absent/corrupt marker: start a fresh window
         first = now
@@ -303,14 +320,26 @@ def _mark_stuck(kind: str, detail: str) -> None:
         pass  # a marker write must never break a rotation tick
 
 
-def _clear_stuck() -> None:
+def _clear_stuck(*, only_kinds: tuple[str, ...] | None = None) -> None:
     """Drop the marker — rotation is possible again. Best-effort; never raises.
 
     Called on every outcome that proves the dead end is over. Clearing on SUCCESS rather
     than by expiry is what keeps the signal honest: a marker that ages out on its own would
     go quiet while the host is still stuck.
+
+    `only_kinds` limits the removal to markers of those kinds (an unparseable marker is
+    still removed). TRDD-7T4J5T6Z: the identity-resolution callers prove only that THEIR
+    dead end ended; an unscoped clear deleted an all-accounts-maxed marker every tick, so
+    its first_seen_epoch always equalled last_seen_epoch.
     """
     try:
+        if only_kinds is not None:
+            try:
+                prior = json.loads(_stuck_file().read_text(encoding="utf-8"))
+                if isinstance(prior, dict) and prior.get("kind") not in only_kinds:
+                    return
+            except ValueError:
+                pass  # unparseable marker: remove it as before
         _stuck_file().unlink()
     except OSError:
         pass
@@ -2385,8 +2414,9 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
                 save_state(state)
                 _decide("auto: live identity confirmed via session beacon: %s (mirror == live credential)" % b_email)
             # Identity resolved → the untrusted-live dead end is over; drop any marker a
-            # previous tick's fail-safe wrote (TK529Q0F).
-            _clear_stuck()
+            # previous tick's fail-safe wrote (TK529Q0F). Kind-scoped (TRDD-7T4J5T6Z): an
+            # all-accounts-maxed marker is a different dead end and must keep its first_seen.
+            _clear_stuck(only_kinds=_IDENTITY_STUCK_KINDS)
             return mirror_blob, state
         if isinstance(b_email, str) and b_email:
             # The mirror holds a DIFFERENT credential than the true live. Correct the
@@ -2403,8 +2433,9 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
             )
             twin = read_slot(b_email)
             if twin is not None and not _blob_locally_expired(twin):
-                # A usable twin disproves the no-usable-twin marker a previous tick wrote.
-                _clear_stuck()
+                # A usable twin disproves the no-usable-twin marker a previous tick wrote
+                # (kind-scoped, TRDD-7T4J5T6Z).
+                _clear_stuck(only_kinds=_IDENTITY_STUCK_KINDS)
                 return twin, state
             # WHY no refresh here: once an account is live, Claude Code owns its rotating
             # refresh grant. Refreshing the slot twin can only fail (the copy is spent) or
