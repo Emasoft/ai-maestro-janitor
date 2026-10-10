@@ -4,7 +4,7 @@ title: Clear chain stops typing janitor-arm
 column: backburner
 status: tasked
 created: 2026-10-03T03:41:57+0200
-updated: 2026-10-03T09:33:12+0200
+updated: 2026-10-10T12:08:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -34,6 +34,7 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T03:41:57+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T09:30:32+0200 — column → dev. C5 in progress
 - 2026-10-03T09:33:00+0200 — column → backburner. deferred: waits on the owner's plain-edit decision for module-level constants (see STATE) Cleared blocked-by (--clear-blocker override).
+2026-10-10 12:08 BOARD DRAIN: this card asks that the clear chain's bootstrap become (RESUME_CMD,) because 'crons survive /clear, verified'. THAT PREMISE IS CONTRADICTED on Claude Code 2.1.296: the post-clear diagnostic of 2026-10-10 09:09 reports 'cron id changed 6e812941 to 5a840a7a (destroyed by /clear, recreated by re-arm)' (reports/continuity-build/20261010_090954+0200-handoff-clear-verify.md). Removing /janitor-arm from the clear bootstrap as written would leave a cleared session with no heartbeat unless SessionStart's own self-check re-arms it, which was not examined. DO NOT BUILD AS WRITTEN. It stays in backburner; pull it only after measuring, on the current Claude Code, whether a clear with no arm command still ends with a live heartbeat cron. Its old block reason (the edit tool cannot change module-level constants) has a verified workaround: rewrite the file through fastedit create and check the result with git diff, as done for scripts/oauth_rotator/rotate_to.py on 2026-10-10.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 

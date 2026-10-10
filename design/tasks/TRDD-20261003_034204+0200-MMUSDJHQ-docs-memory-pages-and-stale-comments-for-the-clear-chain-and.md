@@ -1,10 +1,10 @@
 ---
 trdd-id: MMUSDJHQ
 title: Docs, memory pages and stale comments for the clear chain and rotator
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-05T02:05:08+0200
+updated: 2026-10-10T12:08:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -19,6 +19,8 @@ project-id: ai-maestro-janitor
 parent-trdd: K9AHY1ZB
 derived: true
 implementation-commits: [bfefa9f8, 95422abd]
+blocked-by: [ZKXQXHBI]
+pre-block-column: todo
 ---
 
 # Docs, memory pages and stale comments for the clear chain and rotator
@@ -34,12 +36,14 @@ Parent plan: TRDD-K9AHY1ZB
 ## Approval log
 
 - 2026-10-03T03:42:04+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T12:08:21+0200 — column → blocked. four leftovers already fixed; the atom correction turns on the owner's decision recorded on ZKXQXHBI
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
 2026-10-03: bfefa9f8 (exec-bit sweep + derived test) is attributed here.
 RELEASE BLOCKERS (fastedit refused, owner asked about a one-off plain edit): delete the four stale comment lines in scripts/clear_trigger.py saying a failed hold write must stop the chain (superseded by the fail-open in take_summary_hold, a48d8974); delete the unused constant _LATE_SUMMARY_STAMP in scripts/dispatch.py.
 2026-10-05: worked by an agent, result PARTIAL (report: reports/board, mmusdjhq-work). DONE: the DEBOUNCE_S comment in scripts/lib/rotator_alert.py now matches the backoff at line 225 (27 tests pass). CHECKED, nothing to change: the pages jev-compaction and janitor-compaction-floor-gate (and its three sub-pages) carry no stale claim the worker could show against current code; skills/janitor-compact-context/SKILL.md has no :240 reference and already says --force does not bypass the 300k floor. NOT DONE 1: the R4 alert wording. docs_dev/20261003_060617+0200-R4b-report.md contains no intended wording, so there is nothing to apply; the intended text must come from the owner or from card 3OS6AXV3. NOT DONE 2: the atom is ATOM-RQDO-2SJE in oauth-rotation-renew-reauth-operations.md after all; its last sentence says a primary live credential UNREADABLE from the daemon context every tick is the DESIGNED headless path, not a fault, while scripts/daemon.py lines 775 to 795 push a HIGH alert OAUTH-PRIMARY-UNREADABLE for exactly that state and call it a persistent degradation only the user can fix. Both cannot be right. Not edited, because the worker and the main agent could not tell from code alone which is intended; the triage also notes that card QQ7QCS3T turned the primary read off by default. NEXT ACTION: read TRDD-7PYTX4E9 finding F1 and TRDD-QQ7QCS3T whole, decide which statement holds today, then correct the atom through memgrep with a superseding lesson or raise a bug against the daemon alert.
+2026-10-10 12:08 BOARD DRAIN, wave 6 card 4, no code. A read-only lean-worker (0.14 million tokens) inventoried every leftover against HEAD; the main session read its report's items 5 to 7 and summary table (reports/board/20261010_120732+0200-mmusdjhq-leftovers.md, gitignored), not the code. ALREADY FIXED, per the worker with commits named: (1) the stale 'must stop the chain' comment in scripts/clear_trigger.py now matches the fail-open code (95422abd); (2) _LATE_SUMMARY_STAMP is gone from scripts/dispatch.py (95422abd); (3) no dead code found in scripts/lib/rotator_alert.py (95422abd; what 'R4b' named could not be identified beyond that); (4) _NOWISH in tests/test_release_age_guard_hook.py is computed at run time and that file passes (22 passed). So the 'pending an owner-approved plain edit' lines above are SUPERSEDED for these four. BELONG TO OTHER CARDS: the clear-only bootstrap tuple is TRDD-8SC3YEIG's; the host-load registration is TRDD-8524H5V1's. STILL OPEN HERE: (7) the memory atom ATOM-RQDO-2SJE says the daemon finding the live credential unreadable every tick is 'the DESIGNED headless path, not a fault', while, per the worker's partial read, scripts/daemon.py lines 775 to 796 push a HIGH notification OAUTH-PRIMARY-UNREADABLE for the same state; which of the two is right depends on whether the daemon's primary read is turned on, which is TRDD-ZKXQXHBI, with the owner. Also still open from 2026-10-05: the R4 alert wording, which needs the owner or card 3OS6AXV3. The atom is NOT edited. This card is blocked on TRDD-ZKXQXHBI.
 
 ## Process breaches to record
 
