@@ -1277,6 +1277,69 @@ def test_cmd_auto_burn_projection_alone_never_rotates_onto_a_target_spent_on_the
 
 
 
+_PROJ = "5h wall projected in ~14 min (recent burn slope)"
+
+
+def _stuck_projection_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, slot_blobs: dict,
+                            usage: dict, verdict: str) -> list:
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs=slot_blobs, usage={"LIVE": (200, _usage_ok(10.0)), **usage})
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator.burn_gate, "live_burn_verdict", lambda state, email, now, **kw: verdict)
+    return switches
+
+
+def test_cmd_auto_projection_with_no_alternates_stays_put_without_stuck_marker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-POOBOHDM: a burn projection with no alternates is a guess, so no stuck marker and no 'exhausted'."""
+    switches = _stuck_projection_setup(monkeypatch, tmp_path, {}, {}, _PROJ)
+    rotator.cmd_auto()
+    out = capsys.readouterr().out
+    assert switches == []
+    assert not rotator._stuck_file().exists()
+    assert "exhausted" not in out and "burn projection only" in out
+
+
+def test_cmd_auto_projection_with_only_account_spent_alternate_stays_put_without_stuck_marker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-POOBOHDM: a burn projection with every alternate account-spent is a guess, so no stuck marker."""
+    switches = _stuck_projection_setup(monkeypatch, tmp_path,
+                                       {"spent@x": _blob("SPENT", expires_ms=_ms_in(50))},
+                                       {"SPENT": (200, _usage_ok(99.0))}, _PROJ)
+    rotator.cmd_auto()
+    out = capsys.readouterr().out
+    assert switches == []
+    assert not rotator._stuck_file().exists()
+    assert "exhausted" not in out and "burn projection only" in out
+
+
+def test_cmd_auto_learned_cap_verdict_with_no_alternates_still_marks_stuck(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-POOBOHDM: a learned-cap verdict is a real wall, so it must still write the stuck marker."""
+    _stuck_projection_setup(monkeypatch, tmp_path, {}, {},
+                            "7d=91% ≥ learned cap bar 90% (observed 429s below the configured threshold)")
+    rotator.cmd_auto()
+    out = capsys.readouterr().out
+    assert rotator._stuck_file().exists()
+    assert "exhausted" in out
+
+
+def test_cmd_auto_projection_with_scoped_blocked_and_degraded_alternate_does_not_rotate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-POOBOHDM: the Fable-spent incident case stays put even with a degraded alternate present."""
+    live_usage = _scoped_usage(85.0, 32.0, fable=52.0)
+    live_usage["limits"][0]["is_active"] = False
+    switches = _stuck_projection_setup(
+        monkeypatch, tmp_path,
+        {"spent@x": _blob("SPENT", expires_ms=_ms_in(50)), "deg@x": _blob("DEG", expires_ms=_ms_in(50))},
+        {"LIVE": (200, live_usage), "SPENT": (200, _scoped_usage(1.0, 76.0, fable=100.0)),
+         "DEG": (500, None)}, _PROJ)
+    rotator.cmd_auto()
+    assert switches == []
+
+
+
 def test_usage_endpoint_429_streak_teaches_no_cap(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-YVC3F06V: a streak of usage-endpoint 429s (5h=3%, 7d=85%) must not be stored as a learned cap."""

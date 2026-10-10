@@ -212,6 +212,13 @@ def observe_wall(state: dict, email: str, now: float) -> None:
         caps[w] = record_cap_sample(caps.get(w, []), rings.get(w, []), now)
     store_caps(state, email, caps)
 
+PROJECTION_PHRASE = "wall projected"
+
+
+def is_projection(why: str | None) -> bool:
+    """True for a slope-projection verdict (a guess); the rotator must tell it from a learned cap, a real wall."""
+    return why is not None and PROJECTION_PHRASE in why
+
 
 def live_burn_verdict(
     state: dict,
@@ -232,7 +239,7 @@ def live_burn_verdict(
                 samples, now,
                 cap_pct=effective_switch_at(100.0, caps.get(w, []), margin=0.0) if caps.get(w) else 100.0,
             )
-            return f"{w} wall projected in ~{m:.0f} min (recent burn slope)"
+            return f"{w} {PROJECTION_PHRASE} in ~{m:.0f} min (recent burn slope)"
         fresh = [(t, u) for t, u in samples if now - t <= SAMPLE_MAX_AGE_S]
         if fresh and caps.get(w):
             configured = 100.0  # the caller's threshold gate already ran; this is the CAP bar

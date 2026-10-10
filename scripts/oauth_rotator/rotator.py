@@ -2616,7 +2616,7 @@ def cmd_auto() -> int:
             burn_why = burn_gate.live_burn_verdict(state, live_email, time.time())
             if burn_why:
                 near = True
-                burn_only = True
+                burn_only = burn_gate.is_projection(burn_why)  # learned cap = real wall, not a guess (TRDD-POOBOHDM)
                 live_desc += " +BURN[%s]" % burn_why
         if not near:
             # MODEL-SCOPED trigger (owner failure report 2026-08-15, TRDD-QE390SJA's missing
@@ -2889,6 +2889,18 @@ def cmd_auto() -> int:
         _decide(
             "auto: live %s %s — burn projection only, and every target is spent on the model "
             "in use; staying put (a projection must not trade a working model for a hard wall)%s"
+            % (live_email or "(live)", live_desc, detail)
+        )
+        return 0
+    # TRDD-POOBOHDM: a projection with NO usage-confirmed target at all (no alternates, or all
+    # account-spent) must also stay put — stage 3 would write the stuck marker and say
+    # "exhausted" for a guess. `not degraded`: a degraded alternate keeps today's behaviour
+    # (out of this card's scope).
+    if burn_only and best is None and not degraded:
+        detail = (" [%s]" % "; ".join(verdicts)) if verdicts else ""
+        _decide(
+            "auto: live %s %s — burn projection only, and no usage-confirmed target exists; "
+            "staying put (a projection is not a wall; the threshold rotates for real if it comes true)%s"
             % (live_email or "(live)", live_desc, detail)
         )
         return 0

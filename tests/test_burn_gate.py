@@ -134,6 +134,23 @@ def test_live_burn_verdict_fires_on_learned_cap() -> None:
     assert why is not None and "learned cap" in why
 
 
+
+def test_is_projection_tells_a_guess_from_a_learned_cap() -> None:
+    """TRDD-POOBOHDM: only the slope-projection verdict is a guess; a learned cap and None are not."""
+    fast: dict = {}
+    for dt, u in ((-180, 43), (-120, 49), (-60, 55), (0, 61)):
+        bg.observe(fast, "a@x", NOW + dt, u, 10.0)
+    capped: dict = {}
+    for dt, u in ((-240, 62), (-180, 62.5), (-120, 63)):
+        bg.observe(capped, "a@x", NOW + dt, u, 10.0)
+    bg.observe_wall(capped, "a@x", NOW - 100)
+    for dt, u in ((-60, 61), (-30, 61), (0, 61)):
+        bg.observe(capped, "a@x", NOW + dt, u, 10.0)
+    assert bg.is_projection(bg.live_burn_verdict(fast, "a@x", NOW)) is True
+    assert bg.is_projection(bg.live_burn_verdict(capped, "a@x", NOW)) is False
+    assert bg.is_projection(None) is False
+
+
 def test_observe_wall_without_fresh_samples_learns_nothing() -> None:
     state: dict = {}
     bg.observe_wall(state, "a@x", NOW)
