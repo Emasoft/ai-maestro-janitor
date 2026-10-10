@@ -103,21 +103,37 @@ def test_tick_workload_does_not_write_the_heartbeat() -> None:
         t.shutdown(5)
 
 
-def test_wedge_request_runs_the_tick_now_with_the_env() -> None:
-    """A wedge request makes the thread tick immediately (interval is an hour) with the wedge env
-    set during the body and gone afterwards."""
-    seen: list[str | None] = []
-    t = _thread(lambda: seen.append(os.environ.get("JANITOR_ROTATOR_WEDGE_TICK")), interval=3600)
+def test_wedge_request_runs_the_tick_now_without_touching_os_environ() -> None:
+    """A wedge request makes the thread tick immediately (interval is an hour), and the wedge flag
+    never enters the daemon-wide os.environ: a subprocess another thread spawns WHILE the wedge
+    tick is running must not inherit it (TRDD-PAHO6KWK). The tick body blocks on an Event, so
+    the overlap is guaranteed, not timed."""
+    inside = threading.Event()
+    release = threading.Event()
+    seen: list[tuple[str | None, bool]] = []
+
+    def body() -> None:
+        seen.append((os.environ.get("JANITOR_ROTATOR_WEDGE_TICK"),
+                     bool(getattr(daemon._thread_state, "wedge_tick", False))))
+        inside.set()
+        assert release.wait(10)
+
+    t = _thread(body, interval=3600)
     t.start()
     try:
         gs.request_rotator_tick("retry-wedged-esc")
         assert daemon._consume_rotator_tick_request(t) is True
-        assert _wait(lambda: bool(seen), 5), "wedge request did not run the tick"
-        assert seen == ["1"]
-        # The thread pops the env var after the body returns, so wait for it instead of racing it.
-        assert _wait(lambda: "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ, 5), "wedge env not cleared after the tick"
+        assert inside.wait(5), "wedge request did not run the tick"
+        other = subprocess.run(
+            [sys.executable, "-c", "import os;print(os.environ.get(\"JANITOR_ROTATOR_WEDGE_TICK\"))"],
+            capture_output=True, text=True, check=True,
+        )  # another thread's subprocess (this test thread) while the wedge tick is in flight
+        assert other.stdout.strip() == "None", "the wedge flag leaked into another thread's subprocess"
+        release.set()
+        assert seen == [(None, True)]
         assert gs.rotator_tick_requested_present() is False
     finally:
+        release.set()
         t.shutdown(5)
 
 

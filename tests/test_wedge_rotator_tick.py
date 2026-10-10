@@ -139,14 +139,18 @@ def test_consume_runs_only_the_tick_not_sibling_tasks() -> None:
         ticker.shutdown(5)
 
 
-def test_the_wedge_scheduled_tick_carries_the_env_and_beat_does_not() -> None:
-    """The wedge context must cross the subprocess boundary as JANITOR_ROTATOR_WEDGE_TICK=1
-    exactly while the wedge-scheduled task body runs, and be gone for a beat-scheduled run —
-    the env var is the rotator's ONLY channel for this (it runs as a subprocess)."""
-    observed: list[str | None] = []
+def test_the_wedge_scheduled_tick_carries_the_env_and_beat_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wedge flag reaches the rotator SUBPROCESS env (via `_run_workload(env=...)`) only on a
+    wedge-scheduled tick, and never lands in the daemon-wide os.environ (TRDD-PAHO6KWK)."""
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda: True)
+    monkeypatch.setattr(daemon.gs, "rotation_succeeded_within", lambda *a, **kw: False)
+    handed: list[object] = []
+    monkeypatch.setattr(daemon, "_run_workload", lambda cmd, **kw: handed.append(kw.get("env")))
+    environ_seen: list[str | None] = []
 
     def _spy() -> None:
-        observed.append(os.environ.get("JANITOR_ROTATOR_WEDGE_TICK"))
+        environ_seen.append(os.environ.get("JANITOR_ROTATOR_WEDGE_TICK"))
+        daemon.task_oauth_rotator_tick()
 
     task = daemon.Task("oauth-rotator-tick", 3600, _spy, own_thread=True)
     ticker = _fresh_ticker(task)
@@ -154,13 +158,52 @@ def test_the_wedge_scheduled_tick_carries_the_env_and_beat_does_not() -> None:
     try:
         gs.request_rotator_tick("retry-wedged-esc")
         daemon._consume_rotator_tick_request(ticker)
-        assert _wait_for(lambda: observed == ["1"]), "the wedge-scheduled run must set the env"
-        assert _wait_for(lambda: "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ), "the env must be popped afterwards"
+        assert _wait_for(lambda: len(handed) == 1), "the wedge-scheduled run must call _run_workload"
     finally:
         ticker.shutdown(5)
+    assert handed[0] == {"JANITOR_ROTATOR_WEDGE_TICK": "1"}
+    assert environ_seen == [None], "the flag must never be written to the shared os.environ"
 
-    task.run()  # the ordinary 60 s beat's path — no consume, no wedge context
-    assert observed == ["1", None], "a beat-scheduled run must NOT inherit the wedge context"
+    task.run()  # the ordinary 60 s beat path: no consume, no wedge context
+    assert handed[1] is None, "a beat-scheduled run must not pass the wedge env"
+    assert "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ
+
+
+
+def test_wedge_mark_is_cleared_when_the_task_raises() -> None:
+    """`_thread_state.wedge_tick` is True during a wedge task and cleared in a finally even when the
+    task raises, so the tick thread's next (beat) run is not marked as a wedge run."""
+    marks: list[bool] = []
+
+    def _raise_once() -> None:
+        marks.append(bool(getattr(daemon._thread_state, "wedge_tick", False)))
+        if len(marks) == 1:
+            raise RuntimeError("boom")
+
+    task = daemon.Task("oauth-rotator-tick", 1, _raise_once, own_thread=True)
+    ticker = _fresh_ticker(task)
+    ticker.request_wedge_tick()
+    ticker.start()
+    try:
+        assert _wait_for(lambda: len(marks) >= 2, timeout=30), "the beat run after the wedge run never came"
+    finally:
+        ticker.shutdown(5)
+    assert marks[:2] == [True, False]
+
+
+def test_run_workload_hands_env_to_every_retry_attempt(tmp_path: Path) -> None:
+    """A workload retried after a non-zero exit still receives `env` on the retry (real subprocess)."""
+    log = tmp_path / "seen.txt"
+    script = tmp_path / "w.py"
+    script.write_text(
+        "import os,sys\n"
+        f"open({str(log)!r},\"a\").write(str(os.environ.get(\"JANITOR_ROTATOR_WEDGE_TICK\"))+\"\\n\")\n"
+        "sys.exit(1)\n"
+    )
+    res = daemon._run_workload([sys.executable, str(script)], timeout=30, max_attempts=2,
+                               env={"JANITOR_ROTATOR_WEDGE_TICK": "1"})
+    assert res is not None and res.returncode == 1
+    assert log.read_text().split() == ["1", "1"], "both attempts must carry the env"
 
 
 def test_a_confirmed_retry_wedge_requests_a_tick(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

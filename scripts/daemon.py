@@ -54,7 +54,7 @@ import sys
 import time
 from pathlib import Path
 from types import FrameType
-from typing import AbstractSet, Callable, Optional
+from typing import AbstractSet, Callable, Mapping, Optional
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
@@ -432,7 +432,8 @@ def _tick_heartbeat() -> None:
 
 def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                        heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
-                       preexec_fn: Optional[Callable[[], None]] = None) -> Optional[subprocess.CompletedProcess[str]]:
+                       preexec_fn: Optional[Callable[[], None]] = None,
+                       env: Optional[Mapping[str, str]] = None) -> Optional[subprocess.CompletedProcess[str]]:
     """Run a subprocess ONCE to completion, ticking the daemon heartbeat periodically.
 
     Returns the CompletedProcess on a normal exit (whatever the returncode),
@@ -448,6 +449,10 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
     low CPU priority. Defaults to None, so every other caller's Popen is
     byte-identical to before. POSIX-only; harmless where unsupported (callers
     pass None there).
+
+    `env` (optional, TRDD-PAHO6KWK): extra variables for THIS child only, merged over the
+    inherited environment. None adds nothing. It lets a caller hand one subprocess a flag
+    without writing os.environ, which every daemon thread shares.
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     try:
@@ -473,8 +478,8 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             start_new_session=True,
             # launchd's own env has no settings.json knobs (TRDD-XCJFCJUX) — merge the
             # in-memory mirror in so a child that reads CLAUDE_PLUGIN_OPTION_* sees them
-            # via its own os.environ; a real env var still wins.
-            env={**os.environ, **state.plugin_options_env()},
+            # via its own os.environ; a real env var still wins. `env` (PAHO6KWK) goes last.
+            env={**os.environ, **state.plugin_options_env(), **(env or {})},
         )
     except FileNotFoundError:
         state.log_line("daemon", f"  binary not in PATH: {cmd[0]}")
@@ -519,7 +524,8 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                   heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
                   max_attempts: int = _WORKLOAD_MAX_ATTEMPTS,
-                  preexec_fn: Optional[Callable[[], None]] = None) -> Optional[subprocess.CompletedProcess[str]]:
+                  preexec_fn: Optional[Callable[[], None]] = None,
+                  env: Optional[Mapping[str, str]] = None) -> Optional[subprocess.CompletedProcess[str]]:
     """Run a workload with the Pillar-1 retry policy (TRDD-7100178d Phase 4).
 
     Calls `_run_workload_once` up to `max_attempts` times, retrying ONLY on a
@@ -542,7 +548,8 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 
     `preexec_fn` (optional, TRDD-TY2EZ8ZH) is threaded into every attempt's
     `_run_workload_once`. Default None ⇒ unchanged behavior for every existing
-    caller.
+    caller. `env` (optional, TRDD-PAHO6KWK) is threaded into every attempt the same way:
+    extra variables for the child only, so a retry after a non-zero exit still gets them.
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     result: Optional[subprocess.CompletedProcess[str]] = None
@@ -561,7 +568,8 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             # launch for nothing. Stop here; `result` already holds attempt 1's
             # (non-zero) outcome.
             break
-        result = _run_workload_once(cmd, timeout=remaining, heartbeat_tick=heartbeat_tick, preexec_fn=preexec_fn)
+        result = _run_workload_once(cmd, timeout=remaining, heartbeat_tick=heartbeat_tick,
+                                    preexec_fn=preexec_fn, env=env)
         if result is None or result.returncode == 0:
             return result
         if attempt < max_attempts:
@@ -916,10 +924,12 @@ def task_oauth_rotator_tick() -> None:
     could not prevent the daemon-vs-manual race. The daemon is already a singleton,
     so there is no daemon-vs-daemon race for a wrapper lock to guard anyway.
 
-    TRDD-GXXKAGY6: when this run was SCHEDULED by a wedge trigger (`_consume_rotator_tick_request`
-    sets `JANITOR_ROTATOR_WEDGE_TICK=1` around `task.run()`), the subprocess env carries it so
-    cmd_auto treats the live 429 as already debounced (see rotator.wedge_tick_requested for the
-    heuristic). A beat-scheduled run leaves it unset, so the ordinary path is byte-identical.
+    TRDD-GXXKAGY6: when this run was SCHEDULED by a wedge trigger (`_RotatorTickThread` marks
+    `_thread_state.wedge_tick` around `task.run()`), the rotator subprocess gets
+    `JANITOR_ROTATOR_WEDGE_TICK=1` in its OWN env (`_run_workload(env=...)`), never in os.environ,
+    which every daemon thread shares (TRDD-PAHO6KWK). cmd_auto then treats the live 429 as already
+    debounced (see rotator.wedge_tick_requested for the heuristic). A beat-scheduled run leaves it
+    unset, so the ordinary path is byte-identical.
     """
     if not oauth_supervisor.opt_in_present():
         return  # rotator not activated on this machine -> silent no-op
@@ -933,9 +943,14 @@ def task_oauth_rotator_tick() -> None:
     # ZKXQXHBI read. Session-context reads are untouched (they never set HEADLESS).
     if os.environ.get("JANITOR_ROTATOR_DAEMON_PRIMARY_READ", "").strip() != "1":
         os.environ["JANITOR_ROTATOR_HEADLESS"] = "1"
+    # TRDD-PAHO6KWK: the wedge flag rides ONLY in the rotator subprocess's own env. os.environ
+    # is shared by every daemon thread, so writing it there leaked the flag into other threads'
+    # subprocesses and mutated the environment under concurrent forks.
+    wedge_env = {"JANITOR_ROTATOR_WEDGE_TICK": "1"} if getattr(_thread_state, "wedge_tick", False) else None
     tick_result = _run_workload(
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,
+        env=wedge_env,
     )
     _log_rotator_tick_result(tick_result)
     # TRDD-NACCL0CB, second incident 2026-09-02 21:41-21:47: the rotator switched at 21:41:03
@@ -3441,15 +3456,17 @@ class _RotatorTickThread(threading.Thread):
             if not (wedge or self._task.is_due()):
                 continue
             self._wedge.clear()
-            if wedge:
-                # Process-global env, set around the tick only; the sole other
-                # subprocess spawner racing it is the main loop's bulk-lane Popen, whose
-                # children never read this variable.
-                os.environ["JANITOR_ROTATOR_WEDGE_TICK"] = "1"
+            # TRDD-PAHO6KWK: the wedge context is marked on this thread only. It used to be
+            # os.environ["JANITOR_ROTATOR_WEDGE_TICK"], but os.environ is shared by every
+            # daemon thread: any subprocess another thread spawned meanwhile inherited the flag,
+            # and mutating the environment while another thread forks is not thread-safe.
+            # `task_oauth_rotator_tick` (run on this thread) reads the mark and hands the flag
+            # to the rotator subprocess alone.
+            _thread_state.wedge_tick = wedge
             try:
                 self._task.run()
             finally:
-                os.environ.pop("JANITOR_ROTATOR_WEDGE_TICK", None)
+                _thread_state.wedge_tick = False
 
 
 def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
@@ -3462,8 +3479,9 @@ def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
     cannot stop rotation (2026-10-03). Clear-before-signal, same shape as
     `_consume_version_update_request` (TRDD-Y9KM5RCJ): the flag is cleared first, a wedged
     pane that persists re-signals on the next detection pass. The wedge context rides to the
-    rotator SUBPROCESS as `JANITOR_ROTATOR_WEDGE_TICK=1` (the env var is the only channel
-    that crosses the subprocess boundary), set around the thread's `task.run()` — see
+    rotator SUBPROCESS as `JANITOR_ROTATOR_WEDGE_TICK=1` in that subprocess's own env only
+    (never the shared os.environ, TRDD-PAHO6KWK): the thread marks it on `_thread_state` around
+    its `task.run()` and `task_oauth_rotator_tick` passes it to `_run_workload` — see
     `_RotatorTickThread`. Gated by the caller on the task NOT being yielded to the
     ai-maestro server. Returns True iff a request was consumed."""
     if not gs.rotator_tick_requested_present():
