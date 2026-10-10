@@ -4,7 +4,7 @@ title: The memory chore agent runs on Haiku 5.5 with the 1M context at medium ef
 column: testing
 status: tasked
 created: 2026-10-10T20:28:20+0200
-updated: 2026-10-11T01:16:21+0200
+updated: 2026-10-11T01:16:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -15,6 +15,7 @@ assignee: main-agent@ai-maestro-janitor
 approved: true
 approval-judge: user
 approval-datetime: 2026-10-10T20:28:31+0200
+implementation-commits: [d005e6ea, 5dcb60c2, 238c1ac5]
 ---
 
 # The memory chore agent runs on Haiku 5.5 with the 1M context at medium effort instead of Sonnet
