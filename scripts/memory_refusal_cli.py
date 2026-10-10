@@ -81,9 +81,9 @@ def main() -> int:
         # A consolidate key is matched pair-wise (group_has_unjudged_pair): a one-page key contains
         # no pair, so it is inert. One-page keys recorded 2026-10-06 and 2026-10-10 left the same
         # group listed for re-dispatch (~200k tokens a pass) while this CLI reported success
-        # (TRDD-K5F7US68). The same page given twice is still one page (candidate_key does not
-        # dedup, so a.md|a.md would be recorded and cover no pair).
-        if args.intervention == "consolidate" and len(set(pages)) < 2:
+        # (TRDD-K5F7US68). Pages are compared resolved, so the same page given twice or spelled
+        # two ways is still one page (candidate_key does not dedup).
+        if args.intervention == "consolidate" and len({p.resolve() for p in pages}) < 2:
             print(
                 "REFUSED: a consolidate refusal must name every page of the judged pair or group "
                 "in ONE call (repeat --page); a one-page key matches no pair and stops nothing"

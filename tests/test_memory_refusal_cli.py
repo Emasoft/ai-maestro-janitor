@@ -49,6 +49,16 @@ def test_same_page_twice_consolidate_refusal_is_refused_and_not_recorded(tmp_pat
     assert memory_refusals.read("consolidate", "LOCAL", tmp_path) == {}
 
 
+def test_same_page_spelled_two_ways_consolidate_refusal_is_refused_and_not_recorded(tmp_path):
+    """The same page spelled a.md and sub/../a.md is still one page: exit 2, REFUSED, ledger empty."""
+    _page(tmp_path, "a.md")
+    (tmp_path / "sub").mkdir()
+    proc = _record(tmp_path, "consolidate", "a.md", "sub/../a.md")
+    assert proc.returncode == 2
+    assert proc.stdout.startswith("REFUSED:")
+    assert memory_refusals.read("consolidate", "LOCAL", tmp_path) == {}
+
+
 def test_two_page_consolidate_refusal_is_recorded(tmp_path):
     """Positive control: two --page values record one key naming both pages."""
     _page(tmp_path, "a.md")

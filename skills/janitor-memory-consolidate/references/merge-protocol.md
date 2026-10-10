@@ -401,14 +401,14 @@ when ANY named page's bytes change, and again after 7 days. So a wrong "no" cost
 most one cycle, while a right one stops costing anything.
 
 `--reason` is the deliverable, not a formality: the next reader must be able to
-re-check your judgement from it without re-reading both pages.
+re-check your judgement from it without re-reading the named pages.
 
 The invocation, shown for a pair (add one --page per further page of the group):
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
   --intervention consolidate --scope <LOCAL|PROJECT|USER> --root <memdir> \
-  --page <A>.md --page <B>.md --reason "<why A and B do NOT merge>"
+  --page <A>.md --page <B>.md --reason "<why the named pages do NOT merge>"
 ```
 
 ## Candidate selection details
