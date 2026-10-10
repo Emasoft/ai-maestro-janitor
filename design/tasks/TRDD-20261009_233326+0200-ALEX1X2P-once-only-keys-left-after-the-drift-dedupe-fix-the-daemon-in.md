@@ -4,7 +4,7 @@ title: Once-only keys left after the drift dedupe fix — the daemon inbox error
 column: todo
 status: tasked
 created: 2026-10-09T23:33:26+0200
-updated: 2026-10-09T23:33:26+0200
+updated: 2026-10-11T00:52:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Follow-up of TRDD-37H7QFSF (closed 2026-10-09), which bounded the dispatcher's o
 ## Approval log
 
 - 2026-10-09T23:33:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Findings
+
+2026-10-11 00:52 (clock). READ IN CODE by the main session, nothing built (git log on scripts/detectors/oauth-login-needed.py run first: last change cc8ce274, not about its keys). (a) THE MISSING TEST AS WORDED WOULD BE WRONG: of the six names in dispatch._SELF_DEDUPING_DETECTORS, five call dedupe.emit_forget (host-load, oauth-login-needed, stale-index-lock, system-daemon-runaway, trdd-cross-card-blindspot); memgrep-binary-stale does not and needs none, since its key is (reason, stamp, installed sha), so a new occurrence has a new key (its own comment at line 146 says so). The existing test (tests/test_dispatch_phases.py, test_every_self_deduping_detector_is_on_the_roster_and_uses_emit_once) checks the roster and the word emit_once only. A correct test: each name either calls emit_forget or is on a short list of detectors whose key changes with the occurrence, each with its reason. (b) Item 2 confirmed: oauth-login-needed.py lines 288, 342 and 452 use keys due-<day>-<sig>, stalled-<day>-<sig2>, topup-<day> with no forget; its one emit_forget (line 226) serves another key. Whether a same-day repeat is wanted is still undecided. (c) Items 1 and 3 not looked at. Card stays in todo.
