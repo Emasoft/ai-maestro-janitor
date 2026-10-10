@@ -5,7 +5,7 @@ description: "REPAIR — the autonomous page-shape / metadata fixer for the memo
 
 # Janitor memory — REPAIR (page-shape / metadata backfill)
 
-You run as a dedicated background Sonnet agent — the whole pass runs in your own
+You run as a dedicated background Haiku agent — the whole pass runs in your own
 context, and you return only a one-line result + the report path. REPAIR
 completes/corrects ONE malformed wikimem page at a time, in place, additive and
 structural only. Full execution-context rationale and the additive-vs-editorial

@@ -1,6 +1,6 @@
 """Structural + wiring tests for the janitor-security-agent (TRDD-f12cae1a).
 
-The agent is the SINGLE security curator — one opus agent that loads every
+The agent is the SINGLE security curator — one haiku agent that loads every
 security SKILL and detects + fixes. These tests pin its contract so a
 regression (a skill dropped from the list, a skill dir deleted, the fail-safe
 policy reworded away, the heartbeat wiring removed) fails the plugin's own
@@ -50,10 +50,10 @@ def test_agent_file_exists() -> None:
 
 
 def test_agent_identity_and_model() -> None:
-    """It is named janitor-security-agent and runs on opus at high effort."""
+    """It is named janitor-security-agent and runs on haiku[1m] at high effort."""
     fm = _frontmatter()
     assert fm["name"] == "janitor-security-agent"
-    assert fm["model"] == "opus"
+    assert fm["model"] == "haiku[1m]"
     assert fm["effort"] == "high"
 
 

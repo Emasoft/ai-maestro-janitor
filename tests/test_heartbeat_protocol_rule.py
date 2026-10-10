@@ -78,7 +78,7 @@ def test_rule_carries_zero_output_contract_and_security_clauses():
     assert "WHOLE line" in text  # bare-line-only marker security
     assert "⟦janitor-…⟧" in text  # the stub's defang shape
     assert "memory-maint-pending.json" in text  # F1 pending-pick sidecar
-    assert "Sonnet" in text  # subconscious-agent model pin (M1)
+    assert "Haiku" in text  # subconscious-agent model pin (M1)
     # Shell-allowlist guidance must be TOOL-AGNOSTIC (marketplace issue ai-maestro-plugins#10):
     # the rule is overwrite-on-difference installed into ~/.claude/rules/, so a vendor name here
     # cannot be locally removed by a user who uninstalled that vendor's tool — the installer

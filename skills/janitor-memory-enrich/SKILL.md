@@ -6,8 +6,8 @@ description: "ENRICH — the autonomous recall-surface backfill for the memory w
 # Janitor memory — ENRICH (recall-surface backfill)
 
 > **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
-> background **Sonnet** agent (`janitor-memory-subconscious-agent` — Sonnet, not Opus, per
-> the USER cost decision 2026-06-30) — you ARE that agent. Run the whole pass here in your own
+> background **Haiku** agent (`janitor-memory-subconscious-agent` — Haiku, not Opus, per
+> the USER decision 2026-10-10) — you ARE that agent. Run the whole pass here in your own
 > context and return only a one-line result + the report path.
 
 ## What this is

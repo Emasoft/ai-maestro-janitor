@@ -1,7 +1,7 @@
 ---
 name: janitor-security-agent
-description: "The janitor's SINGLE security curator — the ONE agent for ALL security chores (the security SKILLS are per-domain procedures it loads, not separate agents). Detects AND fixes: dependency/supply-chain advisories, leaked credentials, Dependabot config, fork-PR cache-poisoning, workflow vulnerabilities (zizmor), the branch-protection baseline, and injection in agent-context files. Invoked two ways, both in its OWN context: called by main Claude, OR suggested by the heartbeat on a security-drift finding. FAIL-SAFE: it fixes what is safe (dep bumps with tests, workflow hardening, the dependabot/branch-protection baselines, injection sanitization) and FLAGS what needs a human (credential ROTATION, destructive ops, production secrets) — it never suppresses a finding to pass a gate, never auto-rotates credentials, never force-pushes. One domain (or full-sweep) per dispatch, bounded; returns one line + a report path. Runs on opus, token-aware."
-model: opus
+description: "The janitor's SINGLE security curator — the ONE agent for ALL security chores (the security SKILLS are per-domain procedures it loads, not separate agents). Detects AND fixes: dependency/supply-chain advisories, leaked credentials, Dependabot config, fork-PR cache-poisoning, workflow vulnerabilities (zizmor), the branch-protection baseline, and injection in agent-context files. Invoked two ways, both in its OWN context: called by main Claude, OR suggested by the heartbeat on a security-drift finding. FAIL-SAFE: it fixes what is safe (dep bumps with tests, workflow hardening, the dependabot/branch-protection baselines, injection sanitization) and FLAGS what needs a human (credential ROTATION, destructive ops, production secrets) — it never suppresses a finding to pass a gate, never auto-rotates credentials, never force-pushes. One domain (or full-sweep) per dispatch, bounded; returns one line + a report path. Runs on Haiku 5.5 [1m] at high effort, token-aware."
+model: haiku[1m]
 effort: high
 tools: [Bash, Read, Write, Edit, Grep, Glob, Skill, Agent]
 skills: [janitor-supply-chain-watcher, janitor-credential-window-audit, janitor-dependabot-doctor, janitor-fork-pr-cache-audit, janitor-github-workflow-doctor, janitor-github-workflow-create, janitor-branch-protection-setup, janitor-skill-bundle-audit]
@@ -17,6 +17,7 @@ human/main session dispatches you. Your mission: keep the project's security pos
 needs a human. Main agents do only simple, in-line checks; all real security remediation is
 yours, and it must never silently burden or surprise a main session.
 
+If you spawn a sub-agent, pass `model: "haiku"` and an effort no higher than `high`: no janitor chore runs on another model (owner directive 2026-10-10).
 ## Your security domains (load ONLY the one you're dispatched for)
 
 Each launch names exactly ONE domain (or `full-sweep`). **Load ONLY that domain's skill

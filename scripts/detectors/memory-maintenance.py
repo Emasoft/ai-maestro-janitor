@@ -11,21 +11,21 @@ deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron tur
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
 only EMITS one of eight bare markers:
 
-    [janitor-memory-split]        → dispatch a background Sonnet agent: /janitor-memory-split
-    [janitor-memory-repair]       → dispatch a background Sonnet agent: /janitor-memory-repair
-    [janitor-memory-atomize]      → dispatch a background Sonnet agent: /janitor-memory-atomize
-    [janitor-memory-harvest]      → dispatch a background Sonnet agent: /janitor-memory-harvest
-    [janitor-memory-retro-lesson] → dispatch a background Sonnet agent: /janitor-memory-retro-lesson
-    [janitor-memory-consolidate]  → dispatch a background Sonnet agent: /janitor-memory-consolidate
-    [janitor-memory-conflict]     → dispatch a background Sonnet agent: /janitor-memory-conflict
-    [janitor-memory-enrich]       → dispatch a background Sonnet agent: /janitor-memory-enrich
+    [janitor-memory-split]        → dispatch a background Haiku agent: /janitor-memory-split
+    [janitor-memory-repair]       → dispatch a background Haiku agent: /janitor-memory-repair
+    [janitor-memory-atomize]      → dispatch a background Haiku agent: /janitor-memory-atomize
+    [janitor-memory-harvest]      → dispatch a background Haiku agent: /janitor-memory-harvest
+    [janitor-memory-retro-lesson] → dispatch a background Haiku agent: /janitor-memory-retro-lesson
+    [janitor-memory-consolidate]  → dispatch a background Haiku agent: /janitor-memory-consolidate
+    [janitor-memory-conflict]     → dispatch a background Haiku agent: /janitor-memory-conflict
+    [janitor-memory-enrich]       → dispatch a background Haiku agent: /janitor-memory-enrich
 
 The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
 spawn agents — the "a python detector cannot spawn agents, only the main loop can"
 contract holds through CC 2.1.181. (TRDD-b4b9e27c STATE block.) Per TRDD-aebedbff the
 cron turn does NOT run the editorial pass in its own context: it spawns exactly ONE
-background Sonnet agent (Agent tool, run_in_background — pinned to Sonnet per the
-USER cost decision 2026-06-30) that reads & executes the matching
+background Haiku agent (Agent tool, run_in_background — pinned to Haiku per the
+USER decision 2026-10-10) that reads & executes the matching
 `janitor-memory-<name>` skill on the due scope and returns, fire-and-forget — so the
 complex, verify-gated pass never burdens whatever main session fired the heartbeat.
 

@@ -5,7 +5,7 @@ description: CONFLICT + fact-verify executor — reconciles contradictory or obs
 
 # Janitor memory — CONFLICT + fact-verify executor
 
-You run as a dedicated background Sonnet agent — the whole pass runs in your own
+You run as a dedicated background Haiku agent — the whole pass runs in your own
 context, and you return only a one-line result + the report path. It reconciles
 contradictory/obsolete memory pages via DEMOTE (default) or DELETE (rare,
 hard-gated). Full execution-context rationale and the DEMOTE/DELETE overview:

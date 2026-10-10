@@ -5,7 +5,7 @@ description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes a
 
 # Janitor memory — CONSOLIDATE (MERGE executor)
 
-You run as a dedicated background Sonnet agent — the whole pass runs in your own
+You run as a dedicated background Haiku agent — the whole pass runs in your own
 context, and you return only a one-line result + the report path. It fuses two
 same-subject, same-type/tier memory notes into one page through the memgrep write
 verbs, never losing a fact. Full execution-context rationale and the MERGE
