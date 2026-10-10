@@ -1719,11 +1719,12 @@ def relocate_survey_then_create(
     judgment (UNSURE → local per the memory rule); this function only forwards it.
 
     Returns `(created, destination)`: `(True, <new page>)` when a page was minted;
-    `(False, <existing page>)` when the survey found the topic already owned; and
-    `(False, None)` when memgrep is missing or fails — fail CLOSED, the same shape as
-    `enrich_pages`/`relocate_lesson_findings`: an agent with no binary can neither
-    verify the survey nor trust a page it could not have validated, so creation must
-    not happen at all.
+    `(False, <existing page>)` when the survey found the topic already owned, including
+    when another agent created the page between the survey and the mint (the verb
+    refuses, one re-survey finds it); and `(False, None)` when memgrep is missing or
+    fails — fail CLOSED, the same shape as `enrich_pages`/`relocate_lesson_findings`:
+    an agent with no binary can neither verify the survey nor trust a page it could
+    not have validated, so creation must not happen at all.
     """
     binary = memgrep_bin
     if binary is None:
@@ -1736,19 +1737,26 @@ def relocate_survey_then_create(
     if not binary or not roots:
         return False, None
 
-    survey = subprocess.run(  # noqa: S603 - resolved binary + explicit paths, no shell
-        [binary, "recall", topic, *[str(r) for r in roots],
-         "--output", "full", "--no-notes"],
-        capture_output=True, text=True, timeout=60, check=False,
-    )
-    if survey.returncode != 0:
+    def survey() -> tuple[bool, Path | None]:
+        """(recall ran, hit page or None). A hit — under ANY name, in ANY scope — is
+        the destination; never mint a near-synonym page (the failure duty 10 undoes)."""
+        res = subprocess.run(  # noqa: S603 - resolved binary + explicit paths, no shell
+            [binary, "recall", topic, *[str(r) for r in roots],
+             "--output", "full", "--no-notes"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        if res.returncode != 0:
+            return False, None
+        for ln in res.stdout.splitlines():
+            if _RECALL_HIT_RE.match(ln):
+                return True, Path(ln.split(" — ", 1)[0].split("#", 1)[0])
+        return True, None
+
+    ran, hit = survey()
+    if not ran:
         return False, None
-    for ln in survey.stdout.splitlines():
-        m = _RECALL_HIT_RE.match(ln)
-        if m:
-            # A hit — under ANY name, in ANY scope — is the destination. Never mint a
-            # near-synonym page: that is the exact failure duty 10 exists to undo.
-            return False, Path(ln.split(" — ", 1)[0].split("#", 1)[0])
+    if hit is not None:
+        return False, hit
     # Empty across all three roots → genuine absence → mint through the write verb.
     mint = subprocess.run(  # noqa: S603 - same resolved binary, no shell
         [binary, "new-mem-topic", "--tier", "component", "--scope", scope,
@@ -1756,7 +1764,11 @@ def relocate_survey_then_create(
         capture_output=True, text=True, timeout=60, check=False,
     )
     if mint.returncode != 0:
-        return False, None
+        # Survey-then-mint is not atomic: another agent can create the page in between.
+        # The verb's refuse-to-overwrite is what closes that race; a re-survey turns the
+        # refusal into the ordinary hit path. ONE retry only — a second empty survey means
+        # the refusal had another cause (TRDD-VIFQ1LKI).
+        return False, survey()[1]
     # The verb prints `wrote <path>`; resolve the destination from the scope roots it
     # derives, mirroring the verb's own derivation (`<scope root>/<name>.md`) so the
     # caller gets a real path even if the print format ever shifts.

@@ -2370,3 +2370,37 @@ def test_duty15_single_root_hit_still_suppresses_mint(tmp_path, monkeypatch):
     )
     assert created is False
     assert destination == existing
+
+
+def test_duty15_page_created_between_survey_and_mint_is_returned(tmp_path, monkeypatch):
+    """Race (TRDD-VIFQ1LKI): a page appearing after an empty survey makes the real
+    `new-mem-topic` refuse; one re-survey returns that page as `(False, page)`. The
+    shim only sequences the real binary: it creates the competing page right after the
+    first real `recall` has answered."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH is None:
+        pytest.skip("memgrep binary unavailable")
+    root = tmp_path / "local"
+    root.mkdir()
+    staged = _page15(tmp_path / "staged", "test-isolation")
+    shim = tmp_path / "memgrep-shim.sh"
+    shim.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = recall ] && [ ! -e "{tmp_path}/raced" ]; then\n'
+        f'  touch "{tmp_path}/raced"\n'
+        f'  "{MEMGREP_BIN_PATH}" "$@"; rc=$?\n'
+        f'  cp "{staged}" "{root}/test-isolation.md"\n'
+        "  exit $rc\n"
+        "fi\n"
+        f'exec "{MEMGREP_BIN_PATH}" "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    monkeypatch.setenv("WIKIMEM_LOCAL_SCOPE_PATH", str(root))
+    created, destination = mcp.relocate_survey_then_create(
+        "test-isolation", "local", [root], _DESC_15_PHRASES, memgrep_bin=str(shim),
+    )
+    assert created is False, "the refused mint must not report a creation"
+    assert destination is not None and destination.is_file()
+    assert destination == root / "test-isolation.md"
+    assert [p.name for p in root.iterdir()] == ["test-isolation.md"]
