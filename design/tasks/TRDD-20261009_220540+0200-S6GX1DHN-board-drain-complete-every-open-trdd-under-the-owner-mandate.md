@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-10T23:36:59+0200
+updated: 2026-10-10T23:37:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -102,6 +102,7 @@ KNOWN CONSTRAINTS: every paid account was at its usage limit at 2026-10-09 eveni
 2026-10-10 23:45. WAVE 23 CAP, checked before each card: at most 3 cards before 2026-10-11 03:00 local, by trddgrep next among todo cards; a card is taken only if its failure is in a retained log or readable in code today; git log on the files a card names before reading further; every earlier wave rule stands. WAVE 23 CARD 1, no code: TRDD-SUUDAXRT reproduced on a scratch corpus and moved to human_review with a draft issue. The cross-repo blocker has a legal spelling already (gh:owner/repo#N); removing a field is impossible and set stores a flag-shaped value as text; an archived card refuses every set, which settles the open point of TRDD-BIQELG5J. OWNER ITEM, new: post or drop the SUUDAXRT draft. FAULT: commit 1a3e6be4 was staged with one-card glob patterns, not literal file names; each matched one file and the tree was clean after, but the rule is literal names. Wave 23: 1 card of 3, none minted. NEXT: trddgrep next among todo cards. Nothing is pushed or published.
 2026-10-10 23:50. Review of 1a3e6be4 and cf3689c1 (0.32 million tokens): no blocker. Recorded in this commit: the 2O7JA0TG probe cannot see a gap that is still open (on that card, not cured); the SUUDAXRT draft gains the external-successor case of YXY992BN and two weakened claims. Also accepted: the VN2ASDKJ control proved the tick line format and not the 600 s branch, and where the words stopped ticking are logged was not read; SLFMG704 clears if I6ZZWVDN closes, so not fixable from this board holds for edits only. Wave 23: 1 card of 3 before 03:00. NEXT: trddgrep next among todo cards. Nothing is pushed or published.
 2026-10-11 00:10. Review of f9beb259 (0.32 million tokens): no blocker; its two points are on TRDD-VN2ASDKJ and TRDD-2O7JA0TG in this commit. WAVE 23 CARD 2, no code: TRDD-KPS76TQ3 read; a detector already removes an orphan lock but logs nothing durable, so the card now names a small build (one log line and one test) and stays in todo. Wave 23: 2 cards of 3 before 03:00, none minted, no code. The session context is about 0.34 million tokens: NEXT, after a clear, build KPS76TQ3 (one worker, tests first, full gate), then trddgrep next among todo cards (JEP2XFB1, UASBYABI, ALEX1X2P were next). Six owner decisions open: hook timeout (9TF9YXGB); the strict validator; a nudge while agents are alive; the ai-maestro audit issue; the BIQELG5J draft; the SUUDAXRT draft. Nothing is pushed or published.
+CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this session's lines on this card and on BIQELG5J, SUUDAXRT, KPS76TQ3, VN2ASDKJ and 2O7JA0TG (23:20 to 23:50, and 2026-10-11 00:10) were GUESSED by the main session, not read from a clock, and run up to 35 minutes ahead. The true times are the commit times: 1b3149a6, 1a3e6be4, cf3689c1, f9beb259 and 075e1f9c were all made between 23:17 and 23:37 on 2026-10-10 (git log). RULE: a dated line takes its time from the date command in the same call.
 
 ## Acceptance
 
