@@ -3927,28 +3927,48 @@ def _last_user_prompt_epoch() -> int | None:
     return _presence_last_input_epoch()
 
 
+
+# TRDD-W4IZA704: re-nudge an unchanged board that holds a `dev` card every 30 min, at most 4 times.
+_BOARD_NUDGE_REPEAT_S = 1800
+_BOARD_NUDGE_MAX_REPEATS = 4
+
+
 def _board_nudge_signature_changed(
     sd: Path, ids: frozenset[str], attn_signature: str = ""
 ) -> bool:
     """True iff the ZERO-pending-agent board fallback should nudge this fire: the `dev`/
     `todo` id set (keyed `"uid:column"`, F-4/TRDD-V3BQT7QE) differs from the last nudge,
-    the ATTENTION id set (`attn_signature`, from `_attention_summary()`) differs, or a
-    user prompt landed since (F-3, TRDD-V3BQT7QE).
+    the ATTENTION id set (`attn_signature`, from `_attention_summary()`) differs, a
+    user prompt landed since (F-3, TRDD-V3BQT7QE), or a `dev` card is open and the board
+    nudge is due again (TRDD-W4IZA704, below).
 
     WHY: with zero pending agents, `_board_has_workable_cards()` alone re-nudged on
     EVERY ~15-minute fire while a `todo`/`dev` card sat untouched because nobody could
     start it (needs a human, or the owner said "queue it") — 30+ turns overnight for a
-    board that never moved. This persists `{signature, prompt_epoch}` in one stamp file
-    so an unchanged board with an idle user nudges AT MOST ONCE; a user prompt strictly
-    newer than the stamped one resets the dedup even when the board itself did not move,
-    because the user re-engaging is itself a reason to re-anchor the nudge. The two id
-    sets are folded into one comparison key (`board-ids|attn=attn-signature`, F-4/
+    board that never moved. This persists `{signature, prompt_epoch, nudged_at, repeats}`
+    in one stamp file so an unchanged board with an idle user nudges ONCE; a user prompt
+    strictly newer than the stamped one resets the dedup even when the board itself did
+    not move, because the user re-engaging is itself a reason to re-anchor the nudge. The
+    two id sets are folded into one comparison key (`board-ids|attn=attn-signature`, F-4/
     TRDD-V3BQT7QE) so a card newly entering `blocked`/`human_review`/etc. re-arms the
     nudge even when the `dev`/`todo` set itself is unchanged — `human_review` is exactly
     the state where only a human moves the pipeline, and the whole point of the cue is to
     say so once. The caller passes the SAME `_attention_summary()` result it also uses to
     build the attention clause — this function never recomputes it. The pending-agent
     (non-zero) path is untouched — this only gates the zero-agent fallback.
+
+    REPEAT (TRDD-W4IZA704, owner 2026-10-10: the session idled over an open board). A card
+    in `dev` claims work in flight, so once-only was too quiet: when the id set holds at
+    least one `:dev` id, an unchanged board re-nudges once `_BOARD_NUDGE_REPEAT_S` have
+    passed since the last emitted board nudge, at most `_BOARD_NUDGE_MAX_REPEATS` times; a
+    signature change or a newer user prompt resets the count. The cap is the ONLY bound: a
+    long-lived `dev` card keeps the condition true forever, and unbounded it would bring
+    back the 30-turns-overnight case above. The cap is PER signature and prompt epoch, not
+    a total: a janitor-typed command (`/janitor-resume`, `/janitor-arm`) still stamps
+    presence, so a clear or a resume resets the count and opens up to four more repeats.
+    A `todo`-only board stays once-only. A stamp
+    without `nudged_at` (older format) is stamped "now" and does not nudge, so an upgrade
+    cannot cause an immediate repeat.
 
     `prompt_epoch` is sourced from the cross-plugin presence breadcrumb
     `last_user_input_epoch` (`_last_user_prompt_epoch`) — a janitor self-typed command can
@@ -3961,7 +3981,8 @@ def _board_nudge_signature_changed(
     # TRDD-LH84WTL5: one session per project root gets the board nudge. Asked BEFORE the stamp
     # is read or written, so a session that loses the lease cannot consume the stamp the
     # holder still needs in order to be re-nudged on its next board change.
-    if not _board_nudge_lease_acquire(sd, int(time.time())):
+    now = int(time.time())
+    if not _board_nudge_lease_acquire(sd, now):
         state.log_line(
             "dispatch", "keep-going: another session of this project holds the board nudge lease"
         )
@@ -3971,6 +3992,8 @@ def _board_nudge_signature_changed(
     prompt_epoch = _last_user_prompt_epoch()
     prev_signature: str | None = None
     prev_prompt_epoch: int | None = None
+    prev_nudged_at: int | None = None
+    prev_repeats = 0
     try:
         raw = json.loads(stamp_file.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
@@ -3978,6 +4001,10 @@ def _board_nudge_signature_changed(
             prev_signature = sig if isinstance(sig, str) else None
             pe = raw.get("prompt_epoch")
             prev_prompt_epoch = pe if isinstance(pe, int) and not isinstance(pe, bool) else None
+            na = raw.get("nudged_at")
+            prev_nudged_at = na if isinstance(na, int) and not isinstance(na, bool) else None
+            rp = raw.get("repeats")
+            prev_repeats = rp if isinstance(rp, int) and not isinstance(rp, bool) else 0
     except (OSError, ValueError):
         pass
     first_time = prev_signature is None
@@ -3986,14 +4013,31 @@ def _board_nudge_signature_changed(
         prev_prompt_epoch is None or prompt_epoch > prev_prompt_epoch
     )
     changed = first_time or signature_changed or prompt_advanced
-    if changed:
-        try:
-            state.atomic_write(
-                stamp_file, json.dumps({"signature": signature, "prompt_epoch": prompt_epoch})
-            )
-        except OSError:
-            pass
-    return changed
+    nudge = changed
+    stamp = {
+        "signature": signature,
+        "prompt_epoch": prompt_epoch,
+        "nudged_at": now,
+        "repeats": 0,
+    }
+    if not changed:
+        # Unchanged board: only a `dev` card can earn a repeat (see REPEAT in the docstring).
+        stamp["prompt_epoch"] = prev_prompt_epoch
+        stamp["repeats"] = prev_repeats
+        if not any(i.endswith(":dev") for i in ids):
+            return False
+        if prev_nudged_at is None:
+            pass  # old-format stamp: write nudged_at=now below, no nudge
+        elif now - prev_nudged_at >= _BOARD_NUDGE_REPEAT_S and prev_repeats < _BOARD_NUDGE_MAX_REPEATS:
+            stamp["repeats"] = prev_repeats + 1
+            nudge = True
+        else:
+            return False
+    try:
+        state.atomic_write(stamp_file, json.dumps(stamp))
+    except OSError:
+        pass
+    return nudge
 
 _BOARD_NUDGE_LEASE_FILE = "keep-going-board-nudge-lease.json"
 # Three missed ~15-minute heartbeats: long enough that a holder merely between fires keeps
@@ -4245,6 +4289,9 @@ def _phase_keep_going_nudge() -> None:
     for extra in (_board_summary_bit(), _open_issues_bit(), _uncommitted_work_bit()):
         if extra:
             bits.append(extra)
+    if agent_total == 0:
+        # TRDD-W4IZA704: zero-agent board nudge; the session may be waiting on a background run.
+        bits.append("if you are waiting on a background run, pull the next card meanwhile (trddgrep next)")
     # The ATTENTION clause (TRDD-1PDCPIZC, USER 2026-09-03) is GATED, unlike the two above —
     # it would otherwise dominate every single nudge on a board that has any blocked card at
     # all. Gating is by cadence (every Nth fire) OR by a genuine change in which cards need

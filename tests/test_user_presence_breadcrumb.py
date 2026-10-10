@@ -172,6 +172,33 @@ def test_a_marker_buried_PAST_the_scan_window_is_treated_as_user_input(tmp_path)
     assert _breadcrumb_path(home).exists()                  # treated as genuine input
 
 
+
+def test_task_notification_prompt_does_not_create_breadcrumb(tmp_path):
+    """A harness-delivered `<task-notification>` is not the owner typing — no breadcrumb (TRDD-W4IZA704)."""
+    home = tmp_path / "home"
+    rc, _out, _err = _run_hook("<task-notification>\n<task-id>x</task-id>\n<status>completed</status>\n</task-notification>", home)
+    assert rc == 0
+    assert not _breadcrumb_path(home).exists()
+
+
+def test_system_notification_wrapped_task_notification_does_not_create_breadcrumb(tmp_path):
+    """A `[SYSTEM NOTIFICATION - NOT USER INPUT]` wrapper around a task-notification stamps no presence."""
+    home = tmp_path / "home"
+    prompt = "[SYSTEM NOTIFICATION - NOT USER INPUT]\nA background task finished.\n\n<task-notification>\n<task-id>x</task-id>\n</task-notification>"
+    rc, _out, _err = _run_hook(prompt, home)
+    assert rc == 0
+    assert not _breadcrumb_path(home).exists()
+
+
+def test_prompt_merely_mentioning_task_notification_late_still_creates_breadcrumb(tmp_path):
+    """An ordinary prompt that mentions task-notification only on its 8th line is genuine input."""
+    home = tmp_path / "home"
+    prompt = "\n".join(["human line"] * 7 + ["<task-notification> is what I am asking about"])
+    rc, _out, _err = _run_hook(prompt, home)
+    assert rc == 0
+    assert _breadcrumb_path(home).exists()
+
+
 # --------------------------------------------------------------------------
 # (c) heartbeat refresh updates written_at_epoch, leaves last_user_input_epoch
 # --------------------------------------------------------------------------

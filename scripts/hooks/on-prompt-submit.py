@@ -91,9 +91,16 @@ def _is_cron_marker(prompt: str) -> bool:
     Trade-off accepted: a human prompt that begins one of its first few lines with
     `[janitor-` is read as a cron fire and does not stamp presence. That is one turn of lost
     recency, self-inflicted, and the offset-0 version had the same hazard at line 0.
+
+    A harness-delivered `<task-notification>` (or its `[SYSTEM NOTIFICATION` wrapper) is not
+    the owner either (TRDD-W4IZA704): it stamped presence on every background completion and
+    so reset the 600 s owner mute of the keep-going nudge. The trade-off above widens with
+    it: a human prompt that quotes one of these two prefixes in its first few lines (a pasted
+    log) stamps no presence and records no intent for that turn. Same shapes the sibling hook
+    on-prompt-submit-autorecall.py skips (janitor#326).
     """
     for line in prompt.splitlines()[:_CRON_MARKER_SCAN_LINES]:
-        if line.strip().startswith("[janitor-"):
+        if line.strip().startswith(("[janitor-", "<task-notification>", "[SYSTEM NOTIFICATION")):
             return True
     return False
 
