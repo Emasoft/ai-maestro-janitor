@@ -1,10 +1,10 @@
 ---
 trdd-id: Y2NM51KE
 title: The memory chore agent runs on Haiku 5.5 with the 1M context at medium effort instead of Sonnet
-column: dev
+column: testing
 status: tasked
 created: 2026-10-10T20:28:20+0200
-updated: 2026-10-10T21:08:07+0200
+updated: 2026-10-11T00:41:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -24,6 +24,7 @@ Owner directive, 2026-10-10, verbatim: 'why the memory chores subagents are stil
 ## Approval log
 - 2026-10-10T20:28:31+0200 — APPROVED by user (min-approval-requirement: user). the owner gave this directive himself on 2026-10-10; quoted verbatim in the body.
 - 2026-10-10T20:28:32+0200 — column → dev. being built now
+- 2026-10-11T00:41:06+0200 — column → testing. built on d005e6ea, gate green; boxes 2 and 3 wait on the validator decision and a release
 
 ## Second owner directive
 
@@ -33,6 +34,7 @@ Owner directive, 2026-10-10, verbatim: 'why the memory chores subagents are stil
 2026-10-10 20:58 OWED CORRECTIONS BUILT: memory agent frontmatter effort high; rule row wording with the parenthesis and the colon before CLAIM; blank line in the security agent; both agents say a spawned sub-agent has the standard context; project memory page janitor-skills-and-agents-roster corrected. Strict validator still without verdict.
 2026-10-10 21:00 STRICT VALIDATOR, CAUSE OF THE FAILURE READ IN ITS CODE AND REPRODUCED (reports/board/strict-validate-rerun-2125.txt, exit 2; the file name carries a wrong time, it ran at about 20:59). Run through uvx, the validator's own root is the site-packages directory of uv's environment; no plugin.json is there, so its version is unknown; it then asks GitHub for the manifest of the branch 'main', which answers 404 because the validator repository's default branch is 'master'; it falls back to the cached file ~/.cache/cpv/github-manifest-vmain.json (created 2026-10-06 16:06, byte-identical to the v5.22.0 manifest) and compares it with site-packages, where none of those files exist: 3446 mismatches, exit 2, before this plugin is looked at. PROVEN by a probe with an empty cache directory: the same check prints 'could not fetch' and returns True, so a pass of this check under uvx means NOT VERIFIED, never verified. NOT EXPLAINED: the cached file has existed since 2026-10-06, yet the releases of 2026-10-07 and the run of 20:03 today passed. This is a defect of the validator (three parts: the branch name, a root that can never match under uvx, a stale-cache fallback), not of this plugin; nothing was moved, deleted or bypassed. Acceptance box 2 stays open; a publish is blocked by it until the owner decides (see the session reply).
 2026-10-10 21:08 FROM THE REVIEW OF 5dcb60c2, accepted as limits: (a) 3446 mismatches against a manifest of 1291 entries: about 2155 must be files of site-packages reported as added; not counted separately. The cause as written explains why the check fails now, not why it passed before, so it is an incomplete account. (b) effort high as the default costs more wherever a per-spawn effort is ignored (repair and enrich would run at high); cost, not correctness. (c) 'a sub-agent gets the standard context' is read off the Agent tool's model option list, not observed. (d) The rule row tells the dispatcher to pass an effort; that the Agent tool honours it for a plugin agent is still not established. (e) OWED: the roster memory page keeps the old sonnet and opus sentence in its atom body and its description names no model question; extend the description through a memgrep verb. (f) Full suite, mypy and pyright not run on 5dcb60c2; they run in the gate of the next code commit.
+2026-10-11 00:41 (clock). OWED ITEM (e) DONE: the body of ATOM-NH7H-YPR8 on the PROJECT memory page janitor-skills-and-agents-roster still read 'Memory agent model sonnet, security agent model opus' beside the lesson that supersedes it; that one sentence now states haiku[1m] at effort high for all three chore agents (frontmatter of the three files in agents/ re-read by the main session at this time). The page description already carried the model question ('how many janitor agents are there and what model do they use'), so that half of (e) needed no change. The atom's title still says 'Agents(2)' and describes two agents; the repair agent is not described on that page, left for a memory pass. COLUMN: moved from dev to testing, since nothing is being built: the code is on d005e6ea with a green gate; Acceptance box 2 waits on the strict validator (owner decision), box 3 on a release.
 
 ## Acceptance
 

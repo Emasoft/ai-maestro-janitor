@@ -79,7 +79,7 @@ session, and had to be corrected for exactly that bias.
 have to squint at is being used as a rationalisation.
 
 
-^ATOM-04A3-Y4N5 [desc: "measured across a 4-fork chain 2026-09-05: 3 of 4 forks found their sharpest defect in the PREVIOUS fork's remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-10-10]
+^ATOM-04A3-Y4N5 [desc: "measured across one review chain 2026-09-05: every fork that had a prior remediation to review (4 of 4) found its sharpest defect in that remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-10-10]
 **Remediation is the least-reviewed work in any correction chain, and measurably the buggiest.**
 Across one session's review chain (2026-09-05), **every fork that HAD a prior remediation to
 review found its sharpest defect IN it** rather than in the original work — 4 of 4, listing the

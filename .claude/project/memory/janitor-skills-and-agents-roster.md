@@ -14,8 +14,7 @@ publish-globally: false
 # janitor-skills-and-agents-roster
 
 
-^ATOM-NH7H-YPR8 [desc:"Agents(2), Tests, and Design docs sections verbatim: the two single-curator agents (memory + security), the pytest test suite conventions, and where TRDDs live", keywords: the_two_agents_janitor-memory-subconscious-agent_janitor-security-agent single_curator_agent_per_domain tests_directory_pytest_per_pattern_lib design_docs_TRDDs_location how_many_janitor_agents_are_there memory_agent_uses_sonnet_security_agent_uses_opus security_agent_hint_is_visible_not_a_silent_marker one_agent_per_domain_never_one-agent-per-task where_do_janitor_tests_actually_live real_no_mocks_isolate_global_state_via_env_vars where_do_janitor_tests_and_trdds_live memory_agent_cost_decision_2026-06-30 both_agents_run_at_effort_high, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
-
+^ATOM-NH7H-YPR8 [desc: "Agents(2), Tests, and Design docs sections verbatim: the two single-curator agents (memory + security), the pytest test suite conventions, and where TRDDs live", keywords: the_two_agents_janitor-memory-subconscious-agent_janitor-security-agent single_curator_agent_per_domain tests_directory_pytest_per_pattern_lib design_docs_TRDDs_location how_many_janitor_agents_are_there memory_agent_uses_sonnet_security_agent_uses_opus security_agent_hint_is_visible_not_a_silent_marker one_agent_per_domain_never_one-agent-per-task where_do_janitor_tests_actually_live real_no_mocks_isolate_global_state_via_env_vars where_do_janitor_tests_and_trdds_live memory_agent_cost_decision_2026-06-30 both_agents_run_at_effort_high, type: project, ocd: 2026-08-02, lmd: 2026-10-10]
 **Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
 many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one
 line + a report. `janitor-memory-subconscious-agent` (Wikimem editorial: consolidate/
@@ -24,7 +23,7 @@ split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` v
 skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via
 `security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since
 security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`).
-Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `model: opus`; both `effort: high`.
+Since 2026-10-10 (owner directive, TRDD-Y2NM51KE) every chore agent in `agents/` (memory, security, and the repair agent this paragraph does not describe) is `model: haiku[1m]`, `effort: high`; the heartbeat rule passes a per-chore effort for memory chores, never above high. Read the agent frontmatter for the current values.
 
 **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
 (`test_marketplace_lock`, `test_rules_installer`, …). (`test_marketplace_refresh_daemon_stale`
