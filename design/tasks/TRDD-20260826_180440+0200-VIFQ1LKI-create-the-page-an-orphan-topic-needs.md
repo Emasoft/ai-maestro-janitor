@@ -3,7 +3,7 @@ trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
 column: testing
 created: 2026-08-26T18:04:40+0200
-updated: 2026-10-10T09:16:19+0200
+updated: 2026-10-10T09:18:56+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -15,7 +15,7 @@ parent-trdd: 87RKBYJ8
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [91cd5534, be4e8fc4, 6ab9618e]
+implementation-commits: [91cd5534, be4e8fc4, 6ab9618e, ee149708]
 relevant-rules: []
 pre-block-column: 
 status: tasked
@@ -48,7 +48,7 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 
 ## Acceptance
 
-- [ ] Page creation requires a recorded 3-root survey showing no existing page owns the topic
+- [x] Page creation requires a recorded 3-root survey showing no existing page owns the topic
 - [x] The new page is minted through the write verbs with correct scope routing (UNSURE → LOCAL)
       and a `description:` carrying the SYMPTOM phrasings, not the jargon of the subject
 - [x] The moved atom arrives via QDYQLM5V's verified two-page move — this card mints the target,
@@ -75,3 +75,4 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 2026-10-10 08:58: 6ab9618e, from the review of be4e8fc4. GATE GREEN on be4e8fc4: ruff, mypy, pyright exit 0; 18282 passed, 2 skipped (reports/board/gate-be4e8fc4.txt); the gate on 6ab9618e writes reports/board/gate-6ab9618e.txt and had not reported when this was written. THE RACE IS NARROWED, NOT CLOSED: the mint is refused by page NAME and the re-survey matches by TOPIC, so a same-name page the topic query does not match still returns (False, None) and the caller records a refusal. Closing it would need the refused path taken from the verb's own output, which nobody has read; left open here, not carded. The race test now asserts the verb sequence recall, new-mem-topic, recall (it could pass before without the retry being reached); the main session re-ran the five duty-15 tests after reading the diff (5 passed) and the worker ran the race test five times in a row (5 passed). The competing page in that test is a hand-written valid page, not one minted by the verb. BOX STATE, corrected: the line of 2026-09-29 says boxes 1 to 4 were ticked by evidence, but all five boxes were unticked in the file today. Ticked now on what the main session read today: box 1 (the function surveys every given root before any mint) and box 4 (both tests read: lines 2296 to 2338 of the test file). NOT ticked: box 2 (the description's symptom phrasing is the caller's and was not read), box 3 (the move path was not read today), box 5 (waits for the gate on 6ab9618e). ITEM 2 of the 2026-09-29 landing review (quote the relocate token-cap counter output): no counter output was searched for or found; what was measured today is wc -c on skills/janitor-memory-relocate/SKILL.md, 8012 bytes, about 2000 tokens at four bytes a token, against the owner's limit of 5000; taken as discharging the item by the main session's decision, with the caveat that no tokenizer was run.
 2026-10-10 09:13: GATE GREEN on 6ab9618e (ruff, mypy, pyright exit 0; 18282 passed, 2 skipped; reports/board/gate-6ab9618e.txt). BOXES, from the review of 6ab9618e and one read of skills/janitor-memory-relocate/SKILL.md lines 60 to 112 by the main session: box 1 UNTICKED, because it asks for a RECORDED three-root survey and the skill tells the agent to record the survey only when it finds a page (step 2), not when it is empty (step 3); box 2 ticked (step 3 mints through new-mem-topic with scope routing, UNSURE to local, and a description of at least 15 symptom phrasings); box 3 ticked (step 4 and the MOVE branch hand the minted page to migrate-mem-atom; nothing here re-implements the move); box 5 ticked on the gate above. ITEM 2 of the 2026-09-29 landing review is WAIVED by the main session with the byte measurement of the 08:58 line, not discharged: no counter output was found and no tokenizer was run. NEW FACT: relocate_survey_then_create has no caller outside the tests (grep of scripts, skills, agents, commands), so agents follow the skill text by hand; the code fix protects a future caller and the skill sentence is what changes behaviour today. The name-versus-topic hole and the docstring rewrap are now TRDD-BAK8B3C0; the words 'left open here, not carded' in the 08:58 line are superseded. TO CLOSE THIS CARD: one sentence in the skill's step 3 telling the agent to record the empty survey in its report, shipped with the next code batch (not alone: a one-sentence edit does not earn its own full-suite run); then box 1 and the wave 3 closing rule.
 2026-10-10 09:16, corrections from the review of 957985a3: 'has no caller' should read 'no caller found by a grep of scripts, skills, agents and commands'. Boxes 2 and 3 rest on the relocate skill's TEXT (read before the 09:09 clear and seen after it through the compacted context), because no caller exists to read; box 2's scope routing inside the helper itself rests on the 2026-09-29 worker line, and box 3's word 'verified' is QDYQLM5V's own claim, not re-checked here. The skill sentence for box 1 now has a carrier: TRDD-BAK8B3C0's change.
+2026-10-10 09:19: ee149708 adds to step 3 of the relocate skill's CREATE section 'Record in your report that the three-root survey was empty before you mint' (step 2 already records a hit), so box 1 is ticked on the diff the main session read. All five boxes are ticked. It stays in testing until the full gate on ee149708 reports (reports/board/gate-ee149708.txt). CLOSING RULE then: (1) the commits are on main; this card has no release-via field, and the skill text reaches agents only with a release; (2) pinning tests to re-run by name: the five duty15 tests in tests/test_memory_content_precheck.py; (3) FIELD CASE UNOBSERVED: no live relocate pass has minted a page.
