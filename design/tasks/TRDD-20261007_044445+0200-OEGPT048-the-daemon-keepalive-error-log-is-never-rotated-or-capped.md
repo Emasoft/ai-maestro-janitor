@@ -4,7 +4,7 @@ title: The daemon keepalive error log is never rotated or capped
 column: backburner
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-10T22:03:51+0200
+updated: 2026-10-10T23:17:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,8 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T04:44:45+0200
 review-after: 2027-01-10
+blocker-probe: find ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state -name daemon-keepalive.err.log -size +5M
+blocker-holds-if: not-match:daemon-keepalive
 ---
 
 # The daemon keepalive error log is never rotated or capped

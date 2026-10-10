@@ -4,7 +4,7 @@ title: One late rotator tick under load raises the tick-stalled alarm and the do
 column: backburner
 status: tasked
 created: 2026-10-07T05:15:51+0200
-updated: 2026-10-10T23:10:53+0200
+updated: 2026-10-10T23:17:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T05:15:51+0200
 parent-trdd: JOXQQL4J
 review-after: 2026-12-10
+blocker-probe: grep -a -h -c tick-stalled ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log.1
+blocker-holds-if: not-match:[1-9]
 ---
 
 # One late rotator tick under load raises the tick-stalled alarm and the doctor remedy
