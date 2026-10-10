@@ -3,7 +3,7 @@ trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
 column: testing
 created: 2026-09-04T18:48:19+0200
-updated: 2026-10-10T20:11:49+0200
+updated: 2026-10-10T20:13:04+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -24,6 +24,7 @@ pre-block-column: todo
 blocked-by: []
 blocker-probe: cat "$(git rev-parse --show-toplevel)/.janitor/logs/post-compact-resume.log" 2>/dev/null | grep -c "deferred recheck child started"
 blocker-holds-if: not-match:^[1-9][0-9]*$
+assignee: main-agent@ai-maestro-janitor
 ---
 
 # Compacted sessions are neither woken nor told a handoff exists

@@ -1,10 +1,10 @@
 ---
 trdd-id: 9UORH472
 title: The board fails its own validation with 70 errors over 705 cards
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T23:19:48+0200
-updated: 2026-10-08T20:18:23+0200
+updated: 2026-10-10T20:13:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,6 +24,7 @@ Goal: investigate each error card by card and repair or re-column it; never by a
 ## Approval log
 
 - 2026-10-05T23:19:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T20:13:05+0200 — COMPLETE by main-agent@ai-maestro-janitor. errors repaired card by card to the 7 that cannot be repaired in place; narrowing in the box.
 
 ## Corrections
 
@@ -41,3 +42,7 @@ Goal: investigate each error card by card and repair or re-column it; never by a
 2026-10-08 (fifth review round on 2705ea89 closed, cycle declared CONVERGED — commit 16bdd6b1): the review judged the retarget 'meaningful but wrong' (a probe naming the parent invites a blocker relationship no field asserts) and ranked deletion first, the vestigial-note second. Took the note (deletion was never validated against the checker; the note kills the false signal). REVIEW-CYCLE VERDICT, recorded verbatim: findings across the five rounds were monotonically decreasing in severity — false-unblock (live-proven) → unproven release → incomplete terminal set → vacuous self-probes → this — each a refinement, no new class; board ERROR count stable at 5 immutable known-noise throughout; stopping now is sound. STRUCTURAL BLIND SPOT (the round cycle cannot catch it): the probes are advisory text nobody executes; the first real consumer of blocker-probe is the actual test of the fleet — when one exists, re-review probe semantics against its reading code, not the grammar. Open items parked with owners: 'failed'-releases-dependents (owner ruling), bump-rule interpretation on frontmatter edits (corpus rules, recorded tension), READY-title collision (probe-consumer design).
 2026-10-08 (sixth round on 16bdd6b1+8af977e7 closed — commit c650e995): the review's one live defect discharged. The 3384c6ec sweep had replaced GK35MOXU/N954KWUC's original literal backslash-t escapes with real tab bytes; YAML reads 'not-match:' + real-tab as a nested mapping and BOTH CARDS WENT UNPARSEABLE — board ERRORs 5→8, a regression this session introduced and never caught because no round ran validate until now. Restored the literal backslash-t form (grep -E matches it as tab; python re does not — the probe consumer is shell grep, the original 10fc3994 contract). The inline # comments on B78NJU35/LXUZYFD9 parse cleanly, never flagged. BOARD REVALIDATED: 5 ERRORs, all the immutable archived known-noise set. Two discipline findings accepted: (1) every round that edits frontmatter must end with a trddgrep validate — this session skipped it five times; (2) the round-6 fork spawn on an already-dispositioned change was gate compliance, not checking (the review itself said so) — its net-new value was exactly this validate debt.
 2026-10-08 (seventh round on c650e995+5610d0f4 closed — corrections to the round-6 record, commit rides this append): (1) FACTUAL CORRECTION, twice-recorded: round-6's claim 'python re does not match backslash-t' was FALSE — a misread of a non-comparable test (the pattern was run against a line containing no alternation word). VERIFIED: python re interprets \\t in a pattern as a tab escape exactly like grep -E; both consumers AGREE on the stored value, regex re.search returns True on a complete-line with the stored pattern. The restore's real grounds are: byte-exact match to the original 10fc3994 contract and validate green. (2) Comment ceiling recorded: YAML plain scalars truncate at whitespace-#, so the parsed probe value is the clean command and the VESTIGIAL note is file text only — desired behavior, but a future frontmatter round-trip (parse→rewrite tooling) silently drops the note. (3) Validate rule rephrased OPERATIONALLY (the round-6 per-round phrasing was session-local and backward — the failure was the check's absence in rounds 3-5, not its placement): after ANY trddgrep frontmatter edit, run trddgrep validate before the next commit. (4) Umbrella append-stopping rule, self-imposed: NO further appends to this card without a defect ref (T-/TRDD-) or an owner directive — the Corrections wall and the converged stamp rot together otherwise.
+
+## Acceptance
+
+- [x] Each validation error was looked at card by card and repaired or re-columned, never by a scripted sweep: 70 errors on 2026-10-05, 5 on 2026-10-08, 21 on 2026-10-10 (16 of them new), 7 after commit 14e04920 (defect ref TRDD-S6GX1DHN). NARROWED: 7 errors remain and cannot be repaired in place (YXY992BN, SLFMG704, HMLS5WE8, 66EMACDD, UHMB7BZW archived; 8524H5V1 and U119W52S complete, the tool refuses a checklist there); the 10 probes written on 2026-10-10 were each executed once by the main session and returned their blocker's column or state, but nothing runs them on a schedule; K0PMVRN6's probe covers one of its three blockers; the NDV15X5G probe prints nothing without network or gh login, which reads as still blocked.
