@@ -22,7 +22,7 @@ ranking (owner directive, TRDD-S2RZHXU7).
 
 Run the script with whatever argument you were given (may be empty), then **relay its
 first stdout line verbatim** — that line IS the report (`ROTATED …`, `ALREADY_LIVE …`,
-`UNKNOWN_ACCOUNT …`, `NO_TARGET …`, `LOCK_BUSY …`). Never sleep, retry, or add your own commentary.
+`UNKNOWN_ACCOUNT …`, `NO_TARGET …`, `LOCK_BUSY …`, `TARGET_CHANGED …`). Never sleep, retry, or add your own commentary.
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotate_to.py" [<account_email>]
@@ -33,7 +33,7 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotate_to.p
 - `0` — rotated (or already live on the requested account).
 - `2` — the named email is not a known slot.
 - `3` — no non-live slot has both a usable usage snapshot and account headroom.
-- `4` — `LOCK_BUSY`: another rotator operation held the lock for 60 s; nothing was changed, retry.
+- `4` — `LOCK_BUSY` or `TARGET_CHANGED`: transient, nothing was changed, retry.
 
 ## Scope
 

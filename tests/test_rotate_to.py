@@ -414,3 +414,48 @@ def test_named_email_made_live_while_waiting_is_not_switched_again(
     assert rc == 0
     assert capsys.readouterr().out.splitlines()[0] == "ALREADY_LIVE alt@example.com"
     assert switched == []
+
+
+def _wrap_pick_target(monkeypatch: pytest.MonkeyPatch, after_pick) -> None:
+    """Wrap rt._pick_target so `after_pick()` runs once it has read the slots, before main takes the lock."""
+    real = rt._pick_target
+
+    def _wrapped(now: int):
+        picked = real(now)
+        after_pick()
+        return picked
+
+    monkeypatch.setattr(rt, "_pick_target", _wrapped)
+
+
+def test_auto_select_installs_the_slot_blob_refreshed_while_waiting_for_the_lock(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, _lock_dir: Path
+) -> None:
+    """Auto-select installs the slot's blob as re-read inside the lock, not the one read by the pick."""
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("OLD")}
+    usages = {"alt@example.com": (200, _usage(five=10, seven=20, fable=30))}
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
+    written: list[dict] = []
+    monkeypatch.setattr(rotator, "write_live_blob", written.append)
+    _wrap_pick_target(monkeypatch, lambda: slots.__setitem__("alt@example.com", _blob("NEW")))
+    rc = rt.main(["rotate_to.py"])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines()[0].startswith("ROTATED alt@example.com")
+    assert [w["claudeAiOauth"]["accessToken"] for w in written] == ["NEW"]
+
+
+def test_auto_select_slot_gone_after_the_pick_yields_target_changed_and_no_switch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, _lock_dir: Path
+) -> None:
+    """If the slot reads empty inside the lock, print TARGET_CHANGED, return 4 and switch nothing."""
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("OLD")}
+    usages = {"alt@example.com": (200, _usage(five=10, seven=20, fable=30))}
+    saved = _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
+    written: list[dict] = []
+    monkeypatch.setattr(rotator, "write_live_blob", written.append)
+    _wrap_pick_target(monkeypatch, lambda: slots.pop("alt@example.com"))
+    rc = rt.main(["rotate_to.py"])
+    assert rc == 4
+    assert capsys.readouterr().out.splitlines()[0].startswith("TARGET_CHANGED")
+    assert saved == {}
+    assert written == []

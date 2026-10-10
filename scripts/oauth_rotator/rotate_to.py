@@ -158,10 +158,8 @@ def _pick_target(now: int) -> tuple[str, dict, float | None, float, float, bool]
     best = min(candidates, key=lambda c: max(c[3], c[4]))
     return (*best, True)
 
+
 _LOCK_BUSY_MSG = "LOCK_BUSY another rotator operation is in progress — nothing was changed, retry"
-
-
-
 # Bounded wait for the machine-wide rotator lock (same primitive as rotator.file_slot).
 _LOCK_WAIT_S = 60.0
 _LOCK_BUSY_RC = 4  # 0-3 are taken by main(): ok, switch failed, unknown account, no target
@@ -220,6 +218,14 @@ def main(argv: list[str]) -> int:
         if rotator.load_state().get("live_email") == target:
             print("ALREADY_LIVE %s" % target)
             return 0
+        # why: the tick's keepalive can refresh this slot while we wait for the lock, and
+        # installing the pre-lock blob would make a spent token the live credential
+        # (TRDD-4XND73XD). The CHOICE of target is not re-validated (its usage probe is as old
+        # as the wait); a switch onto a fuller account is recoverable, a spent token is not.
+        blob = rotator.read_slot(target)
+        if not blob or rotator._blob_locally_expired(blob):
+            print("TARGET_CHANGED %s its saved credential changed while waiting — nothing was changed, retry" % target)
+            return _LOCK_BUSY_RC
         fallback_note = ""
         if needs_model_fallback:
             fallback_note = " [model-fallback: %s]" % _request_model_opus()
