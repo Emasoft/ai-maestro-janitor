@@ -356,3 +356,61 @@ def test_request_model_opus_survives_a_send_verified_exception(
     assert "/model opus not typed" in err, err
     assert "RuntimeError" in err, err
     assert "pane vanished mid-send" in err, err
+
+
+
+@pytest.fixture
+def _lock_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the global-state dir (hence oauth-rotator-tick.lock) at a throwaway dir."""
+    d = tmp_path / "gs"
+    d.mkdir()
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(d))
+    return d
+
+
+def test_lock_held_elsewhere_yields_lock_busy_and_no_switch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, _lock_dir: Path
+) -> None:
+    """While another holder owns the rotator lock, main prints LOCK_BUSY, returns 4 and never switches."""
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
+    saved = _wire_state(monkeypatch, live="live@example.com", slots=slots, usages={})
+    _known(monkeypatch, set(slots))
+    monkeypatch.setattr(rt, "_LOCK_WAIT_S", 0.3)
+    handle = rotator.gs.acquire_oauth_rotator_lock()
+    assert handle is not None
+    try:
+        rc = rt.main(["rotate_to.py", "alt@example.com"])
+    finally:
+        rotator.gs.release_oauth_rotator_lock(handle)
+    assert rc == rt._LOCK_BUSY_RC == 4
+    assert capsys.readouterr().out.splitlines()[0].startswith("LOCK_BUSY")
+    assert saved == {}
+
+
+def test_lock_is_released_after_a_successful_switch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, _lock_dir: Path
+) -> None:
+    """With the lock free the switch still happens, and the lock can be taken again afterwards."""
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
+    saved = _wire_state(monkeypatch, live="live@example.com", slots=slots, usages={})
+    _known(monkeypatch, set(slots))
+    assert rt.main(["rotate_to.py", "alt@example.com"]) == 0
+    assert saved["live_email"] == "alt@example.com"
+    handle = rotator.gs.acquire_oauth_rotator_lock()
+    assert handle is not None
+    rotator.gs.release_oauth_rotator_lock(handle)
+
+
+def test_named_email_made_live_while_waiting_is_not_switched_again(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, _lock_dir: Path
+) -> None:
+    """If the daemon made the named account live before the lock was taken, print ALREADY_LIVE and do not switch."""
+    reads = iter([{"live_email": "live@example.com", "slots": {}}, {"live_email": "alt@example.com", "slots": {}}])
+    monkeypatch.setattr(rotator, "load_state", lambda *a, **k: next(reads))
+    _known(monkeypatch, {"live@example.com", "alt@example.com"})
+    switched: list[str] = []
+    monkeypatch.setattr(rotator, "cmd_switch", lambda e: switched.append(e) or 0)
+    rc = rt.main(["rotate_to.py", "alt@example.com"])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines()[0] == "ALREADY_LIVE alt@example.com"
+    assert switched == []

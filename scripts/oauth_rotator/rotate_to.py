@@ -158,6 +158,14 @@ def _pick_target(now: int) -> tuple[str, dict, float | None, float, float, bool]
     best = min(candidates, key=lambda c: max(c[3], c[4]))
     return (*best, True)
 
+_LOCK_BUSY_MSG = "LOCK_BUSY another rotator operation is in progress — nothing was changed, retry"
+
+
+
+# Bounded wait for the machine-wide rotator lock (same primitive as rotator.file_slot).
+_LOCK_WAIT_S = 60.0
+_LOCK_BUSY_RC = 4  # 0-3 are taken by main(): ok, switch failed, unknown account, no target
+
 
 def main(argv: list[str]) -> int:
     email = argv[1].strip() if len(argv) > 1 else ""
@@ -171,10 +179,21 @@ def main(argv: list[str]) -> int:
         if email not in _known_emails():
             print("UNKNOWN_ACCOUNT %s" % email)
             return 2
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = rotator.cmd_switch(email)
-        # cmd_switch's stdout is captured so the first line stays the token, but its
+        # why: this script imports rotator as a library, so it bypasses rotator.main() lock;
+        # a manual switch racing the daemon 60 s tick can split state.live_email from the live
+        # credential (TRDD-4XND73XD item b). Not reentrant: cmd_switch/_switch_blob take no lock.
+        with rotator.gs.oauth_rotator_lock_wait(_LOCK_WAIT_S) as got:
+            if not got:
+                print(_LOCK_BUSY_MSG)
+                return _LOCK_BUSY_RC
+            # the daemon may have switched while we waited for the lock
+            if rotator.load_state().get("live_email") == email:
+                print("ALREADY_LIVE %s" % email)
+                return 0
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = rotator.cmd_switch(email)
+        # cmd_switch stdout is captured so the first line stays the token, but its
         # WARNING (e.g. "token is already expired") must not vanish with it — the operator
         # named this account, so they get the switch AND the caveat, on stderr.
         for line in buf.getvalue().splitlines():
@@ -187,15 +206,24 @@ def main(argv: list[str]) -> int:
         return 0
 
     now = int(time.time())
+    # _pick_target makes network usage probes: keep it OUTSIDE the lock so a slow probe never holds it.
     picked = _pick_target(now)
     if picked is None:
         print("NO_TARGET no non-live slot has both a usable usage snapshot and account headroom")
         return 3
     target, blob, fable_used, fh, sd, needs_model_fallback = picked
-    fallback_note = ""
-    if needs_model_fallback:
-        fallback_note = " [model-fallback: %s]" % _request_model_opus()
-    rotator._switch_blob(target, blob, reason="rotate_to.py auto-select")
+    # why: same lock as the named branch above (TRDD-4XND73XD item b).
+    with rotator.gs.oauth_rotator_lock_wait(_LOCK_WAIT_S) as got:
+        if not got:
+            print(_LOCK_BUSY_MSG)
+            return _LOCK_BUSY_RC
+        if rotator.load_state().get("live_email") == target:
+            print("ALREADY_LIVE %s" % target)
+            return 0
+        fallback_note = ""
+        if needs_model_fallback:
+            fallback_note = " [model-fallback: %s]" % _request_model_opus()
+        rotator._switch_blob(target, blob, reason="rotate_to.py auto-select")
     fable_s = ("%.0f" % fable_used) if fable_used is not None else "?"
     print("ROTATED %s fable=%s%% 5h=%.0f%% 7d=%.0f%%%s" % (target, fable_s, fh, sd, fallback_note))
     return 0
