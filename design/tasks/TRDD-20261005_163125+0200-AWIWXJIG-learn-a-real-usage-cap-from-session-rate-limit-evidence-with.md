@@ -4,7 +4,7 @@ title: Learn a real usage cap from session rate-limit evidence with one-window a
 column: backburner
 status: tasked
 created: 2026-10-05T16:31:25+0200
-updated: 2026-10-10T14:15:04+0200
+updated: 2026-10-10T16:30:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,7 @@ Related open problem: the rotator's 429 branch marks rotation stuck on an endpoi
 (a) The per-tick state.pop("learned_caps", None) in cmd_auto must be removed, or every cap this card learns is erased on the next tick.
 (b) The burn_gate cap functions (observe_wall, record_cap_sample, store_caps, the learned-cap arm of live_burn_verdict) are dormant and kept for this card.
 (c) Wedge ticks and the stop-failure hook are the candidate evidence sources; the daemon task_oauth_recovery (scripts/daemon.py) is a second launcher of rotator.py auto and must carry the same evidence marker.
+2026-10-10 16:30, from the board drain. (d) TRDD-LSGY6PKA is blocked on this card: observe_wall records a cap sample for BOTH windows from one event; one-window attribution above is its cure. (e) TRDD-WJVXIQRL (todo): live_burn_verdict says 'recent burn slope' when the trigger is a reading at or above a learned cap; fix the wording in the same change. (f) TRDD-V7QQ8PKO decided on 2026-10-10 to KEEP the dormant cap functions for this card; if this card is cancelled or redesigned without them, delete them (and their tests in tests/test_burn_gate.py) in that change. (g) Field note for the evidence design: on 2026-10-10 an alternate account was ruled out as maxed-429 on 324 consecutive usage-endpoint throttle answers (also on TRDD-QHACQPPG).
 
 ## Inherited from TRDD-YVC3F06V (archived 2026-10-10)
 
