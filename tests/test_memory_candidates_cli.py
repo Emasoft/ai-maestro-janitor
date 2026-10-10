@@ -157,7 +157,6 @@ def test_atomize_refused_page_is_omitted(tmp_path):
     assert out.strip() == ""
 
 
-
 def test_atomize_declines_a_scope_holding_only_the_seeded_overview_stub(tmp_path):
     """TRDD-BRW49ELM: the SessionStart-seeded empty overview stub is not an atomize
     candidate. Its one prose line made `_has_substantive_body` true, so the heartbeat
@@ -178,7 +177,6 @@ def test_atomize_declines_a_scope_holding_only_the_seeded_overview_stub(tmp_path
     code, out = _cli("--intervention", "atomize", "--scope", "LOCAL", "--root", str(tmp_path))
     assert code == 0
     assert out.strip() == ""
-
 
 
 def test_atomize_still_lists_a_seeded_stub_that_gained_real_facts(tmp_path):
@@ -293,7 +291,6 @@ def test_consolidate_pair_refusal_narrows_but_keeps_a_three_group(tmp_path):
     assert out.strip() == "", "every pair judged — no judgment work remains"
 
 
-
 def test_consolidate_group_refusal_over_all_members_holds_until_a_page_changes(tmp_path):
     """One refusal naming all three pages judges every pair; editing any page re-lists the group."""
     a = _curated(tmp_path, "a.md", tier="component")
@@ -306,6 +303,7 @@ def test_consolidate_group_refusal_over_all_members_holds_until_a_page_changes(t
 
     b.write_text(b.read_text(encoding="utf-8") + "\nA new fact.\n", encoding="utf-8")
     code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert code == 0
     assert [ln for ln in out.splitlines() if ln] == ["a.md,b.md,c.md\tsame-tier-type"]
 
 
