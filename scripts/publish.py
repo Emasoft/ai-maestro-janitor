@@ -99,6 +99,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -316,6 +317,17 @@ def _read_cpv_pin(path: Path | None = None) -> str:
     return pin
 
 
+# WHY (2026-10-07, TRDD-2PYQ8VVA): the validator exits 0 although it printed
+# `[WARNING] markdownlint timed out — skipping markdown lint` (and the same for pyright),
+# so publish step 4 passed a run that had skipped a check, and the push gate later refused.
+# This matches the validator's wording at pin v5.16.2; a reword upstream needs this updated.
+_CPV_SKIPPED_CHECK_RE = re.compile(r"timed out\b.*\bskipping", re.IGNORECASE)
+_CPV_SKIPPED_BLOCKED_MSG = (
+    "BLOCKED: the validator skipped a check (a linter timed out), so this run proves "
+    "nothing for that check. Run again when the host is less loaded."
+)
+
+
 _CPV_PIN = _read_cpv_pin()
 _CPV_SPEC = f"git+https://github.com/Emasoft/claude-plugins-validation@{_CPV_PIN}"
 
@@ -380,6 +392,65 @@ def run_pytest_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> int:
     finally:
         signal.signal(signal.SIGTERM, old_term)
         signal.signal(signal.SIGHUP, old_hup)
+
+
+def run_cpv_strict(cmd: list[str], cwd: Path, *, timeout: int) -> tuple[int, list[str]]:
+    """Run the strict remote validator; return (exit code, lines that report a skipped check).
+
+    WHY (2026-10-07, TRDD-2PYQ8VVA): the validator exits 0 when a linter inside it times
+    out and is skipped, so the exit code alone cannot prove every check ran. Its output is
+    streamed live and each line matching _CPV_SKIPPED_CHECK_RE is collected for the caller.
+    Raises TimeoutExpired after killing the whole process group.
+    """
+    def _raise_interrupt(signum: int, frame: object) -> None:
+        # WHY: same as run_pytest_in_own_session — a child in its own session needs
+        # SIGTERM/SIGHUP turned into KeyboardInterrupt to reach the killpg below.
+        raise KeyboardInterrupt
+
+    skipped: list[str] = []
+
+    def _pump() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if _CPV_SKIPPED_CHECK_RE.search(line):
+                skipped.append(line.strip())
+
+    # WHY stderr=STDOUT: one pipe, so no second pipe can fill and deadlock the child
+    # while we read the first. WHY own session: killpg reaches every descendant (uvx,
+    # the linters it spawned) on timeout, as in run_pytest_in_own_session.
+    proc = subprocess.Popen(
+        cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", start_new_session=True,
+    )
+    reader = threading.Thread(target=_pump, daemon=True)
+    reader.start()
+    old_term = signal.signal(signal.SIGTERM, _raise_interrupt)
+    old_hup = signal.signal(signal.SIGHUP, _raise_interrupt)
+    try:
+        code = proc.wait(timeout=timeout)
+    except BaseException:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, old_term)
+        signal.signal(signal.SIGHUP, old_hup)
+    # WHY bounded: a detached descendant may still hold the pipe open; the publisher
+    # must not hang on it.
+    reader.join(timeout=10)
+    # WHY fail closed: if the reader is still alive, the output is incomplete and a skip
+    # line may not have been read yet; an incomplete read must block, not pass. The list
+    # is copied so the still-running thread cannot mutate what the caller reads.
+    result = list(skipped)
+    if reader.is_alive():
+        result.append(
+            "validator output was still open 10 s after it exited"
+            " — cannot prove no check was skipped"
+        )
+    return code, result
 
 
 def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
@@ -1107,6 +1178,34 @@ def _personal_email_hits(
     return hits
 
 
+def _gate_validate(root: Path) -> int:
+    """Push gate G3: run the strict remote CPV validator; return 1 when blocked, 0 when passed."""
+    # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
+    # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
+    # blocking issues (WARNING allowed). The validator is ALWAYS fetched from
+    # GitHub so a tampered local copy cannot weaken the rules.
+    cprint(f"\n{BLUE}[G3] Validating plugin (remote CPV)...{NC}")
+    if not shutil.which("uvx"):
+        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+        return 1
+    ve, skipped = run_cpv_strict(
+        ["uvx", "--from",
+         _CPV_SPEC,
+         "--with", "pyyaml",
+         "cpv-remote-validate", "plugin", ".", "--strict"],
+        root, timeout=_CPV_TIMEOUT_SEC)
+    # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
+    if ve != 0 and ve < 5:
+        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+        cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
+        return 1
+    if skipped:
+        cprint(f"  {RED}{_CPV_SKIPPED_BLOCKED_MSG}{NC}")
+        for line in skipped:
+            cprint(f"  {RED}{line}{NC}")
+        return 1
+    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
+    return 0
 def run_gate(root: Path) -> int:
     """Pre-push gate: blocks on any quality issue. Returns 0 if clean."""
     cprint(f"\n{BOLD}Pre-push gate checks{NC}\n")
@@ -1481,26 +1580,9 @@ def run_gate(root: Path) -> int:
             return 1
         cprint(f"  {GREEN}Shell lint passed ({len(_shell_scripts)} script(s)).{NC}")
 
-    # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
-    # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
-    # blocking issues (WARNING allowed). The validator is ALWAYS fetched from
-    # GitHub so a tampered local copy cannot weaken the rules.
-    cprint(f"\n{BLUE}[G3] Validating plugin (remote CPV)...{NC}")
-    if not shutil.which("uvx"):
-        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+    # Gate 3: Validate via REMOTE CPV validator. MANDATORY (see _gate_validate).
+    if _gate_validate(root):
         return 1
-    ve = subprocess.run(
-        ["uvx", "--from",
-         _CPV_SPEC,
-         "--with", "pyyaml",
-         "cpv-remote-validate", "plugin", ".", "--strict"],
-        cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
-    # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
-    if ve != 0 and ve < 5:
-        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
-        cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
-        return 1
-    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
     # Gate 4: Tests. MANDATORY — missing tests/ dir or zero tests is a BLOCK.
     cprint(f"\n{BLUE}[G4] Running tests...{NC}")
@@ -1804,13 +1886,30 @@ def stage_validate(root: Path) -> None:
         cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
         sys.exit(1)
     # Fetch CPV from GitHub and run validate_plugin remotely. --strict blocks
-    # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
-    run([
-        "uvx", "--from",
-        _CPV_SPEC,
-        "--with", "pyyaml",
-        "cpv-remote-validate", "plugin", ".", "--strict",
-    ], cwd=root, timeout=_CPV_TIMEOUT_SEC)
+    # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); at THIS step ANY non-zero exit stops
+    # the publish (the "WARNING 5+ passes" rule applies only at the push gate).
+    # run_cpv_strict, not run(): a validator that skipped a timed-out linter still
+    # exits 0, so its output must be checked too (TRDD-2PYQ8VVA).
+    shown = f"uvx --from {_CPV_SPEC} --with pyyaml cpv-remote-validate plugin . --strict"
+    cprint(f"  {BLUE}$ {shown}{NC}")
+    try:
+        code, skipped = run_cpv_strict([
+            "uvx", "--from",
+            _CPV_SPEC,
+            "--with", "pyyaml",
+            "cpv-remote-validate", "plugin", ".", "--strict",
+        ], root, timeout=_CPV_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}Command timed out after {_CPV_TIMEOUT_SEC}s: {shown}{NC}")
+        sys.exit(1)
+    if code != 0:
+        cprint(f"  {RED}Command failed (exit {code}){NC}")
+        sys.exit(code)
+    if skipped:
+        cprint(f"  {RED}{_CPV_SKIPPED_BLOCKED_MSG}{NC}")
+        for line in skipped:
+            cprint(f"  {RED}{line}{NC}")
+        sys.exit(1)
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 
