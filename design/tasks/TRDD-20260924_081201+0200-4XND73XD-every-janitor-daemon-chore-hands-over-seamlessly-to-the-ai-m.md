@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: todo
 created: 2026-09-24T08:12:01+0200
-updated: 2026-10-05T10:18:42+0200
+updated: 2026-10-10T10:48:39+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -103,3 +103,4 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 ## STATE
 
 2026-10-05 — Residency and lease reading landed and published in v3.7.0; items b, c, d and e are open development work with no live event to wait on, so the card returns to todo.
+2026-10-10 10:48 BOARD DRAIN: read whole by the main session and NOT pulled in wave 5, by decision under the owner mandate of 2026-10-09. Reason: its open items (b) to (e) change the live rotation path (lock, lease write, refresh_dead_fp, shared threshold table) and each depends on the joint spec, which this card says is a DRAFT on the ai-maestro side with its path not committed; building the janitor half against a draft risks two daemons disagreeing on who rotates. It blocks no other card (K0PMVRN6 was re-pointed away from it today). It stays in todo. To move it: confirm with the ai-maestro session that the lease file format and the policy file are final, then build item (b) alone first.

@@ -1,9 +1,9 @@
 ---
 trdd-id: ZKXQXHBI
 title: The janitor daemon reads the live credential's primary item behind its own latch
-column: todo
+column: human_review
 created: 2026-09-24T11:21:18+0200
-updated: 2026-09-29T08:10:16+0200
+updated: 2026-10-10T10:48:39+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:18+0200
+status: tasked
 ---
 
 # The janitor daemon reads the live credential's primary item behind its own latch
@@ -23,6 +24,7 @@ Release 1 of TRDD-RAEGS1D5; design on TRDD-4XND73XD (decision 2 of TRDD-WZKFSQ2N
 ## Approval log
 
 - 2026-09-24T11:21:18+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T10:48:39+0200 — column → human_review. built and released, off by default; the LaunchAgent probe and the opt-in are the owner's decision (credential work)
 
 ## Review corrections 2026-09-24
 
@@ -38,3 +40,4 @@ Logging that becomes live once the daemon reads the primary: (1) the F1 "primary
 2026-09-29 DISPOSITION-REVIEW ROUND 2 (fork on e7896746): HOLDS — second and final round on this thread. Three LOWs: [1 hint-half evidence gap] accepted — CLI pyright counts the error class only; the _slot_keychain_delete unused-hint clears under scope-including-callers analysis (the symbol IS called at tests/test_oauth_rotator.py:734), clause to fold in at next card touch: 'unused-symbol hints clear only under a scope that includes the test callers; CLI runs count the error class only'. [2 race comment misattributes mechanism] FIXED in code now — comment reworded to the real lost-update race (two ticks read the same base, second os.replace clobbers the first; torn file impossible under tmp+os.replace). [3 residual scope] noted — test_safe_storage.py/daemon.py hint diagnostics out of the sentence's claimed scope. This closes the ZKXQXHBI review chain; LaunchAgent probe remains the publish gate.
 2026-09-29 FINAL LOW folded in (60a97d48): the lost-update comment now covers re-stamps too ('increment or re-stamp'); closing fork verdict HOLDS, thread stays closed. Two residual wording nits graded LOW-not-applied by the forks themselves (re-stamp consequence clause precision; no separate card append for the one-word fold-in). ZKXQXHBI review chain: CLOSED. Open publish gate: LaunchAgent-context read probe; deferred named residuals: field-trip line-shape check, hint-class scope clause.
 2026-09-29 CLOSURE-RECORD REVIEW (fork on f75a2987): HOLDS — every clause traced to a fork's own words; thread stays closed. Two LOW-noted: [1] the fold-in round ran one fork past the two-round cap, sanctioned by the review-found-defect exception, now acknowledged here; [2] the residual list is restatement — the card's prerequisite section owns the LaunchAgent probe. ZKXQXHBI: no further review rounds; only the named durables remain (probe before publish).
+2026-10-10 10:48 BOARD DRAIN, wave 5 card 3, no code. READ by the main session: scripts/daemon.py lines 895 to 940 and git log -S on the headless assignment. The latch and the bounded primary read of this card landed in 3c48d054, which is an ancestor of tag v3.8.11. Then 2b18348f made the daemon's read OPT-IN: task_oauth_rotator_tick sets JANITOR_ROTATOR_HEADLESS=1 unless JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 is in the daemon's environment, with the comment 'Owner decision pending (2026-10-03)' because the prerequisite probe from the daemon's LaunchAgent context was never run and a wrong guess is a keychain prompt storm. So the sentence above, 'daemon no longer forces JANITOR_ROTATOR_HEADLESS', is SUPERSEDED: it forces it by default again. FIELD, 2026-10-10 04:23 to 10:47 (rotator.log and rotator.log.1, account names masked before printing): 373 lines 'capture: primary live credential UNREADABLE (skipped by policy (JANITOR_ROTATOR_HEADLESS))' and no latch-refusal line, so on this machine the opt-in is not set and this card's acceptance line 'one real daemon tick logs a primary read' has not happened. WHAT REMAINS IS THE OWNER'S, both credential work: (1) run the one bounded, no-prompt read probe from the daemon's LaunchAgent context; (2) if it reads cleanly, set JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 for the daemon. Nothing else is left to build here. Consequence if left off: the daemon never copies the live credential into its slot between switches (TRDD-K0PMVRN6, TRDD-IT5GEZDZ).
