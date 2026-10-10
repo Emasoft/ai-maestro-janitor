@@ -4,7 +4,7 @@ title: The memory-maint dispatch queue does not drain dedup or expire
 column: todo
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-10-09T23:50:56+0200
+updated: 2026-10-10T07:39:17+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -15,7 +15,7 @@ task-type: bugfix
 labels: [memory, dispatch, cost]
 release-via: publish
 test-requirements: [unit]
-implementation-commits: [86a48174, 1b2071a3]
+implementation-commits: [86a48174, 1b2071a3, 85304cd4]
 status: tasked
 ---
 
@@ -168,11 +168,11 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
 
 ## Acceptance
 
-- [ ] The queue DRAINS: a record whose candidates a later pass repaired ages out on its own.
-- [ ] The queue DEDUPS: two records naming the same (scope, root, intervention) collapse to one.
+- [x] The queue DRAINS: a record whose candidates a later pass repaired ages out on its own.
+- [x] The queue DEDUPS: two records naming the same (scope, root, intervention) collapse to one.
 - [ ] Consolidate requires subject evidence; the `same-tier-type`-only group no longer
       emits on either root measured here.
-- [ ] A regression test builds a scope whose candidates are empty and asserts no marker.
+- [x] A regression test builds a scope whose candidates are empty and asserts no marker.
 - [ ] The 8 stale pending dispatches are dealt with explicitly (drop or drain) — decided
       once the emitter is fixed, so the decision is not made against churning state.
 
@@ -199,6 +199,7 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
 
 2026-10-07: the claim step drops an aged-out record only on a KNOWN empty candidate answer from a read-only chore (repair, atomize, consolidate, split-topic); enrich and relocate records never drain by this path; an error keeps the record claimable; card items 2 and 3 not done. Merged at 1296ccde.
 2026-10-07: disclosure: one function-level change (is_drained in scripts/memory_dispatch_claim.py, commit 1b2071a3) was made with a plain Edit, outside the plain-edit scope the main agent had set (module-level constants, comment blocks, docstrings); accepted once because it is small and covered by the two new tests.
+2026-10-10 07:39: 85304cd4. FOUND: a consolidate refusal with one page is inert (group_has_unjudged_pair needs one live key holding both pages) and the CLI still printed 'recorded'. Seen twice on this repo's LOCAL root, checked by the main session in the ledger and the candidates CLI: the 2026-10-06 pass keyed fastedit-freeze.md alone and the same pair was dispatched and declined again on 2026-10-08; the 2026-10-10 07:35 pass recorded three one-page keys for a three-page group and the group was still listed right after. Not excluded for 2026-10-08: that the first refusal would have lapsed anyway through a page edit. BUILT: record exits 2 for consolidate with fewer than two pages; skill and merge-protocol say one abstain in one call naming every page of a group read in full; tests for the refused call, a two-page control, a one-page repair key, and a three-page key that covers the group until a page changes. Worker ran ruff, mypy, pyright and the two test files (21 passed); the full gate on 85304cd4 writes reports/board/gate-85304cd4.txt. ITEM 2 AS WORDED IS REJECTED: no subject-evidence gate, because the consolidate_has_work docstring (TRDD-3XS3PDCF) shows a keyword proxy over- and under-fires and the under-fire hides a real merge; the box stays unticked and its intent is carried by the refusal ledger plus this commit. BOX 4 was already met: tests/test_memory_maintenance.py 416 and 735 read by the main session, 359, 758, 799, 841 by name; the 2026-10-09 note saying no such test exists was wrong. BOXES 1 and 2: is_drained and expire_drained read by the main session, tests at test_memory_dispatch_claim.py 1623 and 1649; dedup is _supersede_older_unclaimed (memory-maintenance.py 265, TRDD-Q7X4M2KP) with test_memory_maintenance.py 1090; this repo's claim log holds no drained line, the two drains of 2026-10-08 in other projects are worker-read. BOX 5 stays open, decided as KEEP: five pending records here, not eight; three are under two days old; the two of 2026-09-03 are retro-lesson PROJECT, whose root is the live PROJECT corpus through the old path alias, and enrich LOCAL on the old path's slug directory, which still exists. A 30-day expiry for kinds the drain cannot judge was proposed and dropped after review: it contradicts the rule in is_drained that an unknown answer keeps the record, and the re-emit paths of enrich and retro-lesson are unread. FIELD CHECK, possible only after a release carries the skill text: a LOCAL consolidate pass records one key naming two or more pages and the candidates CLI then prints nothing for that group. Cost: 1 measuring worker, 1 coding worker (about 0.26 million tokens together), 1 review fork (0.27 million), 1 advisor call.
 
 ## Approval log
 
