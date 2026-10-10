@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-10T23:37:13+0200
+updated: 2026-10-10T23:51:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -103,6 +103,7 @@ KNOWN CONSTRAINTS: every paid account was at its usage limit at 2026-10-09 eveni
 2026-10-10 23:50. Review of 1a3e6be4 and cf3689c1 (0.32 million tokens): no blocker. Recorded in this commit: the 2O7JA0TG probe cannot see a gap that is still open (on that card, not cured); the SUUDAXRT draft gains the external-successor case of YXY992BN and two weakened claims. Also accepted: the VN2ASDKJ control proved the tick line format and not the 600 s branch, and where the words stopped ticking are logged was not read; SLFMG704 clears if I6ZZWVDN closes, so not fixable from this board holds for edits only. Wave 23: 1 card of 3 before 03:00. NEXT: trddgrep next among todo cards. Nothing is pushed or published.
 2026-10-11 00:10. Review of f9beb259 (0.32 million tokens): no blocker; its two points are on TRDD-VN2ASDKJ and TRDD-2O7JA0TG in this commit. WAVE 23 CARD 2, no code: TRDD-KPS76TQ3 read; a detector already removes an orphan lock but logs nothing durable, so the card now names a small build (one log line and one test) and stays in todo. Wave 23: 2 cards of 3 before 03:00, none minted, no code. The session context is about 0.34 million tokens: NEXT, after a clear, build KPS76TQ3 (one worker, tests first, full gate), then trddgrep next among todo cards (JEP2XFB1, UASBYABI, ALEX1X2P were next). Six owner decisions open: hook timeout (9TF9YXGB); the strict validator; a nudge while agents are alive; the ai-maestro audit issue; the BIQELG5J draft; the SUUDAXRT draft. Nothing is pushed or published.
 CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this session's lines on this card and on BIQELG5J, SUUDAXRT, KPS76TQ3, VN2ASDKJ and 2O7JA0TG (23:20 to 23:50, and 2026-10-11 00:10) were GUESSED by the main session, not read from a clock, and run up to 35 minutes ahead. The true times are the commit times: 1b3149a6, 1a3e6be4, cf3689c1, f9beb259 and 075e1f9c were all made between 23:17 and 23:37 on 2026-10-10 (git log). RULE: a dated line takes its time from the date command in the same call.
+2026-10-10 23:51 (clock). Review of 075e1f9c and 6ee9f64b (0.34 million tokens): no blocker; ACCEPTED: this session first commit was at 23:19 and not 23:17, the guessed times ran up to 33 minutes ahead and not 35, they still head lines on six cards, and in place since 2026-08-14 is the oldest of three log rows seen. Its main doubt was checked and went further than it asked: the lock-clearing function writes no log line, but it RENAMES the lock inside .git, so 46 past removals are on disk with their times; the KPS76TQ3 line saying no durable trace exists is corrected on the card and the build it named is withdrawn. LESSON: before calling something unrecorded, read the function that does the act, not only its caller. Wave 23: 2 cards of 3, no code. NEXT: finish the KPS76TQ3 matching (46 lock times against fires, commits and worker logs), then trddgrep next among todo cards. Six owner decisions open, unchanged. Nothing is pushed or published.
 
 ## Acceptance
 
