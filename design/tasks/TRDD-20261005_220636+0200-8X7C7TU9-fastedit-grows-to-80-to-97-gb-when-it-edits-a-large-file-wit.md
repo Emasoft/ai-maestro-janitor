@@ -1,10 +1,10 @@
 ---
 trdd-id: 8X7C7TU9
 title: fastedit grows to 80 to 97 GB when it edits a large file with no target symbol
-column: todo
+column: human_review
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-05T23:19:40+0200
+updated: 2026-10-10T04:58:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,8 @@ To do: reproduce on a copy of a file of that size with a memory ceiling set (uli
 ## Approval log
 
 - 2026-10-05T22:06:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 04:58 TO human_review (board drain, wave 4, rule 4 of TRDD-S6GX1DHN). Everything an agent can do without posting is done and on this card: the growth was traced to the prompt-cache copies and measured (Findings 2026-10-05), and a draft issue sits in that day's report. The one step left is posting the issue on the fastedit repository, an outward-facing act the drain's stop list leaves to the owner; this session did not check who owns that repository. The fix itself belongs to that project. The working guard stays: never run fastedit edit on a code file without a replace or after target.
+- 2026-10-10T04:58:47+0200 — column → human_review by main-agent@ai-maestro-janitor. only an upstream issue post remains; outward-facing, the owner's
 
 ## Corrections
 
