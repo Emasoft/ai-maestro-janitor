@@ -3751,6 +3751,22 @@ def _open_issues_bit() -> str:
         return ""
 
 
+def _uncommitted_work_bit() -> str:
+    # WHY: the owner directive of 2026-09-24 names uncommitted work, and the nudge listed the
+    # board but not the tree (TRDD-ADIGRD0T). Clean/non-repo/git failure ⇒ "" (never raises).
+    try:
+        import git_utils  # noqa: PLC0415 - lazy, matches this file's helper-import convention
+
+        proc = git_utils.run_git_readonly(
+            ["git", "status", "--porcelain"], cwd=state.project_root(), timeout=5
+        )
+        n = len(proc.stdout.splitlines()) if proc.returncode == 0 else 0
+        return f"{n} uncommitted file(s) in the working tree — commit or finish them" if n else ""
+    except Exception as exc:  # noqa: BLE001 -- a git probe must never break the always-on nudge
+        state.log_line("dispatch", f"uncommitted-work bit skipped: {exc!r}")
+        return ""
+
+
 _KEEP_GOING_USER_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_USER_IDLE_S"
 _KEEP_GOING_USER_IDLE_DEFAULT = 600
 _KEEP_GOING_AGENT_STALE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_AGENT_STALE_S"
@@ -4194,7 +4210,7 @@ def _phase_keep_going_nudge() -> None:
     # The BOARD and the open-issues count ride on every nudge (USER, 2026-09-01): "continue
     # your pending task" alone let a session that finished its task idle over a board with
     # open cards. Appended AFTER the directive/agent bits so the current target stays first.
-    for extra in (_board_summary_bit(), _open_issues_bit()):
+    for extra in (_board_summary_bit(), _open_issues_bit(), _uncommitted_work_bit()):
         if extra:
             bits.append(extra)
     # The ATTENTION clause (TRDD-1PDCPIZC, USER 2026-09-03) is GATED, unlike the two above —

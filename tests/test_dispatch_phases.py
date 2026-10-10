@@ -4128,6 +4128,28 @@ def test_board_summary_is_empty_on_an_empty_board(env_isolation: dict) -> None:
     assert dispatch._board_summary_bit() == ""
 
 
+def test_uncommitted_work_bit_counts_dirty_files_in_a_real_repo(env_isolation: dict) -> None:
+    """One untracked file in a real git repo gives a clause naming the count 1."""
+    dispatch = _import_dispatch()
+    project = env_isolation["project"]
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    (project / "x.txt").write_text("x", encoding="utf-8")
+    assert "1 uncommitted file(s)" in dispatch._uncommitted_work_bit()
+
+
+def test_uncommitted_work_bit_is_empty_on_a_clean_repo(env_isolation: dict) -> None:
+    """A clean real git repo gives no clause."""
+    dispatch = _import_dispatch()
+    subprocess.run(["git", "init", "-q"], cwd=env_isolation["project"], check=True)
+    assert dispatch._uncommitted_work_bit() == ""
+
+
+def test_uncommitted_work_bit_is_empty_outside_a_git_repo(env_isolation: dict) -> None:
+    """A directory that is not a git repo gives no clause and does not raise."""
+    dispatch = _import_dispatch()
+    assert dispatch._uncommitted_work_bit() == ""
+
+
 def test_open_issues_bit_counts_the_seen_map_without_calling_gh(env_isolation: dict) -> None:
     """The clause comes from the issues-watch snapshot on disk; absent map ⇒ no clause."""
     dispatch = _import_dispatch()
