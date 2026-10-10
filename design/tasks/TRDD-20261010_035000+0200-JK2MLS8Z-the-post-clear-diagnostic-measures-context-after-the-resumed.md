@@ -4,7 +4,7 @@ title: The post-clear diagnostic measures context after the resumed session has 
 column: todo
 status: tasked
 created: 2026-10-10T03:50:00+0200
-updated: 2026-10-10T03:51:18+0200
+updated: 2026-10-10T12:37:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,7 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 
 - 2026-10-10T03:50:00+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 03:51 SCOPE NARROWED (one atomic task per card): this card keeps only the timing of the context measurement; the two unresolved handoff links moved to TRDD-AFW0CA65. The date 'about 23:30 on 2026-10-09' for the first of the three failures is taken from the drain card's text, not re-read.
+
+## Corrections
+
+2026-10-10 12:37 NOTE: the diagnostic's check 1 (cron_recreated) prints 'destroyed by /clear, recreated by re-arm' for ANY change of cron id, and every re-arm changes the id; on 2026-10-10 that wording was read as an observation and produced a wrong card line on TRDD-8SC3YEIG (withdrawn in 5d65a4ba). The check should say only that the id changed.
