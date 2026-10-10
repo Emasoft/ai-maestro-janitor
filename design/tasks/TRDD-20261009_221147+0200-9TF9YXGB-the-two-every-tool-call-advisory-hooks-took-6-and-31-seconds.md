@@ -4,7 +4,7 @@ title: The two every-tool-call advisory hooks took 6 and 31 seconds and nobody k
 column: todo
 status: tasked
 created: 2026-10-09T22:11:47+0200
-updated: 2026-10-09T22:11:47+0200
+updated: 2026-10-10T22:00:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,3 +37,7 @@ A hook that reports context usage or a token budget should take milliseconds, an
 ## Approval log
 
 - 2026-10-09T22:11:47+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Findings
+
+2026-10-10 22:00 THIRD KILL, at the 30 s bound (from TRDD-YQ3ID0L2, minted today as a duplicate of this card and now superseded by it). Transcript of session 742247bf, two hook_cancelled records at 20:37:35 on 2026-10-10: BOTH hooks were killed on the same Bash call (issued 20:36:59), scripts/hooks/pre-tool-context-usage.py at 35049 ms and scripts/hooks/pre-tool-token-budget.py at 35082 ms against 30000 ms. So the question 'which of the two' has an answer for this kill: both, together. The Bash call ran after the kill (shown for these two advisory hooks only). The finding printed one hook because the detector's dedupe key appears to use the record's hookName, 'PreToolUse:Bash' for both (seen in an excerpt, not read in the detector). MEASURED the same evening while the full suite ran: hooks/hook-run.sh with a one-line script that declares no dependencies takes 0.03 s (three runs), and uptime gave a 1-minute load average of 273.94; the session held about 435k tokens of context at the kill, less than the 750k of the first two. That weighs toward rival (a), host load, without the four timings the acceptance asks for. Raising the timeout to 30 s did not remove the kill; it made the stall 35 s.

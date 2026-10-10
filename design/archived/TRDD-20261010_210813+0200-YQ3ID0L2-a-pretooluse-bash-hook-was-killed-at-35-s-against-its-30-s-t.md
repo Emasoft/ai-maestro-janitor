@@ -1,10 +1,10 @@
 ---
 trdd-id: YQ3ID0L2
 title: A PreToolUse Bash hook was killed at 35 s against its 30 s timeout
-column: todo
-status: tasked
+column: superseded
+status: archived
 created: 2026-10-10T21:08:13+0200
-updated: 2026-10-10T21:31:25+0200
+updated: 2026-10-10T22:00:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T21:08:13+0200
+superseded-by: [9TF9YXGB]
 ---
 
 # A PreToolUse Bash hook was killed at 35 s against its 30 s timeout
@@ -26,6 +27,7 @@ Finding HOOK-001 (hook-timeout-scan), printed at the heartbeat of 2026-10-10 abo
 ## Approval log
 
 - 2026-10-10T21:08:13+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T22:00:13+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. duplicate of 9TF9YXGB, which predates it and carries the acceptance; its evidence was copied there.
 
 ## Findings
 
