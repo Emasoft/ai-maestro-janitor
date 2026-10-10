@@ -1,10 +1,10 @@
 ---
 trdd-id: BZ3BT0NJ
 title: The memory guard took no action while one process held more memory than the machine has
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-06T00:14:26+0200
+updated: 2026-10-10T14:36:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,6 +29,7 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 ## Approval log
 
 - 2026-10-05T22:06:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T14:36:02+0200 — COMPLETE by main-agent@ai-maestro-janitor. detection and alert released in v3.7.1 and seen live on the card's own kind of process; intervention is TRDD-DKID2PYP.
 
 ## Corrections
 
@@ -40,6 +41,7 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 2026-10-06 (change 2): earlier lines on this card say the alert-seen file holds 39 keys that silence programs for ever, and that two keys are cut at a space. After 485596ca nothing reads that file, so no program is silenced by it any more; a fact check counted three cut keys, not two. Checked by the session: the whole diff of the change, and the last line of the full test run, 17960 passed, 2 skipped. From the worker's run: the three linters clean. The design went through two review rounds: the first form (a key with the day in it) was dropped because no simple rule turns a command line into a program path, and the first revision (a name read from the process table) was dropped because a process id from an earlier snapshot can be reused.
 2026-10-06 (review of 485596ca): known limits of the name in the low-memory line, none of them tested. A program whose path contains a space is named by the last part before the space (AI Session Meter is logged as AI). For an interpreter, the word after it is taken as a script and logged by its file name, so a positional argument that is not a script would be logged; the same rule and the same gap are in the process-size watch. The comment in the code says a few dozen lines a day, measured 32: that is from two full days of logs, not a bound. With the deduplication gone, the word ALERT is written for whatever process is above 4 GB each time memory reads low, which on this host can be a model server or a browser; the line is for reading after an incident, not a warning.
 2026-10-06 (after eed16b64): the state block lists a test for the guarded stamp branch of the watch as open; it is done. The test makes the stamp path a non-empty directory so the write fails with a real filesystem error, with no patched function, and checks that the alert still goes out once and the failure is logged (16 tests in the file, run by the session). It cannot tell a failed replace from a failed read of the stamp's age, and it does not reproduce a full disk; both go through the same guarded branch. A failed write leaves the write helper's temporary file beside the stamp, one file per daemon process, overwritten each time. One item is still open before a publish: the scan's reading during the model's generation step. 'Not ready to publish yet' in the state block is the session's recommendation, not a fact: the watch only alerts and harms nothing if it under-reads, so the owner may publish without that measurement.
+2026-10-10 14:40 (TRDD-S6GX1DHN wave 8 card 2), LIVE CHECKS, read by the main session. All four commits are in release tags from v3.7.1, and the watch runs in this host's daemon. (1) Stamp advancing: 47 s old. (2) No failed pass: daemon.log.1 and daemon.log (from 2026-10-07 18:24) hold 16 watch lines, 8 size lines and 8 notify lines, none of another kind. (3) Real alerts at the DEFAULT ceiling, no lowering needed: fastedit processes at 16424 to 17440 MB footprint with 1799 to 2108 MB resident. This settles the question left open in Findings: during real fastedit runs the footprint field follows the large size while resident stays near 2 GB, so the choice of the larger of the two is what makes the watch see this case; whether those moments were the generation step was not determined. (4) NEW FACT against an accepted limit: of the 8 notifications, 6 were 'capped', 1 'pushed', 1 'pushed-digest'. The state block said the notification stays under the daily cap of three; in the field the cap swallowed three alerts in four, so the owner was told of 2 runaways out of 8; each is still in daemon.log. Carried to TRDD-DKID2PYP. NOT checked: the rotator's ticks during those moments; the 14 to 15 GB gap between footprint and resident is unexplained. CLOSING: detection and alert are built, released and seen on the card's own kind of process; the fourth Acceptance box is deliberately unticked and lives on TRDD-DKID2PYP. The state block's 'not ready to publish yet' is superseded: it was published in v3.7.1.
 
 ## Owner decisions
 
@@ -57,3 +59,10 @@ NEXT ACTION: no change is pending on this card, and it is not ready to publish y
 
 Two facts from the investigations of 2026-10-05, both checked by the session in the files. (1) The memory guard's alert-seen file holds 39 keys that are never forgotten, and they include the python of the fastedit virtual environment and the Homebrew Python 3.12; an earlier map said the fastedit interpreter was not in the file because it searched for a different spelling. If the 97 GB process ran as either interpreter its alert was already silenced; which interpreter it was is unknown. Two keys are cut at a space in a path, so every program under those folders shares one key. This is change 2. (2) In a bounded probe of the model engine the resident size read by ps peaked at 2.17 GB while the engine reported a 3.24 GB peak, so resident size under-reads this kind of process; whether the footprint field reads it fully is not measured. The process-size watch must be checked against a real model process before it is trusted for this case.
 Measured 2026-10-05 (report memguard5-measure, a worker's run, read in full by the session): the new scan was sampled every 0.1 s on four bounded fastedit batch-edit runs on synthetic files, which load the model. It read the process at 2167 to 2195 MB footprint and 2193 to 2221 MB resident, the two fields within about 1 percent of each other, matching the largest reading of ps (2192 MB); the lower ps figures in those runs were samples taken mid-load, once a second. The big process was the launcher itself; no child held the memory. So the scan does not under-read a process with the model loaded. NOT MEASURED: these runs reported 0 tokens, so the generation step, where an earlier probe saw the engine report a 3.24 GB peak against 2.17 GB resident, did not run; whether footprint or resident follows the engine's figure during generation, the case of the 2026-10-05 runaway, is still unknown.
+
+## Acceptance
+
+- [x] The process-size watch detects a process at or above the ceiling and alerts once per process: tests/test_process_size_watch.py, 16 passed, re-run 2026-10-10.
+- [x] The watch runs in a live daemon and its stamp advances: global-state/process-size-watch.last-pass.ts was 47 s old at 2026-10-10 14:35.
+- [x] The watch sees the incident's own kind of process at its real size: daemon.log, 2026-10-07 to 2026-10-10, logs python3.12 fastedit processes at 16.4 to 17.4 GB footprint against 1.8 to 2.1 GB resident, at the default 16 GB ceiling.
+- ~~A per-process ceiling with a kill or other intervention.~~ STRUCK 2026-10-10, not ticked: NOT built on this card, by the owner's policy of 2026-10-05; the work is open on TRDD-DKID2PYP (todo).

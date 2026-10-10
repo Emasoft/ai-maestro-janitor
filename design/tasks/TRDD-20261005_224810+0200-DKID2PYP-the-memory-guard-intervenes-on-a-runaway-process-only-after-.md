@@ -4,7 +4,7 @@ title: The memory guard intervenes on a runaway process only after it has verifi
 column: todo
 status: tasked
 created: 2026-10-05T22:48:10+0200
-updated: 2026-10-05T23:19:42+0200
+updated: 2026-10-10T14:35:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,3 +33,7 @@ Goal: investigate, verify and then design the guard's intervention on a runaway 
 
 Measured (report 20261005_231428 MEASURE-AND-VERIFY-REPORT-inv-freeze), all on processes started by the test. A frozen holder of a file lock blocks every other taker for as long as it is frozen; ending it frees the lock at once. A frozen client of a local connection continues after resume when the peer has no idle limit; with a peer that drops a silent client after 10 s the client fails after resume. A parent that runs a child with a 5 s timeout kills and reaps a frozen child at the timeout and sees an ordinary timeout. A terminate signal ends a frozen process at once only when the process has no handler for it; with a handler it waits for the resume; a kill signal always takes effect. A wrapper that polls its child and all descendants every 0.2 s ended a tree growing 50 MB per second at 165 MB against a 150 MB bar and returned its own exit status and one stderr line, so a caller can tell it from an ordinary failure. Killed batch-edit and multi-edit runs of fastedit left files whole and the pair consistent in every interrupted run (8 and 12 runs); these two modes took 3.5 to 4.8 s and 2.17 GB although they reported 0 tokens. NOT MEASURED: the Claude Code tool runner's own timeout handling of a frozen child, the model path with tokens above 0, a large file, an edit with no target, rename-all, move-to-file, growth of GB per second, a process of several GB under real pressure. From the investigation of TRDD-8X7C7TU9: the runaway is on the model path, which none of the kill measurements covered.
 Provenance and corrections (review, 2026-10-05): the paragraph above is from a fork's report; the session read the report in full and did not re-run it. All-or-nothing across two files for a killed multi-edit is supported by the runs, not proven: a kill inside the short write phase was probably hit once at most. The wrapper's exit status 75 was the test's own choice, not a convention. Urgency: from Claude Code 2.1.288 an interactive session no longer stops a command moved to the background after 30 minutes (read in the documentation on TRDD-R3YEXX4L), which removes the only lifetime cap that exists today.
+
+## Inherited from TRDD-BZ3BT0NJ (closed 2026-10-10)
+
+2026-10-10 14:40. The process-size watch is live since v3.7.1 and fired 8 times between 2026-10-07 and 2026-10-10, each on a python3.12 fastedit process at 16.4 to 17.4 GB footprint (resident about 2 GB), ceiling 16 GB. Two facts for this card: (1) the intervention this card designs has real, recurring cases on this host, roughly two a day; (2) 6 of the 8 owner notifications were dropped by the daily notification cap ('capped' in daemon.log), so an alert-only watch reached the owner twice in eight. Decide here whether a runaway alert is exempt from the cap or folded into a digest.
