@@ -4,7 +4,7 @@ title: C41 — autorecall passes scope dirs
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:22+0200
-updated: 2026-10-08T20:02:00+0200
+updated: 2026-10-10T20:11:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:22+0200
-blocked-by: [QXG8SRVD, ZYX8B2RA]
+blocked-by: [ZYX8B2RA]
 pre-block-column: todo
 blocker-probe: [trddgrep, why, RQMJFJGR]
 blocker-holds-if: not-match:READY

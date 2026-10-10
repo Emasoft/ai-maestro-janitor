@@ -3,7 +3,7 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: blocked
 created: 2026-09-24T07:32:06+0200
-updated: 2026-10-10T10:52:56+0200
+updated: 2026-10-10T20:10:27+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -20,6 +20,8 @@ review-after: 2026-10-05
 blocked-by: [IT5GEZDZ, F2LKVWM8, ZKXQXHBI]
 status: tasked
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show IT5GEZDZ --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # All three rotator slots died with invalid_grant and rotation stayed put for 17 days

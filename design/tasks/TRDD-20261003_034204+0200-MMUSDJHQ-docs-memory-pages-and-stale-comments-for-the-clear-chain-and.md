@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: blocked
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-10T12:08:21+0200
+updated: 2026-10-10T20:10:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -21,6 +21,8 @@ derived: true
 implementation-commits: [bfefa9f8, 95422abd]
 blocked-by: [ZKXQXHBI]
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show ZKXQXHBI --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Docs, memory pages and stale comments for the clear chain and rotator

@@ -4,7 +4,7 @@ title: Singleton chores pass between the daemon and the ai-maestro server severa
 column: blocked
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-10T15:32:49+0200
+updated: 2026-10-10T20:10:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:50+0200
 blocked-by: [NBIFKLLC]
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show NBIFKLLC --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Singleton chores pass between the daemon and the ai-maestro server several times in one evening

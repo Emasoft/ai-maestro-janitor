@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: blocked
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-08T20:02:02+0200
+updated: 2026-10-10T20:11:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
 npt: [5MOX0FPO, DS3WDTPV, PHS3DIBD]
 eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
-blocked-by: [5MOX0FPO, DS3WDTPV]
+blocked-by: [DS3WDTPV]
 pre-block-column: dev
 blocker-probe: [trddgrep, why, K9AHY1ZB]
 blocker-holds-if: not-match:READY

@@ -4,7 +4,7 @@ title: The rotator computes its verdicts from a mirror copy of the login that it
 column: blocked
 status: tasked
 created: 2026-10-05T22:11:14+0200
-updated: 2026-10-10T15:42:42+0200
+updated: 2026-10-10T20:10:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:14+0200
 blocked-by: [ZKXQXHBI]
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show ZKXQXHBI --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # The rotator computes its verdicts from a mirror copy of the login that it cannot verify

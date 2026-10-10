@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: blocked
 created: 2026-09-24T08:12:01+0200
-updated: 2026-10-10T12:04:27+0200
+updated: 2026-10-10T20:10:10+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -18,6 +18,8 @@ status: tasked
 implementation-commits: [d3d978a6, 185aa01a, 82881358, 890ba25b, cb7f5fe9, 7cf8ac81]
 blocked-by: [NBIFKLLC]
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show NBIFKLLC --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)

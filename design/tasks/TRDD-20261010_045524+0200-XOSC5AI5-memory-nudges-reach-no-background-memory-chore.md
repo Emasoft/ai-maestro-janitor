@@ -4,7 +4,7 @@ title: Memory nudges reach no background memory chore
 column: todo
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-10T04:55:24+0200
+updated: 2026-10-10T20:10:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T04:55:24+0200
 parent-trdd: 6ESS2MGE
+derived: true
 ---
 
 # Memory nudges reach no background memory chore

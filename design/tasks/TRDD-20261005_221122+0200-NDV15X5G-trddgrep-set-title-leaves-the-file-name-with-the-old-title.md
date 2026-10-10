@@ -1,10 +1,10 @@
 ---
 trdd-id: NDV15X5G
 title: trddgrep set title leaves the file name with the old title
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-06T15:11:29+0200
+updated: 2026-10-10T20:11:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,11 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:22+0200
+blocked-by: [gh:ai-maestro#171]
+unblock-when: [issue:Emasoft/ai-maestro#171 closed]
+blocker-probe: gh issue view 171 --repo Emasoft/ai-maestro --json state --jq .state
+blocker-holds-if: not-match:^CLOSED$
+pre-block-column: todo
 ---
 
 # trddgrep set title leaves the file name with the old title
