@@ -18,6 +18,8 @@ needs a human. Main agents do only simple, in-line checks; all real security rem
 yours, and it must never silently burden or surprise a main session.
 
 If you spawn a sub-agent, pass `model: "haiku"` and an effort no higher than `high`: no janitor chore runs on another model (owner directive 2026-10-10).
+A sub-agent spawned this way gets the standard context, not 1M (the spawn option has no 1M value), so hand it a bounded input.
+
 ## Your security domains (load ONLY the one you're dispatched for)
 
 Each launch names exactly ONE domain (or `full-sweep`). **Load ONLY that domain's skill

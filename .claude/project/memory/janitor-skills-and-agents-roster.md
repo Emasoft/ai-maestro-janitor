@@ -2,7 +2,7 @@
 name: janitor-skills-and-agents-roster
 description: "why did janitor-pause disappear / arm disarm is the only switch / what skills does the janitor ship / janitor-compact-context soft vs hard / janitor-reload-skills vs janitor-reload-plugins / what are the two janitor agents / janitor-memory-subconscious-agent vs janitor-security-agent / where do janitor tests and TRDDs live / why was maintenance mode removed / can I pause the janitor temporarily / a host had keep-going-off set for 14 days silently / why does a global stop delete the cron instead of silencing it / what does janitor-write-handoff do / how do I reload just non-plugin skills / why were the issues-watch on off skills deleted / how many janitor agents are there and what model do they use / what happened to janitor-maintenance-mode"
 ocd: 2026-08-02
-lmd: 2026-09-17
+lmd: 2026-10-10
 metadata:
   node_type: memory
   type: project
@@ -31,7 +31,7 @@ Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `mo
 was removed with the marketplace-refresh chore, 2026-09-17, TRDD-5A4SGMD6.)
 Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`.
 
-**Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
+**Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`). [^1]
 
 
 ^ATOM-1B0M-ZBXT [desc:"Skills part 1: janitor-arm/disarm (local cron true-stop), janitor-global-disarm/arm (machine-wide) — arm/disarm is the only switch", keywords: arm_disarm_only_switch janitor-global-disarm_janitor-global-arm kill_switch_makes_daemon_exit can_I_pause_the_janitor_temporarily why_was_maintenance_mode_removed pause_and_maintenance_mode_retired_in_v0.67.0 indistinguishable_from_a_healthy_fleet_from_outside stale_flags_are_inert_and_swept_by_dispatch retired_cli_verbs_are_rejected_never_no-ops what_skills_does_the_janitor_ship janitor-global-disarm_stops_the_daemon_machine-wide arm_disarm_is_the_only_switch_owner_directive, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
@@ -133,3 +133,5 @@ included — they used to always ESC).
   simply unlinked.
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-AXRU-KAJF, status: valid, supersedes: ATOM-NH7H-YPR8, desc: "which model and effort the janitor chore agents run on since 2026-10-10", keywords: "memory_agent_model_sonnet security_agent_model_opus which_model_do_the_janitor_agents_run_on chore_agent_effort haiku_1m_chore_agents agent_model_cost_decision repair_agent_model per-chore_effort owner_directive_2026-10-10 janitor_agents_model", ocd: 2026-10-10, lmd: 2026-10-10] DO NOT state that the memory agent runs on sonnet and the security agent on opus, BECAUSE since 2026-10-10 (owner directive, TRDD-Y2NM51KE, commit d005e6ea) all three chore agents (memory, security, repair) are model haiku[1m] with effort high, and the dispatcher passes a per-chore effort for memory chores, never above high. DO read the agent frontmatter for the current model and effort. SUPERSEDED BODY: **Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one line + a report. `janitor-memory-subconscious-agent` (Wikimem editorial: consolidate/ split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` via bare `[janitor-memory-*]` markers). `janitor-security-agent` (TRDD-f12cae1a — ALL 8 security skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via `security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`). Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `model: opus`; both `effort: high`. **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests (`test_marketplace_lock`, `test_rules_installer`, …). (`test_marketplace_refresh_daemon_stale` was removed with the marketplace-refresh chore, 2026-09-17, TRDD-5A4SGMD6.) Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`. **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).

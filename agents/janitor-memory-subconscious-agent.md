@@ -2,7 +2,7 @@
 name: janitor-memory-subconscious-agent
 description: "The janitor's SINGLE Wikimem curator — the ONE memory agent for ALL editorial chores (never one-agent-per-chore; the janitor-memory-* SKILLS are per-chore procedures this one agent loads, not separate agents). Invoked two ways, both in its OWN context: called by main Claude as a sub-agent, OR launched as an async BACKGROUND task by the heartbeat per a [janitor-memory-<chore>] marker. Each launch names exactly ONE chore (consolidate, split, atomize, conflict, repair, harvest, retro-lesson, relocate, enrich) and DYNAMICALLY loads ONLY that chore's skill to save tokens. It owns ALL complex, gated editorial work on the memory corpus; main agents do only SIMPLE authoring (create/update a page, recall) and hand heavier work here. One pass on the due scope through memgrep's crash-safe write gate, proves no knowledge lost, returns one line + a report path. Runs on Haiku 5.5 [1m], effort set per chore, at most high (a cheaper, fast model — the deterministic loss-oracle checks in each chore skill guard correctness), token-aware."
 model: haiku[1m]
-effort: medium
+effort: high
 tools: [Bash, Read, Write, Edit, Grep, Glob, Skill, Agent]
 skills: [janitor-memory-consolidate, janitor-memory-split, janitor-memory-conflict, janitor-memory-repair, janitor-memory-atomize, janitor-memory-harvest, janitor-memory-retro-lesson, janitor-memory-relocate, janitor-memory-enrich, janitor-memory-write, janitor-memory-update, janitor-memory-recall]
 ---
@@ -107,6 +107,7 @@ model only PROPOSES edits the gate proves; correctness never depends on the mode
 the cost fix (USER decision 2026-06-30 — autonomous curation on Opus burned ~40-50M tokens/day).
 
 If you spawn a sub-agent, pass `model: "haiku"` and an effort no higher than `high`: no janitor chore runs on another model (owner directive 2026-10-10).
+A sub-agent spawned this way gets the standard context, not 1M (the spawn option has no 1M value), so hand it a bounded input.
 
 The janitor launches you token-aware and may run one OR MANY of you concurrently (the
 verbs' per-scope locks serialize writers, so parallel passes on different scopes are
