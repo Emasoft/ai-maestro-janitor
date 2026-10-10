@@ -1718,12 +1718,12 @@ def relocate_survey_then_create(
     description's phrase floor, and writes atomically. Scope routing is the CALLER's
     judgment (UNSURE → local per the memory rule); this function only forwards it.
 
-    Returns `(created, destination)`: `(True, <new page>)` when a page was minted;
-    `(False, <existing page>)` when the survey found the topic already owned, including
-    when another agent created the page between the survey and the mint (the verb
-    refuses, one re-survey finds it (only when the topic query matches that page)); and
-    `(False, None)` when memgrep is missing or
-    fails — fail CLOSED, the same shape as `enrich_pages`/`relocate_lesson_findings`:
+    Returns `(created, destination)`. `(True, <new page>)` when a page was minted.
+    `(False, <existing page>)` when the survey found the topic already owned. That also
+    covers another agent creating the page between the survey and the mint: the verb
+    refuses and one re-survey finds the page, but only when the topic query matches it.
+    `(False, None)` when memgrep is missing or fails — fail CLOSED, the same shape as
+    `enrich_pages`/`relocate_lesson_findings`:
     an agent with no binary can neither verify the survey nor trust a page it could
     not have validated, so creation must not happen at all.
     """

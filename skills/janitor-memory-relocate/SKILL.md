@@ -103,9 +103,11 @@ failure duty 10 exists to undo.
    ```
 
    The verb refuses to overwrite, validates the description floor, and writes atomically.
+   Record in your report that the three-root survey was empty before you mint.
    If it refuses because the page appeared after your survey, run the 3-root survey once more
-   and use the page it now finds as the destination; if that second survey is still empty,
-   record a refusal and do not retry.
+   and use the page it now finds as the destination. If that second survey is still empty,
+   open the page the refusal named: use it as the destination if it owns the topic, otherwise
+   record a refusal. Do not retry.
 4. Then run the normal MOVE (above) with the minted page as `--to`.
 
 If memgrep is missing, do NEITHER: no survey, no mint, no move — record a refusal instead.
