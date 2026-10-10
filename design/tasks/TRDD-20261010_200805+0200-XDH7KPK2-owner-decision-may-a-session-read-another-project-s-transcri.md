@@ -4,7 +4,7 @@ title: Owner decision — may a session read another project's transcripts and j
 column: human_review
 status: tasked
 created: 2026-10-10T20:08:05+0200
-updated: 2026-10-10T20:08:05+0200
+updated: 2026-10-10T20:08:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -26,3 +26,4 @@ The archived TRDD-U6B3B8TD recorded this as decided by the main session; its rev
 ## Approval log
 
 - 2026-10-10T20:08:05+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 20:08 — CHANGED after the review of fc29f82a: the proposed limits are NOT in force. Until the owner answers, the main session does not read another project's transcripts or janitor logs; a diagnosis that needs them waits or is put to the owner. Related card: TRDD-U6B3B8TD (archived; its 'nothing leaves the machine' sentence is false and its closure is superseded by this card).
