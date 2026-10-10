@@ -1,9 +1,9 @@
 ---
 trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
-column: todo
+column: blocked
 created: 2026-09-24T08:12:01+0200
-updated: 2026-10-10T10:52:56+0200
+updated: 2026-10-10T11:25:34+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -15,6 +15,9 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:12:01+0200
 status: tasked
+implementation-commits: [d3d978a6, 185aa01a, 82881358, 890ba25b, cb7f5fe9]
+blocked-by: [NBIFKLLC]
+pre-block-column: todo
 ---
 
 # Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
@@ -36,6 +39,7 @@ M1 is conditional on a flock(2) interop test between Python fcntl.flock and /usr
 
 - 2026-09-24T08:12:01+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T18:31:39+0200 — column → testing by user. R1 residency landed (commit d3d978a6), main-verified; items b-e remain on the card
+- 2026-10-10T11:25:34+0200 — column → blocked. lock half built in cb7f5fe9; the rest waits on the answers asked for in proposal NBIFKLLC
 
 ## Owner statement 2026-09-24 (verbatim)
 
@@ -105,3 +109,4 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 2026-10-05 — Residency and lease reading landed and published in v3.7.0; items b, c, d and e are open development work with no live event to wait on, so the card returns to todo.
 2026-10-10 10:48 BOARD DRAIN: read whole by the main session and NOT pulled in wave 5, by decision under the owner mandate of 2026-10-09. Reason: its open items (b) to (e) change the live rotation path (lock, lease write, refresh_dead_fp, shared threshold table) and each depends on the joint spec, which this card says is a DRAFT on the ai-maestro side with its path not committed; building the janitor half against a draft risks two daemons disagreeing on who rotates. It blocks no other card (K0PMVRN6 was re-pointed away from it today). It stays in todo. To move it: confirm with the ai-maestro session that the lease file format and the policy file are final, then build item (b) alone first.
 2026-10-10 10:52 CORRECTION to the line of 10:48, from the review of 5bf783f7: 'each depends on the joint spec' contradicts 'build item (b) alone first' in the same line, and a card left in todo with a note that it will not be worked is wrongly placed. CHECKED by the main session: scripts/oauth_rotator/rotate_to.py contains no lock and no lease code, and nothing under scripts mentions refresh_dead_fp or rotation-policy.json, so items (b) to (e) are unbuilt. DECISION: the LOCK half of item (b) does not depend on the spec (the manual switch should take the same machine-wide lock as the daemon's rotator tick) and is taken next, as wave 5 card 5, starting with a read of whether rotate_to.py already runs through rotator.py's locked entry point. The lease half of (b) and items (c), (d), (e) depend on the lease and policy formats; when the lock half is done they are split to their own card. The question to the ai-maestro session (are the per-chore lease file format and rotation-policy.json final, and where is the committed spec) is NOT sent: a message to another agent about a rotation protocol is left for the owner's word.
+2026-10-10 11:25 WAVE 5 CARD 5: the LOCK half of item (b) is BUILT in cb7f5fe9 (1 lean-worker, 0.14 million tokens; whole diff read by the main session, who also read rotator.py main() at 3766 to 3800, file_slot at 1334 to 1362, rotate_to.py main and oauth_rotator_lock_wait before writing the worker's brief). scripts/oauth_rotator/rotate_to.py now runs rotator.cmd_switch and rotator._switch_blob under gs.oauth_rotator_lock_wait(60 s); on a timeout it writes nothing, prints LOCK_BUSY and exits 4; inside the lock it re-reads live_email and prints ALREADY_LIVE if the daemon switched meanwhile; the usage probes stay outside the lock; skills/janitor-rotate-account-to/SKILL.md lists the token and exit code. Reentrancy (worker-read, with line numbers in docs_dev/20261010_112422+0200-4xnd73xd-rotate-to-lock.md, gitignored): only file_slot and main take the lock; cmd_switch, _switch_blob and what they call do not. PINNING TESTS in tests/test_rotate_to.py: test_lock_held_elsewhere_yields_lock_busy_and_no_switch (holds the REAL flock in an isolated state dir), test_lock_is_released_after_a_successful_switch, test_named_email_made_live_while_waiting_is_not_switched_again. Not run red by the worker (the first would raise on the missing constant). NOT COVERED: the auto-select branch has no lock test of its own; the typing of '/model opus' into the pane now happens inside the lock; the lease half of item (b) is not built. The full gate and the strict validator on cb7f5fe9 were started in the background (reports/board/gate-cb7f5fe9.txt, strict-validate-cb7f5fe9.txt) and had not reported when this was written. FIELD CASE UNOBSERVED: no race between a manual switch and a tick is on record. THE REST of this card (lease half of b, items c, d, e) is BLOCKED on proposal TRDD-NBIFKLLC, the three questions for the ai-maestro side that the owner must release.
