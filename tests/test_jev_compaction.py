@@ -3335,3 +3335,40 @@ def test_injected_render_still_shows_three_tool_items_beside_exchanges() -> None
     assert jc._EXCHANGES_HEADING in doc
     assert len(re.findall(r"^-- tool t\d+:0 --$", doc, re.M)) >= jc._NON_OWNER_FLOOR
     assert len(doc.encode("utf-8")) <= 6000
+
+
+
+_STATUS_REPLY = "janitor heartbeat\n1 background worker running; newest activity under 1 min ago"
+
+
+def _status_conversation() -> list[jc.Item]:
+    return [_item("owner:0", "user", "OWNER ask", turn=0),
+            _item("real:0", "assistant", "REAL WORK NOTE alpha", turn=1)] + [
+        _item(f"s{i}:0", "assistant", _STATUS_REPLY, turn=2 + i) for i in range(9)]
+
+
+def test_select_exchanges_caps_heartbeat_status_run_in_the_injected_view() -> None:
+    """TRDD-U119W52S: 9 consecutive status replies must not push a real work note out of the
+    injected exchanges -- only the newest 2 are shown and `shown` matches the blocks."""
+    conversation = _status_conversation()
+    cap = jc.DEFAULT_INJECT_ITEM_BYTES
+
+    def cost(it: jc.Item, c: int) -> int:
+        return len(jc._exchange_block(it, c).encode("utf-8")) + 1
+
+    marker = len(f"[{len(conversation)} messages between these are only in the full copy]"
+                 .encode("utf-8")) + 1
+    budget = (cost(conversation[0], jc.NEWEST_OWNER_ITEM_BYTES) + marker
+              + cost(conversation[1], cap) + 2 * cost(conversation[-1], cap))
+    blocks, shown = jc._select_exchanges(conversation, budget)
+    joined = "\n".join(blocks)
+
+    assert "REAL WORK NOTE alpha" in joined
+    assert joined.count(_STATUS_REPLY) == 2
+    assert shown == sum(1 for b in blocks if b.startswith("-- "))
+
+
+def test_full_render_keeps_every_heartbeat_status_reply() -> None:
+    """TRDD-U119W52S: the cap is for the injected view only; the full copy stays verbatim."""
+    doc = jc.compose([], {}, budget_tokens=8000, header=_H, conversation=_status_conversation())
+    assert doc.count(_STATUS_REPLY) == 9

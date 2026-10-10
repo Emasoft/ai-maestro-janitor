@@ -581,6 +581,13 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
     if lines is None:
         return None
     turns = _extract_turns(lines)
+    # TRDD-U119W52S: a run of dispatcher-status replies (one per 5-min heartbeat) would fill the
+    # whole n-turn window and push real work out, so cap each run before windowing. Not done in
+    # `_extract_turns` (it also finds human turns). `_extract_text` joins text blocks with a
+    # newline, so a reply with a second prose block already fails the predicate: no guard needed.
+    turns = tr.cap_status_runs(
+        turns, lambda t: t[0] == "assistant" and tr.is_heartbeat_status_reply(t[1])
+    )
 
     if not turns:
         return None

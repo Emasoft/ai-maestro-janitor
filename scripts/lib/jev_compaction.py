@@ -1468,7 +1468,10 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
     each capped at `DEFAULT_INJECT_ITEM_BYTES`, stopping at the first that does not fit or at
     the owner message -- and when it reaches the owner message, on past it into older messages
     while they fit; (3) a marker counting the messages between the two. Contiguous, not
-    skip-and-continue: a hole inside an exchange reads as a conversation that never happened.
+    skip-and-continue: a hole inside an exchange reads as a conversation that never happened;
+    the one exception is the surplus heartbeat status replies of a run (beyond the newest
+    `transcript_roles.MAX_CONSECUTIVE_HEARTBEAT_STATUS`), which carry no exchange content and
+    stay in the full copy.
     Returns `(blocks, shown)`: each block costs its UTF-8 length plus the one "\\n" `render()`
     joins it with; `shown` counts the messages among them (markers excluded)."""
     def cost(block: str) -> int:
@@ -1477,6 +1480,11 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
     def fits(used: int, c: int) -> bool:
         return budget is None or used + c <= budget
 
+    # TRDD-U119W52S: a run of 5-minute heartbeat status replies would otherwise spend the whole
+    # budget and stop the contiguous run before the real work behind it.
+    visible = {id(it) for it in transcript_roles.cap_status_runs(
+        conversation,
+        lambda it: it.kind == "assistant" and transcript_roles.is_heartbeat_status_reply(it.text))}
     used = 0
     owner_idx = next((i for i in range(len(conversation) - 1, -1, -1)
                       if conversation[i].kind == "user"), None)
@@ -1502,6 +1510,9 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
         out: list[str] = []
         i = start
         while i > stop_at:
+            if id(conversation[i]) not in visible:
+                i -= 1  # surplus status reply: no block, no cost, not counted
+                continue
             block = _exchange_block(conversation[i], DEFAULT_INJECT_ITEM_BYTES)
             if not fits(used, cost(block)):
                 break

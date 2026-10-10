@@ -19,11 +19,16 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any, Literal
+from collections.abc import Callable
+from typing import Any, Literal, TypeVar
+
+_T = TypeVar("_T")
 
 __all__ = [
     "RecordRole",
     "HEARTBEAT_PREFIX",
+    "MAX_CONSECUTIVE_HEARTBEAT_STATUS",
+    "cap_status_runs",
     "classify_record",
     "is_heartbeat_reply",
     "is_heartbeat_status_reply",
@@ -438,3 +443,22 @@ def is_heartbeat_status_reply(text: str) -> bool:
         return False
     rest = [ln.lstrip() for ln in lines[1:] if ln.strip()]
     return bool(rest) and all(_DISPATCHER_LINE_RE.match(ln) for ln in rest)
+
+
+#: Longest run of consecutive heartbeat status replies any view keeps (TRDD-U119W52S): the status
+#: line repeats every 5 minutes, and a long run crowds real messages out of a small window.
+MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2
+
+
+def cap_status_runs(items: list[_T], is_status: Callable[[_T], bool]) -> list[_T]:
+    """`items` in order, keeping only the newest `MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of
+    consecutive items for which `is_status(item)` is true (TRDD-U119W52S)."""
+    kept_rev: list[_T] = []
+    run = 0
+    for item in reversed(items):
+        run = run + 1 if is_status(item) else 0
+        if run > MAX_CONSECUTIVE_HEARTBEAT_STATUS:
+            continue
+        kept_rev.append(item)
+    kept_rev.reverse()
+    return kept_rev

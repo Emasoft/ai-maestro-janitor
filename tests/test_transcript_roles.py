@@ -543,3 +543,15 @@ def test_is_control_input_false_for_wrapper_with_real_arguments() -> None:
 def test_is_control_input_false_for_wrapper_followed_by_extra_owner_text() -> None:
     text = _wrapper("/usage-credits") + "\nalso please check the dashboard"
     assert tr.is_control_input(text) is False
+
+
+
+def test_cap_status_runs_keeps_newest_two_of_each_run() -> None:
+    """Runs of 1, 2, 3 and 9 status items keep min(run, 2) newest; a non-status item resets the count."""
+    assert tr.MAX_CONSECUTIVE_HEARTBEAT_STATUS == 2
+    is_status = lambda s: s.startswith("s")  # noqa: E731
+    for run, kept in ((1, 1), (2, 2), (3, 2), (9, 2)):
+        items = [f"s{i}" for i in range(run)]
+        assert tr.cap_status_runs(items, is_status) == items[-kept:]
+    items = ["s0", "s1", "s2", "x", "s3", "s4", "s5", "s6", "y"]
+    assert tr.cap_status_runs(items, is_status) == ["s1", "s2", "x", "s5", "s6", "y"]

@@ -775,21 +775,12 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     return [*protected, *kept_window]
 
 
-_MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2
-
-
 def _cap_heartbeat_status_runs(tail: list[tuple[str, bool]]) -> list[str]:
-    """Keep only the newest `_MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of consecutive
-    heartbeat status records; every other line passes through in order. Returns the kept lines."""
-    kept_rev: list[str] = []
-    run = 0
-    for ln, is_status in reversed(tail):
-        run = run + 1 if is_status else 0
-        if is_status and run > _MAX_CONSECUTIVE_HEARTBEAT_STATUS:
-            continue
-        kept_rev.append(ln)
-    kept_rev.reverse()
-    return kept_rev
+    """Keep only the newest `transcript_roles.MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of
+    consecutive heartbeat status records; every other line passes through in order. Returns the
+    kept lines. The algorithm is `transcript_roles.cap_status_runs`, shared with the other views
+    (TRDD-U119W52S: one source of truth)."""
+    return [ln for ln, _ in transcript_roles.cap_status_runs(tail, lambda pair: pair[1])]
 
 
 _POINTER_EXPAND_PREFIX = "pointers expand with:"

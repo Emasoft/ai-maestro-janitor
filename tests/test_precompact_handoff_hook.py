@@ -791,6 +791,23 @@ def test_recent_turns_drops_bare_heartbeat_reply_but_keeps_substantive_heartbeat
     assert ("assistant", "Reading the TRDD card and dispatching the fix agent.") in turns
 
 
+
+def test_recent_turns_caps_consecutive_heartbeat_status_replies(tmp_path: Path) -> None:
+    """A run of 9 dispatcher-status replies must not crowd a real work note out of the n=5
+    window: at most 2 status replies are kept and the real note survives (TRDD-U119W52S)."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    status = "janitor heartbeat\n1 background worker running; newest activity under 1 min ago"
+    entries = [_umsg("Please fix the build"), _amsg("REAL WORK NOTE alpha")]
+    for _ in range(9):
+        entries += [_umsg("[janitor-heartbeat]\n/path/to/stub"), _amsg(status)]
+    _write_jsonl(tx, entries)
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert ("assistant", "REAL WORK NOTE alpha") in turns
+    assert sum(1 for _, t in turns if t == status) <= 2
+
+
 def test_recent_turns_drops_api_error_message(tmp_path: Path) -> None:
     """An `isApiErrorMessage` assistant record is an error surface, not conversation — dropped
     the same way `jev_compaction` and `external_clear` already skip it.
