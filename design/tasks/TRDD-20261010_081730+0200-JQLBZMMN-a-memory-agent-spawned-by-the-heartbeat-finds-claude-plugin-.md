@@ -1,10 +1,10 @@
 ---
 trdd-id: JQLBZMMN
 title: A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty and sets it by hand
-column: todo
+column: verify_assumptions
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-10T08:17:30+0200
+updated: 2026-10-10T08:41:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Seen once, 2026-10-10 07:34, reported by the consolidate agent the heartbeat mar
 ## Approval log
 
 - 2026-10-10T08:17:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T08:41:40+0200 — column → verify_assumptions. agent-reported once; reproduce first

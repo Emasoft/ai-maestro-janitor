@@ -1,10 +1,10 @@
 ---
 trdd-id: S41TV0I7
 title: Pending memory-maint records of kinds the drain cannot judge have no way out of the queue
-column: todo
+column: verify_assumptions
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-10T08:17:30+0200
+updated: 2026-10-10T08:41:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Split from TRDD-K5F7US68 box 5 on 2026-10-10. FACTS: memory_dispatch_claim.is_dr
 ## Approval log
 
 - 2026-10-10T08:17:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T08:41:40+0200 — column → verify_assumptions. an open design choice and unread emit paths; not ready for todo

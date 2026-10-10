@@ -1,13 +1,13 @@
 ---
 trdd-id: JYA0MFVY
-title: A relocate claim on PROJECT has been held since 2026-10-08 and nothing expired or closed it
-column: todo
+title: Is the relocate claim on PROJECT held since 2026-10-08 within its expiry bound or was it missed
+column: verify_assumptions
 status: tasked
 created: 2026-10-10T08:17:31+0200
-updated: 2026-10-10T08:17:31+0200
+updated: 2026-10-10T08:41:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
-task-type: bugfix
+task-type: spike
 min-approval-requirement: none
 assignee: main-agent@ai-maestro-janitor
 mandate: true
@@ -24,3 +24,4 @@ Seen 2026-10-10: .janitor/state/memory-maint-claimed-1791460073-1d22bb32.json, i
 ## Approval log
 
 - 2026-10-10T08:17:31+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T08:41:41+0200 — column → verify_assumptions. the expiry threshold is unread, so a defect is not established
