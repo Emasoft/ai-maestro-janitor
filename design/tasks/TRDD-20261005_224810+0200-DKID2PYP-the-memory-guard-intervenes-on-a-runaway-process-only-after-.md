@@ -4,7 +4,7 @@ title: The memory guard intervenes on a runaway process only after it has verifi
 column: todo
 status: tasked
 created: 2026-10-05T22:48:10+0200
-updated: 2026-10-10T14:35:54+0200
+updated: 2026-10-10T14:37:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,3 +37,4 @@ Provenance and corrections (review, 2026-10-05): the paragraph above is from a f
 ## Inherited from TRDD-BZ3BT0NJ (closed 2026-10-10)
 
 2026-10-10 14:40. The process-size watch is live since v3.7.1 and fired 8 times between 2026-10-07 and 2026-10-10, each on a python3.12 fastedit process at 16.4 to 17.4 GB footprint (resident about 2 GB), ceiling 16 GB. Two facts for this card: (1) the intervention this card designs has real, recurring cases on this host, roughly two a day; (2) 6 of the 8 owner notifications were dropped by the daily notification cap ('capped' in daemon.log), so an alert-only watch reached the owner twice in eight. Decide here whether a runaway alert is exempt from the cap or folded into a digest.
+2026-10-10 14:55 CORRECTION, from the review of a95209e7; the line above overclaims and BZ3BT0NJ is frozen, so the corrections live here. (1) 'real, recurring cases' and 'runaway' are NOT shown. All 8 detections sit 0.2 to 6 percent above the 16384 MB ceiling with resident near 2 GB; the incident was 81 to 97 GB. A footprint field that counts mapped or compressed model memory would give this reading on every healthy fastedit run, so the default ceiling may be a false-alarm source on this host and the 6 capped notifications may be noise, not lost alerts. BZ3BT0NJ's third Acceptance box says 'at its real size': that is unsupported; what is shown is that the watch fires on fastedit processes whose footprint reads above 16 GB. (2) 'Roughly two a day' rests on 8 detections whose dates were read for 4 only. (3) OPEN, to measure before this card designs any intervention: what the footprint field counts for a fastedit process (sample footprint and resident through one bounded, ordinary fastedit edit and compare with the 2.2 GB both fields read on 2026-10-05); if an ordinary run reads above 16 GB, the ceiling or the measure is wrong and must change first. (4) OPEN and inherited, never answered on BZ3BT0NJ: why the old memory-guard task returned in 0 s at 21:35 to 21:39 on 2026-10-05 (yielded to the server, disabled, a threshold not met, or a measure that cannot see one large process). The watch was added beside the old guard; the old guard's silence is unexplained.
