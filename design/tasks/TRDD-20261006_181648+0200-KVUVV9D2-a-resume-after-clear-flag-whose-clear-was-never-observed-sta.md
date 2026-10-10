@@ -4,7 +4,7 @@ title: A resume-after-clear flag whose clear was never observed stays unarmed un
 column: testing
 status: tasked
 created: 2026-10-06T18:16:48+0200
-updated: 2026-10-09T23:30:42+0200
+updated: 2026-10-10T03:40:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -36,6 +36,7 @@ A resume-after-clear flag whose /clear was never observed (no clear-observed sta
 
 - 2026-10-06T18:16:48+0200 — MANDATE issued by lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6 (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a SessionStart where on-session-start.py ran over 5000 ms and still succeeded; the clears of 2026-10-09 on 3.8.11 are proxies because hook duration is not logged. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
+2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: hook duration is not logged; session-start.log has one-second stamps and no end-of-hook line, so a SessionStart over 5000 ms that still succeeded cannot be read from any file.
 
 ## STATE
 

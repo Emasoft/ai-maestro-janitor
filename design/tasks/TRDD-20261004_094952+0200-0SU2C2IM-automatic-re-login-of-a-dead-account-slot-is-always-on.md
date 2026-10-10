@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-09T23:30:43+0200
+updated: 2026-10-10T03:40:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -42,6 +42,7 @@ Related: supersedes the default chosen in TRDD-5OJX3SCF; parent umbrella TRDD-JS
 - 2026-10-04 — KNOWN LIMIT: the re-login cannot help a daemon that cannot read the keychain. On 2026-10-04 09:03 the daemon lost keychain access after the macOS login session was replaced; see the sibling card created the same day.
 - 2026-10-04T20:10:59+0200 — column → testing. Code landed (default ON, refusal refund and alert in c91af837); nobody is writing code for it. Awaiting end-to-end observation on this machine after 3.7.1 is installed; open items stay listed on the card.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: 0 matches for 'auto-bootstrap: launch' in the daemon log. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
+2026-10-10 DETECT (board drain step iv): grep -h 'auto-bootstrap: opening a browser to mint' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/rotator.log ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/rotator.log.1 — prints one timestamped line per launch when the awaited event has happened; today it prints nothing (0 lines). CORRECTION: the string 'auto-bootstrap: launch' never exists in the code and the line goes to rotator.log (via _log), not daemon.log. String verified at scripts/oauth_rotator/rotator.py:3380, log path LOG_FILE at :254; rotator.log rotates at 256 KB into rotator.log.1.
 
 ## Open items carried past the first release (2026-10-04)
 
