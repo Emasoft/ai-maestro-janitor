@@ -4,7 +4,7 @@ title: fastedit grows to 80 to 97 GB when it edits a large file with no target s
 column: human_review
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-10T04:58:47+0200
+updated: 2026-10-10T05:15:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,6 +30,7 @@ To do: reproduce on a copy of a file of that size with a memory ceiling set (uli
 - 2026-10-05T22:06:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 04:58 TO human_review (board drain, wave 4, rule 4 of TRDD-S6GX1DHN). Everything an agent can do without posting is done and on this card: the growth was traced to the prompt-cache copies and measured (Findings 2026-10-05), and a draft issue sits in that day's report. The one step left is posting the issue on the fastedit repository, an outward-facing act the drain's stop list leaves to the owner; this session did not check who owns that repository. The fix itself belongs to that project. The working guard stays: never run fastedit edit on a code file without a replace or after target.
 - 2026-10-10T04:58:47+0200 — column → human_review by main-agent@ai-maestro-janitor. only an upstream issue post remains; outward-facing, the owner's
+2026-10-10 05:15 CORRECTION of the line above that says everything an agent can do without posting is done: FALSE by this card's own To do. The reproduction on a copy of a real large file under a resident-size watchdog was NEVER run; the Findings are a code trace and a measurement on synthetic input, and the 80 to 97 GB figure is INFERRED. The main session will not run that reproduction unattended: the incident it would reproduce needed a power cycle of this host. So the card waits on the owner for two things: to run or attend the reproduction, and to post the upstream issue; the draft issue asserts a cause that is still inferred and should say so.
 
 ## Corrections
 
