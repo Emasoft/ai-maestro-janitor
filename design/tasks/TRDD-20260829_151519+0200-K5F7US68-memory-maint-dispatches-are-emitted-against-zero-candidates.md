@@ -4,7 +4,7 @@ title: The memory-maint dispatch queue does not drain dedup or expire
 column: testing
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-10-10T08:41:39+0200
+updated: 2026-10-10T10:12:45+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -212,3 +212,7 @@ claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~
 2026-10-09 BACK TO todo (board drain, wave 3): drain and dedup are shipped and evidenced (tests pass per the assessing worker; two drained records logged in other projects on 2026-10-08), but the card's own note says items 2 and 3 are not done: consolidate still groups on same tier and type only, with no subject evidence (scripts/lib/memory_content_precheck.py consolidate_group_defect), and no test for 'empty candidates, no marker' was found. Five pending records remain in this repo, two from 2026-09-03 of kinds that never drain by design. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
 - 2026-10-09T23:50:56+0200 — column → todo by main-agent@ai-maestro-janitor. items 2 and 3 of the card are not done
 - 2026-10-10T07:58:46+0200 — column → testing. built at 85304cd4 and b60db1f5; field check needs a release carrying the skill text
+
+## Field notes
+
+2026-10-10 10:14, not this card's field check (the machine runs the released 3.8.11, which lacks the fix): a consolidate pass on USER, dispatched by the 09:55 heartbeat, abstained on five groups (about 190 pages) and recorded one abstain per group while reporting that it did not open every page. Its own report: reports/janitor-memory-subconscious-agent/20261010_095531+0200-consolidate-user.md (gitignored). The ledger was NOT read by the main session, so which pages those keys name is unknown. If they name unread pages, those groups are silenced for 7 days on a partial read, which is what the new skill sentence (name only pages read in full) is meant to stop. It also reported claim 1791460073-1d22bb32 still in flight (TRDD-JYA0MFVY).

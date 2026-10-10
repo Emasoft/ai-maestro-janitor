@@ -1,9 +1,9 @@
 ---
 trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
-column: testing
+column: complete
 created: 2026-08-26T18:04:40+0200
-updated: 2026-10-10T09:35:30+0200
+updated: 2026-10-10T10:12:17+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -15,10 +15,11 @@ parent-trdd: 87RKBYJ8
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [91cd5534, be4e8fc4, 6ab9618e, ee149708, 397849ed]
+implementation-commits: [91cd5534, be4e8fc4, 6ab9618e, ee149708, 397849ed, 6506bd61]
 relevant-rules: []
 pre-block-column: 
 status: tasked
+release-via: publish
 ---
 
 # Duty 15 — if an off-topic atom's topic has NO page yet, CREATE that page
@@ -63,6 +64,7 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 
 - 2026-09-27T12:44:27+0200 — column → todo by user. blocker QDYQLM5V closed complete 2026-09-27 (stale blocker cleared per batch6 verdict) Cleared blocked-by (--clear-blocker override).
 - 2026-10-10T08:41:41+0200 — column → testing. race path built at be4e8fc4; gate running; item 2 of the landing review still owed
+- 2026-10-10T10:12:17+0200 — column → complete. all boxes ticked; gate and strict validator green on 6506bd61; FIELD CASE UNOBSERVED
 
 ## Implementation
 
@@ -77,3 +79,4 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 2026-10-10 09:16, corrections from the review of 957985a3: 'has no caller' should read 'no caller found by a grep of scripts, skills, agents and commands'. Boxes 2 and 3 rest on the relocate skill's TEXT (read before the 09:09 clear and seen after it through the compacted context), because no caller exists to read; box 2's scope routing inside the helper itself rests on the 2026-09-29 worker line, and box 3's word 'verified' is QDYQLM5V's own claim, not re-checked here. The skill sentence for box 1 now has a carrier: TRDD-BAK8B3C0's change.
 2026-10-10 09:19: ee149708 adds to step 3 of the relocate skill's CREATE section 'Record in your report that the three-root survey was empty before you mint' (step 2 already records a hit), so box 1 is ticked on the diff the main session read. All five boxes are ticked. It stays in testing until the full gate on ee149708 reports (reports/board/gate-ee149708.txt). CLOSING RULE then: (1) the commits are on main; this card has no release-via field, and the skill text reaches agents only with a release; (2) pinning tests to re-run by name: the five duty15 tests in tests/test_memory_content_precheck.py; (3) FIELD CASE UNOBSERVED: no live relocate pass has minted a page.
 2026-10-10 09:36: GATE GREEN on ee149708 (18282 passed, 2 skipped). 397849ed moves the record-the-empty-survey instruction to the head of step 3 of the relocate skill and adds a test that pins its wording (test_relocate_skill_records_empty_survey_and_handles_already_exists), so box 1 now has a test that turns red if the sentence is dropped; it still cannot refuse a mint made without a record, which the box's word 'requires' would suggest: met as an instruction, stated here. Closing waits for the gate on 397849ed.
+2026-10-10 10:13 CLOSING. GATE GREEN on 6506bd61 (18283 passed, 2 skipped) and the strict validator exits 0 on it (0 critical, major, minor, nit; 42 warnings; with the integrity exemption). CLOSING RULE: (1) all six commits are on main, release-via publish (the skill text reaches agents only with a release); (2) pinning tests re-run by the main session at 10:11 to 10:12: the five duty15 tests in tests/test_memory_content_precheck.py (5 passed) and test_relocate_skill_records_empty_survey_and_handles_already_exists (1 passed); (3) FIELD CASE UNOBSERVED: no live relocate pass has minted a page. Boxes 1 to 3 are met as skill instructions, not as mechanical refusals. The race's residue is recorded on TRDD-BAK8B3C0.
