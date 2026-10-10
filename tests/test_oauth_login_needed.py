@@ -481,6 +481,25 @@ def test_each_stuck_kind_names_its_own_remedy(tmp_path: Path) -> None:
     assert len({v.split("Detail:")[0] for v in seen.values()}) == 3, "remedies must differ"
 
 
+
+def test_stuck_line_uses_the_alert_table_text(tmp_path: Path) -> None:
+    """The heartbeat line words each stuck kind exactly as the desktop alert does (one table)."""
+    import rotator_alert  # scripts/lib is on sys.path once the detector module is loaded
+
+    for kind in (
+        "all-accounts-maxed",
+        "no-alternates-configured",
+        "expired-and-offline",
+        "no-usable-slot-twin",
+        "identity-unknowable",
+        "some-new-kind",
+    ):
+        out, rc = _run(tmp_path / kind, {"a@x": True}, {"a@x": 30.0},
+                       before=lambda home, k=kind: _write_stuck(home, k))
+        assert rc == 0
+        assert rotator_alert.stuck_text(kind) in out, f"{kind}: {out!r}"
+
+
 # ---------------------------------------------------------------------------
 # Phase 1 (TRDD-GZXTSJSR) — wider proactive grace window + urgency escalation +
 # the real notify.py human channel. In-process (not subprocess) so notify.push

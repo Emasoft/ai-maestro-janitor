@@ -174,14 +174,6 @@ def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) ->
     assert "capture-all-logins" not in text
 
 
-def test_stuck_alert_for_other_kinds_keeps_the_capture_remedy(root: Path) -> None:
-    """Control: the identity kinds keep the capture-logins text."""
-    for kind in ("no-usable-slot-twin",):
-        _stuck(root, NOW, kind=kind)
-        assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
-
-
-
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [

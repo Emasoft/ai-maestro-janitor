@@ -49,6 +49,14 @@ REPEAT_S = 86400  # after the 2nd notification, repeat an unchanged condition at
 AUTH_FAILED_NAME = "auth-failed.json"  # written by the StopFailure hook on a 401
 AUTH_FAILED_TTL_S = 6 * 3600  # the marker expires on its own after 6 h
 AUTH_FAILED_ACTION = "the login was rejected (Login expired) - run /login"
+
+
+# WHY (TRDD-MI018FID): the alert and the oauth-login-needed detector word a stuck rotation from this one table.
+def stuck_text(kind: object) -> str:
+    """Owner-facing wording for a stuck-rotation kind; unknown kinds get the generic remedy."""
+    return _STUCK_TEXT.get(str(kind), _ACTIONS["rotation-stuck"])
+
+
 def _read_json(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -209,7 +217,7 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
     if stuck.get("kind") and stuck_seen is not None and now - stuck_seen <= _STUCK_FRESH_S:
         # WHY: a login capture cannot help when every account is at its limit; on 2026-10-05 the
         # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
-        out["rotation-stuck"] = _STUCK_TEXT.get(str(stuck.get("kind")), _ACTIONS["rotation-stuck"])
+        out["rotation-stuck"] = stuck_text(stuck.get("kind"))
     marker = _read_json(root / AUTH_FAILED_NAME)
     ts = _epoch(marker.get("ts"))
     # Normally cleared by the next successful Stop (`clear_auth_failed`); these are backstops:

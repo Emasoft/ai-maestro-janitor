@@ -46,6 +46,7 @@ import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW
 import dedupe  # noqa: E402
 import notify  # noqa: E402  # scripts/lib/notify.py (human-notification channel, TRDD-4649ZLE0)
 import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (canonical session-key probe + profiles root)
+import rotator_alert  # noqa: E402  # scripts/lib/rotator_alert.py (stuck-rotation wording SSOT, TRDD-MI018FID)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
 
@@ -373,24 +374,7 @@ def main() -> int:
         first = int(stuck.get("first_seen_epoch") or now)
         kind = str(stuck.get("kind"))
         hours = max(0.0, (now - first) / 3600.0)
-        remedy = {
-            "all-accounts-maxed":
-                "every paid account is over its usage window — nothing to do but wait for "
-                "a window to reset, or add another paid account",
-            "no-alternates-configured":
-                f"there is no second account to rotate to — add one with `{login_sh} <email>`",
-            "expired-and-offline":
-                "the live credential is expired and the API is unreachable — check the "
-                "network, then re-auth manually",
-            "no-usable-slot-twin":
-                "the live credential is unreadable and its slot twin is unusable — the "
-                "rotator refuses to act on an untrusted identity; re-auth manually or "
-                f"re-run `{login_sh} <email>` for the live account",
-            "identity-unknowable":
-                "the live credential is unreadable and no fresh beacon names it — the "
-                "rotator will not decide on an untrusted identity; run one Claude session "
-                "interactively (it restamps the beacon) or re-auth manually",
-        }.get(kind, "see the rotator log for the decision")
+        remedy = rotator_alert.stuck_text(kind)
         msg3 = (
             f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
             f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
