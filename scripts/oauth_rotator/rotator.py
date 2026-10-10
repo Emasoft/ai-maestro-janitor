@@ -2073,26 +2073,38 @@ def _mirror_live_to_outgoing_slot(state: dict, incoming_email: str) -> None:
     is logged and the switch proceeds with the slot's previous token (the same accepted
     degradation as _refresh_and_heal_slot) — this NEVER blocks or fails the switch itself.
     The slot's index meta (fp/expires_at) is updated on the passed-in state, which the
-    caller persists in its own single save."""
+    caller persists in its own single save.
+
+    Every skip after the ownership and outgoing checks is logged with its reason and whether
+    the process is headless (TRDD-NGLPQ7SW; headless, the live read comes from the -livebak
+    mirror): a silent skip is indistinguishable from nothing to file."""
     if not _janitor_owns_rotator_tick():
         return
     outgoing = state.get("live_email")
     if not isinstance(outgoing, str) or not outgoing or outgoing == incoming_email:
         return
     live = read_live_blob()
+    headless = "yes" if not _primary_secret_read_permitted() else "no"
+    skipped = "[switch] %s: at-switch slot mirror skipped — " % outgoing
     if live is None:
+        _log("%sno live credential readable (headless: %s)" % (skipped, headless))
         return
     fp = fingerprint(live)
     if not fp:
+        _log("%slive credential has no access token (headless: %s)" % (skipped, headless))
         return  # unreadable/degenerate live credential — nothing attributable to file
     meta = (state.get("slots") or {}).get(outgoing)
     if isinstance(meta, dict) and meta.get("fp") == fp:
+        _log("%sslot already current (headless: %s)" % (skipped, headless))
         return  # the slot already holds this exact token — the common, healthy case
     live_exp = _oauth(live).get("expiresAt")
     if not isinstance(live_exp, (int, float)):
+        _log("%slive credential has no expiry (headless: %s)" % (skipped, headless))
         return  # cannot establish "newer" — never file a token of unknown freshness
     slot_exp = meta.get("expires_at") if isinstance(meta, dict) else None
     if isinstance(slot_exp, (int, float)) and live_exp <= slot_exp:
+        _log("%sslot token is newer or equal (live expiresAt=%s slot expires_at=%s) (headless: %s)"
+             % (skipped, live_exp, slot_exp, headless))
         return  # the slot's token is already newer — filing would be a regression
     try:
         write_slot(outgoing, live)

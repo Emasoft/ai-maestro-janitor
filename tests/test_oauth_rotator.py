@@ -3111,6 +3111,153 @@ def test_switch_mirror_runs_only_while_the_janitor_owns_the_tick(
     assert wrote == [], "a server-owned tick must leave slot writes to the server"
 
 
+
+def _mirror_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live: dict | None,
+                 meta: dict | None, *, live_email: str = "out@x", headless: bool = False) -> list[str]:
+    """Set up an at-switch mirror scenario with the live reader stubbed (no keychain read);
+    returns the list that records every slot write."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    if headless:
+        monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+    else:
+        monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    wrote: list[str] = []
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: live)
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: None)
+    monkeypatch.setattr(rotator, "write_slot", lambda email, blob: wrote.append(email))
+    slots = {"out@x": meta} if meta is not None else {}
+    rotator.save_state({"live_email": live_email, "slots": slots})
+    return wrote
+
+
+def _mirror_lines(tmp_path: Path) -> list[str]:
+    """Every rotator.log line the at-switch mirror wrote (skip or success)."""
+    log = tmp_path / "rotator.log"
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return [ln for ln in lines if "at-switch slot mirror" in ln or "filed the outgoing" in ln]
+
+
+def test_mirror_skip_logged_when_no_live_credential_is_readable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: an unreadable live credential logs its reason and read source."""
+    wrote = _mirror_case(tmp_path, monkeypatch, None, {"fp": "x", "expires_at": 1})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "no live credential readable" in lines[0]
+    assert "skipped" in lines[0] and "(headless: no)" in lines[0] and "out@x" in lines[0]
+    assert wrote == []
+
+
+def test_mirror_skip_logged_when_live_credential_has_no_access_token(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a live blob with no access token logs its reason and read source."""
+    wrote = _mirror_case(tmp_path, monkeypatch, {"claudeAiOauth": {"expiresAt": _ms_in(9)}},
+                         {"fp": "x", "expires_at": 1})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "live credential has no access token" in lines[0]
+    assert "skipped" in lines[0] and "(headless: no)" in lines[0]
+    assert wrote == []
+
+
+def test_mirror_skip_logged_when_the_slot_is_already_current(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: the healthy same-token skip logs 'slot already current' and the headless flag."""
+    live = _blob("LIVE", expires_ms=_ms_in(9))
+    wrote = _mirror_case(tmp_path, monkeypatch, live,
+                         {"fp": rotator.fingerprint(live), "expires_at": _ms_in(9)})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "slot already current" in lines[0]
+    assert "skipped" in lines[0] and "(headless: no)" in lines[0]
+    assert "LIVE" not in lines[0] and rotator.fingerprint(live) not in lines[0], "the log must not carry the token or its fingerprint"
+    assert wrote == []
+
+
+def test_mirror_skip_logged_when_live_credential_has_no_expiry(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a live blob with no numeric expiresAt logs its reason and read source."""
+    wrote = _mirror_case(tmp_path, monkeypatch, _blob("LIVE"), {"fp": "other", "expires_at": 1})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "live credential has no expiry" in lines[0]
+    assert "skipped" in lines[0] and "(headless: no)" in lines[0]
+    assert wrote == []
+
+
+def test_mirror_skip_logged_with_both_expiries_when_the_slot_is_newer(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a newer-or-equal slot logs its reason, the source and both expiry numbers."""
+    live_exp, slot_exp = _ms_in(4), _ms_in(9)
+    live = _blob("LIVE", expires_ms=live_exp)
+    wrote = _mirror_case(tmp_path, monkeypatch, live,
+                         {"fp": "other", "expires_at": slot_exp})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "slot token is newer or equal" in lines[0]
+    assert "skipped" in lines[0] and "(headless: no)" in lines[0]
+    assert "live expiresAt=%s" % live_exp in lines[0] and "slot expires_at=%s" % slot_exp in lines[0]
+    assert "LIVE" not in lines[0] and rotator.fingerprint(live) not in lines[0], "the log must not carry the token or its fingerprint"
+    assert wrote == []
+
+
+
+def test_mirror_skip_logged_as_headless_with_both_expiries_when_the_slot_is_newer(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a headless newer-or-equal slot logs '(headless: yes)' and both expiry numbers."""
+    live_exp, slot_exp = _ms_in(4), _ms_in(9)
+    live = _blob("LIVE", expires_ms=live_exp)
+    wrote = _mirror_case(tmp_path, monkeypatch, live,
+                         {"fp": "other", "expires_at": slot_exp}, headless=True)
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "slot token is newer or equal" in lines[0]
+    assert "skipped" in lines[0] and "(headless: yes)" in lines[0]
+    assert "live expiresAt=%s" % live_exp in lines[0] and "slot expires_at=%s" % slot_exp in lines[0]
+    assert "LIVE" not in lines[0] and rotator.fingerprint(live) not in lines[0], "the log must not carry the token or its fingerprint"
+    assert wrote == []
+
+
+def test_mirror_is_silent_when_the_tick_is_not_the_janitors(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a server-owned tick skips the mirror without any log line."""
+    import harness_backend
+
+    monkeypatch.setenv(harness_backend.SERVER_CHORES_ENV, "up")
+    wrote = _mirror_case(tmp_path, monkeypatch, _blob("LIVE", expires_ms=_ms_in(9)),
+                         {"fp": "stale", "expires_at": _ms_in(4)})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    # _switch_blob writes no other rotator.log line (its only side effects are state, the
+    # beacon file and the global-state stamp), so there is no positive control line to assert.
+    assert _mirror_lines(tmp_path) == []
+    assert wrote == []
+
+
+def test_mirror_is_silent_when_outgoing_equals_incoming(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: switching to the already-live account skips the mirror without a log line."""
+    wrote = _mirror_case(tmp_path, monkeypatch, _blob("LIVE", expires_ms=_ms_in(9)),
+                         {"fp": "stale", "expires_at": _ms_in(4)}, live_email="in@x")
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    # _switch_blob writes no other rotator.log line (its only side effects are state, the
+    # beacon file and the global-state stamp), so there is no positive control line to assert.
+    assert _mirror_lines(tmp_path) == []
+    assert wrote == []
+
+
+def test_mirror_success_logs_the_filed_line_and_no_skipped_line(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-NGLPQ7SW: a successful mirror logs only its existing 'filed' line."""
+    wrote = _mirror_case(tmp_path, monkeypatch, _blob("LIVE-NEW", expires_ms=_ms_in(9)),
+                         {"fp": "old", "expires_at": _ms_in(4)})
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+    lines = _mirror_lines(tmp_path)
+    assert len(lines) == 1 and "filed the outgoing live credential into out@x's slot" in lines[0]
+    assert not any("skipped" in ln for ln in lines)
+    assert wrote == ["out@x"]
+
+
 # ── the setup-token 403 gate (TRDD-BMITQ2MN) ────────────────────────────────────────────
 #
 # A `claude setup-token` key has no refreshToken and 403s on /api/oauth/usage by design.
