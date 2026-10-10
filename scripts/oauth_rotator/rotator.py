@@ -2365,9 +2365,11 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
 
     Never trusts the fp=="no drift" shortcut: the stale mirror is EXACTLY the blob
     whose fp matches stale state (the trap that blinded the reconciler)."""
+    # TRDD-A2JLFIQ5: a designed skip was read as a defect because this line gave no reason.
     _decide(
-        "auto: ⚠ primary live credential UNREADABLE from this context — using the "
+        "auto: ⚠ primary live credential UNREADABLE (%s) — using the "
         "-livebak MIRROR; identity untrusted until independently resolved (TRDD-7PYTX4E9 F1)"
+        % _primary_read_unreadable_reason()
     )
     beacon = read_live_identity_beacon()
     mirror_fp = fingerprint(mirror_blob)

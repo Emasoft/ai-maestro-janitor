@@ -2344,6 +2344,37 @@ def test_resolve_untrusted_live_stays_put_without_beacon(
     assert blob is None
 
 
+def test_untrusted_live_auto_line_names_its_reason(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-A2JLFIQ5: the auto UNREADABLE line carries the reason, so a designed HEADLESS
+    skip is not read as a defect and differs from a latch refusal."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "x@x", "live_fp": "a" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    lines: list = []
+    monkeypatch.setattr(rotator, "_log", lambda m: lines.append(m))
+
+    monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+    rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    auto = [m for m in lines if "UNREADABLE" in m]
+    assert auto and "skipped by policy" in auto[0]
+
+    lines.clear()
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    auto = [m for m in lines if "UNREADABLE" in m]
+    assert auto and "unreadable (no primary item" in auto[0]
+    assert "skipped by policy" not in auto[0]
+    assert "refused by the primary-read latch" not in auto[0]
+
+    lines.clear()
+    rotator._primary_read_latch_write({"latched_epoch": time.time(), "timeouts": 0})
+    rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    auto = [m for m in lines if "UNREADABLE" in m]
+    assert auto and "refused by the primary-read latch" in auto[0]
+    assert "skipped by policy" not in auto[0]
+
+
 # ---------------------------------------------------------------------------
 # TRDD-TK529Q0F — the untrusted-live fail-safe paths are CAN'T-ROTATE states and
 # must write the machine-readable marker (`rotation-stuck.json`) the
