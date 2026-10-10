@@ -36,6 +36,13 @@ _ACTIONS = {
 # WHY (TRDD-5CCRBM1H): one name for the all-accounts-maxed stuck text, so the test imports it
 # instead of repeating the literal and the two cannot drift.
 _STUCK_ALL_MAXED_TEXT = "every account is at its usage limit - waiting for a window to reset"
+# WHY (TRDD-DM7IJQ1T): a login capture cannot help these kinds, so each names its own remedy.
+_STUCK_TEXT = {
+    "all-accounts-maxed": _STUCK_ALL_MAXED_TEXT,
+    "no-alternates-configured": "no second account to rotate to - add another paid account",
+    "expired-and-offline": "the login expired and the API is unreachable - check the network, then run /login",
+    "identity-unknowable": "the live login cannot be identified - start one interactive Claude session, or run /login",
+}
 
 
 REPEAT_S = 86400  # after the 2nd notification, repeat an unchanged condition at most daily
@@ -202,11 +209,7 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
     if stuck.get("kind") and stuck_seen is not None and now - stuck_seen <= _STUCK_FRESH_S:
         # WHY: a login capture cannot help when every account is at its limit; on 2026-10-05 the
         # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
-        out["rotation-stuck"] = (
-            _STUCK_ALL_MAXED_TEXT
-            if stuck.get("kind") == "all-accounts-maxed"
-            else _ACTIONS["rotation-stuck"]
-        )
+        out["rotation-stuck"] = _STUCK_TEXT.get(str(stuck.get("kind")), _ACTIONS["rotation-stuck"])
     marker = _read_json(root / AUTH_FAILED_NAME)
     ts = _epoch(marker.get("ts"))
     # Normally cleared by the next successful Stop (`clear_auth_failed`); these are backstops:

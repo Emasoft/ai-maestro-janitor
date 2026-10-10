@@ -4,7 +4,7 @@ title: The rotator reports a usage-endpoint throttle with no rotation target as 
 column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-08T19:54:57+0200
+updated: 2026-10-10T15:46:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,4 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 2026-10-08 lint migration: the descriptive decision token moved out of the graph's way — blocked-by now carries the external-issue spelling gh:ai-maestro-janitor/QHACQPPG#0 (a self-referential pointer naming THIS card's owner decision, so the graph reads it as a non-local ref — WARN, no edge — instead of mangling 'decision:...' to the fake id DECISION and ERRORing). The real wait condition stays in unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B], which is what trdd-drift evaluates. If the owner ever files the A-or-B decision as a GitHub issue, replace #0 with that issue number.
 2026-10-08: the sentinel gh: pointer is a WORKAROUND, not a convention — the checker gap (decision: tokens mangle to fake ids) filed upstream as Emasoft/ai-maestro#177; when that fix lands, re-spell this blocker back to decision:owner-chooses-throttle-behaviour-A-or-B.
 2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
+2026-10-10 15:46. Field note from TRDD-A7KT2CL1's measurement: today's exhausted verdicts list an ALTERNATE account as maxed-429(x324), that is, a candidate ruled out on 324 consecutive throttle answers from the usage endpoint. The same doubt as this card's, applied to a candidate; whichever option is chosen should say what it means for candidates. Not investigated.

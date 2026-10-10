@@ -176,9 +176,36 @@ def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) ->
 
 def test_stuck_alert_for_other_kinds_keeps_the_capture_remedy(root: Path) -> None:
     """Control: the identity kinds keep the capture-logins text."""
-    for kind in ("no-usable-slot-twin", "identity-unknowable"):
+    for kind in ("no-usable-slot-twin",):
         _stuck(root, NOW, kind=kind)
         assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
+
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("all-accounts-maxed", ra._STUCK_ALL_MAXED_TEXT),
+        ("no-alternates-configured", "no second account to rotate to - add another paid account"),
+        (
+            "expired-and-offline",
+            "the login expired and the API is unreachable - check the network, then run /login",
+        ),
+        (
+            "identity-unknowable",
+            "the live login cannot be identified - start one interactive Claude session, or run /login",
+        ),
+        ("no-usable-slot-twin", ra._ACTIONS["rotation-stuck"]),
+        ("some-new-kind", ra._ACTIONS["rotation-stuck"]),
+    ],
+)
+def test_stuck_alert_text_per_kind(root: Path, kind: str, expected: str) -> None:
+    """Each stuck kind a login capture cannot repair names its own remedy; the rest keep the generic text."""
+    _stuck(root, NOW, kind=kind)
+    text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
+    assert text == expected
+    if kind in ("no-alternates-configured", "expired-and-offline", "identity-unknowable"):
+        assert "capture-all-logins" not in text
 
 
 def test_stuck_marker_older_than_an_hour_does_not_alert_but_a_fresh_one_does(root: Path) -> None:
