@@ -2,7 +2,7 @@
 name: review-fork-gate-when-to-spawn-and-when-not
 description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork"
 ocd: 2026-09-05
-lmd: 2026-10-08
+lmd: 2026-10-10
 publish-globally: true
 metadata:
   node_type: memory
@@ -79,7 +79,7 @@ session, and had to be corrected for exactly that bias.
 have to squint at is being used as a rationalisation.
 
 
-^ATOM-04A3-Y4N5 [desc: "measured across a 4-fork chain 2026-09-05: 3 of 4 forks found their sharpest defect in the PREVIOUS fork's remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-04A3-Y4N5 [desc: "measured across a 4-fork chain 2026-09-05: 3 of 4 forks found their sharpest defect in the PREVIOUS fork's remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-10-10]
 **Remediation is the least-reviewed work in any correction chain, and measurably the buggiest.**
 Across one session's review chain (2026-09-05), **every fork that HAD a prior remediation to
 review found its sharpest defect IN it** rather than in the original work — 4 of 4, listing the
@@ -92,6 +92,9 @@ what makes the claim strong, not a hedge.)
 The mechanism, stated because it is actionable: remediation is written fast, under the
 assumption that the hard thinking already happened upstream — a finding READS like a
 specification, so the fix gets typed rather than reasoned.
+
+
+^ATOM-2WOB-J5JE [desc: "the remedy for buggy remediation is NOT another review fork: before committing a correction, mark every number and named fact MEASURED or ESTIMATED and list the members of every count", keywords: what_is_the_remedy_for_a_buggy_correction should_I_run_another_review_fork_on_my_fix review_does_not_converge_on_remediation a_count_without_its_members_is_an_estimate before_committing_a_correction_what_do_I_check mark_each_number_MEASURED_or_ESTIMATED list_the_members_of_every_count the_fix_repeated_the_error_class_it_was_fixing one_re_read_catches_what_another_fork_does_not correction_commit_checklist_numbers_and_named_facts, ocd: 2026-10-10, lmd: 2026-10-10]
 
 **The remedy is NOT another fork.** Every round produced one new instance of the class being
 remediated, so review does not converge here. What catches it costs one re-read: **before
