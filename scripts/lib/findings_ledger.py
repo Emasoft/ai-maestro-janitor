@@ -30,9 +30,11 @@ daemon loop.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -42,11 +44,15 @@ if str(_HERE) not in sys.path:
 
 import dedupe  # noqa: E402  -- sibling lib (the once-per-episode ack, generalized here)
 import state  # noqa: E402  -- sibling lib
+import suppression  # noqa: E402  -- sibling lib (.janitor.toml [lint] ignore)
 import token_meter  # noqa: E402  -- trim_log (the structural-cap pattern, TRDD-a4e41e89)
 
 LEDGER_NAME = "findings-ledger.ndjsonl"
 CURSOR_NAME = "findings-ledger.cursor"
 SURFACED_TO_HUMAN_NAME = "surfaced-to-human.seen"
+CONFIG_ERROR_CODE = "CONFIG-001"  # a bad .janitor.toml; never itself suppressible
+NEVER_SUPPRESSED_SEVERITIES = frozenset({"HIGH", "CRITICAL", "ERROR"})  # .janitor.toml cannot silence these
+CONFIG_ERROR_SEEN_NAME = "config-001.seen"  # once-per-distinct-error latch (dedupe.emit_once)
 
 # TRDD-KU3ERYFX (janitor#234) — the human-only findings class. `actor="human"` marks a
 # finding whose remedy is a GUI toggle or a credential decision an agent structurally
@@ -128,6 +134,57 @@ def _is_current_project(project_dir: str | os.PathLike[str] | None) -> bool:
         return Path(project_dir).resolve() == state.project_root().resolve()
     except Exception:  # noqa: BLE001 -- an unresolvable path must not crash the caller
         return False
+
+
+def is_suppressed(code: str, project_dir: str | os.PathLike[str] | None = None) -> bool:
+    """True iff `[lint] ignore` in the project root's `.janitor.toml` selects issue `code`.
+
+    Only `ignore` counts: the same file configures memgrep lint, so `select` /
+    `per-file-ignores` there must not silence ledger records.
+
+    WHY it swallows every config error: this runs inside a background observer
+    (`record()`, the heartbeat). A typo in the owner's config must not stop it, so a
+    broken file suppresses NOTHING and the typo is itself reported once as CONFIG-001.
+    """
+    try:
+        root = Path(project_dir) if project_dir is not None else state.project_root()
+        cfg = root / ".janitor.toml"
+        if not cfg.is_file():
+            return False
+        lint = tomllib.loads(cfg.read_text(encoding="utf-8")).get("lint", {})
+        if not isinstance(lint, dict):
+            raise ValueError("`lint` must be a table")
+        ignore = lint.get("ignore", [])
+        if not isinstance(ignore, list):
+            raise ValueError("`lint.ignore` must be a list")
+        seen = state_dir_for(project_dir) / CONFIG_ERROR_SEEN_NAME
+        for key in _read_lines(seen):
+            dedupe.emit_forget(seen, key)  # parses cleanly: a later re-break reports again
+        # An empty selector would match every code under startswith semantics.
+        return suppression._selects([s for s in ignore if s], code, None)  # noqa: SLF001 -- the shared selector rule
+    except Exception as exc:  # noqa: BLE001 -- record() must never raise
+        err = f"{type(exc).__name__}: {exc}"
+        key = hashlib.sha256(err.encode("utf-8")).hexdigest()[:16]
+        try:
+            seen = state_dir_for(project_dir) / CONFIG_ERROR_SEEN_NAME
+            if dedupe.emit_once(seen, key, "x") is not None:
+                record(
+                    sev="MEDIUM",
+                    code=CONFIG_ERROR_CODE,
+                    src="suppression",
+                    msg=f".janitor.toml unreadable, nothing suppressed: {err}",
+                    project_dir=project_dir,
+                )
+        except Exception:  # noqa: BLE001 -- reporting the typo is best-effort
+            pass
+        return False
+
+
+def _read_lines(path: Path) -> list[str]:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
 
 
 def _age_phrase(entry: dict, now: int) -> str:
@@ -228,8 +285,19 @@ def record(
     bookkeeping — a finding that reached the session is not lost even if the mailbox
     write failed).
     """
-    import hashlib  # noqa: PLC0415 -- stdlib, keep module import-light
     import time  # noqa: PLC0415 -- stdlib, keep module import-light
+
+    # Owner-ignored codes (.janitor.toml) are never written. WHY HIGH/CRITICAL/ERROR and
+    # human-only are exempt: a repository's own file must not be able to silence a
+    # security or human-only alert. CONFIG-001 is exempt so a broken config can always
+    # report itself (and is_suppressed -> record cannot recurse).
+    if (
+        code != CONFIG_ERROR_CODE
+        and actor != HUMAN_ONLY_ACTOR
+        and str(sev).upper() not in NEVER_SUPPRESSED_SEVERITIES
+        and is_suppressed(code, project_dir)
+    ):
+        return None
 
     # The directive is a DELIVERY property, so it is stored as the `actor` FIELD and
     # applied by `render_line` — NOT concatenated into `msg`. Prefixing the content was

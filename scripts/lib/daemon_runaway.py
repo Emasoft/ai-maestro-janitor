@@ -325,6 +325,6 @@ def format_drift_line(
         if worst.kind == "rss":
             disk_txt += " — likely the amplifier turning FS churn into a balloon"
     return (
-        f"[system-daemon-runaway] {worst.command} (pid {worst.pid}) {metric}{watched_txt}"
+        f"[system-daemon-runaway] HOST-002 {worst.command} (pid {worst.pid}) {metric}{watched_txt}"
         f"{disk_txt}{extra} — a process RAM/CPU runaway; investigate before it exhausts the host."
     )

@@ -279,3 +279,54 @@ def test_marker_suppression_records_one_ledger_finding_per_chore_per_day(tmp_pat
         _clear_state_cache()
     leaked = _PROJECT_ROOT / ".janitor" / "state" / "memory-marker-suppressed-seen.txt"
     assert not leaked.exists(), "test must write only into the tmp_path project, never the real repo"
+
+
+def test_drop_suppressed_lines(tmp_path, monkeypatch):
+    """Lines whose issue code is ignored in .janitor.toml are dropped; uncoded lines stay."""
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_state_cache()
+    try:
+        text = "[host-load] HOST-001 load is high\n[x] no code here\n[y] DISK-002 other\n"
+        assert dispatch._drop_suppressed_lines(text) == text  # no config: unchanged
+        (tmp_path / ".janitor.toml").write_text('[lint]\nignore = ["HOST"]\n', encoding="utf-8")
+        assert dispatch._drop_suppressed_lines(text) == "[x] no code here\n[y] DISK-002 other\n"
+    finally:
+        _clear_state_cache()
+
+
+def test_drop_suppressed_lines_keeps_lookalikes_and_high_codes(tmp_path, monkeypatch):
+    """HTTP-404 is not a registered code; MCPSEC-001 is HIGH: neither is dropped even if ignored."""
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    (tmp_path / ".janitor.toml").write_text('[lint]\nignore = ["HTTP", "MCPSEC", "GHSA", "WMATOM"]\n', encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_state_cache()
+    try:
+        text = "got HTTP-404 here\nGHSA-123 advisory\n[m] MCPSEC-001 changed\n[w] WMATOM-001 dup id\n"
+        assert dispatch._drop_suppressed_lines(text) == text
+    finally:
+        _clear_state_cache()
+
+
+def test_host_load_ignored_end_to_end(tmp_path, monkeypatch):
+    """Real host-load detector via `_run_detector`: `ignore = ["HOST"]` keeps HOST-001 off stdout; without it, it prints."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT", "60")
+    monkeypatch.setenv("JANITOR_LOADAVG", "500")
+    monkeypatch.setenv("JANITOR_CPU_COUNT", "4")
+    (tmp_path / "detectors").mkdir()
+    (tmp_path / "detectors" / "host-load.py").symlink_to(_PROJECT_ROOT / "scripts" / "detectors" / "host-load.py")
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+    outs = {}
+    for label, ignore in (("ignored", True), ("plain", False)):
+        proj = tmp_path / label
+        (proj / ".janitor" / "state").mkdir(parents=True)
+        if ignore:
+            (proj / ".janitor.toml").write_text('[lint]\nignore = ["HOST"]\n', encoding="utf-8")
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+        _clear_state_cache()
+        try:
+            outs[label] = _capture(lambda: dispatch._run_detector("host-load", interval=0))
+        finally:
+            _clear_state_cache()
+    assert "HOST-001" not in outs["ignored"]
+    assert "HOST-001" in outs["plain"]

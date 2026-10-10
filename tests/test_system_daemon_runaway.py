@@ -138,7 +138,7 @@ def test_worst_offender_sorts_first_and_drift_line_names_it() -> None:
     findings, disk_danger = dr.classify_runaway(_rows(text), disk_free_pct=50.0, rss_threshold_mb=4096.0)
     line = dr.format_drift_line(findings, disk_danger, disk_free_pct=50.0)
     assert line is not None
-    assert line.startswith("[system-daemon-runaway] fseventsd ")
+    assert line.startswith("[system-daemon-runaway] HOST-002 fseventsd ")
     assert "more process(es)" in line
 
 
@@ -335,7 +335,7 @@ def test_enabled_runaway_snapshot_emits_one_drift_line(tmp_path: Path) -> None:
     assert proc.returncode == 0
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
     assert len(lines) == 1
-    assert lines[0].startswith("[system-daemon-runaway] fseventsd ")
+    assert lines[0].startswith("[system-daemon-runaway] HOST-002 fseventsd ")
 
 
 def test_quiet_snapshot_produces_no_output(tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ def test_cpu_runaway_needs_two_fires_end_to_end(tmp_path: Path) -> None:
     assert _streak_file(tmp_path).read_text() == '{"74805:node": 1}'
 
     line = _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST))
-    assert line.startswith("[system-daemon-runaway] node ")
+    assert line.startswith("[system-daemon-runaway] HOST-002 node ")
     assert "~1-minute decaying average" in line
     assert "over the bar on 2 consecutive checks" in line
 
@@ -398,7 +398,7 @@ def test_rss_runaway_alarms_on_the_very_first_fire_end_to_end(tmp_path: Path) ->
     cause. (`_PS_QUIET`'s low-RSS rows keep this the only finding.)"""
     text = f"4242 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/fseventsd\n"
     line = _out(_run(tmp_path, ps_snapshot=text))
-    assert line.startswith("[system-daemon-runaway] fseventsd ")
+    assert line.startswith("[system-daemon-runaway] HOST-002 fseventsd ")
     assert "decaying average" not in line  # RSS is instantaneous; no window caveat
     assert _streak_file(tmp_path).read_text() == "{}"
 
@@ -412,4 +412,4 @@ def test_corrupt_streak_file_degrades_to_no_history_not_a_crash(tmp_path: Path) 
 
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
     assert streaks.read_text() == '{"74805:node": 1}'
-    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)).startswith("[system-daemon-runaway] node ")
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)).startswith("[system-daemon-runaway] HOST-002 node ")

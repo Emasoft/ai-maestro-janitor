@@ -332,7 +332,7 @@ unattended access to your repository.
 
 ## All codes by family
 
-89 code(s) across every emitter.
+90 code(s) across every emitter.
 
 ### AICTX
 
@@ -348,6 +348,12 @@ unattended access to your repository.
 | `BRPROT-001` | HIGH | none | janitor:branch-protection | the default branch of {slug} is unprotected |
 | `BRPROT-002` | HIGH | none | janitor:branch-protection | the branch-protection baseline on {slug} has drifted: {detail} |
 | `BRPROT-003` | HIGH | none | janitor:branch-protection | the branch-protection applier cannot identify the repo in {where} |
+
+### CONFIG
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `CONFIG-001` | MEDIUM | none | janitor:findings-ledger | .janitor.toml could not be read, so no code is suppressed |
 
 ### CRED
 

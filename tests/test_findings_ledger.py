@@ -451,3 +451,80 @@ def test_an_unusable_timestamp_says_so_instead_of_going_quiet(_isolate: Path) ->
             f"an unusable ts must render an explicit unknown, not nothing: {bad!r}"
         )
     assert fl.render_line({**base, "ts": 2_000_000}, now=1_000_000).endswith("age unknown")
+
+
+# ---------- 6. .janitor.toml suppression at the choke point (TRDD-8524H5V1) ----------
+
+
+def _rec_host() -> str | None:
+    return fl.record(sev="MEDIUM", code="HOST-001", src="host-load", msg="load is high")
+
+
+def test_lint_ignore_suppresses_record(_isolate: Path) -> None:
+    """`[lint] ignore = ["HOST"]` makes record() return None and append nothing."""
+    (_isolate / ".janitor.toml").write_text('[lint]\nignore = ["HOST"]\n', encoding="utf-8")
+    assert _rec_host() is None
+    assert _entries() == []
+
+
+def test_record_without_config_is_recorded(_isolate: Path) -> None:
+    """No .janitor.toml: nothing is suppressed, the finding is appended."""
+    assert _rec_host() is not None
+    assert [e["code"] for e in _entries()] == ["HOST-001"]
+
+
+def test_malformed_config_records_finding_and_one_config_001(_isolate: Path) -> None:
+    """A malformed .janitor.toml suppresses nothing; the typo is reported once, not per call."""
+    (_isolate / ".janitor.toml").write_text("[lint\nignore = ", encoding="utf-8")
+    assert _rec_host() is not None
+    assert _rec_host() is not None
+    codes = [e["code"] for e in _entries()]
+    assert codes.count("HOST-001") == 2
+    assert codes.count("CONFIG-001") == 1
+
+
+def test_select_without_ignore_suppresses_nothing(_isolate: Path) -> None:
+    """The same file configures memgrep lint: `select = ["WM"]` must not silence ledger records."""
+    (_isolate / ".janitor.toml").write_text('[lint]\nselect = ["WM"]\n', encoding="utf-8")
+    assert _rec_host() is not None
+    assert [e["code"] for e in _entries()] == ["HOST-001"]
+
+
+def test_high_and_human_findings_are_never_suppressed(_isolate: Path) -> None:
+    """A repository's own file must not silence a HIGH/CRITICAL/ERROR or human-only alert."""
+    (_isolate / ".janitor.toml").write_text('[lint]\nignore = ["HOST"]\n', encoding="utf-8")
+    fl.record(sev="HIGH", code="HOST-001", src="s", msg="m")
+    fl.record(sev="critical", code="HOST-001", src="s", msg="m")
+    fl.record(sev="LOW", code="HOST-001", src="s", msg="m", actor="human")
+    fl.record(sev="ERROR", code="HOST-001", src="s", msg="m")
+    assert len(_entries()) == 4
+    assert fl.record(sev="LOW", code="HOST-001", src="s", msg="m") is None  # suppression is active here
+    assert len(_entries()) == 4
+
+
+def test_empty_string_selector_selects_nothing(_isolate: Path) -> None:
+    """`ignore = [""]` must not silence every code."""
+    (_isolate / ".janitor.toml").write_text('[lint]\nignore = [""]\n', encoding="utf-8")
+    assert _rec_host() is not None
+    assert [e["code"] for e in _entries()] == ["HOST-001"]
+
+
+def test_record_never_raises_when_state_dir_cannot_be_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """record() must not raise even if the state dir resolution itself fails."""
+    def boom(*_a: object, **_k: object) -> Path:
+        raise RuntimeError("no state dir")
+
+    monkeypatch.setattr(fl, "state_dir_for", boom)
+    fl.record(sev="MEDIUM", code="HOST-001", src="s", msg="m")
+
+
+def test_config_001_reports_again_after_fix_and_rebreak(_isolate: Path) -> None:
+    """Broken, fixed, broken again: two CONFIG-001 entries (the latch is forgotten on a clean parse)."""
+    cfg = _isolate / ".janitor.toml"
+    cfg.write_text("[lint\n", encoding="utf-8")
+    _rec_host()
+    cfg.write_text('[lint]\nignore = ["NOPE"]\n', encoding="utf-8")
+    _rec_host()
+    cfg.write_text("[lint\n", encoding="utf-8")
+    _rec_host()
+    assert [e["code"] for e in _entries()].count("CONFIG-001") == 2

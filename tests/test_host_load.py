@@ -33,6 +33,16 @@ def test_above_threshold_emits_one_host001_line(tmp_path: Path) -> None:
     assert "HOST-001" in lines[0] and "182" in lines[0] and "14 cores" in lines[0] and "(13x)" in lines[0]
 
 
+def test_host_load_is_registered_and_self_deduping() -> None:
+    """host-load must run (be on the roster) and, printing via emit_once, skip the dedupe layer."""
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+    import dispatch
+    assert "host-load" in [d[0] for d in dispatch._DETECTORS]
+    assert "host-load" in dispatch._SELF_DEDUPING_DETECTORS
+
+
 def test_at_threshold_is_silent(tmp_path: Path) -> None:
     """Load exactly cores x 4 is not overloaded: no output."""
     proc = _run(tmp_path, "56", "14")

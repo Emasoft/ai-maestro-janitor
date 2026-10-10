@@ -66,6 +66,7 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402  -- the quiet heartbeat's pull-model sink
 import global_state as gs  # noqa: E402
+import issue_codes_gen  # noqa: E402  -- registered issue codes + severities (.janitor.toml ignore gate)
 import memory_dispatch_claim  # noqa: E402  -- TRDD-LDSCQ0NU relay-time claim-pool gate
 import memory_scopes  # noqa: E402  -- shared project_slug rule (TRDD-6P0KUSO9 transcript resolution)
 import session_liveness  # noqa: E402  -- SSOT for the `FIRED rearm → iterm` evidence parse
@@ -510,6 +511,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # model window otherwise stalls the session; TRDD-M4HVFU2A fixed this stale comment,
     # 2026-09-06). Opt out with CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED=false.
     ("model-fallback", 60, "CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_INTERVAL"),
+    ("host-load", 300, "CLAUDE_PLUGIN_OPTION_HOST_LOAD_INTERVAL"),
     # system-daemon-runaway (TRDD-HK7IZ21Z, EHT of TRDD-ZNN0UK5K): the fseventsd-class
     # safety NET — `memory-guard` only kills JANITOR-OWNED runaways, so a SYSTEM daemon
     # (fseventsd/mds*) or any OTHER process ballooning in RAM/CPU is otherwise invisible
@@ -844,6 +846,29 @@ def _quiet_filter(detector: str, text: str) -> str:
     return "\n".join(kept) + "\n" if kept else ""
 
 
+_ISSUE_CODE_RE = re.compile(r"\b[A-Z][A-Z0-9]*-\d{3}\b")
+_REGISTERED_SEVERITY = {ic.code: ic.severity for ic in issue_codes_gen.ISSUE_CODES}
+
+
+def _drop_suppressed_lines(text: str) -> str:
+    """Drop detector lines whose first issue code the owner ignored in `.janitor.toml`.
+
+    Lines carrying no code pass unchanged. Applied to the raw detector output so a
+    suppressed code never reaches the quiet filter, the dedupe layer or stdout.
+    Only a REGISTERED code of non-HIGH/CRITICAL/ERROR severity can be dropped: a token that
+    merely looks like a code (HTTP-404, GHSA-123) is data, and a repository's own file
+    must not be able to silence a security alert (same rule as `record()`).
+    """
+    kept = []
+    for line in text.splitlines(keepends=True):
+        m = _ISSUE_CODE_RE.search(line)
+        sev = _REGISTERED_SEVERITY.get(m.group(0)) if m else None
+        if m and sev and sev.upper() not in findings_ledger.NEVER_SUPPRESSED_SEVERITIES and findings_ledger.is_suppressed(m.group(0)):
+            continue
+        kept.append(line)
+    return "".join(kept)
+
+
 def _defang_foreign_markers(detector: str, text: str) -> str:
     """Defang reserved `[janitor-…]` markers a detector is not entitled to emit.
 
@@ -934,6 +959,7 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
 # `emit_once`), so adding an ungated print to a member makes that line print on EVERY fire --
 # re-verify membership whenever a member detector is edited.
 _SELF_DEDUPING_DETECTORS = frozenset({
+    "host-load",
     "memgrep-binary-stale",
     "oauth-login-needed",
     "stale-index-lock",
@@ -1298,7 +1324,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         else:
             partial = partial_raw
         if partial:
-            sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, partial))))
+            sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _drop_suppressed_lines(_defang_foreign_markers(name, partial)))))
             sys.stdout.flush()
         # Stamp last-run even on timeout so a chronically-slow detector backs
         # off to its cadence instead of re-firing (and re-hanging) every fire.
@@ -1317,7 +1343,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         # after this, the marker is heartbeat stdout and the session decides to spawn.
         if name == "memory-maintenance":
             out = _suppress_stale_memory_markers(out, force=cooldown_active)
-        sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, out))))
+        sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _drop_suppressed_lines(_defang_foreign_markers(name, out)))))
         sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")

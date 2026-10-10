@@ -1143,6 +1143,18 @@ summary = "a daemon process is consuming runaway CPU"
 why = "A runaway daemon starves everything else on the host."
 fix_text = "Restart or stop the process."
 
+[[issue]]
+code = "CONFIG-001"
+name = "bad-janitor-toml"
+family = "CONFIG"
+severity = "MEDIUM"
+fix = "none"
+gate_floor = false
+emitter = "janitor:findings-ledger"
+summary = ".janitor.toml could not be read, so no code is suppressed"
+why = "A syntax or type error in the owner's .janitor.toml; the janitor keeps running and suppresses nothing rather than guess."
+fix_text = "Correct the .janitor.toml syntax or the wrongly typed [lint] value."
+
 [[retired]]
 code = "AICTX-001"
 reason = "split into AICTX-002 (d89eca8): AICTX-001 claimed a file CONTAINS a payload, but the scanner only proves a dependency CAN WRITE such a file — raising the first for the second reported a documented opt-in CLI feature as a critical compromise (janitor#110)."
