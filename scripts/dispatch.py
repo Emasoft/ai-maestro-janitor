@@ -3754,6 +3754,8 @@ def _open_issues_bit() -> str:
 def _uncommitted_work_bit() -> str:
     # WHY: the owner directive of 2026-09-24 names uncommitted work, and the nudge listed the
     # board but not the tree (TRDD-ADIGRD0T). Clean/non-repo/git failure ⇒ "" (never raises).
+    # The count is stated WITHOUT an instruction to commit: untracked entries may belong to
+    # another session, and files are staged by name, never wholesale.
     try:
         import git_utils  # noqa: PLC0415 - lazy, matches this file's helper-import convention
 
@@ -3761,7 +3763,11 @@ def _uncommitted_work_bit() -> str:
             ["git", "status", "--porcelain"], cwd=state.project_root(), timeout=5
         )
         n = len(proc.stdout.splitlines()) if proc.returncode == 0 else 0
-        return f"{n} uncommitted file(s) in the working tree — commit or finish them" if n else ""
+        return (
+            f"{n} uncommitted entr(y/ies) in the working tree (git status; untracked files included, they may not be yours)"
+            if n
+            else ""
+        )
     except Exception as exc:  # noqa: BLE001 -- a git probe must never break the always-on nudge
         state.log_line("dispatch", f"uncommitted-work bit skipped: {exc!r}")
         return ""

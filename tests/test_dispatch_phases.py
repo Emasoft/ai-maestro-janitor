@@ -4129,12 +4129,14 @@ def test_board_summary_is_empty_on_an_empty_board(env_isolation: dict) -> None:
 
 
 def test_uncommitted_work_bit_counts_dirty_files_in_a_real_repo(env_isolation: dict) -> None:
-    """One untracked file in a real git repo gives a clause naming the count 1."""
+    """One untracked file in a real git repo gives a clause naming the count 1, with no commit instruction."""
     dispatch = _import_dispatch()
     project = env_isolation["project"]
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     (project / "x.txt").write_text("x", encoding="utf-8")
-    assert "1 uncommitted file(s)" in dispatch._uncommitted_work_bit()
+    bit = dispatch._uncommitted_work_bit()
+    assert bit.startswith("1 uncommitted entr(y/ies)")
+    assert "commit" not in bit.split("uncommitted", 1)[1]
 
 
 def test_uncommitted_work_bit_is_empty_on_a_clean_repo(env_isolation: dict) -> None:
