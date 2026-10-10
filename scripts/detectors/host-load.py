@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import daemon_runaway as dr  # noqa: E402
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
@@ -38,6 +39,36 @@ def _readings() -> tuple[float, int] | None:
     except (OSError, AttributeError, ValueError):  # AttributeError: no getloadavg on Windows
         return None
     return (load, cores) if cores > 0 else None
+
+def _log_top_cpu(load: float) -> None:
+    """Record the 5 busiest processes in host-load.log; fail open, print nothing.
+
+    WHY (TRDD-PYV26AYU): loads of 232 to 403 left no record of who caused them. Called
+    only on the first fire of an overload episode, so one log line per episode. ps %cpu
+    is a decaying average over up to a minute, not an instant reading. `comm` carries no
+    arguments (a command line can hold secrets). Under a real overload the listing itself
+    can time out (it did five times between 2026-10-03 and 2026-10-05 in the runaway
+    detector); then nothing is recorded.
+    """
+    try:
+        injected = os.environ.get("JANITOR_PS_SNAPSHOT")  # same seam as system-daemon-runaway
+        if injected is not None:
+            ps_text = injected
+        else:
+            proc = state.run_subprocess(["ps", "-axo", "pid,ppid,rss,%cpu,comm"], timeout=10.0, detector_name=_LOG)
+            ps_text = proc.stdout if proc is not None and proc.returncode == 0 else ""
+        rows = sorted(dr.parse_ps_rows(ps_text), key=lambda r: r.pcpu, reverse=True)[:5]
+        if not rows:
+            state.log_line(_LOG, "top-cpu: no process listing")
+            return
+        parts = [
+            f"pid={r.pid} {state.sanitize_for_drift_line(os.path.basename(r.command))} "
+            f"cpu={r.pcpu:.0f}% rss={r.rss_mb:.0f}MB"
+            for r in rows
+        ]
+        state.log_line(_LOG, f"top-cpu at load {load:.0f}: " + "; ".join(parts))
+    except Exception:  # noqa: BLE001 - fail open: the HOST-001 alert must still print
+        pass
 
 
 def main() -> int:
@@ -62,6 +93,7 @@ def main() -> int:
     )
     if line is not None:
         print(line)
+        _log_top_cpu(load)
     state.rotate_log_if_big(_LOG)
     return 0
 
