@@ -1,10 +1,10 @@
 ---
 trdd-id: 0QCRG2YX
 title: The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-07T02:38:39+0200
+updated: 2026-10-10T13:24:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -62,6 +62,7 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 - 2026-10-05T04:48:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-05T08:55:50+0200 — column → testing. no work in progress; waits on the first recurrence under a release carrying the probe logging
 - 2026-10-07T02:38:39+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
+- 2026-10-10T13:24:16+0200 — COMPLETE by main-agent@ai-maestro-janitor. named live event observed in daemon.log.1 (11 timeout episodes, each recovered); commits released since v3.7.1; pinning tests re-run; remaining items decided or split.
 
 ## STATE
 
@@ -126,3 +127,11 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — review findings NOT applied, with reasons: (a) restricting the probe failure logger to the daemon — the two short-lived callers are rare (one on demand, one only while the daemon is dead), at most three lines per run; side effect accepted: a status command then writes a log line in that project's own log under the name daemon. (b) probe log volume on a marginal host — judged small next to the routine daemon log traffic, from reading one log tail, not measured.
 2026-10-05 — bearing on the cause: the daemon log shows the daemon exiting for an OS respawn when 3.7.0 was staged on 2026-10-04 and starting again a minute later, so the daemon whose probe failed on 2026-10-05 was under a day old, not a long-lived process from before the release. And TRDD-LRGZV19Z's premise (the daemon inherits a session's working directory) needs re-reading against that: an OS-spawned daemon gets its directory from the launch agent. What decides it, not yet read: the running daemon's parent process and its working directory.
 2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: the card's own list (1) alert wording, (2) fleet-size decision, (3) resolved ledger entry, (4) interpreter-path point, (5) per-project acknowledgement store, none in progress; the live event named above (first probe failure on a release carrying the logging) gates only the root-cause diagnosis, not these.
+2026-10-10 13:23 FIELD: THE NAMED LIVE EVENT HAS OCCURRED. Read by the main session in the global-state daemon.log.1 (2026-10-07 18:24 to 2026-10-09 07:29, a release carrying this card's six commits, all contained in tags from v3.7.1): 11 lines 'iterm-probe: timeout bin=/usr/bin/osascript deadline-exceeded stderr=' between 2026-10-07 19:41 and 2026-10-09 05:29, each followed by 'iterm-probe: ok after failures (timeout deadline-exceeded)' from 19 seconds to 7 minutes later; the current daemon.log (since 2026-10-09 07:29) has none, and neither log has an agent-roster line. So on this host the real failure of the probe under a release with the logging is a TIMEOUT that recovers, never a refusal; the fast 'error (after 3 attempts)' form of 2026-10-05 has not recurred and its cause stays NOT ESTABLISHED. In the same window this project's findings ledger (starts 2026-10-06 12:35) holds ONE ITERM-AUTOMATION-TCC entry, at 2026-10-07 05h, before the first of the 11 episodes: no alert was recorded here during any of them. That shows no repeat storm; it does not show 'one print per persisting episode', because no episode persisted: for the repetition fix the FIELD CASE IS UNOBSERVED. PINNING TESTS re-run by the main session (55 passed): tests/test_fleet_scan.py test_run_probe_outcome_logs_exit_code_and_stderr, _logs_timeout, _logs_an_identical_failure_once_until_a_success, _logs_one_line_when_a_success_ends_a_failure_episode, _logs_a_persisting_failure_again_after_the_interval; tests/test_cli_agent_roster.py test_fetch_agents_works_when_the_inherited_working_directory_was_deleted, test_fetch_agents_failure_is_logged_with_the_child_error. REMAINING ITEMS of the 2026-10-05 resume point, each decided by the main session under the mandate of 2026-10-09: (1) alert wording: the observed failure kind (timeout) already has its own branch in dispatch.py that gives no Automation remedy (read today, the elif on probe_outcome startswith timeout); the generic branch still offers the grant advice as cause (a) and still says 'check the evidence age below' without printing one; not changed, because the only error form that reaches it has not recurred and its cause is unknown. (2) fleet size: a changed fleet size stays a new observation and prints again; no code. (3) the resolved ledger entry is split to its own card, named on the drain line. (4) interpreter path: closed as not a cause; the interpreter was measured PERMITTED on 2026-10-05 and every logged failure since is a timeout. (5) the per-project acknowledgement store stays; it is narrower than 'once per session' and errs toward fewer repeats; a new session reads the alert from the session-start ledger replay. CLOSED to complete on: commits in a release, pinning tests re-run, the named event found in the named log with timestamps.
+
+## Acceptance
+
+- [x] Report item 1, 'reword the remedy': NARROWED. The failure kind observed since the release (a timeout) has its own alert branch with no Automation remedy; the generic branch still offers the grant advice as one of two causes and is unchanged, because the error form that reaches it has not recurred and its cause is not established.
+- [x] Report item 2, 'name one cause if it can be told apart': NARROWED to the daemon log. The probe now logs its real failure (exit code, error number, exception type); the alert text does not carry it. On this host the logged cause is a timeout, 11 times.
+- [x] Report item 3, 'do not repeat the full alert on every fire while nothing changed': the flag is no longer rewritten for an unchanged observation (pinned by test); FIELD CASE UNOBSERVED, no failure has persisted since the release.
+- [x] The named live event (first probe failure under a release carrying the logging) was found in daemon.log.1 with timestamps; see the STATE line of 2026-10-10 13:24.
