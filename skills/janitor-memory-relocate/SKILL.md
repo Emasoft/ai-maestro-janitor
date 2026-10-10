@@ -107,8 +107,9 @@ failure duty 10 exists to undo.
    If the verb refuses with "already exists" (the page appeared after your survey), run the
    3-root survey once more and use the page it now finds as the destination. If that second
    survey is still empty, do NOT move the atom: record a refusal that names the page path
-   the "already exists" error printed, so a later pass or a human decides. Any other refusal
-   (for example the description floor) is fixed and re-run, not treated as a race.
+   the "already exists" error printed, for a human to decide. On a description-floor refusal,
+   fix the description and re-run ONCE; record any other refusal, and never change the page
+   name to get past one.
 4. Then run the normal MOVE (above) with the minted page as `--to`.
 
 If memgrep is missing, do NEITHER: no survey, no mint, no move — record a refusal instead.

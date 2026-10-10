@@ -125,10 +125,9 @@ def test_heartbeat_rule_spawn_prompt_carries_the_state_dir_placeholder():
     )
 
 
-
 def test_relocate_skill_records_empty_survey_and_handles_already_exists():
-    """TRDD-BAK8B3C0: relocate records the empty survey before minting and re-surveys on an
-    "already exists" refusal instead of retrying."""
+    """TRDD-BAK8B3C0: the relocate skill records the empty survey before minting, and after an
+    already-exists refusal with an empty re-survey it does not move the atom."""
     text = (_SKILLS_DIR / "janitor-memory-relocate" / "SKILL.md").read_text(encoding="utf-8")
     assert "three-root survey was empty" in text
-    assert "already exists" in text
+    assert "do NOT move the atom" in text
