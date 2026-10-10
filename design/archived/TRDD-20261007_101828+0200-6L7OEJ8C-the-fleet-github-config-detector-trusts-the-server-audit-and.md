@@ -1,10 +1,10 @@
 ---
 trdd-id: 6L7OEJ8C
 title: The fleet GitHub-config detector trusts the server audit and re-raises NO_PR_REVIEW on repos whose own rule says no pull request
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T10:18:28+0200
-updated: 2026-10-07T10:20:35+0200
+updated: 2026-10-10T23:12:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -42,3 +42,14 @@ In the detector, before surfacing or proposing a NO_PR_REVIEW finding for the cu
 ## Approval log
 
 - 2026-10-07T10:18:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-10T23:12:23+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
+
+## Acceptance
+
+- [x] A NO_PR_REVIEW finding is dropped where the repo's own rule says no pull request, and still raised where it says true: commits ba7f26c1, bd80987f, 3904fe81, all in release v3.8.7; tests test_no_pr_review_is_dropped_when_the_repos_own_prrd_says_false and test_no_pr_review_is_still_raised_when_the_repos_own_prrd_says_true.
+- [x] Review additions 1, 2, 4 and corrections a, b, d, each with a named test: every slug filtered in one place with the drop count in the detector's log, never printed for other repos (test_other_repos_are_filtered_but_never_printed_and_the_drop_count_goes_to_the_log); an undetermined requirement keeps an advisory and never proposes (test_an_undetermined_requirement_keeps_an_advisory_and_never_proposes); generated_at compared as time (test_generated_at_is_compared_as_time_not_as_text). NARROWED: correction c (a repo whose rule cannot be read counts as undetermined) is covered only through the tri-state test, no test of its own was looked for; addition 3 (what happens to the seen file and the suppressed count on a drop) was answered in code only as far as line 311, the digest is taken from the payload after the drop; the suppressed-count file was not read.
+- [x] FIELD CASE OBSERVED, the card's own: this project's fleet-github-config.log holds 95 lines 'dropped 1 NO_PR_REVIEW finding(s): pull-request requirement determined false' from 2026-10-07 14:39:35 to 2026-10-10 23:11:19 (installed version 3.8.11), and the findings ledger holds one GHCFG-001 entry, the original of 2026-10-07 10:14, none since; the false proposal TRDD-0JTGLSXE is in column refused. All 28 tests of tests/test_fleet_github_config_detector.py passed on a re-run by the main session at this time.
+
+## STATE
+
+2026-10-10 23:12. CLOSED to complete by the main session: the fix was built and released on 2026-10-07 and the card was left in todo. NOT READ, and not needed for the closing: the two questions of correction f (whether ticket_proposal treats a refused card as already proposed; whether the seen file's hash changes on every server audit); no ticket line recurred, which is the outcome they guarded. STILL OPEN OUTSIDE THIS CARD, the owner's: the server audit in the ai-maestro repository does not apply the 2026-08-13 ruling and needs an issue there; nothing was posted. Also unchanged: if the server stops owning the chore, the detector reads the janitor's own findings file of 2026-10-04.
