@@ -2,6 +2,7 @@
 prrd-version: 1.7
 updated: "2026-09-05T10:45:19+0200"
 project: ai-maestro-janitor
+project-id: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
 mirrors: []
 require-pull-request: false
