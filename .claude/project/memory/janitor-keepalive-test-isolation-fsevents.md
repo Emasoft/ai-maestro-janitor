@@ -2,7 +2,7 @@
 name: janitor-keepalive-test-isolation-fsevents
 description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / a test wrote the LIVE control plane and JANITOR_GLOBAL_STATE_DIR did not move it / a kill-switch flag appeared from nowhere and disarmed the fleet / how to root-cause an fseventsd or mds RAM/CPU runaway / I found a daemon.py process running from a temp directory / is this the real janitor daemon or a test leftover / an orphaned daemon from the test suite stayed alive for days / a daemon process burning almost no CPU that ignored SIGTERM / ps shows a second daemon but daemon.pid names a different one"
 ocd: 2026-07-03
-lmd: 2026-10-05
+lmd: 2026-10-10
 metadata:
   node_type: memory
   type: project
@@ -146,7 +146,7 @@ Because the isolation levers are per-process env, an escapee CANNOT corrupt real
 is contained, not dangerous. It is still worth killing: it holds an fd on an unlinked flock,
 and it makes every later process-table audit ambiguous.
 
-^ATOM-5STX-ZL36 [desc:"the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed is_this_orphan_evidence_my_fix_failed compare_the_orphan_start_time_to_the_fix_commit_date 2_days_18_hours_alive_at_0.13s_cpu_total a_leak_is_silent_absence_of_symptoms_is_not_absence_of_leaks terminate-and-assume_cleanup_does_not_clear_a_leak parked_in_a_sleep_which_is_why_nothing_noticed_it ppid_1_process-group_leader_long_gone sandbox_HOME_already_deleted_but_process_still_alive is_this_orphan_process_a_sign_my_fix_didnt_work, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-5STX-ZL36 [desc: "the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed 2_days_18_hours_alive_at_0.13s_cpu_total a_leak_is_silent_absence_of_symptoms_is_not_absence_of_leaks terminate-and-assume_cleanup_does_not_clear_a_leak parked_in_a_sleep_which_is_why_nothing_noticed_it ppid_1_process-group_leader_long_gone sandbox_HOME_already_deleted_but_process_still_alive ignored_SIGTERM_required_SIGKILL leak_uses_no_CPU_so_nobody_reports_it, type: project, ocd: 2026-08-01, lmd: 2026-10-10]
 
 Measured instance (2026-07-30 → 2026-08-02): one escapee still alive **2 d 18 h** after its
 sandbox HOME had been deleted, at **0.13 s of CPU total** and 4 MB RSS — parked in a sleep,
@@ -158,6 +158,9 @@ Two consequences worth keeping:
   process that uses no CPU and touches no real state; it is found only by looking.
 - **It ignored SIGTERM and required SIGKILL.** A cleanup that sends SIGTERM and assumes
   success leaves the escapee running while reporting a clean teardown.
+
+
+^ATOM-PYBD-C3SM [desc: "kill the process GROUP not the suite's handle; an orphan that started before the fix commit is not evidence the fix failed", keywords: orphan_started_before_the_fix_is_not_evidence_the_fix_failed compare_orphan_start_time_to_fix_commit_date kill_the_process_group_not_the_handle is_this_orphan_process_a_sign_my_fix_didnt_work escapee_survived_after_my_cleanup_fix fix_landed_2026-08-01_process_group_kill how_to_judge_a_leaked_process_you_find leak_predates_the_fix_commit teardown_must_signal_the_group_leader_not_the_child orphaned_process_found_after_fix_shipped suite_holds_only_a_handle_not_the_group, type: project, ocd: 2026-10-10, lmd: 2026-10-10]
 
 The fix is to kill the process GROUP rather than the handle the suite holds (landed
 2026-08-01). Note the ordering when judging a leak you find: an escapee that STARTED before
