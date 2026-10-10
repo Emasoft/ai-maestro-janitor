@@ -4,7 +4,7 @@ title: One late rotator tick under load raises the tick-stalled alarm and the do
 column: todo
 status: tasked
 created: 2026-10-07T05:15:51+0200
-updated: 2026-10-07T05:15:51+0200
+updated: 2026-10-10T03:48:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,4 @@ Compare TICK_STALL_S in scripts/lib/rotator_alert.py with measured tick duration
 ## Approval log
 
 - 2026-10-07T05:15:51+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 03:48 from the closure of TRDD-JOXQQL4J (archived): its third Acceptance box was ticked for the question this card carries, which was handed over, not answered. FIELD CASE UNOBSERVED for the alert-evaluation path: nine handled stalled-ps ticks were seen on the tick path only; the daemon's stderr file (global-state/daemon-keepalive.err.log) is 115 bytes since the re-stage of 2026-10-09 and holds no handled-stall line.

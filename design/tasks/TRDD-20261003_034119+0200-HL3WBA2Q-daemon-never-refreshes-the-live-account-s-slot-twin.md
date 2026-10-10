@@ -4,7 +4,7 @@ title: Daemon never refreshes the live account's slot twin
 column: testing
 status: tasked
 created: 2026-10-03T03:41:19+0200
-updated: 2026-10-09T23:19:37+0200
+updated: 2026-10-10T03:48:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,6 +35,7 @@ Parent plan: TRDD-JSQSJ3PZ
 
 - 2026-10-03T03:41:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3): its field case has not been seen: a rotation of the live account by Claude Code with no token refresh of the slot twin. The rotator log holds only today's lines and has 0 'refusing to refresh' entries. Guard and real-socket test are in place (15 selected tests pass). Assessment: reports/board/20261009_231646+0200-wave3-batchC.md.
+2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). NOTE INCOMPLETE: 0 'refusing to refresh' lines (rotator.py:2445) is true, but the sibling keepalive guard logged 'not refreshed — it is the best-known LIVE account' twice, 2026-10-09T18:57:55 and 18:59:06 (both lines read by the main session). Whether that is this card's own case has NOT been judged; judge it against the card before the next stay decision.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 

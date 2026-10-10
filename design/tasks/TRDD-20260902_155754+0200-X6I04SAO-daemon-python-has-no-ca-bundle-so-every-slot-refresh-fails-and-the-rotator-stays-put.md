@@ -3,7 +3,7 @@ trdd-id: X6I04SAO
 title: the daemon's Python has no CA bundle, so every slot refresh fails TLS and the rotator stays put while the user rotates by hand
 column: testing
 created: 2026-09-02T15:57:54+0200
-updated: 2026-10-09T23:50:54+0200
+updated: 2026-10-10T03:48:09+0200
 review-after: 2026-09-24
 current-owner: main-session
 task-type: bugfix
@@ -133,6 +133,7 @@ scoped switch (util still healthy, no pane was actually wedged/blocked at the ti
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-17T05:54:33+0200 — column → testing by main session (owner standing permission 2026-09-03). CA-bundle fix landed and stable; remaining box 4 needs a genuinely wedged pane + paired ESC event.
 2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. Box 4 not yet seen: a rotation triggered by a model-scoped wall. DETECT (non-empty output proves it): grep -h 'SCOPED\[' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/rotator.log* | grep switched. The rotator log keeps about two days, so check daily. Assessment: reports/board/20261009_233351+0200-wave3-batchH.md.
+2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). STILL UNSEEN: 0 'SCOPED[' lines; the rotator logs cover only about 9 hours (2026-10-09T18:25 onward), not the two days the note assumed, so the check must run more often than daily.
 
 ## Notes and lessons learned
 

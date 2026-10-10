@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-10-09T23:50:55+0200
+updated: 2026-10-10T03:48:08+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -453,6 +453,7 @@ this, because each actor is behaving correctly by its own contract.
 - 2026-09-16T14:25:00+0200 — correction to the NEXT ACTION above: the hand update at 12:45 contaminates evidence only AFTER 12:45. The 12:20-12:45 window of the owning daemon's log (the ai-maestro server holds version-update on this host per daemon.log's chore-coordination line) already answers whether an update was attempted within one cadence of the 3.5.5 release; read that first, it may close the box today. And never skip the upgrade-on-green rule at a future release to make this observation — read the log for the window BEFORE the hand update instead.
 - 2026-09-17T05:54:32+0200 — column → testing by main session (owner standing permission 2026-09-03). Both boxes' code landed; remaining box 2 is a live latency measurement observable only at next release.
 2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. Open box: a measured publish-to-installed latency under the server. The flag was raised 4 s after the v3.8.10 publish (2026-10-07 21:35:53), but the next server tick came 17 minutes later and failed; the v3.8.11 install was done by another actor. DETECT after the next release: ~/.claude/janitor-control/version-update-last-raised.ts newer than the release, and a server tick marked updated within 15 minutes. Why the 21:53:17 tick failed is not known. Assessment: reports/board/20261009_234031+0200-wave3-batchI.md.
+2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). STILL UNSEEN, one new fact: janitor-control/version-update-last-raised.ts dates from 2026-10-07 21:35, before the v3.8.11 tag of 22:56:50 the same day, so the v3.8.11 release left no new raise stamp; the daemon logs say it yields version-update to the ai-maestro server on every start.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 

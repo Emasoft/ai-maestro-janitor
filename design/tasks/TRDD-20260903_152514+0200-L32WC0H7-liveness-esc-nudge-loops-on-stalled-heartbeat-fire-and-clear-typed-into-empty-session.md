@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-10-09T23:50:55+0200
+updated: 2026-10-10T03:48:08+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -303,5 +303,6 @@ Mechanism, verified in code + transcript:
 - 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
 - 2026-09-23T19:06:42+0200 — column → testing. card 1 of the Jev spec landed 2026-09-22; only the F5 live stalled-fire observation remains, per this card's STATE
 2026-10-09 STAYS in testing (board drain, wave 3). Per the assessing worker, not re-checked by the main session: fix commits are ancestors of the v3.8.11 tag and the card's test files pass. Three live boxes open: a stalled fire recovering with one nudge has not been observed with transcript evidence. DETECT: grep -E '\[frozen\] attempt=[0-9]' ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log* per episode, then count interrupt records in that project's transcript. The 3 GIVING UP lines of 2026-10-09 are cron_dead diagnoses, a different case. Assessment: reports/board/20261009_234031+0200-wave3-batchI.md.
+2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). OBSERVED, AS FAILURES: 10 '[frozen] attempt=' lines in daemon.log (count confirmed by the main session), 2026-10-09T19:21:26 to 19:56:23, 5 episodes in two other projects, every one FIRE-FAILED esc_nudge at pane=retry_wedge with attempts climbing 0, 1, 2. The fix's success case is unseen; these failures still need their own card (drain step vi).
 
 ## Notes and lessons learned
