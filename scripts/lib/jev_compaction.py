@@ -1503,15 +1503,18 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
             used += cost(owner_block) + marker_reserve
     stop = owner_idx if owner_block and owner_idx is not None else -1
 
-    def run_back(start: int, stop_at: int) -> tuple[list[str], int]:
-        """Blocks from `start` backward while they fit, newest first; and the first index
-        NOT shown (== `stop_at` when every message down to it was)."""
+    def run_back(start: int, stop_at: int) -> tuple[list[str], int, int]:
+        """Blocks from `start` backward while they fit, newest first; the first index NOT
+        shown (== `stop_at` when every message down to it was); and the number of surplus
+        status replies skipped on the way."""
         nonlocal used
         out: list[str] = []
         i = start
+        skipped = 0
         while i > stop_at:
             if id(conversation[i]) not in visible:
-                i -= 1  # surplus status reply: no block, no cost, not counted
+                i -= 1  # surplus status reply: no block, no cost
+                skipped += 1
                 continue
             block = _exchange_block(conversation[i], DEFAULT_INJECT_ITEM_BYTES)
             if not fits(used, cost(block)):
@@ -1519,20 +1522,22 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
             out.append(block)
             used += cost(block)
             i -= 1
-        return out, i
+        return out, i, skipped
 
-    run, i = run_back(len(conversation) - 1, stop)
+    run, i, skipped = run_back(len(conversation) - 1, stop)
     older: list[str] = []
     if owner_block and owner_idx is not None and i == owner_idx:
         # The run reached the owner message, so the exchange is whole from there on: keep
         # going backward past it, still contiguous, while the share lasts (the room would
         # otherwise sit unused whenever the owner spoke last or second-to-last).
-        older, _ = run_back(owner_idx - 1, -1)
+        older, _, _ = run_back(owner_idx - 1, -1)
 
     blocks: list[str] = list(reversed(older))
     if owner_block and owner_idx is not None:
         blocks.append(owner_block)
-        gap = i - owner_idx  # messages after the owner's that the run did not reach
+        # Skipped status replies after the owner's message are only in the full copy too
+        # (TRDD-U119W52S); pure index arithmetic would not count them.
+        gap = i - owner_idx + skipped
         if gap > 0:
             where = "between these" if run else "after this"
             blocks.append(f"[{gap} messages {where} are only in the full copy]")

@@ -3365,7 +3365,28 @@ def test_select_exchanges_caps_heartbeat_status_run_in_the_injected_view() -> No
 
     assert "REAL WORK NOTE alpha" in joined
     assert joined.count(_STATUS_REPLY) == 2
-    assert shown == sum(1 for b in blocks if b.startswith("-- "))
+    assert shown == 4
+    assert "[7 messages between these are only in the full copy]" in blocks
+
+
+def test_select_exchanges_gap_counts_skipped_status_replies_when_the_real_note_does_not_fit() -> None:
+    """TRDD-U119W52S: the gap marker counts the 7 hidden status replies plus the real note."""
+    conversation = _status_conversation()
+    cap = jc.DEFAULT_INJECT_ITEM_BYTES
+
+    def cost(it: jc.Item, c: int) -> int:
+        return len(jc._exchange_block(it, c).encode("utf-8")) + 1
+
+    marker = len(f"[{len(conversation)} messages between these are only in the full copy]"
+                 .encode("utf-8")) + 1
+    budget = (cost(conversation[0], jc.NEWEST_OWNER_ITEM_BYTES) + marker
+              + 2 * cost(conversation[-1], cap))
+    blocks, _ = jc._select_exchanges(conversation, budget)
+    joined = "\n".join(blocks)
+
+    assert joined.count(_STATUS_REPLY) == 2
+    assert "REAL WORK NOTE alpha" not in joined
+    assert "[8 messages between these are only in the full copy]" in blocks
 
 
 def test_full_render_keeps_every_heartbeat_status_reply() -> None:

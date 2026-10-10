@@ -805,7 +805,7 @@ def test_recent_turns_caps_consecutive_heartbeat_status_replies(tmp_path: Path) 
     turns = hook._recent_turns(str(tx), n=5)
     assert turns is not None
     assert ("assistant", "REAL WORK NOTE alpha") in turns
-    assert sum(1 for _, t in turns if t == status) <= 2
+    assert sum(1 for _, t in turns if t == status) == 2
 
 
 def test_recent_turns_drops_api_error_message(tmp_path: Path) -> None:
