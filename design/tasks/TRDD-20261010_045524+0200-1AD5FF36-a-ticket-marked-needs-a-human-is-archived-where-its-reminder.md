@@ -4,7 +4,7 @@ title: A ticket marked needs a human is archived where its reminder never looks
 column: todo
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-10T04:55:24+0200
+updated: 2026-10-10T04:58:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Found 2026-10-10 while reading for TRDD-6ESS2MGE (measured: reports/board/202610
 ## Approval log
 
 - 2026-10-10T04:55:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-10 04:58 WHO READ WHAT (review of fed2df0e): tickets.py:104 and the save() lines 417-418 are worker-read (measure report item A5); load_all (tickets.py:346-358) and ticket-dispatch.py:147-149 were read by the main session; the 7 closed and 0 open tickets are a worker's count; the path from mark_needs_human to save() was not traced.
