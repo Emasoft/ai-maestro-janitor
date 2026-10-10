@@ -4,7 +4,7 @@ title: Task list carried into the new session after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:49+0200
-updated: 2026-10-09T23:23:38+0200
+updated: 2026-10-11T01:24:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -47,3 +47,4 @@ Field check after release, both parts required before complete: (a) after a jani
 Unverified: that the transcript file stem equals the old sessionId in every case; a wrong id finds no *.json and copies nothing (fails safe).
 Possible follow-up: carry only tasks whose status is not completed (matching the Continuity block's open_tasks), so the list does not grow across repeated clears; copy2 keeps old mtimes, harmless unless Claude Code orders tasks by mtime.
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: not exercised: 5 janitor clears after install (three on 2026-10-04, two on 2026-10-05), none of the cleared sessions had a task directory, 0 carried-files log lines; needs a clear of a session with a populated task directory. The card stays in testing; the check could not be made: no cleared session held task files.
+2026-10-11 01:24. HALF MET, from reports/board/20261011_005026+0200-testing-sweep.md (a read-only worker; leads, not re-read by the main session unless said): two lines carried 2 task file(s) in .janitor/logs/jev-post-clear-hook.log (2026-10-09 07:31 session f2dd0f96, 09:40 session 8a11fda7); survival past the first new task creation is not shown. Stays in testing.

@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-09T22:19:45+0200
+updated: 2026-10-11T01:24:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
 2026-10-06 FIELD CHECK NOT MET: the LaunchAgent plist still sets ProcessType Background (the host re-stage step is not done) and the 3.7.5 daemon started 19:47 runs at priority 4; of 66 rotator ticks since then, 4 took 30 s or more (48, 48, 86 and 141 s). Needs the owner's host re-stage. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 2026-10-07: owner decision still open; nothing changed today; the LaunchAgent stays at ProcessType Background until the owner says so (re-staging at Standard is reversible).
+2026-10-11 01:24. FIELD SIGNAL, NOT MET, from reports/board/20261011_005026+0200-testing-sweep.md (a read-only worker; leads, not re-read by the main session unless said): since the Standard job began (2026-10-09T22:20) 27 of 1514 oauth-rotator-tick runs took 30 s or more (40, 53, 47, 93 s among the first). Host load is in no log, so it is not shown that the slow ticks were under load. Stays in testing.
 
 ## Approval log
 

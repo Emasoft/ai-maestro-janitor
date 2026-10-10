@@ -4,7 +4,7 @@ title: The shared heartbeat-reply predicate hides real assistant messages from t
 column: testing
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-10-10T00:04:26+0200
+updated: 2026-10-11T01:24:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -42,3 +42,4 @@ TRDD-D7RLXAN1 -- the acceptance run that found the 9-message false-drop (jev_com
 - 2026-10-07 -- Decided: narrow (bare-only) wins; all callers were content filters. transcript_roles.is_heartbeat_reply is now the single predicate and jev_compaction uses it (commit f9587fd0).
 2026-10-07 — ACCEPTANCE CHECK (not yet run): external_clear.recent_messages caps its recent window by record count (limit) and by total bytes; replies of the form 'janitor heartbeat' plus one status line are now kept, so on a long idle stretch they can crowd older assistant messages out of that window (the owner's last messages are fetched separately and placed first, so they cannot be crowded out). Pass when a clear handoff taken after 20 or more consecutive heartbeat fires still shows the last substantive assistant message; if it does not, the fix is a cap on consecutive heartbeat-plus-status replies in the tail, not a return to the wide predicate. The full test suite has not run on f9587fd0.
 2026-10-07 — worker breaches on f9587fd0, diff read and accepted by the main agent: a Python script instead of fastedit for the removals in scripts/lib/transcript_roles.py and scripts/lib/jev_compaction.py, and git stash on scripts/lib to show the new tests failing first (popped, tree clean). Checked after review: no other code matches the phrase with its own string test; the two rewritten tests assert the correct opposite and the bare-reply-dropped assertion remains.
+2026-10-11 01:24. STAYS in testing, check not run: its fix commits ee539e7a and 13650a48 are in no tag (git tag --contains is empty for both; only f9587fd0 is in v3.8.11) and the running plugin is the 3.8.11 cache, so no clear since can show the revised rule. The injected text of each clear IS readable in the new session transcript (TRDD-J7RLG96D), so the check becomes possible after a release.

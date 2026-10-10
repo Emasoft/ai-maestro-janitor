@@ -2,7 +2,7 @@
 name: jev-compaction
 description: "the post-clear summary is missing tool results / expand says no block 0 in entry / the Jev hook was too slow / run_compact exceeded the 60 second bound / the handoff after a clear is from another session / what does the injected copy contain / why is my own message not in the digest / AttributeError list object has no attribute strip on a pasted image / the injected copy carried 0 tool or event items / a mid-turn queued owner message failed to expand / what is Jev compaction / how does the post-clear SessionStart hook work / what does jev_compact.py compact do / what is the difference between --out and --inject-out / does Jev score my own prose / are condensers wired into extract_items / is the injected copy a subset of what Jev kept / a 258 MB transcript is too slow to compact / what is TRDD-350W5II2 / why is the compaction hook 46 seconds"
 ocd: 2026-09-24
-lmd: 2026-10-03
+lmd: 2026-10-10
 publish-globally: false
 metadata:
   node_type: memory
@@ -59,6 +59,11 @@ TRDD-4P4Y2KBR (commit 737b4d6c). On 2026-09-24 a clear on the installed v3.5.7 i
 As of 2026-09-24: a measured timing limit, not yet fully fixed (matrix report and hook-timeout follow-up report, both LOCAL scope for the exact file paths). A 258MB real transcript exceeds the 60s run_compact wall bound: jev compose itself took 60.6s of a 71s total. The real post-clear hook was separately measured at 46s against the same 60s bound (was 18s earlier that same session), at load average 50-117 -- one more spike trips the template fallback. Root cause named in TRDD-350W5II2 ('jev scores only live tool and event items, not pre-boundary ones' -- title): split_conversation still scores ALL pre-boundary items, not just the live ones since the last compact_boundary (score_items docstring: 168s serial on 7075 items on the same 258MB transcript). TRDD-350W5II2 is the pending ROOT fix -- as of 2026-09-24 its blocker on TRDD-D7RLXAN1 was cleared (D7RLXAN1's code landed, commit c7779d84) and it moved to column todo, but TRDD-350W5II2 ITSELF has NOT landed any code yet. A separate follow-up, the staleness-aware next-fire reader in external_clear.py, LANDED in commit 9efd5df3 (2026-09-24) -- seconds_until_next_fire now delegates to cron_period.parse() too. [^1]
 
 
+
+
+^ATOM-8Z5K-9RLA [desc: "the text a janitor clear injects is kept in the new session transcript as the SessionStart:clear hook output, so handoff checks need no janitor log", keywords: what_did_the_clear_inject handoff_text_is_not_logged continuity_block_not_recorded recent_messages_tail_of_a_handoff which_reply_was_quoted_after_a_clear nothing_records_the_injected_context post-clear_hook_output SessionStart:clear_attachment read_the_handoff_from_the_transcript check_a_clear_after_the_fact was_the_last_question_carried_over jev_post-clear_injection_lost, type: reference, ocd: 2026-10-10, lmd: 2026-10-10]
+
+The text a janitor clear injects into the new session is not lost: Claude Code stores it in the NEW session transcript (~/.claude/projects/<project>/<session>.jsonl) as the output of the SessionStart:clear hook, an attachment record. Measured 2026-10-11 on this project: 37 such records in the last 40 transcripts, each about 16,000 characters, holding the continuity block and the recent-messages tail. So a field check of what a clear handed over (which reply was quoted, whether a substantive message survived) can be made by reading those records; no janitor log is needed. Hook durations are in the same transcripts ([[janitor-hooks-two-import-conventions]], ATOM-EDA3-ANMF). Limits: the files follow Claude Code retention, and a check only sees clears made by the plugin version that was installed at the time, so a fix that is not released has no after-group (TRDD-IYNS7H83, TRDD-DS3WDTPV, TRDD-J7RLG96D).
 
 ## See also
 

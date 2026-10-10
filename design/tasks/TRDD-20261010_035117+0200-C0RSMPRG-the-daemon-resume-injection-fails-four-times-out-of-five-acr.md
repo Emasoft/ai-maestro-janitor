@@ -1,10 +1,10 @@
 ---
 trdd-id: C0RSMPRG
 title: The daemon resume injection is not done four times out of five across ten projects
-column: todo
+column: dev
 status: tasked
 created: 2026-10-10T03:51:17+0200
-updated: 2026-10-10T04:16:31+0200
+updated: 2026-10-11T01:24:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,8 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 
 - 2026-10-10T03:51:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 04:12 CORRECTIONS to the title and body (review of dfd28faa; counts and code read by the main session). (1) TEN projects, not eight: the list was cut; the other two are CLAUDE-PLUGIN-VALIDATION 4 and ai-maestro-plugin 4. (2) 'fails' is too strong: scripts/daemon.py 2355 to 2369 logs FIRE-FAILED for every outcome of pane_actuate.act other than DONE, which includes a deliberate refusal, and FIRED means the keystrokes were sent, not that the session resumed. So 107 of 130 injections were NOT DONE; the split between refused and failed is unread (the 'resume-wake: <project> pane-policy:' lines beside them should say).
+- 2026-10-11T01:24:07+0200 — column → dev. status-word logging fix being built by one worker
+
+## Findings
+
+2026-10-11 01:24. READ IN CODE by the main session (scripts/daemon.py _resume_wake_pass, about 2372 to 2384): the line is logged for every pane_actuate outcome that is not DONE (FAILED, DEFERRED, NOOP), with neither the status nor a reason, so 120 against 24 is not a failure rate. Recount today: 120 FIRE-FAILED, 24 FIRED. BUILD STARTED: log the status word in that line, as the rotation-esc line already does; tests first; one lean-worker. The split between refused and failed becomes countable only after a release carries it.

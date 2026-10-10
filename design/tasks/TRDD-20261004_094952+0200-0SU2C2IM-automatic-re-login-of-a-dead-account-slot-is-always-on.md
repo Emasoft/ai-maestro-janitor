@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-10T03:47:39+0200
+updated: 2026-10-11T01:24:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -60,3 +60,4 @@ Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is 
 ## STATE
 
 2026-10-07: the 'no release tag yet' wording is stale. git tag --contains c91af837 lists ai-maestro-janitor--v3.7.1 and v3.7.2 (checked 2026-10-07 by a worker). The card still waits on its live event: a credential-dead spare slot holding a valid web cookie, one daemon tick logging auto-bootstrap: launch.
+2026-10-11 01:24. PARTLY MET, from reports/board/20261011_005026+0200-testing-sweep.md (a read-only worker; leads, not re-read by the main session unless said): the launch half is seen (6 lines auto-bootstrap opening a browser to mint, 2026-10-10 15:06 to 15:08 in rotator.log); the re-file half is NOT: both accounts hit the cap of 3 launches without a refresh-bearing mint at 15:09:59. Stays in testing.

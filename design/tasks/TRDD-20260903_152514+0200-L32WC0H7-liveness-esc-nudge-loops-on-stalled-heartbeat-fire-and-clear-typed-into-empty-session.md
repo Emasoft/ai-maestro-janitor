@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-10-10T03:48:08+0200
+updated: 2026-10-11T01:24:06+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -73,6 +73,7 @@ created-by: ai-maestro-janitor main session
 2026-09-25 17:10 — second review round: all commits sound. Notes recorded: (1) the oscillation test pins F1 COMBINED with the identity guard (beat 2 shares pid/tty) — the mutation probe is what isolates the F1 branch as load-bearing; (2) the flag-ABSENT healthy reset is already pinned by test_recovered_instance_resets_its_attempt_budget (test_daemon_session_liveness.py:292), the reviewer's one ask, no new test needed; (3) the oscillation test's global time.time patch (+901s for beat 3) is cosmetic today but a caveat for any future wall-clock assertion.
 2026-10-07: stays in testing, triage checked: it names a live event, F5 (one real stalled heartbeat fire recovering with a single nudge, on a release carrying F0-F6); the row-count test of Acceptance box 1 already landed on 2026-09-25, so nothing developable remains.
 2026-10-07: guard PreToolUse hooks now have 30 s (TRDD-U32EVMI9), so on a stalled host a tool call can wait up to 30 s before it proceeds, three times longer than before; relevant to the liveness nudge timing this card tunes.
+2026-10-11 01:24. FIELD SIGNAL, from reports/board/20261011_005026+0200-testing-sweep.md (a read-only worker; leads, not re-read by the main session unless said): frozen-session esc_nudge shows 5 FIRE-FAILED and 0 FIRED in global-state/daemon.log*, e.g. 2026-10-09T19:21:26 for ai-maestro, attempt=0 pane=retry_wedge. Not read: whether these are refusals by the pane policy. The retry_wedge case has its own card, TRDD-315X5OWA.
 
 ## Symptom (owner report, 2026-09-03)
 
