@@ -307,6 +307,15 @@ def _own_code(paths: list[Path], project_root: Path) -> list[Path]:
     return git_utils.drop_gitignored(kept, root=project_root)
 
 
+
+def _find_named(project_root: Path, pattern: str) -> list[Path]:
+    # TRDD-WOI8GO1S: one git listing instead of an rglob that enters every ignored folder (120 s kills).
+    listed = git_utils.own_files(project_root, log_name=_NAME)
+    if listed is not None:
+        return [p for p in listed if p.match(pattern)]
+    return list(project_root.rglob(pattern))
+
+
 def _go_scan_targets(project_root: Path) -> list[Path]:
     """Files within project_root that may set Go env vars."""
     out: list[Path] = []
@@ -319,7 +328,7 @@ def _go_scan_targets(project_root: Path) -> list[Path]:
             out.append(f)
     # Dockerfiles (any name starting with Dockerfile in any depth).
     out.extend(
-        _own_code([f for f in project_root.rglob("Dockerfile*") if f.is_file()], project_root)
+        _own_code([f for f in _find_named(project_root, "Dockerfile*") if f.is_file()], project_root)
     )
     # Makefiles.
     for name in ("Makefile", "makefile", "GNUmakefile"):
@@ -661,7 +670,7 @@ def _check_setup_py_ast(project_root: Path) -> list[str]:
     ):
         return []
     issues: list[str] = []
-    for path in _own_code(list(project_root.rglob("setup.py")), project_root):
+    for path in _own_code(_find_named(project_root, "setup.py"), project_root):
         try:
             source = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -766,7 +775,7 @@ def _content_signature(project_root: Path) -> str:
     # Same `_own_code` gate as the scan itself — the signature must cover EXACTLY the
     # files that get scanned, or a change to an unscanned file busts the dedupe hash and
     # re-emits an unchanged finding every fire.
-    for p in _own_code(sorted(project_root.rglob("setup.py")), project_root):
+    for p in _own_code(sorted(_find_named(project_root, "setup.py")), project_root):
         try:
             st = p.stat()
             rel_path = p.relative_to(project_root)

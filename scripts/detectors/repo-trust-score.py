@@ -110,6 +110,24 @@ def _is_binary_suffix(p: Path) -> bool:
         return True
     return p.suffix.lower() in _SUSPICIOUS_BIN_SUFFIXES
 
+def _tree_paths(root: Path) -> list[Path]:
+    # TRDD-WOI8GO1S: one git listing instead of an rglob that enters every ignored folder (120 s kills).
+    listed = git_utils.own_files(root, log_name=_NAME)
+    if listed is not None:
+        return listed
+    return git_utils.drop_gitignored(sorted(root.rglob("*")), root=root)
+
+
+_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "*.test.js", "*.test.ts")
+
+
+def _has_test_files(root: Path) -> bool:
+    # TRDD-WOI8GO1S: same listing-or-walk split as _tree_paths; the walk keeps today's unfiltered rglob.
+    listed = git_utils.own_files(root, log_name=_NAME)
+    if listed is not None:
+        return any(p.match(pat) for p in listed for pat in _TEST_FILE_PATTERNS)
+    return any(list(root.rglob(pat))[:1] for pat in _TEST_FILE_PATTERNS)
+
 
 def _enumerate_suspicious_binaries(root: Path) -> list[Path]:
     """Return every suspicious binary blob in the project, excluding
@@ -123,7 +141,7 @@ def _enumerate_suspicious_binaries(root: Path) -> list[Path]:
     # dropper shape, reporting 393 on a repo whose tracked surface is clean. The
     # hard-coded `skip` set above can never keep up with a project's own `*_dev/`
     # conventions; the project's .gitignore already states them. Batched + fail-open.
-    for path in git_utils.drop_gitignored(sorted(root.rglob("*")), root=root):
+    for path in _tree_paths(root):
         if not path.is_file():
             continue
         if any(part in skip for part in path.parts):
@@ -248,7 +266,7 @@ def _score_code_vs_readme_ratio(root: Path, readme: Path | None) -> tuple[int, l
     src_bytes = 0
     # Same filter as the binary walk: the source-mass denominator must be measured over
     # the SAME population as the numerator, or a corpus dir inflates one side only.
-    for path in git_utils.drop_gitignored(sorted(root.rglob("*")), root=root):
+    for path in _tree_paths(root):
         if not path.is_file():
             continue
         if any(part in skip for part in path.parts):
@@ -277,11 +295,7 @@ def _score_missing_essentials(root: Path) -> tuple[int, list[str]]:
     has_ci = (root / ".github" / "workflows").is_dir() or \
              (root / ".gitlab-ci.yml").is_file() or \
              (root / ".circleci" / "config.yml").is_file()
-    has_tests = (root / "tests").is_dir() or (root / "test").is_dir() or \
-                bool(list(root.rglob("test_*.py"))[:1]) or \
-                bool(list(root.rglob("*_test.py"))[:1]) or \
-                bool(list(root.rglob("*.test.js"))[:1]) or \
-                bool(list(root.rglob("*.test.ts"))[:1])
+    has_tests = (root / "tests").is_dir() or (root / "test").is_dir() or _has_test_files(root)
     has_license = any((root / n).is_file() for n in
                       ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"))
     if not has_ci:

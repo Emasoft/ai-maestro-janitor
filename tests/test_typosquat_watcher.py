@@ -11,10 +11,13 @@ pnpm-lock.yaml, requirements.txt, uv.lock, poetry.lock.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "typosquat-watcher.py"
@@ -83,6 +86,52 @@ def test_fires_on_npm_typosquat_reactt(tmp_path: Path) -> None:
     assert "[typosquat-watcher]" in r.stdout
     assert "npm:reactt" in r.stdout
     assert "'react'" in r.stdout
+
+
+
+def _typo_lock(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"lockfileVersion": 3, "packages": {"node_modules/reactt": {"version": "1.0.0"}}}),
+        encoding="utf-8",
+    )
+
+
+def _git_repo_with_ignored_typosquat(root: Path) -> None:
+    _typo_lock(root / "downloads_dev" / "package-lock.json")
+    _typo_lock(root / "src" / "package-lock.json")
+    (root / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", ".gitignore", "src/package-lock.json"], cwd=root, check=True)
+
+
+def test_tracked_typosquat_lockfile_still_fires_from_the_git_listing(tmp_path: Path) -> None:
+    """TRDD-WOI8GO1S: with the listing in play, the tracked lockfile is found and the ignored one is not."""
+    _git_repo_with_ignored_typosquat(tmp_path)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "npm:reactt" in r.stdout
+    assert "src/package-lock.json" in r.stdout
+    assert "downloads_dev" not in r.stdout
+
+
+def test_ignored_folder_is_never_walked_when_git_lists_the_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-WOI8GO1S: NON-ENTRY, not just non-reporting — `rglob` (which enters every ignored
+    folder, the 120 s kill) must not be called at all while `own_files` answers."""
+    _git_repo_with_ignored_typosquat(tmp_path)
+    spec = importlib.util.spec_from_file_location("typosquat_watcher_under_test", _DETECTOR)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.git_utils.own_files.cache_clear()
+
+    def _no_walk(self: Path, pattern: str):
+        raise AssertionError(f"rglob({pattern!r}) walked {self}")
+
+    monkeypatch.setattr(Path, "rglob", _no_walk)
+    assert mod._lockfile_paths(tmp_path, "package-lock.json") == [tmp_path / "src" / "package-lock.json"]
 
 
 def test_fires_on_npm_typosquat_ethersr(tmp_path: Path) -> None:

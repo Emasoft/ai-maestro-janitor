@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import errno
+import functools
 import os
 import subprocess
 import sys
@@ -797,6 +798,51 @@ def drop_gitignored(paths: list[Path], *, root: Path) -> list[Path]:
         return list(paths)  # nothing ignored
     ignored = {line for line in proc.stdout.split("\0") if line}
     return [p for p in paths if str(p) not in ignored]
+
+
+
+@functools.lru_cache(maxsize=None)  # a detector is ONE process per fire; a long-lived process must not call this (stale forever)
+def own_files(root: Path, *, log_name: str) -> Optional[list[Path]]:
+    """The project's own files — tracked plus untracked-not-ignored — from ONE
+    `git ls-files -z --cached --others --exclude-standard` (TRDD-WOI8GO1S), or None.
+
+    WHY: `rglob` + `drop_gitignored` walks the WHOLE tree before filtering, so a huge
+    gitignored folder is entered in full and the detector dies at the 120 s kill (175 field
+    timeouts). Git never descends into an ignored directory, so listing is bounded by the
+    project's own size. Returns sorted absolute paths (`root / rel`).
+
+    None means "no listing, use the full walk" and the caller MUST then keep its old
+    rglob + `drop_gitignored` path (a security scanner fails open). None is silent when git
+    is missing or `root` is not a git repository; any other failure (timeout, other
+    non-zero exit) is logged to `log_name` first.
+
+    Two narrowings versus a full walk: files inside a nested independent repository or a
+    submodule are not listed (a lockfile there drops out of the scan — a loss of coverage),
+    and an ignore rule written `folder/*` instead of `folder/` still makes git enter the
+    folder, so such a folder is not spared the walk.
+    """
+    try:
+        proc = run_git_readonly(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=root,
+            timeout=30,
+        )
+    except OSError:
+        return None
+    except subprocess.TimeoutExpired:
+        state.log_line(log_name, "git ls-files timed out after 30 s; using the full walk")
+        return None
+    if proc.returncode != 0:
+        if "not a git repository" in proc.stderr:
+            return None
+        state.log_line(
+            log_name,
+            f"git ls-files failed (exit {proc.returncode}); using the full walk",
+        )
+        return None
+    return sorted(
+        root / rel for rel in proc.stdout.split("\0") if rel and not rel.endswith("/")
+    )
 
 
 def recover_own_index_lock(repo_root: Path, spawn_ts: float) -> bool:

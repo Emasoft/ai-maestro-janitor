@@ -222,6 +222,15 @@ def _extract_npm_names_from_pnpm_lock(path: Path) -> set[str]:
     return out
 
 
+
+def _lockfile_paths(project_root: Path, lockname: str) -> list[Path]:
+    # TRDD-WOI8GO1S: one git listing instead of an rglob that enters every ignored folder (120 s kills).
+    listed = git_utils.own_files(project_root, log_name=_NAME)
+    if listed is not None:
+        return [p for p in listed if p.name == lockname]
+    return git_utils.drop_gitignored(sorted(project_root.rglob(lockname)), root=project_root)
+
+
 _LOCKFILE_PARSERS = {
     "package-lock.json": ("npm", _extract_npm_names_from_package_lock),
     "yarn.lock": ("npm", _extract_npm_names_from_yarn_lock),
@@ -255,9 +264,7 @@ def _scan_project(project_root: Path) -> list[str]:
         # `gaxios`, `ofetch` and `color` as typosquats on a repo whose own dashboard
         # framework IS preact. The tracked surface is what ships, so it is what we judge.
         # Batched + fail-open: unreadable git ⇒ nothing is filtered.
-        for path in git_utils.drop_gitignored(
-            sorted(project_root.rglob(lockname)), root=project_root
-        ):
+        for path in _lockfile_paths(project_root, lockname):
             # Skip vendored / cached lockfiles.
             if any(part in skip_dirs for part in path.parts):
                 continue
@@ -312,9 +319,7 @@ def _content_signature(project_root: Path) -> str:
     for lockname in _LOCKFILE_PARSERS:
         # Same filter as the scan itself — otherwise the signature changes when an
         # IGNORED corpus file is touched and the detector re-runs for nothing.
-        for path in git_utils.drop_gitignored(
-            sorted(project_root.rglob(lockname)), root=project_root
-        ):
+        for path in _lockfile_paths(project_root, lockname):
             if any(part in {"node_modules", ".venv", "venv", "env",
                             "vendor", "third_party", ".git"}
                    for part in path.parts):

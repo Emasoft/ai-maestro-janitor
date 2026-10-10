@@ -157,6 +157,18 @@ def test_fires_on_dropper_pattern(tmp_path: Path) -> None:
     assert "trust-deficit score" in r.stdout
 
 
+
+def test_dropper_still_fires_from_the_git_listing(tmp_path: Path) -> None:
+    """TRDD-WOI8GO1S: in a real git repo with the dropper files tracked, the scorer reads the
+    `git ls-files` listing (not an rglob) and still reports the dropper shape."""
+    _seed_dropper(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "dropper-shape" in r.stdout
+
+
 def test_fires_when_readme_funnels_to_binary(tmp_path: Path) -> None:
     """A README that points at a local .exe is the canonical
     rogue-distribution shape."""

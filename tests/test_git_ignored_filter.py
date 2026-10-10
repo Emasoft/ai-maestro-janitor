@@ -114,3 +114,45 @@ def test_order_is_preserved(tmp_path: Path) -> None:
     (root / "src" / "b.json").write_text("{}", encoding="utf-8")
     b = root / "src" / "b.json"
     assert git_utils.drop_gitignored([a, b], root=root) == [a, b]
+
+
+
+def test_own_files_lists_tracked_and_untracked_but_not_ignored(tmp_path: Path) -> None:
+    """TRDD-WOI8GO1S: the listing is the project's own files — a tracked lockfile and an
+    untracked-not-ignored file are in, the lockfile inside the ignored corpus is not."""
+    root = _repo(tmp_path)
+    (root / "src" / "new.txt").write_text("x", encoding="utf-8")
+    git_utils.own_files.cache_clear()
+
+    listed = git_utils.own_files(root, log_name="t")
+
+    assert listed is not None
+    assert root / "src" / "package-lock.json" in listed
+    assert root / "src" / "new.txt" in listed
+    assert root / "downloads_dev" / "nested" / "package-lock.json" not in listed
+
+
+def test_own_files_is_none_on_a_plain_folder(tmp_path: Path) -> None:
+    """Not a repo ⇒ None (caller keeps the full walk), silently."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    git_utils.own_files.cache_clear()
+    assert git_utils.own_files(plain, log_name="t") is None
+
+
+def test_own_files_logs_and_returns_none_on_another_git_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-zero exit that is not "not a repository" is logged, then None (full walk)."""
+    root = _repo(tmp_path)
+    logged: list[tuple[str, str]] = []
+
+    def _fail(cmd: list[str], **_k: object):
+        return subprocess.CompletedProcess(cmd, 128, "", "fatal: something else broke")
+
+    monkeypatch.setattr(git_utils, "run_git_readonly", _fail)
+    monkeypatch.setattr(git_utils.state, "log_line", lambda n, m: logged.append((n, m)))
+    git_utils.own_files.cache_clear()
+
+    assert git_utils.own_files(root, log_name="t") is None
+    assert logged and logged[0][0] == "t"
