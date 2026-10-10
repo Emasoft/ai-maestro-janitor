@@ -1,10 +1,10 @@
 ---
 trdd-id: 9XXEKBPD
 title: trddgrep new refused a card and the reason was never read
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-06T15:11:29+0200
+updated: 2026-10-10T20:07:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,3 +27,12 @@ One of fifteen creations on 2026-10-05 printed 'refusing' and was retried with a
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-06 PREMISE REFUTED by reproduction: `trddgrep new --title 'repro: colon' …` prints 'trddgrep: refusing to create — title must not contain a colon (grep-first frontmatter rule)'. The refusal already names the rule; the 2026-10-05 retry-on-a-guess was the agent not reading the message, not a tool defect. Nothing to file.
+- 2026-10-10T20:07:15+0200 — COMPLETE by main-agent@ai-maestro-janitor. premise refuted by reproduction.
+
+## Corrections
+
+2026-10-10 20:07. CLOSED on the reproduction of 2026-10-06 above: the refusal names the rule. Seen again today in the field: trddgrep new refused a card with no author and its message named the missing flag and the accepted values; it was read and the retry was not a guess. Nothing to build.
+
+## Acceptance
+
+- [x] The refusal was reproduced and read on 2026-10-06 and it names the rule; NARROWED: the premise is refuted, nothing built.

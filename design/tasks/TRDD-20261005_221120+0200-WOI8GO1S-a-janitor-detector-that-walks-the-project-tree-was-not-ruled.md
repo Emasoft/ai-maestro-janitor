@@ -4,7 +4,7 @@ title: A janitor detector that walks the project tree was not ruled out for a pr
 column: testing
 status: tasked
 created: 2026-10-05T22:11:20+0200
-updated: 2026-10-10T19:44:15+0200
+updated: 2026-10-10T20:07:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:20+0200
+eht: [XRT9LOQL]
 ---
 
 # A janitor detector that walks the project tree was not ruled out for a project with a very large ignored folder
