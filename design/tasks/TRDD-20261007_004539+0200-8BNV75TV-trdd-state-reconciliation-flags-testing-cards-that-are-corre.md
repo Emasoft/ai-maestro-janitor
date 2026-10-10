@@ -4,7 +4,7 @@ title: trdd-state-reconciliation flags testing cards that are correctly waiting 
 column: testing
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-09T23:30:42+0200
+updated: 2026-10-10T02:43:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,6 +45,7 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 
 - 2026-10-07T00:45:39+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Waits on the first weekly audit on 3.8.2 or later, and on the choice between design A and design B, which the owner's mandate of 2026-10-09 leaves to the main session; not yet decided. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
+2026-10-10 02:45 DESIGN CHOICE NOT YET MADE (board drain, step iii). The main session leaned to design B on the 2026-10-07 sizing (check3 14 flags, 1 real; check4 2 of 2 false) and the closeable precedent; the review of 92d6b144 showed that basis is insufficient: (1) this card itself requires an old-versus-new comparison on the same board, by card, before landing, and none exists for B; (2) nobody reads the one-time ledger notes until TRDD-6ESS2MGE routes them, so B would move the one real finding class to a channel with no reader; (3) the sizing predates about 26 closures and 30 stay notes written on 2026-10-09 and 2026-10-10, many containing the words blocked, waits on and stays, so today check3 and check4 counts are unknown. NEXT: run both checks on the current board and classify every flag by card; choose from that count. The owner mandate of 2026-10-09 (quoted on TRDD-S6GX1DHN) leaves the choice to the main session. Column note: testing is wrong for this card once a design is chosen, since the chosen design is unimplemented work.
 
 ## Implementation commits
 

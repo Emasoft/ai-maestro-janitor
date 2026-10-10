@@ -1,10 +1,10 @@
 ---
 trdd-id: U119W52S
 title: Heartbeat status replies can still crowd real messages out of the Jev newest-messages block and the pre-compact tail
-column: todo
+column: testing
 status: tasked
 created: 2026-10-09T23:33:26+0200
-updated: 2026-10-09T23:33:26+0200
+updated: 2026-10-10T02:43:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-09T23:33:26+0200
+implementation-commits: [8d1b205e, dd70abcd]
+release-via: publish
 ---
 
 # Heartbeat status replies can still crowd real messages out of the Jev newest-messages block and the pre-compact tail
@@ -24,3 +26,7 @@ Sibling of TRDD-IYNS7H83, found by its adversarial review on 2026-10-09 and NOT 
 ## Approval log
 
 - 2026-10-09T23:33:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-10 02:45. FIXED on main in 8d1b205e and dd70abcd, unreleased; in testing until the full suite on dd70abcd is green, then complete (release-via publish). Both functions were read and both views lost the real message in a failing test with a run of 9 status replies (the longest run measured in the 40 newest transcripts of this project; runs of 3 or more occurred 5 times). The cap is now transcript_roles.cap_status_runs with MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2, shared by external_clear.recent_messages, the pre-compact tail (_recent_turns, before turns[-n:]) and the Jev injected block (_select_exchanges skips surplus replies; the full copy keeps all, pinned by a test). dd70abcd repairs a defect 8d1b205e introduced, found by its review: the gap marker did not count skipped replies. Checked by the main session: both diffs read whole; 6 test files 614 passed on 8d1b205e and 4 files 345 passed on dd70abcd; ruff, mypy, pyright clean. That the new tests failed before each fix is the workers report, not re-run by the main session. FIELD CASE UNOBSERVED: no real compaction or clear after a run of 3 or more status replies has been seen with this code, and none can be until a release. KNOWN LIMITS: (1) a reply carrying any prose line is never capped; the identical-drift-reply case is TRDD-FU8MZ0SL; (2) the three views build reply text differently (space-joined, newline-joined, one item per text block), so a multi-block reply can classify differently; (3) a model-written line starting with a lower-case bracket tag, such as an echoed resume token followed by prose, matches the dispatcher-line rule; (4) the cap applies even when nothing would be evicted; (5) recent_messages reads only the last 512 KiB; (6) no test has a human turn inside a run.
