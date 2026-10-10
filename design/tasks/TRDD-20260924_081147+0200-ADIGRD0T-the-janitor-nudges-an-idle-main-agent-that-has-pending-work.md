@@ -1,9 +1,9 @@
 ---
 trdd-id: ADIGRD0T
 title: The janitor nudges an idle main agent that has pending work
-column: dev
+column: testing
 created: 2026-09-24T08:11:47+0200
-updated: 2026-10-10T10:12:45+0200
+updated: 2026-10-10T10:17:28+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -19,6 +19,8 @@ pre-block-column:
 blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show 6ESS2MGE --porcelain | cut -f3
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 status: tasked
+implementation-commits: [fb6bb844]
+release-via: publish
 ---
 
 # The janitor nudges an idle main agent that has pending work
@@ -32,3 +34,5 @@ owner directive of 2026-09-24 (verbatim in TRDD-WZKFSQ2N): "nudging the main age
 - 2026-10-10T04:58:02+0200 — column → todo by main-agent@ai-maestro-janitor. the routing decision it waited on is recorded on 6ESS2MGE Cleared blocked-by (--clear-blocker override).
 2026-10-10 10:14 SCOPED (board drain, wave 5 card 1; main session read scripts/dispatch.py lines 4130 to 4232 and TRDD-HYTKG53C). The nudge this card asks for ALREADY EXISTS: _phase_keep_going_nudge emits [janitor-resume] 'continue your pending task (keep-going mode)' with the open board, the open-issues count, pending background agents and the owner's last message. FIELD INSTANCE of this card's own case: this session, idle while a gate ran, received that line at 09:30 and 10:10 on 2026-10-10 (dispatch.log 10:09:55 'keep-going: nudge emitted') and resumed work on it both times. Whether the nudge reaches an idle pane while the owner types elsewhere is TRDD-HYTKG53C's check, and whether the daemon's resume injection lands is TRDD-C0RSMPRG's; neither is this card's. WHAT IS MISSING against the owner's words of 2026-09-24 ('telling him the pending TRDDs, the uncommitted work'): the nudge never mentions uncommitted work. REMAINING BUILD: one clause in the nudge giving the count of uncommitted files in the project's working tree when it is not zero, with one test; nothing else.
 - 2026-10-10T10:12:45+0200 — column → dev. one clause to build: uncommitted files in the keep-going nudge
+2026-10-10 10:18 BUILT in fb6bb844 (1 lean-worker, 0.13 million tokens; whole diff read by the main session): _uncommitted_work_bit in scripts/dispatch.py, appended in the same tuple as the board and open-issues bits of _phase_keep_going_nudge, so it rides only on a nudge already being emitted; one read-only git status through git_utils.run_git_readonly, 5 s timeout; non-repo, failure or timeout gives no clause and one log line. PINNING TESTS in tests/test_dispatch_phases.py, on real temporary git repos: test_uncommitted_work_bit_counts_dirty_files_in_a_real_repo, test_uncommitted_work_bit_is_empty_on_a_clean_repo, test_uncommitted_work_bit_is_empty_outside_a_git_repo. The worker did not show the first test failing before the change (it calls a function that did not exist, so it could not pass). The worker reported ruff, mypy, pyright at exit 0 and 239 tests passing in that file plus the optional-locks guard; the full gate on fb6bb844 writes reports/board/gate-fb6bb844.txt and had not reported when this was written. CORRECTIONS to the 10:14 line, from the review of 7ea90b11: 'the nudge never mentions uncommitted work' rested on lines 4130 to 4232 only; the worker was told to read the whole phase and to stop if such a clause existed, and it built instead (its report: docs_dev/20261010_101625+0200-adigrd0t-uncommitted-clause.md, gitignored; the main session did not read the phase's head itself). 'resumed work on it both times' overstates 09:30, when the session only replied that it was waiting on a gate. The field instance shows the nudge is emitted and acted on in the pane where the cron fires; it does not show a stalled session being re-engaged (that is TRDD-HYTKG53C's). NOT WEIGHED: the dirty-tree detector is advisory and ledger-only by choice; this clause puts the count in front of the agent only when it is idle with a nudge already due. FIELD CHECK after a release: a keep-going nudge received while the tree is dirty carries the clause.
+- 2026-10-10T10:17:28+0200 — column → testing. built in fb6bb844; waits for the full gate, then a release for its field check
