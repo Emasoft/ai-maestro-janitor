@@ -1,0 +1,26 @@
+---
+trdd-id: 1AD5FF36
+title: A ticket marked needs a human is archived where its reminder never looks
+column: todo
+status: tasked
+created: 2026-10-10T04:55:24+0200
+updated: 2026-10-10T04:55:24+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: bugfix
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-10T04:55:24+0200
+---
+
+# A ticket marked needs a human is archived where its reminder never looks
+
+Found 2026-10-10 while reading for TRDD-6ESS2MGE (measured: reports/board/20261010_044030+0200-6ess2mge-measure.md, item A5). scripts/lib/tickets.py:104 lists needs_human as TERMINAL; save() at tickets.py:417-418 writes a terminal ticket to tickets/closed/ and removes the open copy; load_all at tickets.py:350-354 globs only the open directory. scripts/detectors/ticket-dispatch.py:147-149 builds the NEEDS A HUMAN reminder from load_all, so by reading the code it can never print for a ticket saved after the status change. NOT observed in the field: this project has 7 closed tickets and none open; whether any is needs_human is unread. To do: a failing test that saves a needs_human ticket and expects the reminder line; then either keep needs_human tickets in the open directory or have the reminder read closed/ for that status; decide by which one the retry command (ticket_cli retry) already expects.
+
+## Approval log
+
+- 2026-10-10T04:55:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
