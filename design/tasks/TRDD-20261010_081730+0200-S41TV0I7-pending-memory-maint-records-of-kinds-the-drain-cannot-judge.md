@@ -4,7 +4,7 @@ title: Pending memory-maint records of kinds the drain cannot judge have no way 
 column: verify_assumptions
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-10T08:41:40+0200
+updated: 2026-10-10T08:41:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,4 @@ Split from TRDD-K5F7US68 box 5 on 2026-10-10. FACTS: memory_dispatch_claim.is_dr
 
 - 2026-10-10T08:17:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-10T08:41:40+0200 — column → verify_assumptions. an open design choice and unread emit paths; not ready for todo
+2026-10-10 08:41 CORRECTION to the body: 'stays claimable for ever' is too strong; the scheduler prunes pending files by count, keeping the newest 20 (read by a worker in memory-maintenance.py, not by the main session), so an old record leaves when more than 20 pile up. 'The next enrich fire would work the old slug directory' is reasoned from oldest-first claiming plus the chore match, not observed.
