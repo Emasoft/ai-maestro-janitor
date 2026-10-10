@@ -78,6 +78,16 @@ def main() -> int:
         if not args.reason.strip():
             print("REFUSED: --reason is required — a verdict nobody can re-check is not a refusal")
             return 2
+        # A consolidate key is matched pair-wise (group_has_unjudged_pair): a one-page key contains
+        # no pair, so it is inert. One-page keys recorded 2026-10-06 and 2026-10-10 left the same
+        # group listed for re-dispatch (~200k tokens a pass) while this CLI reported success
+        # (TRDD-K5F7US68).
+        if args.intervention == "consolidate" and len(pages) < 2:
+            print(
+                "REFUSED: a consolidate refusal must name every page of the judged pair or group "
+                "in ONE call (repeat --page); a one-page key matches no pair and stops nothing"
+            )
+            return 2
         if not memory_refusals.record(
             args.intervention, args.scope, root, list(pages), reason=args.reason, now=now
         ):

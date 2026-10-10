@@ -125,7 +125,7 @@ non-mergeable tier, cross-type). Run it and the refusal catalog:
 A merge fuses exactly two sources; confirm A and B match, no third: [merge-protocol § No-third-page check](references/merge-protocol.md#no-third-page-check-pre-merge).
 
 **RECORD EVERY abstain** with `scripts/memory_refusal_cli.py record` — unrecorded, it
-re-dispatches forever. Invocation + why it expires: [merge-protocol](references/merge-protocol.md#recording-an-abstain).
+re-dispatches forever. Invocation + why it expires: [merge-protocol](references/merge-protocol.md#recording-an-abstain). When no pair in a group shares a subject, name every page of that group you read in full in a single call (a one-page key is refused).
 
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 

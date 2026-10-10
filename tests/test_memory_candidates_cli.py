@@ -293,6 +293,22 @@ def test_consolidate_pair_refusal_narrows_but_keeps_a_three_group(tmp_path):
     assert out.strip() == "", "every pair judged — no judgment work remains"
 
 
+
+def test_consolidate_group_refusal_over_all_members_holds_until_a_page_changes(tmp_path):
+    """One refusal naming all three pages judges every pair; editing any page re-lists the group."""
+    a = _curated(tmp_path, "a.md", tier="component")
+    b = _curated(tmp_path, "b.md", tier="component")
+    c = _curated(tmp_path, "c.md", tier="component")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c], reason="distinct subjects")
+    code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert code == 0
+    assert out.strip() == ""
+
+    b.write_text(b.read_text(encoding="utf-8") + "\nA new fact.\n", encoding="utf-8")
+    code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert [ln for ln in out.splitlines() if ln] == ["a.md,b.md,c.md\tsame-tier-type"]
+
+
 # --------------------------------------------------------------------------- #
 # unreadable pages — the scheduler fails OPEN on them, so the CLI must NAME them
 # (review 2026-08-08: a silent skip hands the dispatched agent an empty list with

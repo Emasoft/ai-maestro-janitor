@@ -389,6 +389,13 @@ That idle burn was measured at ~200k–280k tokens per pass (janitor#212, #227).
 The refusal is keyed on the WHOLE candidate group, so pass one `--page` per page in
 the pair — a one-page key matches no group and is silently inert.
 
+The CLI now refuses a one-page consolidate key. When NO pair in a printed group shares a
+subject, record ONE abstain, in ONE call, naming every page of that group that you read IN
+FULL and judged distinct from the others (repeat `--page`), so one pass closes the group
+instead of one pair per pass. Never one call per page, and never name a page you did not
+read. This holds only until a member page changes: the entry re-arms on any edit to any
+named page and after 7 days.
+
 It is a verdict with an EXPIRY, not a permanent silence: the entry re-arms by itself
 when either page's bytes change, and again after 7 days. So a wrong "no" costs at
 most one cycle, while a right one stops costing anything.
