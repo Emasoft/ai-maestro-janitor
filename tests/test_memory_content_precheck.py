@@ -2376,16 +2376,19 @@ def test_duty15_page_created_between_survey_and_mint_is_returned(tmp_path, monke
     """Race (TRDD-VIFQ1LKI): a page appearing after an empty survey makes the real
     `new-mem-topic` refuse; one re-survey returns that page as `(False, page)`. The
     shim only sequences the real binary: it creates the competing page right after the
-    first real `recall` has answered."""
+    first real `recall` has answered (a hand-written valid page standing in for a
+    peer's mint) and logs each verb it forwards."""
     from conftest import MEMGREP_BIN_PATH
     if MEMGREP_BIN_PATH is None:
         pytest.skip("memgrep binary unavailable")
     root = tmp_path / "local"
     root.mkdir()
     staged = _page15(tmp_path / "staged", "test-isolation")
+    verb_log = tmp_path / "verbs.log"
     shim = tmp_path / "memgrep-shim.sh"
     shim.write_text(
         "#!/bin/sh\n"
+        f'echo "$1" >> "{verb_log}"\n'
         f'if [ "$1" = recall ] && [ ! -e "{tmp_path}/raced" ]; then\n'
         f'  touch "{tmp_path}/raced"\n'
         f'  "{MEMGREP_BIN_PATH}" "$@"; rc=$?\n'
@@ -2403,4 +2406,7 @@ def test_duty15_page_created_between_survey_and_mint_is_returned(tmp_path, monke
     assert created is False, "the refused mint must not report a creation"
     assert destination is not None and destination.is_file()
     assert destination == root / "test-isolation.md"
-    assert [p.name for p in root.iterdir()] == ["test-isolation.md"]
+    assert sorted(p.name for p in root.glob("*.md")) == ["test-isolation.md"]
+    assert verb_log.read_text(encoding="utf-8").split() == ["recall", "new-mem-topic", "recall"], (
+        "expected: empty survey, refused mint, one re-survey"
+    )

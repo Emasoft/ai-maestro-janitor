@@ -1721,7 +1721,8 @@ def relocate_survey_then_create(
     Returns `(created, destination)`: `(True, <new page>)` when a page was minted;
     `(False, <existing page>)` when the survey found the topic already owned, including
     when another agent created the page between the survey and the mint (the verb
-    refuses, one re-survey finds it); and `(False, None)` when memgrep is missing or
+    refuses, one re-survey finds it (only when the topic query matches that page)); and
+    `(False, None)` when memgrep is missing or
     fails — fail CLOSED, the same shape as `enrich_pages`/`relocate_lesson_findings`:
     an agent with no binary can neither verify the survey nor trust a page it could
     not have validated, so creation must not happen at all.
@@ -1768,6 +1769,9 @@ def relocate_survey_then_create(
         # The verb's refuse-to-overwrite is what closes that race; a re-survey turns the
         # refusal into the ordinary hit path. ONE retry only — a second empty survey means
         # the refusal had another cause (TRDD-VIFQ1LKI).
+        # The mint is refused by page NAME while the re-survey matches by TOPIC, so the racing
+        # page is found only when the topic query matches its description; a same-name page the
+        # query does not match still yields (False, None), and the caller records a refusal.
         return False, survey()[1]
     # The verb prints `wrote <path>`; resolve the destination from the scope roots it
     # derives, mirroring the verb's own derivation (`<scope root>/<name>.md`) so the
