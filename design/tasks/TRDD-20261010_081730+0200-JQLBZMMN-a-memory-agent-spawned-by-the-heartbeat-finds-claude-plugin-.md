@@ -4,7 +4,7 @@ title: A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty an
 column: verify_assumptions
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-10T08:41:40+0200
+updated: 2026-10-10T08:58:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,4 @@ Seen once, 2026-10-10 07:34, reported by the consolidate agent the heartbeat mar
 
 - 2026-10-10T08:17:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-10T08:41:40+0200 — column → verify_assumptions. agent-reported once; reproduce first
+2026-10-10 08:58 CORRECTION to the body, filed here because the card has no other section: 'every chore skill invokes its scripts through that variable' was read for ONE skill only (the consolidate protocol's invocation example); 'an agent that guesses the directory can run a stale version' is a hypothesis, not an observation.

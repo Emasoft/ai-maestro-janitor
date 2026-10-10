@@ -3,7 +3,7 @@ trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
 column: testing
 created: 2026-08-26T18:04:40+0200
-updated: 2026-10-10T08:41:41+0200
+updated: 2026-10-10T08:58:30+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -15,7 +15,7 @@ parent-trdd: 87RKBYJ8
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [91cd5534, be4e8fc4]
+implementation-commits: [91cd5534, be4e8fc4, 6ab9618e]
 relevant-rules: []
 pre-block-column: 
 status: tasked
@@ -48,12 +48,12 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 
 ## Acceptance
 
-- [ ] Page creation requires a recorded 3-root survey showing no existing page owns the topic
+- [x] Page creation requires a recorded 3-root survey showing no existing page owns the topic
 - [ ] The new page is minted through the write verbs with correct scope routing (UNSURE → LOCAL)
       and a `description:` carrying the SYMPTOM phrasings, not the jargon of the subject
 - [ ] The moved atom arrives via QDYQLM5V's verified two-page move — this card mints the target,
       it does not re-implement the move
-- [ ] A test drives an off-topic atom whose topic has no page and asserts a page is created; a
+- [x] A test drives an off-topic atom whose topic has no page and asserts a page is created; a
       second test drives one whose topic DOES have a page under a different name and asserts NO
       page is created
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
@@ -72,3 +72,4 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 2026-09-29 Review CURE discharged (2 parts). (1) SETTLING RERUN run (main, 6.4s): all three named files re-run at HEAD — test_detector_roster_completeness (DG2V7D5P), test_git_optional_locks_guard (FWDZDB7W), test_wikimem_spec_drift (JHHD3S4Z) — 3 failed / 42 passed. The third slot IS the roster test at this HEAD; the trio is now fully identified and none of the three touches a file this card changed. (2) WORDING CORRECTED: the earlier line's 'the third slot varied between runs ... among the same pre-existing set' was an overclaim — the tail -3 capture cut the third FAILED line, so variation was assumed, not observed. Observed: count matched (3), two names matched; the third is now confirmed by rerun.
 2026-09-29 Terminal review round (REOPEN, wording CURES applied once, disclosed to user): the discharge's 'The third slot IS the roster test... confirmed by rerun... fully identified' claimed re-observation where the evidence supports INFERENCE only — main's run's uncaptured output is gone; the rerun proves current failure, not the earlier line's content. Corrected strength: identification is by rerun-plus-worker-capture inference — the worker's own contemporaneous full-suite run captured all three failing INCLUDING the roster test, making it the only candidate absent a full-suite-conditional fourth failure; the runs' HEADs differ by card-only .md commits (immaterial — none of the three tests reads design cards); the attributions (FWDZDB7W etc.) remain the worker's git log -S claims, not independently re-verified — the discharge only claims identification, which is its right scope.
 2026-10-10 08:41: be4e8fc4 discharges item 1 of the 2026-09-29 landing review: a refused mint triggers one re-survey and a hit is returned as (False, page); one race test that sequences the REAL memgrep binary through a shell shim (it copies the competing page in after the first real recall); the relocate skill carries the same rule. The worker confirmed by a direct run that new-mem-topic refuses an existing page, and reported ruff, mypy, pyright clean and 180 tests passing in the test file; the main session read the whole diff. The full gate on be4e8fc4 writes reports/board/gate-be4e8fc4.txt and had not reported when this line was written; if it fails this card returns to dev. Item 2 of that review (quote the relocate token-cap counter output) is NOT done: the counter output is not on this machine's record that the main session could find without a search, so it stays owed. The card's fifth acceptance box (gates) rests on that gate result.
+2026-10-10 08:58: 6ab9618e, from the review of be4e8fc4. GATE GREEN on be4e8fc4: ruff, mypy, pyright exit 0; 18282 passed, 2 skipped (reports/board/gate-be4e8fc4.txt); the gate on 6ab9618e writes reports/board/gate-6ab9618e.txt and had not reported when this was written. THE RACE IS NARROWED, NOT CLOSED: the mint is refused by page NAME and the re-survey matches by TOPIC, so a same-name page the topic query does not match still returns (False, None) and the caller records a refusal. Closing it would need the refused path taken from the verb's own output, which nobody has read; left open here, not carded. The race test now asserts the verb sequence recall, new-mem-topic, recall (it could pass before without the retry being reached); the main session re-ran the five duty-15 tests after reading the diff (5 passed) and the worker ran the race test five times in a row (5 passed). The competing page in that test is a hand-written valid page, not one minted by the verb. BOX STATE, corrected: the line of 2026-09-29 says boxes 1 to 4 were ticked by evidence, but all five boxes were unticked in the file today. Ticked now on what the main session read today: box 1 (the function surveys every given root before any mint) and box 4 (both tests read: lines 2296 to 2338 of the test file). NOT ticked: box 2 (the description's symptom phrasing is the caller's and was not read), box 3 (the move path was not read today), box 5 (waits for the gate on 6ab9618e). ITEM 2 of the 2026-09-29 landing review (quote the relocate token-cap counter output): no counter output was searched for or found; what was measured today is wc -c on skills/janitor-memory-relocate/SKILL.md, 8012 bytes, about 2000 tokens at four bytes a token, against the owner's limit of 5000; taken as discharging the item by the main session's decision, with the caveat that no tokenizer was run.
