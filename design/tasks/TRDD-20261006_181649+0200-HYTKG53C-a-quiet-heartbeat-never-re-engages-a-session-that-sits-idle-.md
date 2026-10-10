@@ -4,7 +4,7 @@ title: A quiet heartbeat never re-engages a session that sits idle with work sti
 column: testing
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-10T03:40:32+0200
+updated: 2026-10-10T03:51:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -39,6 +39,7 @@ A quiet heartbeat fire makes the session reply only 'janitor heartbeat' with no 
 - 2026-10-06T18:16:49+0200 — MANDATE issued by lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6 (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: an idle session in a pane the owner is not typing in receiving a resume within two fires; the 49 'keep-going: nudge emitted' lines are proxies. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: whether an idle session received and acted on a resume is not logged; the 'keep-going: nudge emitted' line in .janitor/logs/dispatch.log (dispatch.py:4228) is a proxy only.
+2026-10-10 03:51 the step (iv) line 'NO DETECT POSSIBLE: receipt not logged' needs a second look: the daemon does log every resume injection as FIRED or FIRE-FAILED (107 failed, 23 fired since 2026-10-07T18:24; TRDD-C0RSMPRG). Whether one of those lines is this card's awaited event has not been judged.
 
 ## STATE
 
