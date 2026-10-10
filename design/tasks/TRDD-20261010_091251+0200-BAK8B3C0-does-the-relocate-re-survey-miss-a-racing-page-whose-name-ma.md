@@ -4,7 +4,7 @@ title: Does the relocate re-survey miss a racing page whose name matches but who
 column: verify_assumptions
 status: tasked
 created: 2026-10-10T09:12:51+0200
-updated: 2026-10-10T09:12:51+0200
+updated: 2026-10-10T09:16:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -39,3 +39,7 @@ ALSO OWED HERE: the Returns sentence of the helper's docstring was left with nes
 ## Approval log
 
 - 2026-10-10T09:12:51+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-10 09:16, from the review of 957985a3: (1) the sentence saying recall 'matches by TOPIC words against description, title and tags' was taken from the memory rule text, NOT read from memgrep's code or from the helper's query; treat it as unverified and read it as part of this card. (2) 'the caller records a refusal' should read 'the relocate skill tells the agent to record a refusal'; no caller of the helper was found. (3) This card is NOT in TRDD-VIFQ1LKI's eht on purpose: the hole is unobserved and must not block that card's closure. (4) CARRIER: this card's change also carries the one skill sentence TRDD-VIFQ1LKI needs for its box 1 (step 3 of the relocate skill's CREATE section: record the empty survey in the report); it is worked next after TRDD-K0PMVRN6, in wave 4.
