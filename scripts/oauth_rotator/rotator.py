@@ -252,7 +252,7 @@ STATE_FILE = ROOT / "state.json"
 # overnight failure was undiagnosable; see TRDD-5539cd6e). `_decide()` mirrors
 # every decision both to stdout (manual runs + daemon stdout) AND to this file.
 LOG_FILE = ROOT / "rotator.log"
-_LOG_MAX_BYTES = 256 * 1024  # rotate at this size — bounds the unattended 60s-cadence log
+_LOG_MAX_BYTES = 4 * 1024 * 1024  # ~78h at the measured one 256 KiB file per 5h, so yesterday's failure is still readable (TRDD-F2LKVWM8); at most ~8 MiB on disk with the one rotated copy
 
 
 #: The "rotation is IMPOSSIBLE right now" marker — a machine-readable sibling of the three

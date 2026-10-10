@@ -1940,6 +1940,7 @@ def test_log_rotates_via_rename_when_over_cap(tmp_path: Path, monkeypatch: pytes
     leading line — unlike the old read-N-bytes-then-splice approach)."""
     monkeypatch.setattr(rotator, "ROOT", tmp_path)
     monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    assert rotator._LOG_MAX_BYTES >= 4 * 1024 * 1024  # TRDD-F2LKVWM8: >=48h of history survives (real constant, read before the patch below)
     monkeypatch.setattr(rotator, "_LOG_MAX_BYTES", 2000)
     for i in range(200):                       # ~200 * ~60 bytes ≫ 2000 → forces rotation(s)
         rotator._log("decision number %03d padding-padding-padding" % i)
