@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-10T14:11:17+0200
+updated: 2026-10-10T14:14:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -42,6 +42,7 @@ OWNER-QUESTION CARDS now mine to decide: C30 I4MOD020 (discovery trigger: lint-d
 
 KNOWN CONSTRAINTS: every paid account was at its usage limit at 2026-10-09 evening (rotator alert), so worker fan-out may stall until a window resets; the strict publish validator needs PLUGIN_SKIP_GITHUB_INTEGRITY=1 in the environment and exits 0 on main as of 746da19b.
 2026-10-10 14:12, session after the clear of 14:10 (post-clear check 5 of 5 pass; context 507k to 178k). GATE GREEN (18306 passed, 2 skipped; ruff, mypy, pyright exit 0) and STRICT VALIDATOR exit 0 on 0449b637; no code commit is behind the validator. TRDD-A2JLFIQ5 stays in testing (its field check needs a release); box 2 now carries its narrowing. Wave 7 is closed: 4 cards worked, 3 minted. WAVE 8 CAP, checked before each card: at most 4 cards before 18:00 local, taken by trddgrep next (re-run it first; YVC3F06V was next in the last ranking); every wave 6 and 7 rule stands; NEW: the commit is made in one response and its review fork is spawned in the NEXT, so the fork can see it; a review of the BRIEF runs while the worker builds; a sub-agent's change is read before it is committed; a fork demanded for a sub-agent's memory write is asked for 100 words; stop on a usage-limit refusal, a failing gate, or two unusable worker reports. Owner items 1 to 15 stand. Nothing is pushed or published.
+2026-10-10 14:27. Review of 0bf0c976 (0.23 million tokens): ACCEPTED, TRDD-A2JLFIQ5 box 2 is unticked (its own text says the case is unobserved); REJECTED, 'the cap was written with no card cost measured': per-card cost is measured from waves 5 to 7 (worker 0.12 to 0.19 million, a review fork 0.23 million at this context size). WAVE 8 CARD 1: TRDD-YVC3F06V complete and archived in this commit: its fix (95bbddeb) is released since v3.7.1, its two pinning tests were re-run and pass, the field shows a live 429 streak (x160 at 07:25 today) with no cap stored afterwards, and the last leftover, burn_gate.py docstrings describing cap learning as active, is corrected here (comments only, 1 worker, 0.11 million tokens). Known wording limit recorded on the card: 'always absent on disk' is too strong for a host whose ticks reach no save path. The full gate on this commit runs in the background with a completion notice; no script or test edit while it runs. Wave 8: 1 card worked of 4 allowed before 18:00, none minted. NEXT: gate result; then trddgrep next (BZ3BT0NJ was next in the last ranking). Nothing is pushed or published.
 
 ## Acceptance
 

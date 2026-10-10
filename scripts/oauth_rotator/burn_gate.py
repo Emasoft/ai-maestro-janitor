@@ -20,6 +20,12 @@ on its 60 s beat:
     that will wall within the horizon itself (composing with drain-first, which is
     unchanged — this only FILTERS the candidate list, never re-orders it).
 
+CAP LEARNING IS OFF (TRDD-YVC3F06V, 95bbddeb): a usage-endpoint 429 cannot be told from a real
+limit (a throttle taught a false 85% weekly cap on 2026-10-05), so nothing calls `observe_wall`
+and `cmd_auto` discards `learned_caps` on every tick; the learned-cap paths below are kept,
+inert, for the redesign in TRDD-AWIWXJIG, which will learn from session rate-limit evidence.
+Do not re-wire `observe_wall` to the usage-endpoint 429.
+
 Everything here is PURE — no I/O, no clocks, no keychain (R16 untouched: the inputs are
 the read-only usage numbers the caller already holds). FAIL-OPEN is the load-bearing
 contract: with no samples, too few samples, a flat/declining slope, stale samples, or no
@@ -28,7 +34,8 @@ the pure threshold did — byte-for-byte, which the tests pin.
 
 State lives inside the rotator's existing `state.json` under two new keys
 (`usage_samples`, `learned_caps`), both bounded here (ring caps), so the no-unbounded-
-append invariant (TRDD-7IUTRX29 S4) holds by construction.
+append invariant (TRDD-7IUTRX29 S4) holds by construction. `learned_caps` is currently
+always absent on disk (cap learning is off).
 """
 
 from __future__ import annotations
@@ -197,7 +204,8 @@ def observe(state: dict, email: str, now: float, fh: float | None, sd: float | N
 
 def observe_wall(state: dict, email: str, now: float) -> None:
     """Record a CONFIRMED 429 as effective-cap samples for `email` (per window, from each
-    ring's freshest reading). Called once per debounced live 429."""
+    ring's freshest reading). Currently has NO caller (TRDD-YVC3F06V): a usage-endpoint 429
+    cannot be told from a real limit."""
     rings = account_rings(state, email)
     caps = account_caps(state, email)
     for w in ("5h", "7d"):
