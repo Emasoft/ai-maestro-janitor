@@ -120,11 +120,15 @@ def _run(root: Path, session: str = "sess") -> str:
 
 def _closeable_notes(root: Path) -> list[dict]:
     """The TRDD-CLOSEABLE notes in the project findings ledger (janitor#332)."""
+    return _notes(root, "TRDD-CLOSEABLE")
+
+def _notes(root: Path, code: str) -> list[dict]:
+    """The notes with this code in the project findings ledger."""
     ledger = root / ".janitor" / "state" / "findings-ledger.ndjsonl"
     if not ledger.exists():
         return []
     rows = [json.loads(ln) for ln in ledger.read_text().splitlines() if ln.strip()]
-    return [r for r in rows if r["code"] == "TRDD-CLOSEABLE"]
+    return [r for r in rows if r["code"] == code]
 
 
 @pytest.fixture()
@@ -423,24 +427,58 @@ def test_seen_file_dedupe_no_renag_same_verdict(repo: Path):
     assert second.strip() == "", "same verdict must not re-nag"
 
 
-def test_prose_frontmatter_mismatch_surfaces(repo: Path):
-    """Check 3: STATE prose says blocked but frontmatter column != blocked &
-    blocked-by: [] — surfaces even with nothing shipped (no tag)."""
+def test_prose_blocked_card_is_a_ledger_note_not_a_row(repo: Path):
+    """Check 3 (TRDD-8BNV75TV): STATE prose says blocked but frontmatter column != blocked &
+    blocked-by: [] — no row in stdout or report; exactly one TRDD-PROSE-BLOCKED note."""
     uid = "ffffffff"
     _write_trdd(repo, uid, column="dev", blocked_by="[]",
                 body="\n## STATE\nwe are BLOCKED on the upstream API\n")
-    _commit_all(repo, f"wip (TRDD-{uid})")  # no tag → nothing shipped
+    _commit_all(repo, "feat: board")  # subject cites no uid → nothing shipped
+
+    out = _run(repo)
+    assert out.strip() == ""
+    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{uid}"]
+
+def test_prose_blocked_second_run_records_nothing(repo: Path):
+    """The prose-blocked note is one per card, ever (TRDD-8BNV75TV)."""
+    uid = "ffffffff"
+    _write_trdd(repo, uid, column="dev", blocked_by="[]",
+                body="\n## STATE\nwe are BLOCKED on the upstream API\n")
+    _commit_all(repo, "feat: board")
+    _run(repo)
+    _run(repo, session="other")
+    assert len(_notes(repo, "TRDD-PROSE-BLOCKED")) == 1
+
+
+
+def test_prose_blocked_plus_partially_shipped_reports_only_partially_shipped(repo: Path):
+    """A card that is prose-blocked AND has remaining work (an unchecked box) is reported only
+    as partially-shipped-review: the prose class and its evidence text are absent from stdout
+    and the report; the prose class becomes one TRDD-PROSE-BLOCKED note."""
+    uid = "aaaaaaaa"
+    _write_trdd(repo, uid, column="dev", blocked_by="[]",
+                body="\n## STATE\nwe are BLOCKED on the upstream API\n\n- [ ] more work\n")
+    _commit_all(repo, f"feat: ship (TRDD-{uid})")
+    _tag(repo, "v0.1.0")
 
     out = _run(repo)
     assert f"TRDD-{uid}" in out
-    assert "prose-frontmatter-mismatch" in out
+    assert "partially-shipped-review" in out
+    assert "prose-frontmatter-mismatch" not in out
+    assert "closeable-candidate" not in out
+    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
+    assert f"TRDD-{uid}" in report
+    assert "partially-shipped-review" in report
+    assert "prose-frontmatter-mismatch" not in report
+    assert "prose says blocked" not in report
+    assert "closeable-candidate" not in report
+    assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{uid}"]
+    assert _closeable_notes(repo) == []
 
-
-
-def test_closeable_plus_other_class_reports_only_the_other_class(repo: Path):
-    """A card that is closeable AND prose-mismatched is still reported, labelled by the
-    other class; "closeable" is absent from stdout and "closeable-candidate" from the report
-    (its header carries the boilerplate "NOT closeable"); one ledger note (janitor#332)."""
+def test_closeable_and_prose_blocked_card_is_two_notes_and_no_row(repo: Path):
+    """A shipped card whose only other signal is prose-blocked: stdout empty, no report
+    directory, one TRDD-CLOSEABLE note and one TRDD-PROSE-BLOCKED note (TRDD-8BNV75TV)."""
     uid = "aaaaaaaa"
     _write_trdd(repo, uid, column="dev", blocked_by="[]",
                 body="\n## STATE\nwe are BLOCKED on the upstream API\n")
@@ -448,14 +486,10 @@ def test_closeable_plus_other_class_reports_only_the_other_class(repo: Path):
     _tag(repo, "v0.1.0")
 
     out = _run(repo)
-    assert f"TRDD-{uid}" in out
-    assert "prose-frontmatter-mismatch" in out
-    assert "closeable-candidate" not in out
-    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
-    assert f"TRDD-{uid}" in report
-    assert "prose-frontmatter-mismatch" in report
-    assert "closeable-candidate" not in report
+    assert out.strip() == ""
+    assert not (repo / "reports" / "trdd-reconciliation").exists()
     assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
+    assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{uid}"]
 
 
 def test_only_closeable_cards_write_no_closeable_text_to_reports(repo: Path):
@@ -655,6 +689,69 @@ def test_stale_blocker_surfaces(repo: Path):
     assert f"TRDD-{dependent}" in out
     assert "stale-blocker" in out
 
+def test_field_stale_blocker_naming_a_terminal_card_still_reported(repo: Path):
+    """A blocked-by FIELD naming a terminal card stays a stale-blocker row, no prose note."""
+    blocker, dependent = "11111111", "22222222"
+    _write_trdd(repo, blocker, column="published")
+    _write_trdd(repo, dependent, column="dev", blocked_by=f"[TRDD-{blocker}]")
+    _commit_all(repo, "feat: board")
+
+    out = _run(repo)
+    assert f"TRDD-{dependent}" in out
+    assert "stale-blocker" in out
+    assert _notes(repo, "TRDD-PROSE-STALE-BLOCKER") == []
+
+
+def test_prose_only_stale_blocker_is_a_ledger_note_not_a_row(repo: Path):
+    """A blocker named only in STATE prose is not reported as stale-blocker; one
+    TRDD-PROSE-STALE-BLOCKER note, none on a second run (TRDD-8BNV75TV). The dependent
+    (column blocked, empty blocked-by) is still reported, as blocked-without-blocker."""
+    blocker, dependent = "11111111", "22222222"
+    _write_trdd(repo, blocker, column="published")
+    _write_trdd(repo, dependent, column="blocked", blocked_by="[]",
+                body=f"\n## STATE\nstays BLOCKED, see TRDD-{blocker}\n")
+    _commit_all(repo, "feat: board")
+
+    out = _run(repo)
+    assert "stale-blocker" not in out
+    assert f"TRDD-{dependent}" in out
+    assert "blocked-without-blocker" in out
+    notes = _notes(repo, "TRDD-PROSE-STALE-BLOCKER")
+    assert [n["ref"] for n in notes] == [f"TRDD-{dependent}"]
+    _run(repo, session="other")
+    assert len(_notes(repo, "TRDD-PROSE-STALE-BLOCKER")) == 1
+
+
+def test_field_and_prose_stale_blockers_report_only_the_field_id(repo: Path):
+    """Both kinds on one card: the row carries only the field id; the prose id is noted once."""
+    field_id, prose_id, dependent = "11111111", "33333333", "22222222"
+    _write_trdd(repo, field_id, column="published")
+    _write_trdd(repo, prose_id, column="published")
+    _write_trdd(repo, dependent, column="blocked", blocked_by=f"[TRDD-{field_id}]",
+                body=f"\n## STATE\nstays BLOCKED, see TRDD-{prose_id}\n")
+    _commit_all(repo, "feat: board")
+
+    out = _run(repo)
+    assert f"TRDD-{dependent}" in out
+    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
+    assert f"stale blocker(s): {field_id}" in report
+    assert prose_id not in report
+    notes = _notes(repo, "TRDD-PROSE-STALE-BLOCKER")
+    assert len(notes) == 1
+    assert prose_id in notes[0]["msg"]
+
+def test_field_id_in_lowercase_is_not_refiled_as_prose_blocker(repo: Path):
+    """A blocker written lower-case in blocked-by and upper-case in the prose is one blocker:
+    no TRDD-PROSE-STALE-BLOCKER note (the split compares upper-cased ids)."""
+    blocker, dependent = "ABCDABCD", "22222222"
+    _write_trdd(repo, blocker, column="published")
+    _write_trdd(repo, dependent, column="blocked", blocked_by=f"[TRDD-{blocker.lower()}]",
+                body=f"\n## STATE\nstays BLOCKED, see TRDD-{blocker}\n")
+    _commit_all(repo, "feat: board")
+
+    _run(repo)
+    assert _notes(repo, "TRDD-PROSE-STALE-BLOCKER") == []
+
 
 def test_context_gate_off_outside_ai_maestro(repo: Path):
     """Without JANITOR_FORCE_AI_MAESTRO, the detector self-deactivates in a
@@ -716,12 +813,12 @@ def test_terminal_column_with_blocked_prose_and_shipped_commit_never_flagged(rep
 
 def test_prose_block_inside_code_tag_or_script_name_not_flagged(repo: Path):
     """issue #65 class (b), prose half: on a NON-terminal TRDD the
-    `prose-frontmatter-mismatch` check must not fire merely because 'block'
+    `prose-frontmatter-mismatch` check must not fire merely because "block"
     appears INSIDE a code-tag (`DECOUPLE-BLOCKED`), a script/file name
     (`amp-task-blocked.sh`), or a slashed token (`done/blocked`). Those are code
     identifiers, not a current-state declaration. A sibling whose prose carries a
-    genuine 'BLOCKED on X' declaration proves the check still fires on real
-    blocks."""
+    genuine "BLOCKED on X" declaration proves the check still fires on real
+    blocks — now visible as its one TRDD-PROSE-BLOCKED ledger note (TRDD-8BNV75TV)."""
     code_uid = "bbbbbbbb"
     real_uid = "cccccccc"
     _write_trdd(
@@ -738,12 +835,9 @@ def test_prose_block_inside_code_tag_or_script_name_not_flagged(repo: Path):
                 body="\n## STATE\npublish is BLOCKED on GROUP B\n")
     _commit_all(repo, "feat: board")  # no tag — Check 3 is prose-based, not git
 
-    out = _run(repo)
-    # the genuine block surfaces...
-    assert f"TRDD-{real_uid}" in out
-    assert "prose-frontmatter-mismatch" in out
-    # ...but the code-token-only TRDD does NOT.
-    assert f"TRDD-{code_uid}" not in out
+    _run(repo)
+    # the genuine block is noted...
+    assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{real_uid}"]
 
 
 def test_commit_subject_embedded_id_token_not_attributed_as_shipped(repo: Path):

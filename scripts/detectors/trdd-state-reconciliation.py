@@ -751,6 +751,50 @@ def main() -> int:
                     ),
                     ref=f"TRDD-{verdict.uid}",
                 )
+        # TRDD-8BNV75TV: on the 2026-10-10 board 15 of 16 prose-blocked flags and 2 of 2 prose
+        # stale-blocker flags needed no action (the one real case, TRDD-6NMQ95TQ, was fixed by
+        # hand), so they are one-time ledger notes, not rows; the weekly report keeps only the
+        # frontmatter-based checks (a blocked-by FIELD naming a terminal card is still a row).
+        # shortcut: one note per card ever, a later re-declaration is not re-noted; the seen-key
+        # is written before the ledger write, so a failed write loses that card's note for good;
+        # upgrade if TRDD-6ESS2MGE routes these notes
+        if verdict.uid is not None and "prose-frontmatter-mismatch" in fired:
+            fired.remove("prose-frontmatter-mismatch")
+            # Also clear the flag: _write_report prints prose evidence from it, which would
+            # leak into a row reported under another class.
+            verdict = dataclasses.replace(verdict, prose_mismatch=False)
+            if dedupe.emit_once(seen, f"prose-blocked@{verdict.uid}", "x") is not None:
+                findings_ledger.record(
+                    sev="LOW",
+                    code="TRDD-PROSE-BLOCKED",
+                    src="trdd-state-reconciliation",
+                    msg=(
+                        f"TRDD-{verdict.uid} STATE prose says blocked while column and "
+                        f"blocked-by do not — verify, not proof"
+                    ),
+                    ref=f"TRDD-{verdict.uid}",
+                )
+        if verdict.uid is not None and "stale-blocker" in fired:
+            # extract_trdd_refs keeps an id's case as written, so compare upper-cased.
+            declared = {b.upper() for b in rec.blocked_by}
+            field_ids = [b for b in verdict.stale_blockers if b.upper() in declared]
+            for blocker in verdict.stale_blockers:
+                if blocker in field_ids:
+                    continue
+                if dedupe.emit_once(seen, f"prose-stale@{verdict.uid}@{blocker}", "x") is not None:
+                    findings_ledger.record(
+                        sev="LOW",
+                        code="TRDD-PROSE-STALE-BLOCKER",
+                        src="trdd-state-reconciliation",
+                        msg=(
+                            f"TRDD-{verdict.uid} STATE prose names TRDD-{blocker} as a blocker "
+                            f"and it is now terminal — verify, not proof"
+                        ),
+                        ref=f"TRDD-{verdict.uid}",
+                    )
+            if not field_ids:
+                fired.remove("stale-blocker")
+            verdict = dataclasses.replace(verdict, stale_blockers=field_ids)
         if not fired:
             continue
         verdict = dataclasses.replace(verdict, fired=fired, label=fired[0])
