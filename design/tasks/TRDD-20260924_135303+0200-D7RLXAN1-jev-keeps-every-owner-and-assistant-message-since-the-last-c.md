@@ -1,9 +1,9 @@
 ---
 trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
-column: todo
+column: testing
 created: 2026-09-24T13:53:03+0200
-updated: 2026-10-07T19:27:25+0200
+updated: 2026-10-10T10:52:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: feature
@@ -15,8 +15,9 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T13:53:03+0200
 parent-trdd: null
-implementation-commits: [c7779d84, 0ee31a20, 170b6dce, 63af9ce6]
+implementation-commits: [c7779d84, 0ee31a20, 170b6dce, 63af9ce6, a01812f2]
 status: tasked
+release-via: publish
 ---
 
 # Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
@@ -102,6 +103,7 @@ TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heart
 - 2026-09-24T17:32:35+0200 — column → dev by emanuelesabetta. Q1-Q3 decided under the owner's full-authority grant; implementing with advisor fixes A-E
 - 2026-09-24T18:13:52+0200 — column → testing by emanuelesabetta. implementation landed in c7779d84; moving to testing for acceptance/verification follow-through
 - 2026-10-07T04:31:24+0200 — column → todo by main-agent@ai-maestro-janitor. live acceptance failed twice; needs a redesign
+- 2026-10-10T10:52:56+0200 — column → testing. last open code item built in a01812f2; criterion decided; waits for a clear of a session with a compact boundary
 
 
 
@@ -130,3 +132,4 @@ TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heart
 2026-10-07: the third observed clear (74047cb8 → bca1a6aa) counts as a READ: the agent-handoff file the session read in full is a byte copy of jev-compacted-74047cb8.md (128938 B both; diff -q identical). The defect was naming two files, fixed in 0ee31a20: the resume cue now names the READ FIRST file.
 2026-10-07: CORRECTION to the line above: the third clear read the byte copy in full but after six bootstrap and arm calls, so it is a PASS only if the criterion becomes 'read before task work'; under the card's 'before any other action' it is still a fail. Open: (1) decide the criterion; (2) on-session-start.py's 'read the rest' line for a truncated handoff still names the agent-handoff copy, so two names can still appear; point it at jev-compacted-<key>.md with the same mtime preference. Mtime guard for (2)'s sibling in dispatch.py landed in 170b6dce.
 2026-10-07: the resume cue names jev-compacted-<key>.md when the newest keyed handoff is its byte copy (63af9ce6, after an mtime version that was false on the normal path, 170b6dce). Still open: the pass criterion (before task work vs before any action) awaits the owner; on-session-start.py's truncated-handoff 'read the rest' line still names the agent-handoff copy.
+2026-10-10 10:52 BOARD DRAIN, wave 5 card 4. (1) RELEASED: c7779d84, 0ee31a20, 170b6dce and 63af9ce6 are ancestors of tag v3.8.11 (checked by the main session). (2) BUILT a01812f2 (1 lean-worker, 0.13 million tokens; whole diff read by the main session): the truncated-handoff 'read the rest' pointer in scripts/hooks/on-session-start.py names jev-compacted-<key>.md when that file is a byte copy of the handoff (filecmp), so the last place that could show a second read-first file is closed. PINNING TEST: test_truncated_pointer_names_the_jev_compacted_copy_not_the_agent_handoff in tests/test_session_start_compact_handoff_injection.py, which runs the real hook as a subprocess; the worker did not run it against the old code. (3) CRITERION DECIDED by the main session under the owner mandate of 2026-10-09 ('decide yourself'), on the facts of the three observed clears: the pass condition is 'the resumed session reads the whole READ FIRST file before any task work', not 'before any other action', because the arm skill and the resume stub run first by design and the earlier wording could never pass. (4) ONE POSITIVE CASE, not the named event: after the clear of 2026-10-10 09:09 (session dd4d3604 cleared, resumed as 6ba50ace on the installed 3.8.11) the SessionStart injection and the [janitor-resume] cue named the SAME file, jev-compacted-dd4d3604.md (76919 bytes, 731 lines; the agent-handoff copy has the same size), and the resumed session read all 731 lines (lines 1 to 240 through the tool's saved output, then 241 to 480 and 481 to 731) after the arm, the resume stub and the verify diagnostic and before any card work. It is NOT the card's named live event: dd4d3604 holds 0 compact_boundary lines. So: 1 full read of 1 clear since the fixes, against 8 of 9 not read before them; one case, and the reader was the session that wrote this line. STAYS IN TESTING until a clear of a session WITH a compact boundary is followed by a full read before task work. DETECT: in the resumed session's transcript, the tool calls before the first card or code action include reads covering lines 1 to the last line of the jev-compacted file named on its READ FIRST line. The (d) cost question (a 126 to 169 KB copy needs several reads) is unchanged.
