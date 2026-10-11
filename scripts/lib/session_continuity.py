@@ -214,6 +214,11 @@ def carry_task_dir(old_session_id: str, new_session_id: str) -> int:
 #: commands and heartbeats) does not erase them.
 OWNER_MESSAGES_KEEP = 3
 OWNER_MESSAGES_DIR = "owner-messages"
+#: Records older than this are pruned at the next write (TRDD-2UV4BBHP). Readers: the session
+#: that follows a clear, and the keep-going nudge, which reads the CURRENT session's own record.
+#: shortcut: a session alive past 30 days with no clear loses the owner line of its nudge;
+#: prune by "no live session owns it" if that ever matters.
+OWNER_RECORD_MAX_AGE_S = 30 * 86400
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9_.-]+")
 
 
@@ -261,6 +266,14 @@ def _write_owner_record(state_dir: Path, session_id: str, record: dict[str, Any]
         state.atomic_write(path, json.dumps(record, ensure_ascii=False))
     except OSError as exc:
         state.log_line("session-continuity", f"owner record {path.name} not written: {exc!r}")
+        return
+    cutoff = time.time() - OWNER_RECORD_MAX_AGE_S
+    for old in path.parent.glob("*.json"):
+        try:
+            if old != path and old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            continue  # best-effort pruning: one unreadable/vanished file must not fail the write
 
 
 def age_words(ts: str, *, now: float | None = None) -> str:
@@ -370,7 +383,8 @@ def _merge_owner_messages(
     if fresh:
         origin, own_reply = cleared_id, fields["own_reply"]
     else:
-        assert stored is not None  # messages non-empty with no fresh ones => they came from `stored`
+        if stored is None:  # unreachable: non-empty messages with no fresh ones came from `stored`; not an assert (-O strips it)
+            return
         origin, own_reply = stored["origin_session"], stored["own_reply"]
         fields["carried_from"] = {"session_id": origin, "ts": messages[-1]["ts"]}
         fields["last_user"], fields["own_reply"] = messages[-1]["text"], own_reply
@@ -414,12 +428,14 @@ def next_action(fields: dict[str, Any]) -> str | None:
             "No human message arrived in the session that was just cleared. The owner's most "
             f"recent messages, from an earlier session of this clear chain, were: {listed}. "
         )
-        if own_reply:
-            head += f"Your reply at that time was «{own_reply}». "
+        # Why: this sentence sits right after the owner's quotes; after the agent's reply quote it
+        # read as calling the agent's reply the owner's words.
         head += (
             "These are the owner's own words, carried verbatim by the janitor: act on the "
             "instruction among them. "
         )
+        if own_reply:
+            head += f"Your reply at that time was «{own_reply}». "
     else:
         head = ""
         if len(messages) > 1:

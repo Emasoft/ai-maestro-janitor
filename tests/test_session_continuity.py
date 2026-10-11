@@ -11,7 +11,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -425,3 +427,28 @@ def test_injected_command_records_are_never_human_text():
     """The real arm/resume/caveat/heartbeat shapes of a resumed session are not human input."""
     for entry in (_ARM, _RESUME, _CAVEAT, _user("[janitor-heartbeat]\nrun the stub")):
         assert sc._human_text(entry) == ""
+
+
+def test_carried_form_places_the_owner_words_sentence_before_the_agents_own_reply():
+    """The 'owner's own words' sentence follows the owner's quotes, not the agent's reply quote."""
+    action = sc.next_action({
+        "last_user": "q", "own_reply": "my answer", "carried_from": {"session_id": "s", "ts": ""},
+        "owner_messages": [{"text": "q", "ts": ""}],
+    })
+    assert action is not None
+    assert action.index("These are the owner's own words") < action.index("Your reply at that time was")
+
+
+def test_owner_record_older_than_the_retention_is_pruned_by_the_next_write(tmp_path):
+    """A 31-day-old record is removed on write; a 29-day-old one and the new one remain."""
+    sd = tmp_path / "sd"
+    rec_dir = sd / "owner-messages"
+    rec_dir.mkdir(parents=True)
+    now = time.time()
+    for name, days in (("stale", 31), ("recent", 29)):
+        f = rec_dir / f"{name}.json"
+        f.write_text("{}", encoding="utf-8")
+        os.utime(f, (now - days * 86400, now - days * 86400))
+    sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
+    assert not (rec_dir / "stale.json").exists()
+    assert (rec_dir / "recent.json").exists() and (rec_dir / "sess-b.json").exists()
