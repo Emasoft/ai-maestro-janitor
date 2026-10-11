@@ -317,3 +317,22 @@ def test_utc_stamps_are_parsed_as_UTC_not_as_local_time(monkeypatch: pytest.Monk
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_a_recovered_fetch_forgets_its_error_so_the_same_error_logs_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-ALEX1X2P: error, error (not logged twice), success, same error -> logged again."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import daemon  # noqa: PLC0415
+
+    results = iter([(0, "boom"), (0, "boom"), (3, ""), (0, "boom")])
+    monkeypatch.setattr(daemon.gh_notify_inbox, "fetch_and_publish", lambda: next(results))
+    logged: list[str] = []
+    monkeypatch.setattr(daemon.state, "log_line", lambda _name, msg: logged.append(msg))
+
+    for _ in range(4):
+        daemon.task_gh_notify_inbox()
+
+    failures = [m for m in logged if "fetch failed" in m]
+    assert len(failures) == 2, logged

@@ -4514,10 +4514,20 @@ def test_every_self_deduping_detector_is_on_the_roster_and_uses_emit_once() -> N
     does not dedupe itself."""
     dispatch = _import_dispatch()
     roster = {n for n, _, _ in dispatch._DETECTORS}
+    no_forget = {
+        "memgrep-binary-stale": "keys carry the binary build stamp and installed sha "
+        "(stale:<stamp>:<sha>), so a new occurrence has a new key",
+    }
     for name in dispatch._SELF_DEDUPING_DETECTORS:
         assert name in roster, name
         src = (_PROJECT_ROOT / "scripts" / "detectors" / f"{name}.py").read_text(encoding="utf-8")
         assert "emit_once" in src, name
+        if name not in no_forget:
+            assert "emit_forget" in src, name
+    for name, reason in no_forget.items():
+        assert name in dispatch._SELF_DEDUPING_DETECTORS, (name, reason)
+        src = (_PROJECT_ROOT / "scripts" / "detectors" / f"{name}.py").read_text(encoding="utf-8")
+        assert "emit_forget" not in src, (name, reason)
 
 
 def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:

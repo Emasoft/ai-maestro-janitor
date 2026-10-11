@@ -2762,6 +2762,15 @@ def task_gh_notify_inbox() -> None:
         if msg:
             state.log_line("daemon", msg)
         return
+    # Recovered: forget the error keys, else an error text logged once is never logged again
+    # when it returns weeks later (TRDD-ALEX1X2P). Best-effort.
+    seen = gs.control_dir() / "gh-notify-inbox.err.seen"
+    try:
+        keys = [ln.strip() for ln in seen.read_text().splitlines() if ln.strip()]
+    except (OSError, ValueError):  # ValueError: undecodable bytes; this lane never raises
+        keys = []
+    for k in keys:
+        dedupe.emit_forget(seen, k)
     state.log_line("daemon", f"gh-notify-inbox: published {count} notification thread(s)")
 
 

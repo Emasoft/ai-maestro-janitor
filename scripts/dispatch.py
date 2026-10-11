@@ -951,8 +951,9 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
 
 
 # Detectors whose EVERY printed drift line is gated by their own `dedupe.emit_once` and which
-# `emit_forget` on clearance. WHY exempt (TRDD-37H7QFSF): the dispatcher cross-fire dedupe
-# cannot see that such a condition cleared, so it swallowed the line when it returned; the
+# `emit_forget` on clearance (except memgrep-binary-stale, whose keys embed the binary stamp and
+# installed sha, so a new occurrence has a new key). WHY exempt (TRDD-37H7QFSF): the dispatcher
+# cross-fire dedupe cannot see that such a condition cleared, so it swallowed the line when it returned; the
 # detector already prints each (re)appearance exactly once, so a second dedupe here only hides
 # it. Detectors with any ungated print (orphaned-memory-maint) stay out.
 # Membership is a CONTRACT the tests check only loosely (the detector file merely contains
