@@ -2455,6 +2455,21 @@ def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
     )
 
 
+def test_iterm_alarm_generic_text_points_at_probe_log_not_missing_age(env_isolation: dict,
+                                                                      capsys: pytest.CaptureFixture) -> None:
+    """The generic alarm names no absent evidence age and gates the Automation remedy on the iterm-probe -1743 line."""
+    env_isolation["global_dir"].mkdir(parents=True, exist_ok=True)
+    (env_isolation["global_dir"] / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "evidence age below" not in out
+    assert "iterm-probe" in out and "-1743" in out
+    assert out.index("iterm-probe") < out.index("System Settings")
+
+
 def test_iterm_alarm_reports_the_observation_not_a_verdict(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:

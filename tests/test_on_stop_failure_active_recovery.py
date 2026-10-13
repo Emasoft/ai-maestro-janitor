@@ -321,3 +321,27 @@ def test_exits_zero_when_rotator_script_missing(monkeypatch: pytest.MonkeyPatch,
     rc = hook.main()
     assert rc == 0
     assert (project / ".janitor" / "state" / "rate-limited.flag").exists()
+
+
+def test_unwritable_recovery_marker_is_logged_and_the_first_launch_still_fires(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A recovery marker that cannot be written leaves a log line, never crashes, and the rotator still launches."""
+    gstate = tmp_path / "gstate"
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gstate))
+    opt_in = gstate.parent / "oauth-rotator" / "opt-in.flag"
+    opt_in.parent.mkdir(parents=True, exist_ok=True)
+    opt_in.touch()
+    # A directory squatting on the marker's path makes os.replace fail for real (IsADirectoryError).
+    (opt_in.parent / "recovery-requested.ts").mkdir()
+
+    calls: list[list[str]] = []
+
+    def _spy_popen(argv: list[str], **kwargs: Any) -> Any:
+        calls.append(list(argv))
+        return object()
+
+    monkeypatch.setattr("subprocess.Popen", _spy_popen)
+    _hook, project = _run_hook(monkeypatch, tmp_path)  # asserts rc == 0
+
+    log = (project / ".janitor" / "logs" / "stop-failure.log").read_text()
+    assert "recovery marker not written" in log and "recovery-requested.ts" in log
+    assert len([c for c in calls if any("rotator.py" in str(a) for a in c)]) == 1

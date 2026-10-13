@@ -218,8 +218,14 @@ def main() -> int:
             #
             # Written before the spawn, not after: a marker written after a spawn that never
             # returns is a marker that is never written.
-            with contextlib.suppress(Exception):
-                state.atomic_write(opt_in.parent / "recovery-requested.ts", str(int(time.time())))
+            # A failed write must leave a trace: without the marker the daemon has nothing to
+            # service, so there is no second run and silence would hide that (TRDD-7J3QPSPD).
+            marker = opt_in.parent / "recovery-requested.ts"
+            try:
+                state.atomic_write(marker, str(int(time.time())))
+            except Exception as exc:  # noqa: BLE001 -- the first launch below must still start
+                with contextlib.suppress(Exception):  # the log itself must not skip the launch
+                    state.log_line("stop-failure", f"recovery marker not written ({marker.name}): {exc!r}")
 
             subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
                 ["uv", "run", "--script", "--quiet", str(rotator), "auto"],

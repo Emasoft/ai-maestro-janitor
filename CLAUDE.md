@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=a9a1e5ceed4c generated=2026-10-08T18:40:26+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7b78eae87065 generated=2026-10-12T20:44:51+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -163,14 +163,14 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-compaction-floor-gate-clear-lever](.claude/project/memory/janitor-compaction-floor-gate-clear-lever.md) — the cache-expired trigger never fires
   - [jev-compaction](.claude/project/memory/jev-compaction.md) — the post-clear summary is missing tool results
   - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
-  - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
+  - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — how long did a hook run
 
 **janitor-detector-and-hook-roster** — the janitor detector and hook roster split into parts
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
   - [janitor-detector-and-hook-roster-findings](.claude/project/memory/janitor-detector-and-hook-roster-findings.md) — how good are the scan_text rules
 
-**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (75 registered, marketplace-refresh retired 2026-09-17)
-- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (75 registered, marketplace-refresh retired 2026-09-17)
+**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (78 registered, marketplace-refresh retired 2026-09-17)
+- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (78 registered, marketplace-refresh retired 2026-09-17)
 
 **janitor-publish-pipeline** — publish blocked
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
