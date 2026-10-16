@@ -4223,9 +4223,12 @@ def _phase_keep_going_nudge() -> None:
         )
         if rec:
             newest = rec["messages"][-1]
+            # TRDD-0TSG80CL: collapse whitespace BEFORE _clean (it keeps newlines, which split the
+            # one-line [janitor-resume] payload across stdout lines; the 160 cap then counts collapsed text).
+            owner_text = " ".join(newest["text"].split())
             bits.append(
                 f"owner's last message ({session_continuity.age_words(newest['ts'])}): "
-                f"«{session_continuity._clean(newest['text'], 160)}»"
+                f"«{session_continuity._clean(owner_text, 160)}»"
             )
     except Exception as exc:  # noqa: BLE001 -- a broken record must never silence the nudge
         state.log_line("dispatch", f"keep-going: owner record unavailable: {exc!r}")

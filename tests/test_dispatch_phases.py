@@ -5174,3 +5174,27 @@ def test_keep_going_nudge_leads_with_the_owners_last_message_when_a_record_exist
     assert note.startswith("continue your pending task (keep-going mode) — owner's last message (time unknown): «")
     assert "fix 338 now" in note
     assert "[janitor-resume] fix" not in note, "quoted text must not be able to form a bare marker"
+
+
+
+def test_keep_going_nudge_collapses_a_multiline_owner_message_to_one_line(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-0TSG80CL: newlines in the owner text must not split the one-line resume payload."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-now")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_idle_and_stale(state)
+    state.atomic_write(
+        state.state_dir() / "owner-messages" / "sess-now.json",
+        json.dumps({
+            "messages": [{"text": "line one\nline two\n\nline three", "ts": ""}],
+            "own_reply": "ok", "origin_session": "sess-old", "recorded_at": "",
+        }),
+    )
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    note = out.splitlines()[1]
+    assert "line one line two line three" in note
+    assert "\n" not in note
