@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-10-16T23:55:44+0200
+updated: 2026-10-16T23:57:05+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -54,6 +54,7 @@ CHAIN CLOSE (final-review verdict, HOLDS): same-day STATE entries are chronologi
 2026-09-29 residue-fix review (fork KEEP-with-fixes) discharged in commit 9e63365b: MEDIUM (invented lossy-re-apply idempotency claim) fixed — text now names the real behavior (retired page gone → re-run refuses on missing source); MEDIUM-LOW (CURE-4-unproven claim migrated into the agent description) fixed — neutral loss-oracle phrasing; sibling staging/--op bullets migrated; hash-guarded→version-skew; consolidate desc 'never editing'→'never hand-editing'; repair verb named. Residue grep zero, caps 38 passed. Step C now FULLY closed (f051bb2b → 329bf57d → 23314b3a → 030b6e13 → 1fb561d2 → 9e63365b). Card close still gated on: CURE-4 owner confirmation + the four eht cards.
 2026-09-29 second-round review correction (594754e8): the review caught the idempotency bullet's 'missing source' claim was FALSE — merge-mem-topic tombstones the retired page IN PLACE (merge-protocol.md:45-48, the page survives as a pointer), so a re-run reads a tombstone not an absence; text now mechanism-free ('refused at the gate — the retired page is a tombstone, not a mergeable source; retry <=3 then abort'), and 'ABSTAIN per the protocol' corrected to the real gate-refusal path (retry <=3 then abort). Card record 509f34ac's 'step C FULLY closed' superlative corrected BY THIS LINE: step C is closed pending nothing but this line — the two-rounds-max chain on the residue fixes ends here (round 1 = residue review, round 2 = this verification; a third round would be regress, take any further finding to the owner).
 2026-10-16 eht JFIOO9XO closed complete (see its DECISION line).
+2026-10-16 SCOPE NOTE on eht JFIOO9XO (recorded here because the archived card is immutable): its closure (dc9ed4d2) CHANGED that card's acceptance wording. 'An unreadable page refuses with the retryable message' became 'exit 1, nothing written' plus the passing unit test, because update-mem-topic's own read refuses first. Verified in substance, not as worded: both live runs used a scratch root, and the unit test ran on a working-tree debug build, not on the installed 0.2.0 binary. The owner may veto and reopen JFIOO9XO.
 
 ## Approval log
 
