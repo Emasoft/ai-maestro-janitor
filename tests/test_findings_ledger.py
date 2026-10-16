@@ -472,6 +472,15 @@ def test_clear_surfaced_to_human_does_not_touch_other_codes(_isolate: Path) -> N
     assert fl.surfaced_to_human_status("H-8", "hash2") == "reported-pending"
 
 
+def test_clear_surfaced_to_human_reports_whether_stamps_were_found(_isolate: Path) -> None:
+    """TRDD-DZT6X64K: the caller acts (records a resolution) only when a stamp existed, so
+    clear returns True iff it FOUND a stamp for the code — False on a repeat or an unrelated code."""
+    fl.mark_surfaced_to_human("H-8", "hash2")
+    assert fl.clear_surfaced_to_human("H-9") is False, "no stamp under that code"
+    assert fl.clear_surfaced_to_human("H-8") is True
+    assert fl.clear_surfaced_to_human("H-8") is False, "the stamp is already gone"
+
+
 def test_human_only_isolation_still_holds(tmp_path: Path, _isolate: Path) -> None:
     """The human-only path must not weaken the per-project isolation invariant
     (TRDD-X92VBFNF, ARCHITECTURE.md §3): a human-only finding about repo B never

@@ -2652,7 +2652,22 @@ def _phase_iterm_automation_alarm() -> None:
             # surfaced for (TRDD-KU3ERYFX LIVE INSTANCE #2) — clear it here too, in
             # lockstep with the local ack above, so a future recurrence reports
             # "never-reported" rather than a stale "reported-pending".
-            findings_ledger.clear_surfaced_to_human(_ITERM_AUTOMATION_CODE)
+            if findings_ledger.clear_surfaced_to_human(_ITERM_AUTOMATION_CODE):
+                # TRDD-DZT6X64K: the session-start replay showed the HIGH alert after its
+                # condition ended. Record the resolution at the ALERT'S OWN severity:
+                # surface_block sorts by severity (an INFO would fold away on a busy ledger)
+                # and newest-first within it, so the resolution sorts before its alert. The
+                # msg is kept well under the shortest alert msg (40 chars; this one is 31), so
+                # that even with a longer age suffix on the newer resolution its rendered
+                # line is never longer than the alert's: surface_block skips a line that
+                # overflows its 1 KB budget and could otherwise show the alert without its
+                # resolution.
+                # Gate = the surfaced stamp, not the ack file: the transient recent-rearm
+                # branch writes the ack but neither the stamp nor an alert.
+                findings_ledger.record(
+                    sev="HIGH", code=_ITERM_AUTOMATION_CODE, src="iterm-automation-alarm",
+                    msg="resolved: iTerm reachable again", ref="",
+                )
             return
         try:
             raw_flag = flag.read_text(encoding="utf-8")
@@ -2917,6 +2932,8 @@ def _phase_iterm_automation_alarm() -> None:
         # local `acked` hash above already gates the print itself — this call is purely
         # so `findings_ledger.surfaced_to_human_status` can answer "reported-pending" for
         # this alarm instead of only ever "never-reported").
+        # INVARIANT (TRDD-DZT6X64K): this stamp must stay immediately before the HIGH record
+        # below; the resolution gate in the flag-absent branch relies on stamp => alert recorded.
         findings_ledger.mark_surfaced_to_human(_ITERM_AUTOMATION_CODE, payload_hash[:16])
         # RECORD THE FIRE ITSELF, not just the dedupe marker (peer finding on janitor#92,
         # verified here: 69 detectors keep a last-run stamp in .janitor/state; this alarm kept

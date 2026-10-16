@@ -365,7 +365,7 @@ def mark_surfaced_to_human(
     return dedupe.emit_once(_surfaced_seen_path(project_dir), key, "x") is not None
 
 
-def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | None = None) -> None:
+def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | None = None) -> bool:
     """The underlying condition resolved — forget every stamp recorded under `code` so a
     future recurrence (even with an unchanged content hash) surfaces again.
 
@@ -373,15 +373,23 @@ def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | 
     a `surfaced-to-human` stamp must not outlive the condition it was surfaced for, or
     the ledger shows "reported-pending" for a finding that already resolved itself —
     the exact staleness class TRDD-88ZVEQY7 is about). Best-effort; never raises.
+
+    Returns True iff at least one stamp for `code` was FOUND (and a forget attempted);
+    False when none was found or the seen file was unreadable. True is not a success
+    signal for the forget itself: `dedupe.emit_forget` reports none and is a no-op under
+    lock contention, so a stamp can survive and the caller may act twice (a harmless
+    duplicate).
     """
     seen_file = _surfaced_seen_path(project_dir)
     try:
         lines = seen_file.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return
+        return False
     prefix = f"{code}:"
-    for key in [line for line in lines if line.startswith(prefix)]:
+    keys = [line for line in lines if line.startswith(prefix)]
+    for key in keys:
         dedupe.emit_forget(seen_file, key)
+    return bool(keys)
 
 
 def surfaced_to_human_status(

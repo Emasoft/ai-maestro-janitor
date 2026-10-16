@@ -2910,6 +2910,190 @@ def test_iterm_alarm_refires_when_the_condition_recurs(env_isolation: dict,
     assert "enumerated ZERO" in capsys.readouterr().out
 
 
+# ---------------------------------------------------------------------------
+# TRDD-DZT6X64K — the HIGH alert must not outlive its condition in the session-start
+# replay: when the flag clears after the alert was surfaced, a resolution entry is
+# recorded so surface_block shows the alert only together with its resolution.
+# ---------------------------------------------------------------------------
+_ITERM_RESOLVED_MSG = "resolved: iTerm reachable again"
+
+
+def _iterm_ledger_entries() -> list[dict]:
+    """Every entry in the isolated project's findings ledger, in file order."""
+    import findings_ledger
+
+    path = findings_ledger.ledger_path(None)
+    if not path.exists():
+        return []
+    return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def _iterm_alert_entries() -> list[dict]:
+    return [e for e in _iterm_ledger_entries() if e.get("msg", "").startswith("iTerm channel unreachable")]
+
+
+def _iterm_resolution_entries() -> list[dict]:
+    return [e for e in _iterm_ledger_entries() if e.get("msg") == _ITERM_RESOLVED_MSG]
+
+
+def test_iterm_alarm_records_one_resolution_when_the_condition_clears(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """Flag present -> alert recorded -> flag cleared: exactly ONE HIGH resolution entry,
+    the alert entry untouched, nothing printed, and no second resolution on later fires."""
+    import findings_ledger
+
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    flag.write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    capsys.readouterr()
+    before = _iterm_alert_entries()
+    assert len(before) == 1 and before[0]["sev"] == "HIGH", "precondition: the HIGH alert was recorded"
+
+    flag.unlink()
+    dispatch._phase_iterm_automation_alarm()
+    dispatch._phase_iterm_automation_alarm()
+
+    assert capsys.readouterr().out == "", "the resolution is recorded, never printed"
+    assert _iterm_alert_entries() == before, "the alert entry must stay byte-identical"
+    resolved = _iterm_resolution_entries()
+    assert len(resolved) == 1, f"exactly one resolution, got {resolved}"
+    assert resolved[0]["sev"] == "HIGH", "same severity as the alert so it sorts beside it"
+    assert resolved[0]["code"] == before[0]["code"]
+    # The replay compares whole rendered lines: a resolution line longer than its alert line
+    # could be folded while the alert is shown. The margin of 8 covers the longest plausible
+    # age-text difference between the newer resolution and the older alert ("just now" vs "Nm ago").
+    now = int(time.time())
+    alert_line = findings_ledger.render_line(before[0], now=now)
+    res_line = findings_ledger.render_line(resolved[0], now=now)
+    assert len(alert_line) - len(res_line) >= 8
+
+
+def test_iterm_alarm_records_no_resolution_when_it_never_fired(env_isolation: dict) -> None:
+    """Healthy machine: flag never present -> no alert, so no resolution either."""
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+
+    assert _iterm_ledger_entries() == []
+
+
+def test_iterm_alarm_records_no_resolution_on_the_transient_branch(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """The recent-rearm branch writes the ack but neither the stamp nor an alert, so
+    clearing the flag afterwards has nothing to resolve and must record nothing."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    flag.write_text("x", encoding="utf-8")
+    recent = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 3600))
+    (gdir / "daemon.log").write_text(
+        f"[{recent}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n",
+        encoding="utf-8",
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    assert "TRANSIENT" in capsys.readouterr().out, "precondition: the transient branch ran"
+    assert _iterm_alert_entries() == [], "precondition: the transient branch records no alert"
+
+    flag.unlink()
+    dispatch._phase_iterm_automation_alarm()
+
+    assert _iterm_resolution_entries() == []
+
+
+def test_iterm_alarm_replay_shows_the_alert_with_its_resolution(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """The session-start replay on a busy ledger (12 LOW entries) shows BOTH the HIGH
+    alert and its resolution, the resolution first, not the alert alone."""
+    import findings_ledger
+
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    dispatch = _import_dispatch()
+    for i in range(12):
+        findings_ledger.record(sev="LOW", code=f"LOW-{i}", src="t", msg=f"low entry {i}")
+    flag.write_text("x", encoding="utf-8")
+    dispatch._phase_iterm_automation_alarm()
+    flag.unlink()
+    dispatch._phase_iterm_automation_alarm()
+    capsys.readouterr()
+
+    block = findings_ledger.surface_block(None)
+
+    assert "iTerm channel unreachable" in block
+    assert _ITERM_RESOLVED_MSG in block
+    assert block.index(_ITERM_RESOLVED_MSG) < block.index("iTerm channel unreachable")
+
+
+def _iterm_replay_block(
+    env_isolation: dict, count: int, msg_len: int, *, long_resolution: bool
+) -> str:
+    """Alert via the phase, then the resolution, then `count` newer HIGH entries of another
+    code; return the session-start block. With `long_resolution` the resolution is instead
+    recorded directly with a 147-char msg (the control: it must overflow the byte budget)."""
+    import findings_ledger
+
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    dispatch = _import_dispatch()
+    flag.write_text("x", encoding="utf-8")
+    dispatch._phase_iterm_automation_alarm()
+    if long_resolution:
+        findings_ledger.record(
+            sev="HIGH", code="ITERM-AUTOMATION-TCC", src="iterm-automation-alarm", msg="r" * 147
+        )
+    else:
+        flag.unlink()
+        dispatch._phase_iterm_automation_alarm()
+    for i in range(count):
+        findings_ledger.record(sev="HIGH", code=f"OTHER-{i}", src="t", msg=("y" * msg_len))
+    return findings_ledger.surface_block(None)
+
+
+_ITERM_REPLAY_CASES = pytest.mark.parametrize(
+    ("count", "msg_len"), [(5, 120), (7, 70)], ids=["five-long-highs", "seven-short-highs"]
+)
+
+
+@_ITERM_REPLAY_CASES
+def test_iterm_alarm_replay_never_shows_the_alert_without_its_resolution(
+    env_isolation: dict, capsys: pytest.CaptureFixture, count: int, msg_len: int
+) -> None:
+    """Newer HIGH entries (recorded after the clear) compete for the 1 KB budget. The block
+    may drop the alert, and a resolution shown alone stands alone, but the alert must never
+    be shown without its resolution; at least one of the two must be shown."""
+    block = _iterm_replay_block(env_isolation, count, msg_len, long_resolution=False)
+
+    alert_shown = "iTerm channel unreachable" in block
+    resolution_shown = _ITERM_RESOLVED_MSG in block
+    assert alert_shown or resolution_shown, "neither line shown: the test would pass vacuously"
+    if alert_shown:
+        assert resolution_shown, "the alert is shown without its resolution"
+
+
+@_ITERM_REPLAY_CASES
+def test_iterm_alarm_replay_control_a_long_resolution_does_split(
+    env_isolation: dict, capsys: pytest.CaptureFixture, count: int, msg_len: int
+) -> None:
+    """Control: with a 147-char resolution msg the same fixture shows the alert without its
+    resolution, proving the alert-implies-resolution test is falsifiable: the same layout
+    with a long resolution shows the alert alone."""
+    block = _iterm_replay_block(env_isolation, count, msg_len, long_resolution=True)
+
+    assert "iTerm channel unreachable" in block
+    assert "r" * 100 not in block
+
+
 # ---------- TRDD-QW6RVAKN: "janitor resume is called twice after compacting" ----
 
 
