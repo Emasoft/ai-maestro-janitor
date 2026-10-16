@@ -2,7 +2,7 @@
 name: project_janitor_publish_blocked_cpv_fps
 description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get / publish blocked again after fixing every reported finding / the cpv gate reveals a new demoted nit on every attempt / how to find which fragment trips skillaudit / leave one fragment out / run the scanner over the whole page not the reported lines / separate is the third devitalize verb / push cannot contain secrets GH013 blocked the publish / a redaction placeholder was flagged as a secret / redacting in a new commit does not unblock push protection / the tag push was refused but it was not the tag ruleset / allow-secret url vs rewrite history is the owner decision / CPV credential_theft rule flags claude setup-token in skill prose / how to unblock a skill that mentions setup-token from CPV strict / CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude / why can't the .claude gitignore MINOR be satisfied / is this a filed false positive not something to fix in our gitignore / claude-plugins-validation issue 120 / does git check-ignore .claude exit 0 when we track .claude / project / memory / can git re-include a path under an excluded parent directory / why not add a bare .claude / gitignore line / would a bare .claude / line untrack the memory corpus / when does this publish block auto-unblock / should PROJECT memory move out from under .claude to dodge this check / validate_skill.py broken file reference two different fence handling checks / why does a markdown link example inside a fenced template still trip validate_supporting_files / how to clear a Referenced file not found finding in SKILL.md / does a fenced bash block strip literal paths from the check"
 ocd: 2026-06-11
-lmd: 2026-10-07
+lmd: 2026-10-16
 metadata:
   node_type: memory
   type: project
@@ -156,7 +156,7 @@ Publish #5 (3.4.4, 2026-09-02) failed at the remote CPV gate with ONE MAJOR: `sk
 
 
 
-^1LNXSGZG [desc: "CPV --strict flags .gitignore missing coverage for .claude/ as a filed false-positive (CPV#120), unsatisfiable while PROJECT memory is tracked under .claude/project/memory/", keywords: cpv_strict_gitignore_claude_minor_false_positive git_check-ignore_claude_exits_1_by_design cannot_reinclude_path_under_excluded_parent memory_tracked_under_claude_project_memory publish_blocked_on_gitignore_coverage_finding auto_unblocks_when_cpv_120_ships do_not_add_bare_claude_gitignore_line move_project_memory_out_of_claude_to_dodge_check claude-plugins-validation_issue_120 mathematically_unsatisfiable_gitignore_coverage, ocd: 2026-06-14, lmd: 2026-06-14]
+^1LNXSGZG [desc: "CPV --strict flags .gitignore missing coverage for .claude/ as a filed false-positive (CPV#120), unsatisfiable while PROJECT memory is tracked under .claude/project/memory/", keywords: cpv_strict_gitignore_claude_minor_false_positive git_check-ignore_claude_exits_1_by_design cannot_reinclude_path_under_excluded_parent memory_tracked_under_claude_project_memory publish_blocked_on_gitignore_coverage_finding auto_unblocks_when_cpv_120_ships do_not_add_bare_claude_gitignore_line move_project_memory_out_of_claude_to_dodge_check claude-plugins-validation_issue_120 mathematically_unsatisfiable_gitignore_coverage, ocd: 2026-06-14, lmd: 2026-10-16]
 
 CPV `--strict` emits **`[MINOR] .gitignore missing coverage for: Claude Code cache
 directory (.claude/)`** and blocks the janitor publish (exit ≥2). This is a **filed
@@ -173,13 +173,16 @@ parent** (`man gitignore`). So `git check-ignore .claude` necessarily exits 1 �
 flags it. No gitignore both (a) makes `git check-ignore .claude` exit 0 AND (b) keeps the
 memory dir trackable; the two are mutually exclusive.
 
+
+^ATOM-5P4N-85TZ [desc: "how to proceed when publish fails CPV --strict on ONLY the .claude/ gitignore MINOR: wait for the CPV#120 fix, never add a bare .claude/ gitignore line", keywords: publish_failed_CPV_strict_with_only_the_claude_gitignore_MINOR what_to_do_when_CPV_flags_gitignore_missing_coverage_for_.claude will_the_publish_unblock_itself_when_CPV#120_ships should_I_add_.claude/_to_the_gitignore bare_.claude_gitignore_line_untracks_the_memory_corpus move_PROJECT_memory_out_of_.claude_to_dodge_the_check CPV_fetched_fresh_via_uvx_so_the_fix_arrives_automatically plugin_otherwise_clean_except_the_.claude_MINOR publish_exit_2_on_gitignore_coverage_finding is_the_gitignore_claude_finding_a_real_defect, ocd: 2026-10-16, lmd: 2026-10-16]
+
 **How to apply:** when a janitor publish fails CPV `--strict` with ONLY this `.claude/`
 MINOR, the plugin is otherwise clean — the publish **auto-unblocks when CPV ships the #120
 fix** (the pipeline fetches CPV fresh via `uvx --from git+…`). The alternative (the USER's
 call) is to move PROJECT memory out from under `.claude/` to dodge the check entirely. Do
 NOT add a bare `.claude/` gitignore line (it prunes the dir and silently un-tracks the
 memory corpus). See [[project_janitor_publish_blocked_cpv_fps]] for the broader CPV
-publish-gate FP history and [[memory-system]] for why memory lives under `.claude/`.[^9]
+publish-gate FP history and [[memory-system]] for why memory lives under `.claude/`. [^9]
 
 ## See also
 
