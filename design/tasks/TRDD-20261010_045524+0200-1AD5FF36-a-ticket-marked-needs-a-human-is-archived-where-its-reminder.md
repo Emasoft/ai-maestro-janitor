@@ -4,7 +4,7 @@ title: A ticket marked needs a human is archived where its reminder never looks
 column: testing
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-16T23:25:11+0200
+updated: 2026-10-16T23:30:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,3 +29,11 @@ Found 2026-10-10 while reading for TRDD-6ESS2MGE (measured: reports/board/202610
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-16
 
 Implemented (uncommitted, pending orchestrator commit): ARCHIVED set + migrate_needs_human in tickets.py, migrate + age/summary reminder in ticket-dispatch.py; 8 new tests (4 test_tickets, 4 test_ticket_dispatch) shown failing first, 63 pass across the three ticket suites; ruff/mypy/pyright clean. Note: open_ticket dedupe at tickets.py:524 still creates a second ticket for a key held by an open needs_human; both are now visible.
+2026-10-16 review of 5beaba31: wikimem-syntax.py _close_stale_tickets only touches OPEN tickets, so it cannot close a needs_human one (checked). Field evidence exists only after a release; this card waits on the release like TRDD-0TSG80CL. On release, 12 hidden needs_human tickets in other projects resurface.
+
+## Acceptance
+
+- [x] needs_human tickets stay in the open dir; dispatch still skips them (tests)
+- [x] archived needs_human tickets are migrated back under the dispatch lock (tests)
+- [x] reminder names up to 3, else one summary line (tests)
+- [ ] field: a real needs_human ticket's reminder fires in a project after a release

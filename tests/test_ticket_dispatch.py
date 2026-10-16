@@ -128,13 +128,13 @@ def _needs_human(title: str, *, age_days: int = 0, closed: bool = False) -> tick
 
 def test_a_needs_human_ticket_is_reminded_with_its_age(project: Path) -> None:
     """TRDD-1AD5FF36: the reminder read only the live dir while save() archived needs_human, so it
-    could never fire. A ticket the janitor gave up on must be named on every fire, with how long it waited."""
+    could never fire. A ticket the janitor gave up on must be named on every fire, with how long ago it was marked."""
     t = _needs_human("a memgrep index fails validation", age_days=3)
 
     out = _run(project)
 
     assert f"[ticket] {t.id} NEEDS A HUMAN" in out
-    assert "3d old" in out
+    assert "(marked 3d ago)" in out
 
 
 def test_a_needs_human_ticket_archived_by_the_old_save_is_migrated_and_reminded(project: Path) -> None:
@@ -169,6 +169,31 @@ def test_many_needs_human_tickets_collapse_into_ONE_summary_line(project: Path) 
     assert out.count("NEEDS A HUMAN") == 0
     assert all(i in out for i in ids)
     assert "/janitor-support-tickets list" in out
+
+
+
+def test_the_summary_line_names_the_OLDEST_needs_human_tickets_first(project: Path) -> None:
+    """The longest-waiting tickets are the ones worth naming; insertion order must not decide."""
+    young = _needs_human("young one", age_days=1).id
+    oldest = _needs_human("oldest one", age_days=9).id
+    middle = _needs_human("middle one", age_days=5).id
+    youngest = _needs_human("youngest one", age_days=0).id
+
+    out = _run(project)
+
+    assert [out.index(i) for i in (oldest, middle, young, youngest)] == sorted(out.index(i) for i in (oldest, middle, young, youngest))
+
+
+def test_a_needs_human_ticket_with_no_timestamp_says_unknown_not_a_bogus_age(project: Path) -> None:
+    """updated_at 0 means a malformed file; an age computed from it would read as decades."""
+    t = _needs_human("a memgrep index fails validation")
+    tickets.mark_needs_human(t, now=0, why="out of reach here")
+    tickets.save(t)
+
+    out = _run(project)
+
+    assert "(marked: unknown)" in out
+    assert "d ago" not in out
 
 
 def test_an_APPROVED_finding_stops_being_reminded_and_starts_being_DISPATCHED(project: Path) -> None:

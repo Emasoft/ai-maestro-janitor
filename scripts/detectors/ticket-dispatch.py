@@ -59,6 +59,8 @@ import state  # noqa: E402
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
 
+_NEEDS_HUMAN_REMIND_CAP = 3  # its own cap: the needs_human reminder must not shift when the proposal cap does
+
 _REMIND_EVERY_S = 3600  # a standing finding is re-surfaced hourly, not every fire
 _REMIND_CAP = 3  # …and never more than a handful of lines; the rest are counted, not listed
 
@@ -150,13 +152,16 @@ def main() -> int:
 
     # A ticket the janitor could not fix must never go quiet. Surface it every fire, with the command.
     # TRDD-1AD5FF36: this list was always empty while save() archived needs_human tickets out of
-    # load_all(); now they stay live. Up to _REMIND_CAP get a line each (with their age); more than
-    # that collapse into ONE summary line so a pile of stuck tickets cannot flood every session.
-    stuck = [t for t in tickets.load_all() if t.status == tickets.NEEDS_HUMAN]
-    if len(stuck) <= _REMIND_CAP:
+    # load_all(); now they stay live. Up to _NEEDS_HUMAN_REMIND_CAP get a line each (with how long
+    # ago they were marked); more than that collapse into ONE summary line so a pile of stuck
+    # tickets cannot flood every session. Oldest first: the longest-waiting ones are the ones named.
+    stuck = sorted((t for t in tickets.load_all() if t.status == tickets.NEEDS_HUMAN), key=lambda t: t.updated_at)
+    if len(stuck) <= _NEEDS_HUMAN_REMIND_CAP:
         for t in stuck:
-            age_days = max(0, now - t.updated_at) // 86400
-            lines.append(f"[ticket] {t.id} NEEDS A HUMAN after {t.attempts} attempts ({age_days}d old): {t.title[:80]} → inspect: /janitor-support-tickets show {t.id} · retry: /janitor-support-tickets retry {t.id}")
+            # updated_at is stamped when the ticket is marked needs_human; 0 means a malformed
+            # file, where an age computed from it would be bogus.
+            marked = f"marked {max(0, now - t.updated_at) // 86400}d ago" if t.updated_at > 0 else "marked: unknown"
+            lines.append(f"[ticket] {t.id} NEEDS A HUMAN after {t.attempts} attempts ({marked}): {t.title[:80]} → inspect: /janitor-support-tickets show {t.id} · retry: /janitor-support-tickets retry {t.id}")
     else:
         shown = ", ".join(t.id for t in stuck[:5])
         more = f" +{len(stuck) - 5} more" if len(stuck) > 5 else ""
