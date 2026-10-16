@@ -22,6 +22,8 @@ owner-mandate: 2026-10-09
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-09
 
+ORIGINAL MESSAGE (added 2026-10-16): the owner mandate quoted below is the owner's own message in transcript session 8a11fda7-edff-47fe-9479-50d1c88dd6bc at 2026-10-09T19:55:54.607Z (record type user, origin human); details in the section 'Owner mandate source' at the end of this card. The keep-going cue points here via owner-mandate: 2026-10-09 while this card is open (TRDD-0TSG80CL).
+
 OWNER MANDATE, verbatim, 2026-10-09: 'you don't need me. just complete all TRDDs and decide yourself. base your decisions on verified facts and accurate comparisons and tests. go on and finish all tasks. when all TRDDs are done, i have a big task for you that will finally solve the disaster of your compaction timing breaking the cache every time. but now work on the TRDDs.' Earlier the same day: 'the limit of 5000 tokens per skill cannot be violated. but you can create reference files and move some text there'.
 
 Still stop for: destructive or irreversible acts, anything outward-facing (push, publish outside scripts/publish.py, posting to GitHub), credential work, and human-only acts. No publish until the board is drained (project rule: finish pending cards first).
