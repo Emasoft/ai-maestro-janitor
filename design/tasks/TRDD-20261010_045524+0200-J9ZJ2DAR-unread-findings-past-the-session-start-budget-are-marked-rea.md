@@ -1,10 +1,10 @@
 ---
 trdd-id: J9ZJ2DAR
 title: Unread findings past the session-start budget are marked read without being shown
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-10T20:10:52+0200
+updated: 2026-10-16T17:23:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T04:55:24+0200
 parent-trdd: 6ESS2MGE
 derived: true
+implementation-commits: [2f57054a, af6b1ac5]
 ---
 
 # Unread findings past the session-start budget are marked read without being shown
@@ -26,3 +27,7 @@ scripts/lib/findings_ledger.py surface_block pushes unread ledger lines until 10
 ## Approval log
 
 - 2026-10-10T04:55:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-10-16: implemented on branch fix/J9ZJ2DAR-findings-fold (2f57054a + af6b1ac5, not yet merged to main or published). surface_block now acks only shown events and NEVER_SURFACE_CODES; folded events are kept as content hashes in the cursor's pending list and drain on later session starts; a line that does not fit the byte budget is skipped instead of stopping the loop. Every session-start surface logs unread/shown/folded counts per severity to findings-surface.log, which is the measurement this card asked for. Adversarial review done; findings applied or rejected with reasons in af6b1ac5. Tests 46 passed; ruff, mypy, pyright clean. Remaining: merge into main and ship through scripts/publish.py.
