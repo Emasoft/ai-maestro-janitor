@@ -1,10 +1,10 @@
 ---
 trdd-id: FU8MZ0SL
 title: Identical heartbeat replies that carry a prose drift line are never capped in any transcript view
-column: human_review
+column: complete
 status: tasked
 created: 2026-10-10T02:42:48+0200
-updated: 2026-10-16T18:16:22+0200
+updated: 2026-10-16T19:40:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T02:42:48+0200
 implementation-commits: [ec87ab69]
+release-via: publish
 ---
 
 # Identical heartbeat replies that carry a prose drift line are never capped in any transcript view
@@ -34,3 +35,7 @@ Found by the adversarial review of 8d1b205e (TRDD-U119W52S) on 2026-10-10 and th
 ## Approval log
 
 - 2026-10-10T02:42:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-10-16: merged into main as 48cf05f4 (local, not pushed). FULL GATE GREEN on 48cf05f4: 18407 passed, 2 skipped (56 min), ruff, mypy, pyright exit 0 (reports/board/gate-48cf05f4.txt). Closed to complete, release-via publish, FIELD CASE UNOBSERVED (needs a release; the card's pinning tests pass in that run).
