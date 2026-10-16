@@ -143,16 +143,103 @@ def test_cursor_survives_a_structural_trim(_isolate: Path) -> None:
 
 
 def test_surface_block_caps_folds_and_acks(_isolate: Path) -> None:
-    """15 unread ⇒ at most SURFACE_CAP_LINES lines + ONE fold line naming the remainder
-    and /janitor-findings; block ≤ ~1.2 KB; and surfacing ACKS (second call empty)."""
+    """Bounded deliveries drain all fifteen events without acknowledging the folded tail."""
     for i in range(15):
         fl.record(sev="HIGH", code=f"C-{i:02d}", src="d", msg=f"finding {i}", now=100 + i)
-    block = fl.surface_block(None)
-    lines = block.splitlines()
-    assert 0 < len(lines) <= fl.SURFACE_CAP_LINES + 1
-    assert "older unread" in lines[-1] and "/janitor-findings" in lines[-1]
-    assert len(block.encode("utf-8")) <= fl.SURFACE_BUDGET_BYTES + 200
-    assert fl.surface_block(None) == "", "surfacing advances the cursor — no repeat"
+    first = fl.surface_block(None)
+    assert "older unread" in first
+    assert len(first.splitlines()) <= fl.SURFACE_CAP_LINES + 1
+    logged = janitor_state.log_dir().joinpath("findings-surface.log").read_text().splitlines()[-1]
+    counts = json.loads(logged[logged.index("{"):])["HIGH"]
+    assert counts["unread"] == 15
+    assert counts["shown"] + counts["folded"] == 15
+    assert counts["folded"] == fl.unread_entries()[1]
+    assert len(first.encode("utf-8")) <= fl.SURFACE_BUDGET_BYTES + 200
+    second = fl.surface_block(None)
+    assert second
+    delivered = [line.split()[2] for line in (first + "\n" + second).splitlines() if line.startswith("[findings] HIGH")]
+    assert sorted(delivered) == [f"C-{i:02d}" for i in range(15)]
+    assert fl.unread_entries(None) == ([], 0)
+    assert fl.surface_block(None) == ""
+
+def test_folded_findings_survive_trim_and_excluded_entries_are_acked(_isolate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Severity reordering and trimming retain folded same-timestamp duplicate events."""
+    fl.record(sev="INFO", code="TRIM", src="d", msg="old", now=10)
+    fl.advance_cursor()
+    for _ in range(2):
+        fl.record(sev="LOW", code="DUP", src="d", msg="same", now=100)
+    fl.record(sev="HIGH", code="HIGH", src="d", msg="urgent", now=100)
+    fl.record(sev="HIGH", code="WINDOW-BURN", src="d", msg="excluded", now=100)
+    monkeypatch.setattr(fl, "SURFACE_CAP_LINES", 1)
+    assert "HIGH HIGH" in fl.surface_block()
+    assert fl.unread_entries()[1] == 2
+    path = fl.ledger_path()
+    path.write_bytes(b"\n".join(path.read_bytes().splitlines()[1:]) + b"\n")
+    assert fl.unread_entries()[1] == 2
+    assert "LOW DUP" in fl.surface_block()
+    assert fl.unread_entries()[1] == 1
+    assert "LOW DUP" in fl.surface_block()
+    assert fl.surface_block() == ""
+
+
+def test_surface_snapshot_does_not_ack_concurrent_append(_isolate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A finding appended during rendering is not acknowledged by the older snapshot."""
+    fl.record(sev="HIGH", code="FIRST", src="d", msg="first", now=100)
+    render = fl.render_line
+    appended = False
+
+    def append_during_render(entry: dict) -> str:
+        nonlocal appended
+        if not appended:
+            appended = True
+            fl.record(sev="LOW", code="LATER", src="d", msg="later", now=100)
+        return render(entry)
+
+    monkeypatch.setattr(fl, "render_line", append_during_render)
+    assert "FIRST" in fl.surface_block()
+    lines, total = fl.unread_entries()
+    assert total == 1 and "LATER" in lines[0]
+
+def test_malformed_pending_cursor_resurfaces_and_drains(_isolate: Path) -> None:
+    """Invalid pending mappings and list items resurface real events without crashing."""
+    for case in ("mapping", "integer-list"):
+        project = _isolate / case
+        fl.record(sev="HIGH", code="PENDING", src="d", msg="must surface", now=100, project_dir=project)
+        key = fl._entry_key(_entries(project)[0])
+        fl.advance_cursor(project)
+        cursor_path = fl._cursor_path(project)
+        cursor = json.loads(cursor_path.read_text())
+        cursor["pending"] = {key: "bad-count"} if case == "mapping" else [17]
+        cursor_path.write_text(json.dumps(cursor))
+        lines, total = fl.unread_entries(project)
+        assert total == 1 and len(lines) == 1 and "PENDING" in lines[0], case
+        assert "PENDING" in fl.surface_block(project), case
+        assert fl.unread_entries(project) == ([], 0), case
+        assert fl.surface_block(project) == "", case
+
+def test_surface_log_failure_preserves_successful_ack(_isolate: Path) -> None:
+    """A real log-file open failure cannot undo the successfully written delivery cursor."""
+    fl.record(sev="HIGH", code="LOG-FAIL", src="d", msg="deliver despite log failure", now=100)
+    log_path = janitor_state.log_dir() / "findings-surface.log"
+    log_path.mkdir(parents=True)
+    with pytest.raises(IsADirectoryError):
+        janitor_state.log_line("findings-surface", "prove filesystem failure")
+    assert "LOG-FAIL" in fl.surface_block()
+    assert fl.unread_entries() == ([], 0)
+    assert fl.surface_block() == ""
+    assert log_path.is_dir()
+
+
+def test_byte_budget_folds_large_line_but_delivers_smaller_line(_isolate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An oversized finding remains unread without starving a smaller finding behind it."""
+    fl.record(sev="LOW", code="SMALL", src="d", msg="small", now=100)
+    fl.record(sev="HIGH", code="LARGE", src="d", msg="x" * 120, now=100)
+    monkeypatch.setattr(fl, "SURFACE_BUDGET_BYTES", 100)
+    block = fl.surface_block()
+    assert "SMALL" in block and "LARGE" not in block
+    assert fl.unread_entries()[1] == 1
+    fl.advance_cursor()
+    assert fl.surface_block() == ""
 
 
 def test_surface_block_shows_an_old_high_before_newer_low_lines(_isolate: Path) -> None:
