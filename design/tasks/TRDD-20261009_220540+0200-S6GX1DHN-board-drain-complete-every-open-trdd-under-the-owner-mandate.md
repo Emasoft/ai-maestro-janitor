@@ -199,4 +199,4 @@ The OWNER MANDATE quoted at the top of the STATE block is the owner's own messag
 
 ## Board findings 2026-10-16
 
-trddgrep lint reports ERROR TERMINAL-WITHOUT-CHECKLIST on closed cards that have no acceptance checklist, which is why trddgrep does not archive them; measured 2026-10-16 it lists 58 cards board-wide, including TRDD-J9ZJ2DAR and TRDD-FU8MZ0SL closed this day (both frozen now). A wave that closes cards should add the acceptance checklist BEFORE the closing move; the existing 58 need a per-card decision (rule: no scripted mass repair).
+trddgrep lint reports ERROR TERMINAL-WITHOUT-CHECKLIST on complete cards that have no acceptance checklist; measured 2026-10-16: x58 over 831 scanned, of which 2 at ERROR level (TRDD-J9ZJ2DAR and TRDD-FU8MZ0SL, closed this day, both frozen now) and 56 at WARN, archived cards among them. Whether the missing checklist is what blocks archiving was NOT verified. A wave that closes cards should add the acceptance checklist BEFORE the closing move; the existing 58 need a per-card decision (rule: no scripted mass repair).
