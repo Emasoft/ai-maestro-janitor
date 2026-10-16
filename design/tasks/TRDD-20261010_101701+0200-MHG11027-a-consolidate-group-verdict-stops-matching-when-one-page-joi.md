@@ -1,10 +1,10 @@
 ---
 trdd-id: MHG11027
 title: A consolidate group verdict stops matching when one page joins the group so large groups are dispatched again every few days
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T10:17:01+0200
-updated: 2026-10-10T10:34:29+0200
+updated: 2026-10-17T00:17:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,3 +44,7 @@ SMALLEST FIX TO WEIGH: a refused group key covers every pair inside it for the 7
 ## Corrections
 
 2026-10-10 10:36, from the review of 9f22b963: the MEASURED paragraph overstates. What the ledger printed supports: the LARGE bucket (95 then 97 pages) was refused twice, on 2026-10-08 and 2026-10-10. The keys of 2026-10-02 (43 pages), 2026-10-04 (42) and 2026-10-06 (23) are smaller groups; the 43 and 42 fit the SECOND bucket (44 or 43 pages on 10-08, 45 on 10-10), which was therefore refused about four times in eight days; the 23-page key fits neither. The reason texts differ from date to date; 'the same reason text each time' is withdrawn. Whether the two keys of 44 and 43 pages on 2026-10-08 are one bucket or two is not known. That re-listing is CAUSED by a page joining the group is an inference from the 95 to 97 growth; the card's first acceptance box is where it gets shown.
+
+## STATE
+
+2026-10-17 IMPLEMENTED, UNCOMMITTED pending orchestrator commit: memory_refusals.page_hash (sha256 minus frontmatter lmd lines) + record() stores per-member pages + live_members(); memory_content_precheck.group_has_unjudged_pair and refusal_covered_pages use live_members. 7 new tests + 1 deliberately updated; 203 passed in the 4 named test files; ruff, mypy, pyright (-p project) clean. Field criterion: after one recording pass, editing one member of a ~97-page key leaves at most N-1 unjudged pairs, checked from the ledger. Expect one extra consolidate pass per scope because old entries without pages cover nothing. Next cost lever: the 7-day TTL.

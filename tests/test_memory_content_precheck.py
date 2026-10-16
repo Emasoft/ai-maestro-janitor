@@ -312,6 +312,92 @@ def test_group_has_unjudged_pair_is_pair_granular(tmp_path):
     memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c], reason="whole group no")
     assert mcp.group_has_unjudged_pair(tmp_path, "LOCAL", pages) is False
 
+def _group(tmp_path, names):
+    """Create one curated (component, project) page per name; return the paths."""
+    return [_curated(tmp_path, f"{n}.md", tier="component", type_="project") for n in names]
+
+
+def _unjudged_pairs(tmp_path, pages, now=None):
+    """The set of page-name pairs group_has_unjudged_pair still reports unjudged."""
+    out = set()
+    for i in range(len(pages)):
+        for j in range(i + 1, len(pages)):
+            if mcp.group_has_unjudged_pair(tmp_path, "LOCAL", [pages[i], pages[j]], now=now):
+                out.add((pages[i].stem, pages[j].stem))
+    return out
+
+
+def test_editing_one_member_revives_only_that_members_pairs(tmp_path, monkeypatch):
+    """TRDD-MHG11027: after one N-page refusal, editing d leaves a-b, a-c, b-c judged."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b, c, d = _group(tmp_path, "abcd")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c, d], reason="no")
+    d.write_text(d.read_text(encoding="utf-8") + "\nnew fact\n", encoding="utf-8")
+    assert _unjudged_pairs(tmp_path, [a, b, c, d]) == {("a", "d"), ("b", "d"), ("c", "d")}
+
+
+def test_editing_only_the_lmd_line_revives_nothing(tmp_path, monkeypatch):
+    """TRDD-MHG11027: maintenance bumps lmd: and must not re-arm any judged pair."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b, c, d = _group(tmp_path, "abcd")
+    d.write_text(d.read_text(encoding="utf-8").replace("---\n\nbody", "lmd: 2026-01-01\n---\n\nbody"), encoding="utf-8")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c, d], reason="no")
+    d.write_text(d.read_text(encoding="utf-8").replace("lmd: 2026-01-01", "lmd: 2026-10-17"), encoding="utf-8")
+    assert _unjudged_pairs(tmp_path, [a, b, c, d]) == set()
+
+
+def test_deleting_one_member_revives_only_that_members_pairs(tmp_path, monkeypatch):
+    """TRDD-MHG11027: a deleted page is not live; pairs among survivors stay judged."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b, c, d = _group(tmp_path, "abcd")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c, d], reason="no")
+    d.unlink()
+    assert _unjudged_pairs(tmp_path, [a, b, c]) == set()
+    d.write_text("---\nname: d\n---\n", encoding="utf-8")
+    assert _unjudged_pairs(tmp_path, [a, b, c, d]) == {("a", "d"), ("b", "d"), ("c", "d")}
+
+
+def test_refusal_covered_pages_after_editing_one_member(tmp_path, monkeypatch):
+    """TRDD-MHG11027: the edited member leaves the covered set; its siblings stay in it."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b, c, d = _group(tmp_path, "abcd")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c, d], reason="no")
+    d.write_text(d.read_text(encoding="utf-8") + "\nnew fact\n", encoding="utf-8")
+    assert mcp.refusal_covered_pages(tmp_path, "LOCAL") == {"a.md", "b.md", "c.md"}
+
+
+def test_adding_a_page_leaves_only_its_pairs_unjudged(tmp_path, monkeypatch):
+    """Guard: a new page e joins an already-judged group; only the (x, e) pairs are unjudged."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b, c = _group(tmp_path, "abc")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c], reason="no")
+    (e,) = _group(tmp_path, "e")
+    assert _unjudged_pairs(tmp_path, [a, b, c, e]) == {("a", "e"), ("b", "e"), ("c", "e")}
+
+
+
+def test_entry_without_pages_covers_nothing(tmp_path, monkeypatch):
+    """Guard: an old-format entry (no `pages`) deliberately covers no pair (TRDD-MHG11027)."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _group(tmp_path, "ab")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="no")
+    ledger = memory_refusals.read("consolidate", "LOCAL", tmp_path)
+    for entry in ledger.values():
+        entry.pop("pages")
+    memory_refusals._write("consolidate", "LOCAL", tmp_path, ledger)
+    assert _unjudged_pairs(tmp_path, [a, b]) == {("a", "b")}
+    assert mcp.refusal_covered_pages(tmp_path, "LOCAL") == set()
+
+
+def test_expired_entry_covers_nothing(tmp_path, monkeypatch):
+    """Guard: past its TTL an entry with `pages` covers nothing."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _group(tmp_path, "ab")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="no", now=1_000)
+    assert _unjudged_pairs(tmp_path, [a, b], now=1_000 + 8 * 86400) == {("a", "b")}
+    assert mcp.refusal_covered_pages(tmp_path, "LOCAL", now=1_000 + 8 * 86400) == set()
+    assert _unjudged_pairs(tmp_path, [a, b], now=1_000 + 86400) == set()
+
 
 def test_consolidate_has_work_false_on_cross_type_pair(tmp_path):
     """Issue #64 case 1: feedback x reference (same aspect tier, DIFFERENT type) is
@@ -1907,9 +1993,11 @@ def test_mtime_churn_inside_a_refused_group_does_not_re_dispatch(tmp_path, monke
     ) is False
 
 
+
 def test_editing_a_refused_page_re_arms_because_its_refusal_stops_matching(tmp_path, monkeypatch):
-    """The refusal is conditioned on content, so a REAL edit voids it — no expiry
-    bookkeeping of our own. The edited page is then an uncovered change and we dispatch."""
+    """The refusal is conditioned on per-page content, so a REAL edit voids that page's coverage —
+    no expiry bookkeeping of our own. TRDD-MHG11027 changed the rule deliberately: the edited
+    page re-arms the chore while its unedited siblings stay covered (it was whole-group before)."""
     _isolate_gstate(monkeypatch, tmp_path)
     a, b = _consolidate_pair(tmp_path)
     stamp = mcp.page_stats(tmp_path)
@@ -1917,6 +2005,7 @@ def test_editing_a_refused_page_re_arms_because_its_refusal_stops_matching(tmp_p
 
     a.write_text(a.read_text(encoding="utf-8") + "\na genuinely new fact\n", encoding="utf-8")
 
+    assert mcp.refusal_covered_pages(tmp_path, "LOCAL") == {"b.md"}
     assert mcp.consolidate_has_work(
         tmp_path, last_stats=stamp, stamp_age_s=60.0, scope="LOCAL"
     ) is True

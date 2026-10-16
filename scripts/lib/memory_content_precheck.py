@@ -458,24 +458,19 @@ def refusal_covered_pages(
     """Root-relative paths covered by a LIVE consolidate refusal (TRDD-9MQ25PNH).
 
     A refusal is keyed on a whole candidate GROUP — the librarian's aggregation bullets are
-    groups of 2/4/6 pages, and `candidate_key` joins their sorted relpaths. So membership
-    cannot be answered by `is_refused([one_page])`: that would build a one-element key which
-    matches no group. We re-validate each stored group through `memory_refusals.refusal`
-    (which re-checks BOTH the TTL and the group's `content_hash`) and, only if the group is
-    still live, treat its members as covered.
+    groups of 2/4/6 pages (or ~97 for a big scope), and `candidate_key` joins their sorted
+    relpaths. Membership cannot be answered by `is_refused([one_page])`: that would build a
+    one-element key which matches no group. So we walk the stored groups and take, from each,
+    its LIVE members (`memory_refusals.live_members`: entry within TTL and the member's own
+    page_hash unchanged).
 
-    The content_hash re-check is what makes this self-correcting: edit any page in a refused
-    group and the whole group's refusal stops matching, so none of its members count as
-    covered, the edit shows up as an uncovered change, and the chore re-arms — no expiry
-    bookkeeping of our own.
+    TRDD-MHG11027: liveness is per member, not the whole-key content hash. Editing one page
+    of a refused group un-covers only that page; its unedited siblings stay covered, the edit
+    shows up as an uncovered change, and the chore re-arms — no expiry bookkeeping of our own.
     """
     covered: set[str] = set()
     for key in memory_refusals.read("consolidate", scope, root):
-        rels = key.split("|")
-        if memory_refusals.refusal(
-            "consolidate", scope, root, [root / r for r in rels], now=now
-        ):
-            covered.update(rels)
+        covered.update(memory_refusals.live_members("consolidate", scope, root, key, now=now))
     return covered
 
 
@@ -491,13 +486,15 @@ def group_has_unjudged_pair(
     — which a pair-keyed refusal never matches, so any 3+-member group re-listed forever.
     The scheduler meanwhile checked no refusals in its structural gate at all, so it could
     dispatch when the CLI would print nothing. One rule fixes both: a pair (x, y) is JUDGED
-    iff some live refused set contains both x and y (an exact-group refusal therefore
+    iff both x and y are LIVE members of one refused set (an exact-group refusal therefore
     covers all its pairs); a group is a candidate only while an UNJUDGED pair remains —
     which is exactly when there is real judgment work left.
 
-    Fail-open: unresolvable relpaths or an unreadable ledger count as unjudged (dispatch).
-    Each stored refusal is re-validated through `memory_refusals.refusal` (TTL +
-    content_hash), so editing any member page revives its pairs automatically."""
+    TRDD-MHG11027: a refused set contributes only its live members (the member's page_hash
+    is unchanged and the entry is within TTL), so editing one member of a big group revives
+    just that member's pairs instead of all N(N-1)/2.
+
+    Fail-open: unresolvable relpaths or an unreadable ledger count as unjudged (dispatch)."""
     rels: list[str] = []
     for p in pages:
         try:
@@ -506,11 +503,9 @@ def group_has_unjudged_pair(
             return True  # cannot key it → cannot prove it judged → dispatch
     live_sets: list[set[str]] = []
     for key in memory_refusals.read("consolidate", scope, root):
-        members = key.split("|")
-        if memory_refusals.refusal(
-            "consolidate", scope, root, [root / r for r in members], now=now
-        ):
-            live_sets.append(set(members))
+        live = memory_refusals.live_members("consolidate", scope, root, key, now=now)
+        if live:
+            live_sets.append(live)
     for i in range(len(rels)):
         for j in range(i + 1, len(rels)):
             a, b = rels[i], rels[j]

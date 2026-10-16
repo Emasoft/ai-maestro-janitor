@@ -106,6 +106,28 @@ def content_hash(root: Path | str, paths: Sequence[Path | str]) -> str | None:
             return None
     return h.hexdigest()[:16]
 
+def page_hash(root: Path | str, relpath: str) -> str | None:
+    """sha256 of one page's bytes minus its frontmatter `lmd:` lines, 16 hex; None if unreadable.
+
+    `lmd:` is stripped because maintenance writes (lesson adds, relinks, janitor chores) bump it
+    without changing the page's meaning, and a bumped date must not revive a judged pair
+    (TRDD-MHG11027). Only lines inside the leading `---` frontmatter block are dropped.
+    """
+    try:
+        raw = (Path(root) / relpath).read_bytes()
+    except OSError:
+        return None
+    lines = raw.split(b"\n")
+    out: list[bytes] = []
+    in_fm = bool(lines) and lines[0].rstrip(b"\r") == b"---"
+    for i, line in enumerate(lines):
+        if in_fm and i > 0 and line.rstrip(b"\r") == b"---":
+            in_fm = False
+        elif in_fm and line.lstrip().startswith(b"lmd:"):
+            continue
+        out.append(line)
+    return hashlib.sha256(b"\n".join(out)).hexdigest()[:16]
+
 
 def read(intervention: str, scope: str, root: Path | str) -> dict[str, dict]:
     """The ledger for one (intervention, scope, root), or `{}` on absent/corrupt."""
@@ -145,11 +167,18 @@ def record(
         return False
     ts = int(time.time()) if now is None else int(now)
     ledger = read(intervention, scope, root)
-    ledger[candidate_key(root, paths)] = {
+    key = candidate_key(root, paths)
+    entry: dict = {
         "content": digest,
         "reason": state.sanitize_for_drift_line(str(reason or ""))[:300],
         "ts": ts,
     }
+    # Per-member hashes (TRDD-MHG11027) let `live_members` keep unchanged members judged when a
+    # sibling is edited; if any member cannot be hashed, store none so the entry covers nothing.
+    hashes = {rel: page_hash(root, rel) for rel in key.split("|")}
+    if all(h is not None for h in hashes.values()):
+        entry["pages"] = hashes
+    ledger[key] = entry
     _write(intervention, scope, root, ledger)
     return True
 
@@ -180,6 +209,41 @@ def refusal(
     except (TypeError, ValueError):
         return None
     return None if age >= _ttl_for(intervention, ttl_s) else entry
+
+def live_members(
+    intervention: str,
+    scope: str,
+    root: Path | str,
+    key: str,
+    *,
+    now: int | None = None,
+    ttl_s: int | None = None,
+) -> set[str]:
+    """The members of ledger entry `key` that are individually still judged: entry unexpired,
+    carrying `pages`, and the member's current `page_hash` equal to the stored one.
+
+    TRDD-MHG11027: `refusal()` keys one hash over ALL members, so editing one page of a
+    95-page consolidate refusal killed every judged pair and re-dispatched the chore every
+    ~2 days. Per-page liveness keeps unchanged pairs judged until the TTL. Entries without
+    `pages` (recorded before this field) deliberately cover nothing — no compat branch; a
+    whole-key fallback was rejected. A deleted hub cannot revive its former children's pairs
+    (accepted limit). For big groups a refusal may have been a skim, so a still-unchanged
+    pair staying judged until the TTL is accepted.
+    """
+    entry = read(intervention, scope, root).get(key)
+    if not isinstance(entry, dict):
+        return set()
+    pages = entry.get("pages")
+    if not isinstance(pages, dict):
+        return set()
+    ts = int(time.time()) if now is None else int(now)
+    try:
+        age = ts - int(entry.get("ts", 0))
+    except (TypeError, ValueError):
+        return set()
+    if age >= _ttl_for(intervention, ttl_s):
+        return set()
+    return {rel for rel, h in pages.items() if h is not None and page_hash(root, rel) == h}
 
 
 def is_refused(
