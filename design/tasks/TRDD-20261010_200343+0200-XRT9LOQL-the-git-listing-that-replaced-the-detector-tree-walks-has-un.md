@@ -4,7 +4,7 @@ title: The git listing that replaced the detector tree walks has untested branch
 column: todo
 status: tasked
 created: 2026-10-10T20:03:43+0200
-updated: 2026-10-10T20:03:43+0200
+updated: 2026-10-16T23:32:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,7 @@ Goal: write the tests the review of 0d42c65f found missing for TRDD-WOI8GO1S. (1
 ## Approval log
 
 - 2026-10-10T20:03:43+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-16: added tests/test_git_listing_branches.py (9 tests pass; items 1-4 covered; uncommitted, pending orchestrator commit). OPEN: the timeout-fallback measurement/decision (skip the fire vs full walk) is not done; card stays in todo.
