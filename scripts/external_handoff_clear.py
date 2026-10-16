@@ -349,7 +349,10 @@ def _decide(
     # transcript the verdict was computed from -- it is what names the summary source on disk
     # for the delegated summarizer to pick up (TRDD-QZVAEWQH).
     newest = cold_cache_compact.newest_transcript(root)
-    active_waiting = dispatch._cadence_active_waiting(sd, now)
+    # One call yields both the gate boolean and the human-readable reason; no test patches
+    # `_cadence_active_waiting` on the `_decide` path (only the dispatch idle phases do).
+    waiting = dispatch._active_waiting_signal(sd, now)
+    active_waiting = waiting is not None
     in_cooldown = cold_cache_compact.clear_in_cooldown(sd, now=now)
     # RECOVERY GUARD (card 1 follow-up item 2, TRDD-L32WC0H7): this daemon-lane decider used to
     # reach BOTH `should_clear_externally` and `should_clear_on_resume` with no recovery guard
@@ -439,6 +442,11 @@ def _decide(
         # evidence that the fix is doing something on an armed session.
         "transcript_idle_s": idle_s,
         "human_idle_s": human_idle_s,
+        # Diagnostic only (TRDD-DMH25CYD): which signal made `active_waiting` true, as one
+        # space-free `kind:expiry` token (e.g. `resume-stamp:412s`, `agents:3-running`) so it
+        # survives a key=value log line. Facts, never `gate` -- the pure gate takes the boolean.
+        # Text carries a count at most, no agent ids.
+        "waiting_signal": f"{waiting[0]}:{waiting[1]}" if waiting else "",
     }
     if on_resume:
         # The RESUME gate, not the abandoned-session one. A session loaded seconds ago can never
@@ -724,10 +732,14 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     verdict, facts = _decide(
         root, sd, now, force=args.force, on_resume=args.on_resume, session_id=args.session_id
     )
+    # Name the signal behind an active-waiting hold (TRDD-DMH25CYD): the bare `why` left an
+    # operator unable to tell which of four unrelated signals was holding the watcher.
+    signal = facts.get("waiting_signal")
+    waiting = f" waiting={signal}" if verdict.why == "active-waiting" and signal else ""
     print(f"VERDICT {'FIRE' if verdict.fire else 'HOLD'} "
           f"trigger={verdict.trigger or '-'} why={verdict.why} "
           f"transcript_idle_s={facts.get('transcript_idle_s')} "
-          f"human_idle_s={facts.get('human_idle_s')}")
+          f"human_idle_s={facts.get('human_idle_s')}{waiting}")
     if not verdict.fire:
         return 0
 

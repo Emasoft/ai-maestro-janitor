@@ -4593,10 +4593,17 @@ def _daemon_wake_covered_fresh(sd: Path, now: int) -> bool:
     return covered > 0 and 0 <= now - covered < _daemon_wake_coverage_window_s()
 
 
-def _cadence_active_waiting(sd: Path, now: int) -> bool:
-    """True iff this session is waiting on something time-sensitive: a RECENT resume cue
-    (rate-limit or post-compact), a pending directive resume, or in-flight background agents.
-    Fail-open (any read error -> the pending agents probe, itself fail-open).
+def _active_waiting_signal(sd: Path, now: int) -> tuple[str, str] | None:
+    """The time-sensitive wait this session is in, if any: a pending resume recovery flag, a
+    RECENT resume cue (rate-limit or post-compact), a pending directive resume, or in-flight
+    background agents. Fail-open (any read error -> the pending agents probe, itself fail-open).
+
+    Returns (kind, expiry_text) for the first signal that holds, or None. kind is one of
+    "recovery-flag" (no timer: clears when the resume is consumed), "resume-stamp",
+    "resume-directive" (both 30-minute windows) or "agents" (a count of fresh external
+    agents, never their ids). The expiry text is for diagnostics only and is a single token
+    with no spaces or commas, so a caller can embed `kind:expiry` in a key=value log line:
+    "<seconds>s" for the two windows, "on-consume" for the recovery flag, "<N>-running" for agents.
 
     `now` governs the stamp comparisons only -- the directive's age is read from the real clock,
     so this is not evaluable as-of an arbitrary time.
@@ -4648,11 +4655,11 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         import external_clear  # noqa: PLC0415 - shared recovery_pending helper
 
         if external_clear.recovery_pending(sd):
-            return True
+            return ("recovery-flag", "on-consume")
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
         resume_recent = last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S
         if resume_recent and not _daemon_wake_covered_fresh(sd, now):
-            return True
+            return ("resume-stamp", f"{last_resume + _RESUME_RECENCY_WINDOW_S - now}s")
         # AGE-BOUNDED, like the resume stamp above -- and for the same reason, which this
         # signal did not originally have. `resume-directive.txt` is unlinked by exactly ONE
         # consumer, `post-compact-resume.py` ("one-shot per compact"). If that compaction
@@ -4679,7 +4686,7 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
             # mtime (skew) still fails `0 <=`, which is deliberate; see TRDD-2640RYR5.
             age = time.time() - directive.stat().st_mtime
             if 0 <= age < _RESUME_RECENCY_WINDOW_S:
-                return True
+                return ("resume-directive", f"{int(_RESUME_RECENCY_WINDOW_S - age)}s")
     except OSError:
         pass
     # EXTERNAL agents only (TRDD-CI6ZTNB9): a janitor-spawned memory/security agent
@@ -4709,7 +4716,21 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     # `sd` MUST flow through here: this predicate is borrowed by the external-clear
     # watcher for OTHER projects, and an ambient manifest read leaks the calling
     # session's agents into their verdicts (see _fresh_external_agent_count).
-    return _fresh_external_agent_count(now, sd) > 0
+    # Count only, never ids: the caller surfaces this text in a log line.
+    n_agents = _fresh_external_agent_count(now, sd)
+    return ("agents", f"{n_agents}-running") if n_agents > 0 else None
+
+
+def _cadence_active_waiting(sd: Path, now: int) -> bool:
+    """True iff this session is waiting on something time-sensitive: a RECENT resume cue
+    (rate-limit or post-compact), a pending directive resume, or in-flight background agents.
+    Fail-open (any read error -> the pending agents probe, itself fail-open).
+
+    The boolean view of `_active_waiting_signal`, which owns the signals and their rationale.
+    The idle-compact and idle-clear phases still need "is this session waiting on something"
+    to avoid shrinking/clearing a context a resume is about to need.
+    """
+    return _active_waiting_signal(sd, now) is not None
 
 
 def _stamp_resume(sd: Path, now: int) -> None:

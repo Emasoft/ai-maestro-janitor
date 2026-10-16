@@ -538,6 +538,30 @@ def test_unknown_idle_holds_end_to_end_and_touches_nothing(tmp_path):
     assert not (root / ".janitor" / "state" / "resume-after-clear.flag").exists()
 
 
+def test_active_waiting_verdict_names_the_signal_and_leaks_no_directive_text(tmp_path):
+    """TRDD-DMH25CYD: an active-waiting HOLD names its signal; the directive file text stays out."""
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    (sd / "last-resume.ts").write_text(str(int(time.time()) - 60), encoding="utf-8")
+    (sd / "resume-directive.txt").write_text("DIRECTIVE-BODY-MUST-NOT-LEAK", encoding="utf-8")
+    proc = _run(root)
+    assert proc.returncode == 0, proc.stderr
+    assert "why=active-waiting" in proc.stdout, proc.stdout
+    # The whole value must be one `kind:expiry` token: a space or comma inside it would be split
+    # by a key=value log parser, so the match is anchored on the end of the line.
+    assert re.search(r"waiting=resume-stamp:\d+s$", proc.stdout.strip()), proc.stdout
+    assert "DIRECTIVE-BODY-MUST-NOT-LEAK" not in proc.stdout + proc.stderr
+
+
+def test_decide_carries_the_recovery_flag_signal_in_facts(tmp_path, monkeypatch):
+    """TRDD-DMH25CYD: a pending recovery flag lands in facts["waiting_signal"], not in the gate."""
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    (sd / "rate-limited.flag").write_text("x", encoding="utf-8")
+    _, facts = ehc._decide(root, sd, int(time.time()), force=False)
+    assert facts["waiting_signal"] == "recovery-flag:on-consume"
+    assert facts["active_waiting"] is True
 def test_a_project_without_janitor_state_is_skipped(tmp_path):
     """Not every directory is a janitor-armed session; those are none of our business."""
     proc = _run(tmp_path)

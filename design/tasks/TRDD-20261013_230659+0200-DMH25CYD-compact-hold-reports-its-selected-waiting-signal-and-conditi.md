@@ -1,10 +1,10 @@
 ---
 trdd-id: DMH25CYD
 title: Compact hold reports its selected waiting signal and conditional expiry
-column: todo
+column: testing
 status: tasked
 created: 2026-10-13T23:06:59+0200
-updated: 2026-10-13T23:07:44+0200
+updated: 2026-10-17T00:31:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,7 @@ PRRD S5.1 forbids suppressing validation to pass the gate; PRRD S6.1 requires pr
 ## Approval log
 
 - 2026-10-13T23:06:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-17 impl (uncommitted, pending orchestrator commit): dispatch._active_waiting_signal returns (kind, expiry_text); _cadence_active_waiting is its boolean wrapper; external_handoff_clear._decide calls the signal once, facts[waiting_signal] only; VERDICT line adds waiting=<kind>, <expiry> when why=active-waiting; compact-context SKILL.md names the four signals and the 30-minute windows. Tests: new test_active_waiting_signal.py (15) plus 2 handoff tests; 392 passed across the six named files; ruff, mypy, pyright clean on changed files; full suite not run. recovery-flag is unreachable in the VERDICT line (recovery gate runs first), covered at function level only. Out of scope: issue suggestion 3.
