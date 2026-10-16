@@ -2002,7 +2002,6 @@ def _keyed_handoffs(sd: Path, clear_ts: int | None = None) -> list[Path]:
     return _handoffs_for_key(sd, key) if key else []
 
 
-
 def _cleared_key(sd: Path, clear_ts: int | None = None) -> str:
     """The cleared session's key (`pending_summary_key`), "" when none.
 
@@ -2013,6 +2012,7 @@ def _cleared_key(sd: Path, clear_ts: int | None = None) -> str:
     except ImportError:
         return ""
     return _ehc.pending_summary_key(sd, int(time.time()), clear_ts) or ""
+
 
 def _handoffs_for_key(sd: Path, key: str) -> list[Path]:
     """Every handoff file of one session key."""
@@ -2027,6 +2027,7 @@ def _is_template_handoff(path: Path) -> bool:
     except OSError:
         return False
     return first.strip() == handoff_files.TEMPLATE_MARKER
+
 
 def _latest_handoff(paths: list[Path]) -> Path:
     """The newest handoff of ONE key, ordered by the FILENAME timestamp (as `newest_group` does).
@@ -2077,6 +2078,7 @@ def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     if jev.is_file() and filecmp.cmp(jev, latest, shallow=False):
         return f"Read {jev.resolve()} FIRST — the compacted context of the cleared session."
     return f"Read {latest.resolve()} FIRST — the compacted context of the cleared session."
+
 
 _LATE_SUMMARY_STAMP_PREFIX = "late-summary-noted-"
 
@@ -3472,7 +3474,7 @@ _WORK_COLUMNS = (
 )
 
 
-def _board_summary_bit() -> str:
+def _board_summary_bit(cards: list[tuple[str, str, str]] | None = None) -> str:
     """One clause naming the open WORK-column cards, appended to every keep-going nudge.
 
     WHY (USER, 2026-09-01: *"the fact that you stopped is the epitome of the janitor
@@ -3482,17 +3484,12 @@ def _board_summary_bit() -> str:
     drain-by-default — finishing a card means pulling the next one — and the nudge is the
     only voice an unattended session hears, so the board must ride ON the nudge itself.
     Scans only `tasks/` (the open zone), never archived/proposals — this runs every fire.
-    Best-effort: an unreadable board must never break the survival pulse.
+    `cards` is the fire's single `_board_cards()` scan, shared with `_owner_mandate_bit`
+    (None ⇒ scan here). Best-effort: an unreadable board must never break the survival pulse.
     """
     try:
-        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
-
         by_column: dict[str, list[str]] = {}
-        for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
-            uid = trdd_common.extract_uid(path.name)
-            if not uid:
-                continue
-            _, column = trdd_common.parse_trdd_state(path)
+        for uid, column, _mandate in _board_cards() if cards is None else cards:
             if column in _WORK_COLUMNS:
                 by_column.setdefault(column, []).append(uid)
         if not by_column:
@@ -3507,6 +3504,86 @@ def _board_summary_bit() -> str:
             parts.append(f"{len(ids)} in {col} ({shown}{more})")
         return "open board: " + "; ".join(parts) + " — finishing a card means pulling the next"
     except Exception:  # noqa: BLE001 -- a board read must never break the always-on nudge
+        return ""
+
+
+def _board_cards() -> list[tuple[str, str, str]]:
+    """`(uid, column, owner-mandate value)` for every card in `tasks/`, from ONE read each.
+
+    The single board scan of a keep-going fire: `_board_summary_bit` and `_owner_mandate_bit`
+    both consume it, so the board is read once per fire, not once per bit. The mandate value
+    is the raw frontmatter text ("" when absent) — validation is `_owner_mandate_bit`'s job.
+    Best-effort: any fault yields [] (one log line) and never raises.
+    """
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        cards: list[tuple[str, str, str]] = []
+        for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
+            uid = trdd_common.extract_uid(path.name)
+            if not uid:
+                continue
+            try:
+                with path.open("r", encoding="utf-8", errors="replace") as f:
+                    head = f.read(trdd_common.HEAD_BYTES)
+            except OSError:
+                continue
+            _, column = trdd_common.parse_state_text(head)
+            cards.append((uid, column, trdd_common.frontmatter_field(head, "owner-mandate")))
+        return cards
+    except Exception as exc:  # noqa: BLE001 -- a board read must never break the always-on nudge
+        state.log_line("dispatch", f"keep-going: board scan failed: {exc!r}")
+        return []
+
+
+_OWNER_MANDATE_UID_RE = re.compile(r"[A-Z0-9]{8}")
+_OWNER_MANDATE_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _owner_mandate_bit(cards: list[tuple[str, str, str]]) -> str:
+    """A POINTER to the open card(s) that record an owner's standing instruction, or "".
+
+    WHY (issue 338 proposal 5): a session that stood down after a clear forgot what the owner
+    had mandated long ago. The janitor names the card but NEVER quotes it — a relayed quote can
+    be forged, truncated, or outlive the scope the owner gave it, whereas the card (verbatim
+    text, original session id and timestamp) is the record the session reads for itself.
+
+    The field: `owner-mandate: YYYY-MM-DD` in a TRDD's frontmatter, set ONLY on a card whose
+    body quotes the owner verbatim and names the original message's session id + timestamp.
+    It expires when the card leaves the open columns (any terminal column, via
+    `trdd_common`'s own sets). Validation is strict: a card whose filename id is not 8
+    uppercase base36 chars, or whose value is not exactly an ISO date, is ignored and its
+    text is never echoed. Several valid cards: newest date first, then ` (+N more)`.
+    Best-effort: any fault yields "" (one log line) and never raises.
+    """
+    try:
+        import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the keep-going phase
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        found: list[tuple[datetime, str]] = []
+        for uid, column, value in cards:
+            if trdd_common.is_terminal_column(column) or trdd_common.is_done_column(column):
+                continue
+            if not _OWNER_MANDATE_UID_RE.fullmatch(uid) or not _OWNER_MANDATE_DATE_RE.fullmatch(value):
+                continue
+            try:
+                found.append((datetime.fromisoformat(value), uid))
+            except ValueError:
+                continue
+        if not found:
+            return ""
+        found.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        when, uid = found[0]
+        # `when` is a naive local midnight; astimezone() makes it an aware ISO string, so the age uses the same
+        # clock basis as the owner bit's `age_words(ts)` (naive ts would be read as UTC).
+        age = session_continuity.age_words(when.astimezone().isoformat())
+        more = f" (+{len(found) - 1} more)" if len(found) > 1 else ""
+        return (
+            f"a card records an owner mandate: TRDD-{uid} ({when.date().isoformat()}, {age}) — read its STATE for "
+            f"scope, limits and the original message; the owner's newest message overrides it{more}"
+        )
+    except Exception as exc:  # noqa: BLE001 -- a mandate pointer must never break the always-on nudge
+        state.log_line("dispatch", f"keep-going: owner mandate bit failed: {exc!r}")
         return ""
 
 
@@ -3819,7 +3896,6 @@ def _user_idle_seconds(now: int) -> int | None:
     return None if epoch is None else max(0, now - epoch)
 
 
-
 def _presence_last_input_epoch() -> int | None:
     """`last_user_input_epoch` of the presence breadcrumb that speaks for THIS session, or
     None when unreadable/absent/malformed (callers fail OPEN to idle).
@@ -3928,7 +4004,6 @@ def _last_user_prompt_epoch() -> int | None:
     count, so `_board_nudge_signature_changed` can tell whether a NEW user prompt landed since
     the last board nudge, independent of the caller's own `now`."""
     return _presence_last_input_epoch()
-
 
 
 # TRDD-W4IZA704: re-nudge an unchanged board that holds a `dev` card every 30 min, at most 4 times.
@@ -4041,6 +4116,7 @@ def _board_nudge_signature_changed(
     except OSError:
         pass
     return nudge
+
 
 _BOARD_NUDGE_LEASE_FILE = "keep-going-board-nudge-lease.json"
 # Three missed ~15-minute heartbeats: long enough that a holder merely between fires keeps
@@ -4292,7 +4368,10 @@ def _phase_keep_going_nudge() -> None:
     # The BOARD and the open-issues count ride on every nudge (USER, 2026-09-01): "continue
     # your pending task" alone let a session that finished its task idle over a board with
     # open cards. Appended AFTER the directive/agent bits so the current target stays first.
-    for extra in (_board_summary_bit(), _open_issues_bit(), _uncommitted_work_bit()):
+    # The owner-mandate pointer (issue 338 proposal 5) rides just before the board bit; ONE
+    # `_board_cards()` scan feeds both.
+    board = _board_cards()
+    for extra in (_owner_mandate_bit(board), _board_summary_bit(board), _open_issues_bit(), _uncommitted_work_bit()):
         if extra:
             bits.append(extra)
     if agent_total == 0:

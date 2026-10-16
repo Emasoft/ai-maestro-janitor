@@ -427,6 +427,7 @@ def is_pipeline_state_value(value: str) -> bool:
     v = norm_state(value)
     return v in V1_PIPELINE_STATUS_TO_COLUMN or v in ALL_COLUMNS
 
+
 # v2 `column:` values that mean the TRDD is DONE / closed — a TRDD here has
 # already shipped (or been abandoned/replaced), so Check 1 must NOT flag it.
 # Superset of the "terminal" columns across all three release-via pipelines plus
@@ -512,6 +513,20 @@ def parse_state_text(head: str) -> tuple[str, str]:
             status = norm_state(lm.group(1))
 
     return (status, column)
+
+
+def frontmatter_field(head: str, key: str) -> str:
+    """The raw, stripped value of ONE frontmatter `key:` line in the file head, or "".
+
+    Same head and the same `FRONTMATTER_RE` block as `parse_state_text`; it only reads the
+    opening `---` block, so a `key:` line in the body can never match. No validation: the
+    caller decides what a legal value is (e.g. dispatch's `owner-mandate:` date check).
+    """
+    fm = FRONTMATTER_RE.match(head)
+    if not fm:
+        return ""
+    m = re.search(rf"^{re.escape(key)}:[ \t]*(.*)$", fm.group(1), re.MULTILINE)
+    return m.group(1).strip() if m else ""
 
 
 # A UTF-8 BOM, spelled as a code point on purpose. A literal BOM in this source
