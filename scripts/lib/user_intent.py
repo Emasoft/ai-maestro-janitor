@@ -194,9 +194,8 @@ def record_intent_from_prompt(prompt: str, *, state_dir: Path | None = None, now
     # the first few lines like the presence filter, because here over-blocking costs one lost
     # token while under-blocking could authorize an irreversible action. Accepted costs: an
     # owner's prompt containing a pasted or batched peer message mints nothing, and an owner
-    # relaying "disarm" through another session doesn't authorize here. This is hardening: no
-    # historical peer message would have minted a token (all 19 verb matches were negated), and
-    # UserPromptSubmit may not even fire on peer records.
+    # relaying "disarm" through another session doesn't authorize here. This is hardening:
+    # UserPromptSubmit may not even fire on peer records (see the card).
     if "<cross-session-message" in prompt:
         return []
     # One negation anywhere disqualifies the WHOLE prompt. Coarse on purpose: a prompt that both
