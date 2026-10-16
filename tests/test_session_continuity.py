@@ -452,3 +452,77 @@ def test_owner_record_older_than_the_retention_is_pruned_by_the_next_write(tmp_p
     sc.clear_fields(_transcript_a(tmp_path), state_dir=sd, new_session_id="sess-b")
     assert not (rec_dir / "stale.json").exists()
     assert (rec_dir / "recent.json").exists() and (rec_dir / "sess-b.json").exists()
+
+
+_LOGIN = (
+    "<command-name>/login</command-name>\n"
+    "            <command-message>login</command-message>\n"
+    "            <command-args></command-args>"
+)
+_PLUGIN_ENABLE = (
+    "<command-message>plugin</command-message>\n<command-name>/plugin</command-name>\n"
+    "<command-args>enable sample-plugin</command-args>"
+)
+_GOAL = (
+    "<command-message>goal</command-message>\n<command-name>/goal</command-name>\n"
+    "<command-args>do X</command-args>"
+)
+
+
+def test_admin_login_after_three_owner_messages_does_not_evict_any_of_them(tmp_path):
+    """TRDD-2UV4BBHP: /login is harness administration; all three owner sentences stay carried."""
+    path = _write(
+        tmp_path / "sess-a.jsonl",
+        [_user("first words"), _user("second words"), _user("third words"), _user(_LOGIN)],
+    )
+    fields = sc.clear_fields(path, state_dir=tmp_path / "sd", new_session_id="sess-b")
+    assert [m["text"] for m in fields["owner_messages"]] == ["first words", "second words", "third words"]
+    assert fields["last_user"] == "third words"
+
+
+def test_admin_plugin_enable_is_not_carried_but_the_owner_sentence_before_it_is(tmp_path):
+    """TRDD-2UV4BBHP: a /plugin enable wrapper is skipped, the earlier sentence is carried."""
+    path = _write(tmp_path / "sess-a.jsonl", [_user("fix the thing"), _user(_PLUGIN_ENABLE)])
+    fields = sc.clear_fields(path, state_dir=tmp_path / "sd", new_session_id="sess-b")
+    assert [m["text"] for m in fields["owner_messages"]] == ["fix the thing"]
+    assert fields["last_user"] == "fix the thing"
+
+
+def test_stored_admin_command_record_is_dropped_by_owner_record_and_on_merge(tmp_path):
+    """TRDD-2UV4BBHP: a record stored by an older version holding a cleaned /plugin wrapper is dropped."""
+    sd = tmp_path / "sd"
+    (sd / "owner-messages").mkdir(parents=True)
+    cleaned = sc._clean(_PLUGIN_ENABLE, sc.LAST_USER_MAX_CHARS)
+    (sd / "owner-messages" / "sess-a.json").write_text(
+        json.dumps({
+            "messages": [
+                {"text": "real owner sentence", "ts": "2026-10-07T19:00:00.000Z"},
+                {"text": cleaned, "ts": "2026-10-07T19:01:00.000Z"},
+            ],
+            "own_reply": "r", "origin_session": "sess-a", "recorded_at": "2026-10-07T19:02:00+00:00",
+        }),
+        encoding="utf-8",
+    )
+    rec = sc.owner_record(sd, "sess-a")
+    assert rec is not None
+    assert [m["text"] for m in rec["messages"]] == ["real owner sentence"]
+    fields = sc.clear_fields(
+        _write(tmp_path / "sess-a.jsonl", [_user(_LOGIN)]), state_dir=sd, new_session_id="sess-b",
+    )
+    assert [m["text"] for m in fields["owner_messages"]] == ["real owner sentence"]
+
+
+def test_admin_login_with_list_content_is_skipped(tmp_path):
+    """TRDD-2UV4BBHP: the list-of-text-blocks content form of /login is skipped too."""
+    login_blocks = {"type": "user", "message": {"role": "user", "content": [_text(_LOGIN)]}}
+    path = _write(tmp_path / "sess-a.jsonl", [_user("owner words"), login_blocks])
+    fields = sc.clear_fields(path, state_dir=tmp_path / "sd", new_session_id="sess-b")
+    assert [m["text"] for m in fields["owner_messages"]] == ["owner words"]
+
+
+def test_goal_command_with_args_is_still_carried(tmp_path):
+    """TRDD-2UV4BBHP guard: /goal do X is an owner instruction and stays carried."""
+    path = _write(tmp_path / "sess-a.jsonl", [_user("owner words"), _user(_GOAL)])
+    fields = sc.clear_fields(path, state_dir=tmp_path / "sd", new_session_id="sess-b")
+    assert len(fields["owner_messages"]) == 2
+    assert "do X" in fields["last_user"]

@@ -623,3 +623,44 @@ def test_cap_status_runs_identical_waiting_note_keeps_newest_two() -> None:
     """TRDD-FU8MZ0SL: five identical "janitor heartbeat" + prose notes keep the newest 2."""
     note = "janitor heartbeat\nStill waiting on your merge decision"
     assert tr.cap_status_runs([note] * 5, tr.heartbeat_run_key) == [note, note]
+
+
+
+_LOGIN_WRAPPER = (
+    "<command-name>/login</command-name>\n"
+    "            <command-message>login</command-message>\n"
+    "            <command-args></command-args>"
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _LOGIN_WRAPPER,
+        "<command-message>plugin</command-message>\n<command-name>/plugin</command-name>\n"
+        "<command-args>enable sample-plugin</command-args>",
+        "<command-message>usage</command-message>\n<command-name>/usage</command-name>\n"
+        "<command-args></command-args>",
+    ],
+)
+def test_non_instruction_command_true_for_admin_and_empty_content_free_wrappers(text: str) -> None:
+    """TRDD-2UV4BBHP: harness-admin wrappers (any args) and empty content-free wrappers are not instructions."""
+    assert tr.is_non_instruction_command(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<command-message>goal</command-message>\n<command-name>/goal</command-name>\n"
+        "<command-args>do X</command-args>",
+        "<command-message>ultimate-bug-scanner</command-message>\n"
+        "<command-name>/ultimate-bug-scanner</command-name>\n<command-args></command-args>",
+        "<command-message>janitor-disarm</command-message>\n<command-name>/janitor-disarm</command-name>\n"
+        "<command-args></command-args>",
+        "plain owner words",
+        _LOGIN_WRAPPER + "\nand also please fix X",
+    ],
+)
+def test_non_instruction_command_false_for_real_commands_text_and_wrapper_with_extra_text(text: str) -> None:
+    """TRDD-2UV4BBHP: owner decisions, plain text and a wrapper followed by owner text stay instructions."""
+    assert tr.is_non_instruction_command(text) is False

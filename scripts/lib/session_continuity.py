@@ -82,6 +82,11 @@ def _human_text(entry: dict[str, Any]) -> str:
             if isinstance(b, dict) and b.get("type") == "text"
         )
     text = text.strip()
+    # Why (TRDD-2UV4BBHP): a harness-administration wrapper (/login, /plugin enable ...) is
+    # addressed to Claude Code, not to the agent; quoted as an owner message it evicts real
+    # instructions and the next session is told to act on it.
+    if transcript_roles.is_non_instruction_command(text):
+        return ""
     return "" if text.startswith(_NON_HUMAN_TEXT_PREFIXES) else text
 
 
@@ -245,6 +250,10 @@ def owner_record(state_dir: Path, session_id: str) -> dict[str, Any] | None:
         {"text": str(m["text"]), "ts": str(m.get("ts") or "")}
         for m in raw or []
         if isinstance(m, dict) and isinstance(m.get("text"), str) and m["text"].strip()
+        # Why (TRDD-2UV4BBHP): records stored before `_human_text` skipped admin commands still
+        # hold e.g. `/plugin enable ...` (3 live records did); this is the single read point
+        # (merge + keep-going nudge), so dropping them here stops every re-quote.
+        and not transcript_roles.is_non_instruction_command(m["text"])
     ]
     if not messages:
         return None

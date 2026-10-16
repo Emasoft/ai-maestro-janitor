@@ -35,6 +35,7 @@ __all__ = [
     "is_control_input",
     "is_heartbeat_reply",
     "is_heartbeat_status_reply",
+    "is_non_instruction_command",
 ]
 
 RecordRole = Literal["skip", "human", "notification", "system", "peer"]
@@ -148,6 +149,64 @@ def _is_empty_command_wrapper(stripped: str) -> bool:
     if args_match is not None:
         if args_match.group(1).strip():
             return False
+        remainder = remainder[: args_match.start()] + remainder[args_match.end() :]
+    return remainder.strip() == ""
+
+
+#: TRDD-2UV4BBHP: owner-typed commands that administer Claude Code itself (model, login,
+#: plugin management, ...). They are addressed to the harness, not words to the agent; carried
+#: as "owner messages" they evict real owner instructions from the three carried slots and the
+#: next session is told to act on them -- a /plugin or /model choice is a real config decision,
+#: but re-running it is the wrong outcome. Matched whatever the args are. The list grows ONLY
+#: from measured cases: all are MEASURED as owner-typed wrappers in local transcripts
+#: (2026-10-17) except `logout`, which is REASONED (the pair of `login`). NOT `reload-skills`:
+#: the janitor types that itself, so it belongs to `_AUTOMATION_COMMAND_NAMES_EXACT`. Keep this
+#: list consistent with `_CONTENT_FREE_WRAPPER_COMMAND_NAMES` and
+#: `_AUTOMATION_COMMAND_NAMES_EXACT` (three lists, three different questions).
+_HARNESS_ADMIN_COMMAND_NAMES = frozenset(
+    {
+        "model",
+        "login",
+        "logout",
+        "plugin",
+        "exit",
+        "effort",
+        "resume",
+        "advisor",
+        "tui",
+        "rate-limit-options",
+        "feedback",
+        "config",
+        "mcp",
+    }
+)
+
+
+def is_non_instruction_command(text: str) -> bool:
+    """True iff `text` is a slash-command wrapper that carries no instruction for the agent:
+    either (A) ONLY `<command-message>` + `<command-name>` (+ optional `<command-args>` with ANY
+    content) whose name is in `_HARNESS_ADMIN_COMMAND_NAMES`, or (B) an empty content-free
+    wrapper (`_is_empty_command_wrapper`). Anything else -- another command, extra owner text
+    around the wrapper, plain prose -- is False."""
+    stripped = text.strip()
+    if _is_empty_command_wrapper(stripped):
+        return True
+    remainder = stripped
+    message_match = _COMMAND_MESSAGE_TAG_RE.search(remainder)
+    if message_match is None:
+        return False
+    remainder = remainder[: message_match.start()] + remainder[message_match.end() :]
+    name_match = _COMMAND_NAME_TAG_RE.search(remainder)
+    if name_match is None:
+        return False
+    name = name_match.group(1).strip()
+    if name.startswith("/"):
+        name = name[1:]
+    if name not in _HARNESS_ADMIN_COMMAND_NAMES:
+        return False
+    remainder = remainder[: name_match.start()] + remainder[name_match.end() :]
+    args_match = _COMMAND_ARGS_TAG_RE.search(remainder)
+    if args_match is not None:
         remainder = remainder[: args_match.start()] + remainder[args_match.end() :]
     return remainder.strip() == ""
 
