@@ -65,7 +65,7 @@ want the model to author one; this skill will not do that for you.
    **`why=active-waiting` is the veto you will hit most, and it is CORRECT.** It means a
    resume or a BACKGROUND AGENT is in flight (veto reason `active-waiting`). Clearing then would
    strand work that is running right now. The VERDICT line names the signal:
-   `waiting=<kind>, <expiry>`. The four kinds:
+   `waiting=<kind>:<expiry>`. The four kinds:
 
    - `resume-stamp` — a rate-limit or post-compact resume cue was emitted in the last 30 minutes;
    - `resume-directive` — a `resume-directive.txt` pointer is younger than 30 minutes;
@@ -91,7 +91,7 @@ want the model to author one; this skill will not do that for you.
    | token | meaning | what to do |
    |---|---|---|
    | `CLEAR_CHAIN_SPAWNED` | the chain is queued at this pane | **END YOUR TURN IMMEDIATELY** — see step 3 |
-   | `VERDICT HOLD … why=active-waiting waiting=<kind>, <expiry>` | the named signal is IN FLIGHT: a resume stamp, a resume directive, or background agents (30-minute window each) | **wait for it to lapse, then re-run.** Do not force — `--force` does not override this veto, and another veto can still hold afterwards |
+   | `VERDICT HOLD … why=active-waiting waiting=<kind>:<expiry>` | the named signal is IN FLIGHT: a resume stamp, a resume directive, or background agents (30-minute window each) | **wait for it to lapse, then re-run.** Do not force — `--force` does not override this veto, and another veto can still hold afterwards |
    | `VERDICT HOLD … why=idle …` / `no-headroom` | a TRIGGER term, not a veto | `--force` legitimately overrides these two |
    | `VERDICT HOLD …` (any other reason) | a safety veto | report the reason; do NOT try to force past it |
    | `DRY_RUN …` | dry run; the handoff follows on stdout | show the handoff, change nothing |
