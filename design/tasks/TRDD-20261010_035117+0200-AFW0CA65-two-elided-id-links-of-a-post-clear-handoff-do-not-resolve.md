@@ -1,10 +1,10 @@
 ---
 trdd-id: AFW0CA65
 title: Two elided-id links of a post-clear handoff do not resolve
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T03:51:17+0200
-updated: 2026-10-10T04:12:49+0200
+updated: 2026-10-17T01:38:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T03:51:17+0200
+implementation-commits: [7b67bab6]
 ---
 
 # Two elided-id links of a post-clear handoff do not resolve
@@ -25,3 +26,4 @@ Goal: investigate, verify and fix the root cause. Split from TRDD-JK2MLS8Z on 20
 
 - 2026-10-10T03:51:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 04:12 'The previous clear resolved 41 of 41' is taken from the compacted record of session 4487ea93, not re-read.
+- 2026-10-17T01:38:09+0200 — BUILT in 7b67bab6. PREMISE CORRECTION: the two ids were neither absent from the transcript nor unaddressable; extract_wikilinks matched Jev pointers as wikilinks and 'resolved' them by a memgrep text search on their summaries, so 41/41 and 2/41 were both luck (no id resolver exists in this verifier). Pointers are now skipped. VERDICT CHANGE: on all 4 measured real handoffs every target was a pointer, so handoff_links_resolve reports SKIP (no [[wikilinks]]) on link-only handoffs; expected, not a regression. Pre-existing, fail-safe: a [[x]] embedded in a pointer summary is still extracted. 23 tests pass; ruff, mypy, pyright clean. Follow-up: TRDD-I40IKPWU (pointer-expand check). FIELD CHECK: the next post-clear --phase after run shows handoff_links_resolve as SKIP or as PASS/FAIL over real wikilinks only.
