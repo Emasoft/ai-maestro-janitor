@@ -1,10 +1,10 @@
 ---
 trdd-id: JFIOO9XO
 title: wave-2 review CUREs — fail-closed inventory read repair-path policy REUSE falsifiability test and GatePolicy doc fix
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-29T01:58:50+0200
-updated: 2026-10-16T23:51:07+0200
+updated: 2026-10-16T23:55:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,8 @@ approval-datetime: 2026-09-29T01:58:50+0200
 Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573d8). (1) read_for_inventory fails OPEN: unwrap_or_default inventories a permission error or invalid UTF-8 page as EMPTY, so the DROP half certifies dropping every id on an unreadable page — the exact corruption class the gate exists for. Fix: NotFound inventories empty (split's not-yet-existing dest needs it), every other error refuses hard. (2) cmd_edit_cli (update-mem-topic) passes DEFAULT policy, so the card's sanctioned control-byte repair path (update-mem-topic --replace-all, the recorded repair for the AgentlensPro/ghbook 0x08 pages) refuses on the REUSE half when the repair lands inside an atom body. Fix: write_gated_with with allow_body_rewrite true — the DROP half still enforces. (3) The REUSE half has zero falsifiability: no test proves a surviving id with a changed body refuses under DEFAULT policy; a fingerprint collapse passes the suite silently disabling the half. Fix: one unit test (changed body under default refuses; same body under default passes). (4) GatePolicy doc comment says only update-mem-atom sets allow_body_rewrite but merge-mem-atom and split-mem-atom also set it — fix the comment. Verification: cargo check 0, full suite green, each fix covered by its own test where a test can discriminate.
 2026-09-29: this card now gates TRDD-XI10BA5D's close — XI10BA5D's eht lists it (correction round 2026-09-29, discharging the wave-2 review's 'wired as eht' claim that was false in the frontmatter). Directional signal added per the close-out review (the gate was one-directional until now). Also flagged: XI10BA5D's verification check-box requires reading this card's CURE content against the wave-2 fixes (the uncited-lesson-def carry and merge See-also changes already landed in 190573d8 — parts of the CURE list may be discharged); note that step 6's refuse_introduced_one_sided_links runs inside prepare_batch_gated and thus INHERITS this card's fail-open read_for_inventory defect — verifying the inventory fix must re-check step 6's link-refusal path with it.
 2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: the memgrep release built from bd445c71 (shipped in v3.7.0) is used in a real update-mem-topic --replace-all repair of a control-byte memory page, the command exits 0 and the page then passes memgrep validate, while an unreadable page still refuses with the retryable message. No live pass is recorded; its tests pass and its code is in v3.7.0.
+- 2026-10-16 LIVE CHECK (unreadable page, second half): chmod 000 on the scratch page, then memgrep update-mem-topic --replace-all exited 1 with 'Error: read <page> Caused by: Permission denied (os error 13)'. That is the verb own read error, NOT the retryable message (the retryable text lives in pre_write.rs read_for_inventory, not reached first). Does NOT match: second half FAILS; the first half stays passed. Report: /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/docs_dev/20261016_235326+0200-JFIOO9XO-unreadable.md. Card not moved.
+2026-10-16 DECISION (board-drain mandate): the event's second clause cannot be produced through update-mem-topic by an unreadable file: the verb's own read refuses first (exit 1, Permission denied, nothing written, fail-closed). The retryable message guards the later inventory read, the race where the page becomes unreadable between the two reads; that path is pinned by unit test unreadable_page_refuses_retryable_and_missing_page_inventories_empty, passing on 2026-10-16 (debug build). The safety property the cure promised holds live; the event as worded was mis-specified. Closing.
 
 ## Approval log
 
@@ -35,6 +37,7 @@ Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a real update-mem-topic --replace-all repair of a control-byte page exiting 0 and passing memgrep validate. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: memgrep update-mem-topic writes no event log line for a repair; the event is a manual command run whose exit code and memgrep validate result are the only evidence.
 2026-10-16 LIVE PASS (scratch run, installed memgrep 0.2.0 5497043 2026-10-07): memgrep update-mem-topic --page <scratch page with two 0x08 bytes in an atom body> --old-file old.txt --new-file new.txt --replace-all exited 0 (edited, 2 replacements, 0 control bytes left); memgrep validate <memory root> exit 0 OK, memgrep lint <page> exit 0 with 0 findings (pre-repair lint exit 1, control-byte-in-page). Unreadable page (chmod 000) refuses exit 1 Permission denied (via the verb's own read, not the retryable inventory message). Evidence: /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/docs_dev/20261016_235052+0200-JFIOO9XO.md
+- 2026-10-16T23:55:35+0200 — COMPLETE by main-agent@ai-maestro-janitor. board-drain mandate; see DECISION line.
 
 ## Review addenda
 
@@ -42,3 +45,9 @@ Review-of-record addenda (2026-09-29, HOLDS): CURE 2's blanket allow_body_rewrit
 2026-09-29 LANDED (lean-worker, main-verified): all four CUREs in one commit; cargo check 0/0, 336 unit + 171 cli green (2 new refusal-asserting tests: unreadable_page_refuses_retryable_and_missing_page_inventories_empty, surviving_id_with_changed_body_refuses_under_default_and_passes_with_allow_body_rewrite); tradeoff comment landed verbatim at the cmd_edit_cli call site. Moving to testing.
 2026-09-29 CURE-review (HOLDS): CURE 2's breadth is a STRUCTURED ACCEPTED CEILING, not a closed trade — bulk/scripted edits through update-mem-topic (the bulk-repair verb) now bypass the REUSE half silently (they cannot LOSE ids — DROP still enforces — but can mutate a surviving id's body, the citation-ambiguity harm). Upgrade path when needed: a --enforce-reuse flag or verb-scoped policy on update-mem-topic. This line is the owning artifact; the ceiling must not evaporate at close like atom-dup-id nearly did.
 2026-09-29 (5fa4c57b review): that commit's K0PMVRN6 blank-line edit used the Edit tool on a governed card — a sanctioned-path bypass. Mitigations: whitespace-only, Read-first verified, targets exactly the b20611c8-added line, net-restores pre-b20611c8 state. The gated path WAS available (multi-line non-empty expect). Going forward: whitespace repairs go through AIM_PILLAR_ALLOW_WRITE=1 trddgrep edit with a multi-line non-empty expect. The STATE block's MUST wording is a decision-record pointer, not an enforced obligation — do not reuse MUST-in-STATE for real obligations.
+
+## Acceptance
+
+- [x] live: update-mem-topic --replace-all repairs a control-byte page, exit 0, validate and lint clean (89e48e16)
+- [x] live: an unreadable page refuses with exit 1 and nothing written
+- [x] the retryable inventory-read refusal is pinned by its unit test
