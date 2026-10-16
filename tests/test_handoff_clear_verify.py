@@ -62,6 +62,77 @@ def test_extract_wikilinks_targets_dedupe_and_strip() -> None:
     assert links == ["oauth-rotator-burn", "continuity-engineering"], links
 
 
+def test_extract_wikilinks_skips_line_range_jev_pointer() -> None:
+    """A Jev pointer with a line range is a retrieval handle, not a wikilink (TRDD-AFW0CA65)."""
+    mod = _import()
+    text = '[[elided id=82c23f01-e48c-4049-9cb9-1816298db6a2:0 lines=150-181 tokens=393 "x"]] and [[real-page]]'
+    assert mod.extract_wikilinks(text) == ["real-page"]
+
+
+def test_extract_wikilinks_skips_pointer_without_range_and_listing_line() -> None:
+    """A no-range pointer and the `[[elided: N more items ...]]` listing line yield no links."""
+    mod = _import()
+    text = (
+        '[[elided id=5dda1f01-aaaa-bbbb-cccc-000000000000:0 tokens=781 "Bash(...)"]]\n'
+        "[[elided: 545 more items not listed -- list/search]]\n"
+    )
+    assert mod.extract_wikilinks(text) == []
+
+
+def test_extract_wikilinks_real_format_pointer_roundtrip() -> None:
+    """Outer pointers from the real format_pointer are never extracted.
+
+    A pointer whose summary embeds `[[x]]` is not matched at all (the wikilink regex
+    cannot cross the embedded `[`); only "x" is extracted, which is pre-existing
+    behaviour and fails safe. The third pointer (summary with `|`, no brackets) is the
+    one that proves the _JEV_POINTER_TARGET_RE skip.
+    """
+    from jevctx.pipeline import format_pointer
+    from jevctx.types import Pointer
+
+    mod = _import()
+    pointer = Pointer(id="abc123:0", lines=(150, 181), tokens=393, summary='a|b#c "q" back\\slash [[x]] end')
+    plain = Pointer(id="abc123:1", lines=None, tokens=7, summary="no specials here")
+    text = format_pointer(pointer) + "\n" + format_pointer(plain)
+    assert mod.extract_wikilinks(text) == ["x"]
+    assert mod.extract_wikilinks(format_pointer(plain)) == []
+    # No embedded brackets: the wikilink regex DOES match this outer pointer (target cut at the
+    # `|`), so only the _JEV_POINTER_TARGET_RE skip keeps it out.
+    piped = Pointer(id="abc123:2", lines=(1, 2), tokens=5, summary='a|b#c "q" back\\slash end')
+    assert mod.extract_wikilinks(format_pointer(piped)) == []
+
+
+def test_extract_wikilinks_alias_and_anchor_still_resolve_to_page() -> None:
+    """Guards: `[[page|alias]]` and `[[page#anchor]]` still yield the bare page slug."""
+    mod = _import()
+    assert mod.extract_wikilinks("[[page|alias]]") == ["page"]
+    assert mod.extract_wikilinks("[[page#anchor]]") == ["page"]
+
+
+def test_pointers_only_handoff_yields_skip_for_links_resolve() -> None:
+    """A handoff whose only [[ ]] spans are Jev pointers carries no wikilinks, so the verdict is SKIP."""
+    mod = _import()
+    handoff = '[[elided id=5dda1f01-aaaa-bbbb-cccc-000000000000:0 tokens=781 "Bash(...)"]]'
+    before = {
+        "ts": 1000,
+        "cron_id": "oldid",
+        "context_tokens": 400000,
+        "handoff_links": mod.extract_wikilinks(handoff),
+        "resume_flag_present": True,
+    }
+    after = {
+        "ts": 1100,
+        "cron_id": "newid",
+        "context_tokens": 40000,
+        "resume_flag_present": False,
+        "armed_at_ts": 1050,
+        "links_resolved": {},
+    }
+    v = mod.compute_verdicts(before, after)
+    assert v["handoff_links_resolve"]["status"] == "SKIP"
+    assert "no [[wikilinks]]" in v["handoff_links_resolve"]["detail"]
+
+
 def test_compute_verdicts_all_pass() -> None:
     mod = _import()
     before = {

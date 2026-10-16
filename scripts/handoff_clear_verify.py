@@ -80,6 +80,16 @@ _TOKEN_METER_FILENAME = "token-meter.jsonl"
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+?)(?:[|#][^\[\]]*)?\]\]")
 
 
+# Jev pointers `[[elided id=... tokens=N "summary"]]` (jevctx/pipeline.format_pointer) and the
+# listing line `[[elided: N more items ...]]` reuse the [[ ]] delimiters but are retrieval
+# handles for `jev_compact.py expand`, not wikimem links (TRDD-AFW0CA65). Resolving them by
+# memgrep text search only measured whether the summary's words occur in the corpus (the
+# 41/41 and 2/41 results were luck), so they are excluded from extraction. Consequence: a
+# handoff made only of pointers has no wikilinks, and handoff_links_resolve reports SKIP
+# rather than a meaningless PASS/FAIL.
+_JEV_POINTER_TARGET_RE = re.compile(r"^elided(?: id=|:)")
+
+
 # ---------- pure helpers (tested directly) --------------------------------
 
 
@@ -95,6 +105,8 @@ def extract_wikilinks(text: str) -> list[str]:
     seen: set[str] = set()
     for m in _WIKILINK_RE.finditer(text):
         slug = m.group(1).strip()
+        if _JEV_POINTER_TARGET_RE.match(slug):
+            continue
         if slug and slug not in seen:
             seen.add(slug)
             out.append(slug)
