@@ -166,6 +166,8 @@ _LAST_TRIGGER_FILENAME = "precompact-last-trigger.json"
 # manual /compact typed twice on purpose must write both times. Measured 2026-09-15
 # (TRDD-ANIME2SVG): 7 auto firings in 48s for one real compaction.
 _CONTINUITY_DEBOUNCE_WINDOW_S = 120
+
+
 # "Active" skills = every distinct `Skill` tool_use name (or user-typed `/skill` slash
 # command) across the WHOLE transcript, oldest-activated first, capped — a turn-count
 # window misses a MODE skill (e.g. /ponytail) activated long before the window (review
@@ -585,8 +587,11 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
     # whole n-turn window and push real work out, so cap each run before windowing. Not done in
     # `_extract_turns` (it also finds human turns). `_extract_text` joins text blocks with a
     # newline, so a reply with a second prose block already fails the predicate: no guard needed.
+    # TRDD-FU8MZ0SL: the cap also covers identical heartbeat-led drift/alert replies (key = reply text
+    # minus worker-count lines); a reply with a second prose block is keyed by its full text, so only an
+    # identical repeat is capped.
     turns = tr.cap_status_runs(
-        turns, lambda t: t[0] == "assistant" and tr.is_heartbeat_status_reply(t[1])
+        turns, lambda t: tr.heartbeat_run_key(t[1]) if t[0] == "assistant" else None
     )
 
     if not turns:
@@ -756,6 +761,7 @@ def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -
             continue
         blocks.extend(b for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
     return blocks
+
 
 def _plugin_skill_names() -> frozenset[str]:
     """Names of this plugin's own `skills/*/` directories — the allowlist source for

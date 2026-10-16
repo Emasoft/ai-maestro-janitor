@@ -43,6 +43,7 @@ def _item(id_: str, kind: jc.ItemKind, text: str, turn: int, tokens: int | None 
                     tokens=tokens if tokens is not None else estimate_tokens(text),
                     ts=None, turn=turn)
 
+
 def _src_seg_id(a: int) -> str:
     # The pre-commit privacy scan (ssh-user-host rule) reads a literal "0 AT 1-10" ID as an ssh user-at-host pair; this helper keeps such literals out of modified lines. Synthetic fixture IDs only.
     return f"src:0@{a}-{a + 9}"
@@ -345,8 +346,6 @@ def test_max_bytes_backstop_evicts_by_priority_not_chronology() -> None:
     assert "-- tool high-2:0 --" in doc
 
 
-
-
 def test_non_owner_floor_of_3_holds_while_non_guaranteed_owner_items_are_evicted() -> None:
     """Coordinator ruling (TRDD-RAEGS1D5, budget floor round 5): "the at-least-3 non-owner
     target stands; its purpose is that the resumed session learns what was DONE". 5 non-owner
@@ -452,7 +451,6 @@ def test_non_owner_floor_holds_in_injected_mode_too() -> None:
     assert "-- user dec:0 --" in doc
 
 
-
 def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None:
     """TRDD-AW4XD53Q: the actual bug this fix targets. Pre-fix, `compose()` admitted the
     injected copy's items against the 8,000-token `budget_tokens` gate and then appended ALL
@@ -500,6 +498,8 @@ def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None
     assert "-- user rel2:0 --" in doc
     assert "-- user newest:0 --" in doc
     assert "-- user dec:0 --" in doc
+
+
 def test_injected_admission_floor_of_3_holds_with_no_non_guaranteed_owner_items_to_spend() -> None:
     """TRDD-AW4XD53Q: the floor must hold even when the eviction-side backstop's stage (3)
     (non-guaranteed-owner items) has NOTHING to sacrifice -- only the single guaranteed
@@ -1914,9 +1914,6 @@ def test_inject_mode_never_shows_the_oversized_preview() -> None:
         assert line not in doc
 
 
-
-
-
 def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
     """Requirement 5: the `max_bytes` cap is a hard guarantee in injected mode too, down to a
     budget tight enough to force every degrade step in turn (pointer eviction, then kept-item
@@ -1961,6 +1958,8 @@ def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
     assert len(doc2.encode("utf-8")) <= 1600
     assert "-- user c7:0 --" in doc2  # the newest exchange, verbatim, in its own section
     assert jc._DIGEST_TRUNCATED_NOTE not in doc2
+
+
 def test_inject_mode_newest_owner_message_capped_and_nonuser_items_survive() -> None:
     """Orchestrator rebalance (2026-09-23), re-pinned for TRDD-R9UXOSR5: the OWNER SHARE
     admission tier and its ~40% ceiling went with the decision question -- owner prose is
@@ -2014,6 +2013,8 @@ def test_inject_mode_newest_owner_message_capped_and_nonuser_items_survive() -> 
     # (4) non-user items are not crowded out.
     tool_headers = [line for line in doc.splitlines() if line.startswith("-- tool t")]
     assert len(tool_headers) >= 3, f"expected >=3 tool items, got {len(tool_headers)}"
+
+
 def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() -> None:
     # TRDD-RAEGS1D5 (jev newest+3, task 2): `non_owner_item_bytes`, when given alongside
     # `max_item_bytes`, caps ONLY items whose `kind != "user"` -- an owner item beyond the
@@ -2139,6 +2140,8 @@ def test_compose_never_exceeds_max_bytes_with_a_long_transcript_path() -> None:
         doc = jc.compose(items, scores, budget_tokens=80000, header=header,
                          max_bytes=max_bytes, max_item_bytes=700, conversation=conv)
         assert newest_owner_text in doc, f"max_bytes={max_bytes} lost the newest owner message"
+
+
 def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> None:
     """Requirement 3: a budget generous enough that the pre-existing degrade steps already fit
     must render EXACTLY as before this fix -- the new minimal-fallback stage only replaces the
@@ -2519,7 +2522,6 @@ def test_injected_content_free_non_owner_items_are_neither_inlined_nor_pointed()
     assert jc._body_chars(prose) >= jc._INJECT_MIN_BODY_CHARS  # fixture sanity
 
 
-
 def test_injected_selection_is_exact_at_the_byte_boundary() -> None:
     """TRDD-BLGZTHQ9 exactness, re-pinned for TRDD-R9UXOSR5 (the decision-pointer fixture the
     old version used is retired with the question): the render is the fixed lines plus the
@@ -2551,6 +2553,8 @@ def test_injected_selection_is_exact_at_the_byte_boundary() -> None:
     assert len(tight.encode("utf-8")) <= exact - 1
     assert jc._DIGEST_TRUNCATED_NOTE not in tight and jc._MINIMAL_FIXED_LINE not in tight
     assert _count_line_n(tight) == 1
+
+
 def test_injected_gate_keeps_a_short_whole_tool_result_but_not_a_heading_stub() -> None:
     """Amendment S3 thresholds, both sides: a WHOLE tool result needs only 20 body chars, so a
     real `pytest -q` result ("...  [100%]" then "3 passed in 0.18s", 23 chars) is shown; a Read
@@ -2931,7 +2935,6 @@ def test_injected_title_only_notification_frees_its_bytes_for_the_next_candidate
     assert len(doc.encode("utf-8")) <= 780
     assert "notif:0" not in inline and "notif:0" in pointed
     assert "work:0" in inline
-
 
 
 def test_injected_long_newest_message_leaves_room_for_the_non_owner_floor() -> None:
@@ -3337,7 +3340,6 @@ def test_injected_render_still_shows_three_tool_items_beside_exchanges() -> None
     assert len(doc.encode("utf-8")) <= 6000
 
 
-
 _STATUS_REPLY = "janitor heartbeat\n1 background worker running; newest activity under 1 min ago"
 
 
@@ -3367,6 +3369,30 @@ def test_select_exchanges_caps_heartbeat_status_run_in_the_injected_view() -> No
     assert joined.count(_STATUS_REPLY) == 2
     assert shown == 4
     assert "[7 messages between these are only in the full copy]" in blocks
+
+
+def test_select_exchanges_caps_identical_drift_run_in_the_injected_view() -> None:
+    """TRDD-FU8MZ0SL: 10 identical heartbeat + alert replies show only the newest 2 beside the real note."""
+    drift = "janitor heartbeat\nrotator alert: x"
+    conversation = [_item("owner:0", "user", "OWNER ask", turn=0),
+                    _item("real:0", "assistant", "REAL WORK NOTE alpha", turn=1)] + [
+        _item(f"d{i}:0", "assistant", drift, turn=2 + i) for i in range(10)]
+    cap = jc.DEFAULT_INJECT_ITEM_BYTES
+
+    def cost(it: jc.Item, c: int) -> int:
+        return len(jc._exchange_block(it, c).encode("utf-8")) + 1
+
+    marker = len(f"[{len(conversation)} messages between these are only in the full copy]"
+                 .encode("utf-8")) + 1
+    budget = (cost(conversation[0], jc.NEWEST_OWNER_ITEM_BYTES) + marker
+              + cost(conversation[1], cap) + 2 * cost(conversation[-1], cap))
+    blocks, _ = jc._select_exchanges(conversation, budget)
+    joined = "\n".join(blocks)
+
+    assert "REAL WORK NOTE alpha" in joined
+    # The discriminating assertion is the one above ("REAL WORK NOTE alpha" in joined): it holds only
+    # because the drift text is longer than the real note. Keep that fixture property.
+    assert joined.count("rotator alert: x") == 2
 
 
 def test_select_exchanges_gap_counts_skipped_status_replies_when_the_real_note_does_not_fit() -> None:

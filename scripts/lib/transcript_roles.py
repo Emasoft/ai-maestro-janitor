@@ -25,14 +25,16 @@ from typing import Any, Literal, TypeVar
 _T = TypeVar("_T")
 
 __all__ = [
-    "RecordRole",
     "HEARTBEAT_PREFIX",
     "MAX_CONSECUTIVE_HEARTBEAT_STATUS",
+    "RecordRole",
+    "STATUS_RUN_KEY",
     "cap_status_runs",
     "classify_record",
+    "heartbeat_run_key",
+    "is_control_input",
     "is_heartbeat_reply",
     "is_heartbeat_status_reply",
-    "is_control_input",
 ]
 
 RecordRole = Literal["skip", "human", "notification", "system", "peer"]
@@ -77,7 +79,6 @@ def _is_automation_command_name(name: str) -> bool:
     if normalized in _AUTOMATION_COMMAND_NAMES_EXACT:
         return True
     return normalized.startswith(_AUTOMATION_COMMAND_NAME_PREFIXES)
-
 
 
 #: TRDD-DZ1KOGAC, gap found on real transcripts: a slash command usually arrives wrapped in
@@ -197,6 +198,7 @@ def is_control_input(text: str) -> bool:
     if match is None:
         return False
     return _is_automation_command_name(match.group(1))
+
 
 #: TRDD-RAEGS1D5, coordinator correction: measured 7,190 records with `origin.kind ==
 #: "unclassified"` -- mostly list/tool_result carriers, not an oddity. It means "origin gives
@@ -445,20 +447,54 @@ def is_heartbeat_status_reply(text: str) -> bool:
     return bool(rest) and all(_DISPATCHER_LINE_RE.match(ln) for ln in rest)
 
 
-#: Longest run of consecutive heartbeat status replies any view keeps (TRDD-U119W52S): the status
-#: line repeats every 5 minutes, and a long run crowds real messages out of a small window.
+#: Longest run of consecutive identical heartbeat-led replies any view keeps (TRDD-U119W52S): the
+#: reply repeats every 5 minutes, and a long run crowds real messages out of a small window. Covers
+#: status replies (one shared key, texts differ -- TRDD-IYNS7H83) AND identical heartbeat-led replies
+#: incl. work notes (TRDD-FU8MZ0SL). Limits: a reply with a changing number or a [findings] age
+#: suffix never repeats, so is never capped; an alert reply alternating with a pure status reply
+#: (alert, status, alert) forms separate runs and is not capped; the duration of a long run is not shown.
 MAX_CONSECUTIVE_HEARTBEAT_STATUS = 2
+#: Run key shared by every pure status reply (NUL cannot occur in a reply keyed by its own text).
+STATUS_RUN_KEY = "\0heartbeat-status"
 
 
-def cap_status_runs(items: list[_T], is_status: Callable[[_T], bool]) -> list[_T]:
+def cap_status_runs(items: list[_T], run_key: Callable[[_T], str | None]) -> list[_T]:
     """`items` in order, keeping only the newest `MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of
-    consecutive items for which `is_status(item)` is true (TRDD-U119W52S)."""
+    consecutive items with an equal non-None `run_key(item)` (TRDD-U119W52S, TRDD-FU8MZ0SL).
+
+    A `None` key is never capped and ends any run. Limits (see `heartbeat_run_key`): a reply with
+    a changing number or a "[findings]" age suffix never repeats, so it is never capped; an alert
+    reply alternating with a pure status reply (alert, status, alert) forms separate runs and is
+    not capped; the duration of a long run is not shown (same as the status cap)."""
     kept_rev: list[_T] = []
     run = 0
+    prev: str | None = None
     for item in reversed(items):
-        run = run + 1 if is_status(item) else 0
+        key = run_key(item)
+        run = run + 1 if key is not None and key == prev else (1 if key is not None else 0)
+        prev = key
         if run > MAX_CONSECUTIVE_HEARTBEAT_STATUS:
             continue
         kept_rev.append(item)
     kept_rev.reverse()
     return kept_rev
+
+
+_WORKER_COUNT_LINE_RE = re.compile(r"\d+ background workers? running")
+
+
+def heartbeat_run_key(text: str) -> str | None:
+    """The key under which consecutive heartbeat-led replies share a run, or `None` (never capped).
+
+    Status replies ("janitor heartbeat" + only dispatcher lines) share ONE key although their
+    texts differ (TRDD-IYNS7H83). Any other reply led by the phrase (drift/alert lines, work
+    notes) keys on its own text minus the "N background worker(s) running" lines, so identical
+    replies repeat into one run, with or without a worker-count line (TRDD-FU8MZ0SL). A bare
+    phrase or a reply not led by the phrase has no key.
+    """
+    lines = [ln.rstrip() for ln in text.strip().splitlines() if ln.strip()]
+    if not lines or lines[0] != _HEARTBEAT_REPLY_TEXT or len(lines) == 1:
+        return None
+    if is_heartbeat_status_reply(text):
+        return STATUS_RUN_KEY
+    return "\n".join(ln for ln in lines if not _WORKER_COUNT_LINE_RE.match(ln.strip()))

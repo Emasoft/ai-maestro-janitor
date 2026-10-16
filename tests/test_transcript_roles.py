@@ -545,13 +545,81 @@ def test_is_control_input_false_for_wrapper_followed_by_extra_owner_text() -> No
     assert tr.is_control_input(text) is False
 
 
-
 def test_cap_status_runs_keeps_newest_two_of_each_run() -> None:
     """Runs of 1, 2, 3 and 9 status items keep min(run, 2) newest; a non-status item resets the count."""
     assert tr.MAX_CONSECUTIVE_HEARTBEAT_STATUS == 2
-    is_status = lambda s: s.startswith("s")  # noqa: E731
+    run_key = lambda s: "k" if s.startswith("s") else None  # noqa: E731
     for run, kept in ((1, 1), (2, 2), (3, 2), (9, 2)):
         items = [f"s{i}" for i in range(run)]
-        assert tr.cap_status_runs(items, is_status) == items[-kept:]
+        assert tr.cap_status_runs(items, run_key) == items[-kept:]
     items = ["s0", "s1", "s2", "x", "s3", "s4", "s5", "s6", "y"]
-    assert tr.cap_status_runs(items, is_status) == ["s1", "s2", "x", "s5", "s6", "y"]
+    assert tr.cap_status_runs(items, run_key) == ["s1", "s2", "x", "s5", "s6", "y"]
+
+
+_ALERT = "janitor heartbeat\nrotator alert: x"
+_ALERT_WORKER = "janitor heartbeat\nrotator alert: x\n1 background worker running"
+_STATUS = "janitor heartbeat\n1 background worker running"
+
+
+def test_cap_status_runs_caps_an_identical_drift_run_to_newest_two() -> None:
+    """TRDD-FU8MZ0SL: 10 identical drift replies keep the newest 2; the real item after stays."""
+    items = [_ALERT] * 10 + ["REAL"]
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == [_ALERT, _ALERT, "REAL"]
+
+
+def test_cap_status_runs_alert_with_and_without_worker_line_is_one_run() -> None:
+    """TRDD-FU8MZ0SL: alternating alert / alert + worker-count line share one key and one run."""
+    items = [_ALERT, _ALERT_WORKER] * 4 + ["REAL"]
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == [_ALERT, _ALERT_WORKER, "REAL"]
+
+
+def test_cap_status_runs_non_identical_drift_run_is_untouched() -> None:
+    """TRDD-FU8MZ0SL: drift replies whose texts differ are real content and never capped."""
+    items = [f"janitor heartbeat\nrotator alert: {i}" for i in range(10)]
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == items
+
+
+def test_cap_status_runs_identical_non_heartbeat_replies_are_untouched() -> None:
+    """TRDD-FU8MZ0SL: identical replies not led by the phrase have no key and are kept."""
+    items = ["Reading the card."] * 10
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == items
+
+
+def test_cap_status_runs_status_replies_with_different_texts_are_one_run() -> None:
+    """TRDD-IYNS7H83: status replies share one key although their texts differ."""
+    items = [f"janitor heartbeat\n{i} background workers running" for i in range(2, 8)]
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == items[-2:]
+
+
+def test_cap_status_runs_status_run_next_to_drift_run_is_two_runs() -> None:
+    """TRDD-FU8MZ0SL: a status run and an alert run are separate runs, each capped to 2."""
+    items = [_STATUS] * 5 + [_ALERT] * 5
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == [_STATUS] * 2 + [_ALERT] * 2
+
+
+def test_cap_status_runs_alert_alternating_with_status_is_not_capped() -> None:
+    """TRDD-FU8MZ0SL documented limit: alert, status, alert, ... form separate runs of 1."""
+    items = [_ALERT, _STATUS] * 5
+    assert tr.cap_status_runs(items, tr.heartbeat_run_key) == items
+
+
+def test_heartbeat_run_key_bare_phrase_and_other_text_have_no_key() -> None:
+    """TRDD-FU8MZ0SL: the bare phrase and a reply not led by it return None."""
+    assert tr.heartbeat_run_key("janitor heartbeat") is None
+    assert tr.heartbeat_run_key("  janitor heartbeat \n") is None
+    assert tr.heartbeat_run_key("hello\njanitor heartbeat\nx") is None
+
+
+def test_heartbeat_run_key_whitespace_and_blank_line_variants_share_one_key() -> None:
+    """TRDD-FU8MZ0SL: trailing spaces, CRLF and blank lines do not split a run of one reply."""
+    base = tr.heartbeat_run_key(_ALERT)
+    assert base is not None
+    assert tr.heartbeat_run_key("janitor heartbeat \nrotator alert: x  ") == base
+    assert tr.heartbeat_run_key("janitor heartbeat\r\nrotator alert: x\r\n") == base
+    assert tr.heartbeat_run_key("janitor heartbeat\n\nrotator alert: x\n\n") == base
+
+
+def test_cap_status_runs_identical_waiting_note_keeps_newest_two() -> None:
+    """TRDD-FU8MZ0SL: five identical "janitor heartbeat" + prose notes keep the newest 2."""
+    note = "janitor heartbeat\nStill waiting on your merge decision"
+    assert tr.cap_status_runs([note] * 5, tr.heartbeat_run_key) == [note, note]

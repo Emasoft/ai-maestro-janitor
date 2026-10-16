@@ -654,6 +654,7 @@ def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
     assert all("janitor-heartbeat" not in t for _, t in turns)
     assert all(t != "second question" for _, t in turns)
 
+
 def test_tool_use_blocks_tail_boundary_landed_tool_use_survives(tmp_path: Path) -> None:
     """TRDD-A8DRRW0I wave 4d: when the tail window lands EXACTLY on a record boundary whose
     first (only) record is an assistant tool_use record, that record must survive. The old
@@ -791,7 +792,6 @@ def test_recent_turns_drops_bare_heartbeat_reply_but_keeps_substantive_heartbeat
     assert ("assistant", "Reading the TRDD card and dispatching the fix agent.") in turns
 
 
-
 def test_recent_turns_caps_consecutive_heartbeat_status_replies(tmp_path: Path) -> None:
     """A run of 9 dispatcher-status replies must not crowd a real work note out of the n=5
     window: at most 2 status replies are kept and the real note survives (TRDD-U119W52S)."""
@@ -806,6 +806,21 @@ def test_recent_turns_caps_consecutive_heartbeat_status_replies(tmp_path: Path) 
     assert turns is not None
     assert ("assistant", "REAL WORK NOTE alpha") in turns
     assert sum(1 for _, t in turns if t == status) == 2
+
+
+def test_recent_turns_caps_a_run_of_identical_drift_replies(tmp_path: Path) -> None:
+    """TRDD-FU8MZ0SL: 10 identical heartbeat + alert replies keep only 2; the real note survives."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    drift = "janitor heartbeat\nrotator alert: x"
+    entries = [_umsg("Please fix the build"), _amsg("REAL WORK NOTE alpha")]
+    for _ in range(10):
+        entries += [_umsg("[janitor-heartbeat]\n/path/to/stub"), _amsg(drift)]
+    _write_jsonl(tx, entries)
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert ("assistant", "REAL WORK NOTE alpha") in turns
+    assert sum(1 for _, t in turns if t == drift) == 2
 
 
 def test_recent_turns_drops_api_error_message(tmp_path: Path) -> None:
@@ -944,6 +959,7 @@ def test_recent_turns_skips_malformed_lines(tmp_path: Path) -> None:
     assert ("user", "good one") in turns
     assert ("assistant", "good answer") in turns
 
+
 def test_recent_turns_survive_a_damaged_tail(tmp_path: Path) -> None:
     """A raw 0xFF byte line, a non-object JSON line and a half-written last line never raise;
     real turns on both sides of the damage still appear (TRDD-A8DRRW0I stage B)."""
@@ -974,6 +990,7 @@ def test_recent_turns_keeps_first_turn_when_seek_lands_on_a_line_boundary(tmp_pa
     setattr(hook, "_TAIL_BYTES", len(l1) + len(l2))
     turns = hook._recent_turns(str(tx), n=10)
     assert turns == [("user", "first"), ("assistant", "second")]
+
 
 def test_recent_turns_backward_seek_stops_at_the_cap_with_none_found(tmp_path: Path) -> None:
     """No human turn inside the capped doubling window: the walk stops at the byte cap and
@@ -1151,6 +1168,7 @@ def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> No
     handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "auto")  # transcript_path default ""
     assert "## Recent conversation" in handoff
     assert "(recent conversation unavailable)" in handoff
+
 
 def test_active_skills_from_transcript_no_count_cap(tmp_path: Path) -> None:
     """The count cap is REMOVED (review fix, TRDD-7MGJYLY5 follow-up): every distinct

@@ -297,7 +297,6 @@ def test_template_handoff_carries_the_pointers_it_promises():
     assert "memgrep recall" in text
 
 
-
 def test_handoff_idle_renders_minutes_below_an_hour_and_hours_at_or_above():
     """A 720 s lower bound reads "≥ ~12m" (not "≥ ~0h"); an exact 7200 s reads "~2h"."""
     low = ec.compose_template_handoff(
@@ -797,7 +796,6 @@ def test_recovery_pending_defaults_false_so_an_omitting_caller_is_unaffected():
     assert v.fire is True
 
 
-
 # --- card 1 follow-up item 2: the shared recovery_pending helper + the daemon-lane veto ---
 
 
@@ -1059,7 +1057,6 @@ def test_recent_messages_yields_human_turns_in_a_heartbeat_dominated_fixture(tmp
     ], f"heartbeat noise leaked into the tail: {got}"
 
 
-
 def test_recent_messages_keeps_a_heartbeat_reply_that_carries_content(tmp_path):
     """TRDD-IYNS7H83: only the bare reply is noise; "janitor heartbeat" + a drift line is kept."""
     t = tmp_path / "s.jsonl"
@@ -1105,19 +1102,17 @@ def test_recent_messages_status_replies_do_not_crowd_out_the_last_substantive_me
     assert got.count("ASSISTANT: janitor heartbeat 1 background worker running") == 2, got
 
 
-
-def test_recent_messages_a_short_prose_note_after_the_phrase_is_never_capped(tmp_path):
-    """TRDD-IYNS7H83: a short "janitor heartbeat" + prose note is real work, so a run of them is kept."""
+def test_recent_messages_distinct_prose_notes_after_the_phrase_are_never_capped(tmp_path):
+    """TRDD-IYNS7H83: distinct "janitor heartbeat" + prose notes are real work, so a run of them is kept."""
     t = tmp_path / "s.jsonl"
     records = [
         {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
         _substantive("a1", "Started the suite."),
-        *_status_run_records(0, 20, reply="janitor heartbeat\nThe full test suite is still running."),
+        *[r for i in range(20) for r in _status_run_records(i, 1, reply=f"janitor heartbeat\nThe full test suite is still running ({i} of 20 shards done).")],
     ]
     t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
     got = ec.recent_messages(str(t))
-    assert got.count("ASSISTANT: janitor heartbeat The full test suite is still running.") > 2, got
-
+    assert sum("The full test suite is still running (" in m for m in got) > 2, got
 
 
 def test_recent_messages_a_two_block_status_lookalike_reply_is_never_capped(tmp_path):
@@ -1154,6 +1149,62 @@ def test_recent_messages_two_status_runs_split_by_a_substantive_message_keep_two
     status = "ASSISTANT: janitor heartbeat 1 background worker running"
     assert got == ["USER: go", status, status, "ASSISTANT: Midway result.", status, status], got
 
+
+def test_recent_messages_caps_a_run_of_identical_drift_replies(tmp_path):
+    """TRDD-FU8MZ0SL: 10 identical "janitor heartbeat" + alert replies keep only 2 and the real message survives."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+        _substantive("a1", "Deployed the fix, all green."),
+        *_status_run_records(0, 10, reply="janitor heartbeat\nrotator alert: x"),
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert "ASSISTANT: Deployed the fix, all green." in got, got
+    assert got.count("ASSISTANT: janitor heartbeat rotator alert: x") == 2, got
+
+
+def test_recent_messages_caps_identical_two_block_drift_replies(tmp_path):
+    """TRDD-FU8MZ0SL: 10 identical two-text-block heartbeat-led replies keep only 2; the real message stays."""
+    t = tmp_path / "s.jsonl"
+    two_block = [
+        {"type": "text", "text": "janitor heartbeat\nrotator alert: x"},
+        {"type": "text", "text": "Still waiting on the rotator."},
+    ]
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+        _substantive("a1", "Deployed the fix, all green."),
+    ]
+    for i in range(10):
+        records.append({"type": "user", "uuid": f"hb-{i}",
+                        "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nrun the stub {i}"}})
+        records.append({"type": "assistant", "uuid": f"hb-reply-{i}",
+                        "message": {"role": "assistant", "content": two_block}})
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert "ASSISTANT: Deployed the fix, all green." in got, got
+    assert sum("Still waiting on the rotator." in m for m in got) == 2, got
+
+
+def test_recent_messages_two_block_reply_that_glues_into_status_shape_is_never_capped(tmp_path):
+    """TRDD-FU8MZ0SL: space-gluing two blocks must not fake the status shape, so such replies are never capped."""
+    t = tmp_path / "s.jsonl"
+    glued = [
+        {"type": "text", "text": "janitor heartbeat\n1 background worker running"},
+        {"type": "text", "text": "3 background workers running"},
+    ]
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+    ]
+    for i in range(10):
+        records.append({"type": "user", "uuid": f"hb-{i}",
+                        "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nrun the stub {i}"}})
+        records.append({"type": "assistant", "uuid": f"hb-reply-{i}",
+                        "message": {"role": "assistant", "content": glued}})
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    got = ec.recent_messages(str(t))
+    assert sum("3 background workers running" in m for m in got) > 2, got
+    assert ec._status_run_key(records[-1]) is None
 
 
 def test_is_heartbeat_status_reply_shape_boundaries():
@@ -1514,7 +1565,6 @@ def test_with_measured_facts_stays_unknown_when_the_transcript_is_absent(tmp_pat
     assert "idle unknown, context unknown" in text
 
 
-
 def test_with_measured_facts_idle_is_exact_for_a_human_turn_and_a_lower_bound_otherwise(tmp_path: Path):
     """TRDD-QONEBKGK: human turn -> exact "idle ~2h"; heartbeat-only window -> "idle >="; no prompt -> "idle >=" from the oldest line; agent-typed prompt counts as activity."""
     now = int(time.time())
@@ -1569,7 +1619,6 @@ def test_recent_messages_survives_a_damaged_tail_and_keeps_text_on_both_sides(tm
     got = ec.recent_messages(str(t))
     assert "USER: BEFORE_DAMAGE" in got
     assert "USER: AFTER_DAMAGE" in got
-
 
 
 def test_classified_tail_lines_keeps_the_first_line_when_the_seek_lands_on_a_boundary(tmp_path):

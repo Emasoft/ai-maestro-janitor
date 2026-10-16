@@ -609,29 +609,31 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
     return (role_label, text) if text else None
 
 
-
-def _is_status_record(rec: dict[str, Any]) -> bool:
-    """True iff `rec` is a kept assistant record whose RAW text has the heartbeat status shape.
-    Called only on records `_classify_line` kept."""
+def _status_run_key(rec: dict[str, Any]) -> str | None:
+    """`transcript_roles.heartbeat_run_key` of a kept assistant record's RAW text (not the
+    whitespace-collapsed display line), or `None` when it has no key. Called only on records
+    `_classify_line` kept."""
     if rec.get("isSidechain") or rec.get("isApiErrorMessage"):
-        return False
+        return None
     msg = rec.get("message") or {}
     if (rec.get("type") or msg.get("role") or "") != "assistant":
-        return False
+        return None
     content = msg.get("content")
-    # `_record_text` joins blocks with a space, so a prose block would be glued onto the last
-    # dispatcher line and capped with it.
-    if isinstance(content, list) and sum(
+    key = transcript_roles.heartbeat_run_key(_record_text(content, drop_heartbeat_reply=True))
+    # `_record_text` joins blocks with a space, so a prose block could be glued onto the last
+    # dispatcher line and fake the STATUS shape -- a multi-block record is never a status run.
+    # Identity keys are safe: identical multi-block replies glue to identical text.
+    if key == transcript_roles.STATUS_RUN_KEY and isinstance(content, list) and sum(
         1 for b in content if isinstance(b, dict) and b.get("type") == "text" and str(b.get("text") or "").strip()
     ) > 1:
-        return False
-    text = _record_text(content, drop_heartbeat_reply=True)
-    return transcript_roles.is_heartbeat_status_reply(text)
+        return None
+    return key
 
 
-def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, bool]]:
-    """`(f"{role}: {text}", is_status)` for every kept record in the last `max_bytes` of `path`,
-    oldest to newest. [] on a missing/unreadable file. This is the one shared parse+classify
+def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, str | None]]:
+    """`(f"{role}: {text}", run_key)` for every kept record in the last `max_bytes` of `path`,
+    oldest to newest (`run_key` is `_status_run_key`: None unless the record is a capped-run
+    candidate). [] on a missing/unreadable file. This is the one shared parse+classify
     loop behind both `recent_messages` and `_recent_human_lines`, and it never raises
     (`recent_messages` is on the SessionStart injection path). The byte-safe tail read and its
     partial-first-line rule live in `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I): it never
@@ -640,14 +642,12 @@ def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, bool]]:
         entries = jsonl_walk.read_jsonl_tail(path, max_bytes, malformed_lines=[])
     except OSError:
         return []
-    out: list[tuple[str, bool]] = []
+    out: list[tuple[str, str | None]] = []
     for rec in entries:
         classified = _classify_line(rec)
         if classified is not None:
-            out.append((f"{classified[0]}: {classified[1]}", _is_status_record(rec)))
+            out.append((f"{classified[0]}: {classified[1]}", _status_run_key(rec)))
     return out
-
-
 
 
 def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
@@ -775,9 +775,10 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     return [*protected, *kept_window]
 
 
-def _cap_heartbeat_status_runs(tail: list[tuple[str, bool]]) -> list[str]:
+def _cap_heartbeat_status_runs(tail: list[tuple[str, str | None]]) -> list[str]:
     """Keep only the newest `transcript_roles.MAX_CONSECUTIVE_HEARTBEAT_STATUS` of each run of
-    consecutive heartbeat status records; every other line passes through in order. Returns the
+    consecutive records with an equal run key (status replies, or identical heartbeat-led
+    replies -- TRDD-FU8MZ0SL); every other line passes through in order. Returns the
     kept lines. The algorithm is `transcript_roles.cap_status_runs`, shared with the other views
     (TRDD-U119W52S: one source of truth)."""
     return [ln for ln, _ in transcript_roles.cap_status_runs(tail, lambda pair: pair[1])]

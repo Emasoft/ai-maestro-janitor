@@ -476,6 +476,7 @@ def _source_item_id(item_id: str) -> str:
     """
     return item_id.split("@", 1)[0]
 
+
 # Card 6: a Read tool result's `cat -n`-style output prefixes EVERY line with
 # "<spaces><digits><TAB>" -- e.g. "     1\tdef foo():". `jevctx.segments.detect_kind`'s
 # `_looks_tabular` check counts exactly one tab per line as tabular when every line's count
@@ -1267,7 +1268,6 @@ def _oversized_preview(item: Item) -> str:
     return "\n".join(item.text.splitlines()[:_OVERSIZED_PREVIEW_LINES])
 
 
-
 # TRDD-RAEGS1D5 (compose() budget floor round 5, coordinator ruling on the round 4 regression
 # report): round 4's literal "non-owner items, then non-guaranteed-owner items" backstop order
 # could empty the non-owner tier ENTIRELY before touching a single non-guaranteed-owner item --
@@ -1482,9 +1482,10 @@ def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[lis
 
     # TRDD-U119W52S: a run of 5-minute heartbeat status replies would otherwise spend the whole
     # budget and stop the contiguous run before the real work behind it.
+    # TRDD-FU8MZ0SL: identical heartbeat-led drift/alert replies are capped the same way (shared run key).
     visible = {id(it) for it in transcript_roles.cap_status_runs(
         conversation,
-        lambda it: it.kind == "assistant" and transcript_roles.is_heartbeat_status_reply(it.text))}
+        lambda it: transcript_roles.heartbeat_run_key(it.text) if it.kind == "assistant" else None)}
     used = 0
     owner_idx = next((i for i in range(len(conversation) - 1, -1, -1)
                       if conversation[i].kind == "user"), None)
