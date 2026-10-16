@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import tomllib
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -419,15 +420,6 @@ def _read_raw(project_dir: str | os.PathLike[str] | None = None) -> tuple[list[d
     return entries, len(raw)
 
 
-def _read_cursor(project_dir: str | os.PathLike[str] | None = None) -> tuple[int, int]:
-    """(consumed byte offset, newest surfaced ts). (0, 0) when never advanced."""
-    try:
-        data = json.loads(_cursor_path(project_dir).read_text(encoding="utf-8"))
-        return int(data.get("offset", 0)), int(data.get("ts", 0))
-    except Exception:  # noqa: BLE001 -- absent/corrupt cursor = nothing surfaced yet
-        return 0, 0
-
-
 _SEV_RANK = {
     "CRITICAL": 0,
     "HIGH": 1, "ERROR": 1, "MAJOR": 1,
@@ -444,6 +436,48 @@ def _sev_rank(entry: dict) -> int:
     return _SEV_RANK.get(sev.strip().upper(), 2) if isinstance(sev, str) else 2
 
 
+def _unread_snapshot(project_dir: str | os.PathLike[str] | None) -> tuple[list[dict], int, int]:
+    """Read one ledger snapshot, retaining folded event identities across cursor advances."""
+    try:
+        raw = ledger_path(project_dir).read_bytes()
+    except OSError:
+        return [], 0, 0
+    try:
+        cursor = json.loads(_cursor_path(project_dir).read_text(encoding="utf-8"))
+        offset, stamp = int(cursor.get("offset", 0)), int(cursor.get("ts", 0))
+        pending_keys = cursor.get("pending", [])
+        if not isinstance(pending_keys, list) or not all(isinstance(key, str) for key in pending_keys):
+            raise ValueError("cursor pending must be a list of event hashes")
+        pending = Counter(pending_keys)
+    except (OSError, ValueError, TypeError, AttributeError):
+        offset, stamp, pending = 0, 0, Counter()
+    unread: list[dict] = []
+    consumed = newest = 0
+    for raw_line in raw.splitlines(keepends=True):
+        start = consumed
+        consumed += len(raw_line)
+        try:
+            entry = json.loads(raw_line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(entry, dict) or not isinstance(entry.get("ts"), (int, float)):
+            continue
+        newest = max(newest, int(entry["ts"]))
+        key = _entry_key(entry)
+        folded = pending[key] > 0
+        if folded:
+            pending[key] -= 1
+        fresh = entry["ts"] > stamp if offset > len(raw) else start >= offset
+        if folded or fresh:
+            unread.append(entry)
+    return unread, len(raw), newest
+
+
+def _entry_key(entry: dict) -> str:
+    """Stable event identity independent of rendering age and ledger byte position."""
+    return hashlib.sha256(json.dumps(entry, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def unread_entries(
     project_dir: str | os.PathLike[str] | None = None,
     *,
@@ -454,68 +488,42 @@ def unread_entries(
 ) -> tuple[list[str], int]:
     """(rendered unread lines, capped by count AND byte budget; total unread count).
     Order: NEWEST first by default; with `severity_first`, by severity rank (CRITICAL,
-    HIGH/ERROR/MAJOR, MEDIUM/WARN/WARNING and unknown, LOW/MINOR, INFO) and NEWEST first within one severity. Read-only —
-    `advance_cursor()` is the separate ack, so a surfacing path that crashes mid-print
-    re-surfaces instead of losing entries.
+    HIGH/ERROR/MAJOR, MEDIUM/WARN/WARNING and unknown, LOW/MINOR, INFO) and NEWEST first
+    within one severity. Read-only — `advance_cursor()` is the separate ack, so a
+    surfacing path that crashes mid-print re-surfaces instead of losing entries.
 
     Cursor semantics: the primary mark is the consumed BYTE OFFSET (exact). When the
     structural trim rewrote the file smaller than the stored offset, the offset no
     longer addresses the same bytes — fall back to the stored newest-surfaced TS
     (entries with ts > cursor ts are unread), so a trim can neither re-inject the
-    whole history nor lose the tail.
+    whole history nor lose the tail. Folded event identities (content hashes) kept in
+    the cursor's "pending" list stay unread regardless of offset.
 
     `exclude_codes` drops entries whose `code` is a member BEFORE counting/capping — the
-    janitor#230 owner directive: those codes are still recorded and still ack'd via
-    `advance_cursor()`, they are simply invisible to this read (callers that need the
+    janitor#230 owner directive: those codes are still recorded and still ack'd by
+    `surface_block()`, they are simply invisible to this read (callers that need the
     full picture, e.g. `/janitor-findings`, pass the default empty set).
     """
-    entries, size = _read_raw(project_dir)
-    offset, cursor_ts = _read_cursor(project_dir)
-    if offset > size:
-        unread = [e for e in entries if e["ts"] > cursor_ts]
-    elif offset <= 0:
-        unread = entries
-    else:
-        # Exact: re-serialize file-order entries counting bytes until the offset is
-        # consumed; everything past it is unread. Cheaper than tracking offsets per
-        # line on write, and exact because the file is what we just read.
-        unread = []
-        consumed = 0
-        try:
-            raw_lines = ledger_path(project_dir).read_bytes().split(b"\n")
-        except OSError:
-            raw_lines = []
-        for bline in raw_lines:
-            line_len = len(bline) + 1  # + the newline
-            s = bline.strip()
-            parsed = None
-            if s:
-                try:
-                    parsed = json.loads(s.decode("utf-8", errors="replace"))
-                except ValueError:
-                    parsed = None
-            if consumed >= offset and isinstance(parsed, dict) and isinstance(parsed.get("ts"), (int, float)):
-                unread.append(parsed)
-            consumed += line_len
-    if exclude_codes:
-        unread = [e for e in unread if e.get("code") not in exclude_codes]
-    total = len(unread)
-    ordered = list(reversed(unread))  # newest first
+    unread, _size, _stamp = _unread_snapshot(project_dir)
+    unread = [e for e in unread if e.get("code") not in exclude_codes]
+    ordered = list(reversed(unread))
     if severity_first:
-        ordered.sort(key=_sev_rank)  # stable: newest-first is kept inside one severity
+        ordered.sort(key=_sev_rank)
     lines: list[str] = []
     used = 0
-    for e in ordered:
-        line = render_line(e)
+    for entry in ordered:
+        line = render_line(entry)
         if len(lines) >= cap or used + len(line.encode("utf-8")) > budget_bytes:
             break
         lines.append(line)
         used += len(line.encode("utf-8"))
-    return lines, total
+    return lines, len(unread)
 
 
 def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
-    """Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises."""
+    """Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises.
+    Writes no "pending" list, so it also acks every event `surface_block()` had folded —
+    the full-ack path `/janitor-findings` uses after showing the whole ledger."""
     try:
         entries, size = _read_raw(project_dir)
         newest_ts = max((int(e["ts"]) for e in entries), default=0)
@@ -526,28 +534,48 @@ def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
 
 
 def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
-    """The SessionStart injection: capped unread lines + ONE fold line, then the cursor
-    advances. Empty string when nothing is unread (silence — no empty-inbox chatter).
+    """The SessionStart injection: capped severity-first unread lines + ONE fold line.
+    Empty string when nothing is unread (silence — no empty-inbox chatter).
     ≤ ~1 KB by construction (the owner's context-budget constraint).
 
     `NEVER_SURFACE_CODES` (janitor#230 — account-window telemetry must never be PUSHED
-    into an agent's context) is excluded from what gets INJECTED here, but the cursor
-    still advances over the WHOLE ledger (via `advance_cursor()`, which is unconditional
-    and code-agnostic) — so a filtered entry is acked exactly like a shown one and never
-    piles up into a permanent backlog. `/janitor-findings` reads `unread_entries()`
-    directly with no `exclude_codes`, so the data itself is never lost, only unpushed.
+    into an agent's context) is excluded from what gets INJECTED here but still acked
+    like a shown entry, so it never piles up into a permanent backlog. Only shown and
+    excluded events are acked; folded ones are kept in the cursor's "pending" list.
+    `/janitor-findings` reads `unread_entries()` with no `exclude_codes`, so the data is
+    never lost, only unpushed.
     """
+    unread, size, stamp = _unread_snapshot(project_dir)
+    ordered = [e for e in reversed(unread) if e.get("code") not in NEVER_SURFACE_CODES]
     # severity_first: a HIGH must not fold behind newer LOW lines (TRDD-6ESS2MGE).
-    lines, total = unread_entries(project_dir, exclude_codes=NEVER_SURFACE_CODES, severity_first=True)
-    if lines:
-        folded = total - len(lines)
-        out = list(lines)
-        if folded > 0:
-            out.append(f"[findings] …{folded} older unread — `/janitor-findings` to browse")
-        result = "\n".join(out)
-    else:
-        result = ""
-    # Ack the ENTIRE ledger regardless of what was actually injected — a filtered-out
-    # entry (e.g. WINDOW-BURN) must not sit unread forever just because it is never shown.
-    advance_cursor(project_dir)
-    return result
+    ordered.sort(key=_sev_rank)
+    lines: list[str] = []
+    pending: list[str] = []
+    counts: dict[str, dict[str, int]] = {}
+    used = 0
+    for entry in ordered:
+        severity = str(entry.get("sev", "UNKNOWN")).upper()
+        count = counts.setdefault(severity, {"unread": 0, "shown": 0, "folded": 0})
+        count["unread"] += 1
+        line = render_line(entry)
+        if len(lines) >= SURFACE_CAP_LINES or used + len(line.encode("utf-8")) > SURFACE_BUDGET_BYTES:
+            pending.append(_entry_key(entry))
+            count["folded"] += 1
+            continue
+        lines.append(line)
+        used += len(line.encode("utf-8"))
+        count["shown"] += 1
+    # TRDD-J9ZJ2DAR: the offset acknowledges this snapshot, not unseen appends; pending
+    # identities retain only folded events, including duplicates and events surviving trim.
+    try:
+        state.atomic_write(_cursor_path(project_dir), json.dumps({"offset": size, "ts": stamp, "pending": pending}))
+    except Exception:  # noqa: BLE001 -- a failed ack repeats findings rather than losing them
+        pass
+    if project_dir is None:
+        try:
+            state.log_line("findings-surface", json.dumps(counts, sort_keys=True))
+        except Exception:  # noqa: BLE001 -- diagnostic failure does not undo a successful ack
+            pass
+    if pending:
+        lines.append(f"[findings] …{len(pending)} older unread — `/janitor-findings` to browse")
+    return "\n".join(lines)
