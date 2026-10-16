@@ -4,7 +4,7 @@ title: Owner-message carry — three known flaws left by the issue 338 fix
 column: testing
 status: tasked
 created: 2026-10-10T00:42:09+0200
-updated: 2026-10-11T02:00:37+0200
+updated: 2026-10-17T01:05:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T00:42:09+0200
-implementation-commits: [e4dc4425]
+implementation-commits: [e4dc4425, b271c935]
 ---
 
 # Owner-message carry — three known flaws left by the issue 338 fix
@@ -30,3 +30,4 @@ Follow-up of TRDD-IN4493LC (closed 2026-10-10), which carries the owner's last t
 - 2026-10-11T01:41:21+0200 — column → dev. three of four items in build by one worker
 2026-10-11 02:00. BUILT, committed alone in e4dc4425 (worker diff read by the main session; reviewed, no blocker): the carried sentence now follows the owner quotes; a record write prunes records older than 30 days (a choice, not a measurement; the directory holds 20 records, none that old, so no field effect yet; a session alive past 30 days with no clear loses the owner line of its nudge, stated at the constant); the assert is an explicit guard (unreachable, no test). Full gate on the tree holding both fixes: 18384 passed, 2 skipped; ruff, mypy, pyright clean (reports/board/gate-alex-2uv.txt). The worker edited the test file with a heredoc and sed against the editing rule; imports and tail re-checked. STILL OPEN, why the card is not complete: item 1, whether a typed /login is classed as an owner message; it needs a real transcript record of a typed /login first. FIELD CHECK for the sentence order after a release: the next carried handoff shows the owner-words sentence before Your reply at that time.
 - 2026-10-11T02:00:37+0200 — column → testing. three of four items committed in e4dc4425; item 1 open on the card
+2026-10-17T01:05:37+0200 — item 1 BUILT in b271c935: harness-admin slash commands (/model, /login, /plugin, exit, effort, resume, advisor, tui, rate-limit-options, feedback, config, mcp measured; logout reasoned; NOT reload-skills, janitor-typed) and empty content-free wrappers are no longer carried as owner messages; owner_record filters stored entries so the 3 live records holding /plugin enable stop being re-quoted. 4 regression tests failed first, 103 pass; ruff, mypy, pyright clean; reviewed twice before code and once on the diff. Accepted trade-off: a /model or /config choice is no longer told to the next session. Follow-up filed: TRDD-FCYOSWWB (jev_compaction / is_control_input). Card stays in testing: item 1 field check is the next carried handoff after a release showing no admin command among the owner messages; the sentence-order check is unchanged.
