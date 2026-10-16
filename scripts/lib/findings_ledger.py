@@ -521,7 +521,9 @@ def unread_entries(
 
 
 def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
-    """Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises."""
+    """Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises.
+    Writes no "pending" list, so it also acks every event `surface_block()` had folded —
+    the full-ack path `/janitor-findings` uses after showing the whole ledger."""
     try:
         entries, size = _read_raw(project_dir)
         newest_ts = max((int(e["ts"]) for e in entries), default=0)
