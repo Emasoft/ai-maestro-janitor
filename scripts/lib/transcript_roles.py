@@ -182,15 +182,25 @@ _HARNESS_ADMIN_COMMAND_NAMES = frozenset(
 )
 
 
+# TRDD-FCYOSWWB: single line only. `[ \t]` (not `\s`) after the name, so "/model\nfix X" -- a
+# command followed by a real instruction on the next line -- never matches and stays an instruction.
+_RAW_SLASH_COMMAND_RE = re.compile(r"^/(\S+)(?:[ \t].*)?$")
+
+
 def is_non_instruction_command(text: str) -> bool:
-    """True iff `text` is a slash-command wrapper that carries no instruction for the agent:
-    either (A) ONLY `<command-message>` + `<command-name>` (+ optional `<command-args>` with ANY
-    content) whose name is in `_HARNESS_ADMIN_COMMAND_NAMES`, or (B) an empty content-free
-    wrapper (`_is_empty_command_wrapper`). Anything else -- another command, extra owner text
-    around the wrapper, plain prose -- is False."""
+    """True iff `text` carries no instruction for the agent: either (A) a slash-command wrapper of
+    ONLY `<command-message>` + `<command-name>` (+ optional `<command-args>` with ANY content)
+    whose name is in `_HARNESS_ADMIN_COMMAND_NAMES`, (B) an empty content-free wrapper
+    (`_is_empty_command_wrapper`), or (C) a raw single-line `/name [args]` whose name is in
+    `_HARNESS_ADMIN_COMMAND_NAMES` (a command queued while a turn ran arrives unwrapped as
+    `attachment.prompt`, TRDD-FCYOSWWB). Anything else -- another command, extra owner text
+    around the wrapper, a multi-line raw command, plain prose -- is False."""
     stripped = text.strip()
     if _is_empty_command_wrapper(stripped):
         return True
+    raw = _RAW_SLASH_COMMAND_RE.match(stripped)
+    if raw is not None:
+        return raw.group(1) in _HARNESS_ADMIN_COMMAND_NAMES
     remainder = stripped
     message_match = _COMMAND_MESSAGE_TAG_RE.search(remainder)
     if message_match is None:
@@ -225,20 +235,23 @@ _BARE_SLASH_COMMAND_RE = re.compile(r"^/(\S+)$")
 
 
 def is_control_input(text: str) -> bool:
-    """True iff `text`, stripped, is nothing but a bare control word (optionally followed only
-    by trailing punctuation from `.!`, e.g. "resume." or "Continue!"), an argument-less
-    automation slash command, or an empty-args `<command-message>`/`<command-name>`/
-    `<command-args>` wrapper -- content-free regardless of who typed it.
+    """True iff `text`, stripped, is content-free OR not an instruction to the agent
+    (TRDD-FCYOSWWB widened this from "content-free" only): a bare control word (optionally
+    followed only by trailing punctuation from `.!`, e.g. "resume." or "Continue!"), an
+    argument-less automation slash command, an empty-args `<command-message>`/`<command-name>`/
+    `<command-args>` wrapper, or a harness-admin command (`is_non_instruction_command`).
 
     Matches: a single token `resume`/`continue` (case-insensitive), with or without trailing
     `.`/`!`; `/name` with no arguments where `name` is one `_is_automation_command_name`
-    already treats as automation (reusing that list rather than duplicating it); or a
+    already treats as automation (reusing that list rather than duplicating it); a
     `<command-message>`/`<command-name>`/`<command-args>` wrapper, in any order, whose
     `<command-args>` is absent or empty/whitespace-only AND whose `<command-name>` is one of
     the small, explicit read-only/no-op set `_is_content_free_wrapper_command_name` allows
     (TRDD-DZ1KOGAC coordinator correction: measured a real transcript where an empty-args
-    `/usage-credits` wrapper took the guaranteed newest-owner slot). Does NOT match a slash
-    command WITH arguments (`/goal evaluate the plugin`), an empty-args wrapper whose command
+    `/usage-credits` wrapper took the guaranteed newest-owner slot); or a harness-admin command
+    that administers Claude Code itself, whatever its args (`/login`, `/model opus`, `/plugin
+    enable ...`). Does NOT match a slash command WITH arguments that is an instruction
+    (`/goal evaluate the plugin`), an empty-args wrapper whose command
     name is itself an owner decision (`/janitor-disarm`, `/janitor-global-disarm`,
     `/janitor-auto-manage-oauth-off`, `/ponytail`, `/colony`) -- the name IS the content there,
     unlike a bare `/compact` -- a wrapper whose `<command-args>` carries text (`/eli5 the
@@ -246,12 +259,16 @@ def is_control_input(text: str) -> bool:
     (`resume?` is the owner asking a question, not a content-free control word), or a real
     reply that merely contains one of these words (`resume the pending TRDD work`, `ok go on`,
     `yes, post it`) -- those are the owner's actual words and must keep their standing.
+
+    `session_continuity` calls `is_non_instruction_command` directly, NOT this function, on
+    purpose: a bare "resume"/"continue" stays among the carried owner messages there. Do not
+    unify the two callers.
     """
     stripped = text.strip()
     bare = stripped.rstrip(".!")
     if bare.lower() in _CONTROL_TOKENS:
         return True
-    if _is_empty_command_wrapper(stripped):
+    if is_non_instruction_command(stripped):
         return True
     match = _BARE_SLASH_COMMAND_RE.match(stripped)
     if match is None:

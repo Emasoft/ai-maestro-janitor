@@ -545,6 +545,40 @@ def test_is_control_input_false_for_wrapper_followed_by_extra_owner_text() -> No
     assert tr.is_control_input(text) is False
 
 
+
+def test_is_control_input_true_for_harness_admin_wrappers() -> None:
+    """TRDD-FCYOSWWB: /login, /model opus and /plugin enable ... wrappers are not instructions to the agent."""
+    assert tr.is_control_input(_wrapper("/login")) is True
+    assert tr.is_control_input(_wrapper("/model", args="opus")) is True
+    assert tr.is_control_input(_wrapper("/plugin", args="enable sample-plugin")) is True
+
+
+def test_is_control_input_false_for_wrapper_plus_owner_text_goal_and_disarm_guards() -> None:
+    """TRDD-FCYOSWWB: an admin wrapper plus owner text, /goal with args and /janitor-disarm stay instructions."""
+    assert tr.is_control_input(_wrapper("/login") + "\nand also please fix X") is False
+    assert tr.is_control_input(_wrapper("/goal", args="evaluate the plugin")) is False
+    assert tr.is_control_input(_wrapper("/janitor-disarm")) is False
+    assert tr.is_control_input("resume") is True
+    assert tr.is_control_input("continue") is True
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("/model opus", True),
+        ("/login", True),
+        ("/plugin enable sample-plugin", True),
+        ("/goal do X", False),
+        ("/ponytail ultra", False),
+        ("/model opus\nfix the failing test", False),
+        ("/model\nfix the failing test", False),
+    ],
+)
+def test_non_instruction_command_raw_queued_slash_command(text: str, expected: bool) -> None:
+    """TRDD-FCYOSWWB: a queued slash command arrives as raw text; a single-line admin one is not an instruction."""
+    assert tr.is_non_instruction_command(text) is expected
+
+
 def test_cap_status_runs_keeps_newest_two_of_each_run() -> None:
     """Runs of 1, 2, 3 and 9 status items keep min(run, 2) newest; a non-status item resets the count."""
     assert tr.MAX_CONSECUTIVE_HEARTBEAT_STATUS == 2

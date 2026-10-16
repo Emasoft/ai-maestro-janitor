@@ -1247,12 +1247,23 @@ def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> No
     assert "Background lint check finished" not in digest
 
 
+
 def test_bare_owner_control_input_is_kind_control_in_every_branch(tmp_path: Path) -> None:
     """TRDD-D7RLXAN1 test 1 (was TRDD-DZ1KOGAC's "kind event"): a bare "resume"/"continue" typed
     by the owner is content-free, so it must stay out of `kind == "user"` (digest, newest-owner
     pick) -- but it is still the owner's words in the exchange, so it is kind "control"
     (conversation, never scored), not "event" (scored), in the str, text-block and mid-turn
-    attachment branches alike. A peer's "resume" is not the owner's and stays "event"."""
+    attachment branches alike. A peer's "resume" is not the owner's and stays "event".
+    TRDD-FCYOSWWB: a harness-admin command (/login, /plugin, queued raw /model) is "control" too."""
+    login = (
+        "<command-name>/login</command-name>\n"
+        "<command-message>login</command-message>\n"
+        "<command-args></command-args>"
+    )
+    plugin = (
+        "<command-message>plugin</command-message>\n<command-name>/plugin</command-name>\n"
+        "<command-args>enable sample-plugin</command-args>"
+    )
     records = [
         {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "resume"}},
         {"type": "user", "uuid": "u2",
@@ -1265,6 +1276,18 @@ def test_bare_owner_control_input_is_kind_control_in_every_branch(tmp_path: Path
         {"type": "attachment", "uuid": "att2", "attachment": {
             "type": "queued_command", "prompt": "resume", "commandMode": "prompt",
             "origin": {"kind": "peer"}}},
+        {"type": "user", "uuid": "u4", "message": {"role": "user", "content": login}},
+        {"type": "user", "uuid": "u5",
+         "message": {"role": "user", "content": [{"type": "text", "text": plugin}]}},
+        {"type": "attachment", "uuid": "att3", "attachment": {
+            "type": "queued_command", "prompt": "/model opus", "commandMode": "prompt",
+            "origin": {"kind": "human"}}},
+        {"type": "attachment", "uuid": "att4", "attachment": {
+            "type": "queued_command", "prompt": "/model opus", "commandMode": "prompt",
+            "origin": {"kind": "peer"}}},
+        {"type": "attachment", "uuid": "att5", "attachment": {
+            "type": "queued_command", "prompt": "please fix the failing test",
+            "commandMode": "prompt", "origin": {"kind": "human"}}},
     ]
     path = tmp_path / "control.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
@@ -1277,6 +1300,11 @@ def test_bare_owner_control_input_is_kind_control_in_every_branch(tmp_path: Path
     assert by_id["u3:0"].kind == "control"
     assert by_id["att1:0"].kind == "control"
     assert by_id["att2:0"].kind == "event"
+    assert by_id["u4:0"].kind == "control"
+    assert by_id["u5:0"].kind == "control"
+    assert by_id["att3:0"].kind == "control"
+    assert by_id["att4:0"].kind == "event"
+    assert by_id["att5:0"].kind == "user"
 
 
 def test_origin_less_legacy_record_still_classified_human() -> None:

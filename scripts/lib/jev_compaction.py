@@ -76,6 +76,8 @@ __all__ = [
 # drop them. It is conversation now (see `split_conversation`): kept verbatim, never scored,
 # and still never `kind == "user"`, so `build_digest` and the newest-owner pick ignore it
 # exactly as DZ1KOGAC intended.
+# TRDD-FCYOSWWB widened it: "control" is content-free OR a harness-admin command (/login,
+# /model, /plugin ...) -- neither is an instruction to the agent.
 ItemKind = Literal["user", "assistant", "tool", "event", "control"]
 
 # Entry `type`s that ever carry a extractable item (spec: skip `system` entries and the

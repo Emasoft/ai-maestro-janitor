@@ -1021,6 +1021,26 @@ def test_recent_messages_skips_tool_noise(tmp_path):
     assert got == ["USER: hello", "ASSISTANT: hi back"]
 
 
+
+def test_recent_messages_drops_a_harness_admin_command_wrapper(tmp_path):
+    """TRDD-FCYOSWWB: an owner-typed /login wrapper is not an instruction, so it never enters the tail."""
+    t = tmp_path / "s.jsonl"
+    login = (
+        "<command-name>/login</command-name>\n"
+        "<command-message>login</command-message>\n"
+        "<command-args></command-args>"
+    )
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "real owner text"}},
+        {"type": "user", "uuid": "u2", "message": {"role": "user", "content": login}},
+        {"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "assistant reply"},
+        ]}},
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    assert ec.recent_messages(str(t)) == ["USER: real owner text", "ASSISTANT: assistant reply"]
+
+
 # TRDD-0UQSAFCW (card 2a): before this fix, `recent_messages` filtered nothing -- in a
 # heartbeat-driven session its output was almost entirely `[janitor-heartbeat]` prompts and
 # bare "janitor heartbeat" replies. These three tests are the card's own acceptance list.
