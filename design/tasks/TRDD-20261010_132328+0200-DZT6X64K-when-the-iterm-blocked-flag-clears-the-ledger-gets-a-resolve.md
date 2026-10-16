@@ -1,10 +1,10 @@
 ---
 trdd-id: DZT6X64K
 title: When the iTerm blocked flag clears the ledger gets a resolved entry so a replayed alert shows its resolution
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T13:23:28+0200
-updated: 2026-10-10T13:23:28+0200
+updated: 2026-10-17T01:16:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T13:23:28+0200
+implementation-commits: [1a76e87d]
 ---
 
 # When the iTerm blocked flag clears the ledger gets a resolved entry so a replayed alert shows its resolution
@@ -22,6 +23,7 @@ approval-datetime: 2026-10-10T13:23:28+0200
 ## Approval log
 
 - 2026-10-10T13:23:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-17T01:16:03+0200 — BUILT in 1a76e87d: when the flag clears and this project had recorded the alert (surfaced stamp found), a HIGH entry 'resolved: iTerm reachable again' is recorded beside the alert, which is never removed or suppressed. HIGH, not INFO: surface_block sorts by severity and caps at 10 lines / 1 KB, so INFO folded away on busy ledgers (measured). Message 31 chars so its rendered line never exceeds the alert's under the byte budget. Guaranteed: the replay never shows the alert without its resolution (a resolution alone may show). Hardening of an artefact observed once; no recurrence since 2026-10-05. 293 tests in the two files pass; ruff, mypy, pyright clean. FIELD CHECK: the next real flag clear after a release shows the resolution entry in this project's ledger.
 
 ## Task
 
