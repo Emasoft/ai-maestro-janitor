@@ -385,8 +385,8 @@ def test_an_unreachable_instance_is_not_re_audited_on_every_beat(tmp_path, monke
 def test_wedged_target_is_never_typed_at_again(tmp_path, monkeypatch) -> None:
     """TRDD-8DR0X08A F2: queued-but-unexecuted commands at the target's transcript
     tail prove typed input is NOT executing there — the beat must not inject (the
-    queue would only grow), must spend an attempt (so the budget walks to crash_loop
-    instead of looping), and must route to the human channel instead."""
+    queue would only grow) and must route to the human channel instead. Since
+    TRDD-393Z256I it also spends NO attempt: nothing was tried, so the budget stays honest."""
     fleet = [_inst("cron_dead", "/p/proj-w", {"tmux_pane": "%5"}, trailing=2)]
     fired = _setup(monkeypatch, tmp_path, fleet)
     pushes: list = []
@@ -398,7 +398,7 @@ def test_wedged_target_is_never_typed_at_again(tmp_path, monkeypatch) -> None:
     assert "WEDGED" in _log(tmp_path)
     sf = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-w")
     st = json.loads(sf.read_text(encoding="utf-8"))
-    assert st["attempts"] == 1                            # budget consumed, not reset
+    assert "attempts" not in st                           # budget NOT spent (was: == 1)
     assert st["last_audit"] == "declined_wedged:rearm"
     assert pushes and pushes[0]["code"] == "FLEET-WEDGED"
     assert pushes[0]["project"] == "proj-w"
@@ -777,3 +777,73 @@ def test_an_unreadable_pane_logs_unread_and_never_reads_as_working(
     log = _log(tmp_path)
     assert "pane=unread" in log, "an unreadable pane must be named, not left silent"
     assert "pane=working" not in log
+
+
+def _wedged_clock(monkeypatch, start: int) -> dict:
+    """Rebind only the daemon's own `time` reference to a fake clock (see the stall tests)."""
+    import types
+
+    clock = {"t": start}
+    monkeypatch.setattr(
+        daemon, "time",
+        types.SimpleNamespace(
+            time=lambda: float(clock["t"]), sleep=lambda _s: None, monotonic=lambda: float(clock["t"])
+        ),
+    )
+    return clock
+
+
+def test_a_long_wedge_spends_no_attempts_and_escalates_once_past_the_threshold(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-393Z256I: a wedged beat types NOTHING, so it must not spend the recovery budget.
+
+    It used to write attempts+1 on every wedged beat, so a long turn with queued input walked
+    the counter to crash_loop and logged "recovery is looping" for a recovery that never ran
+    (measured: five episodes 10-08..10-10 with zero fired rows). Now the beat declines through
+    `_decline`: attempts stay 0, the WEDGED log line and the FLEET-WEDGED push happen exactly
+    once, and the shared 1 h stall escalation reports FLEET-DECLINE-STALL exactly once."""
+    clock = _wedged_clock(monkeypatch, 3_000_000)
+    fleet = [_inst("cron_dead", "/p/proj-longwedge", {"tmux_pane": "%5"}, trailing=2)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    pushes: list = []
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED")
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+
+    # Seven beats 900 s apart (0..5400 s): each clears the cooldown, and beat 5 lands exactly
+    # on the 3600 s escalation threshold.
+    for _ in range(7):
+        daemon.task_session_liveness()
+        clock["t"] += 900
+
+    sf = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-longwedge")
+    st = json.loads(sf.read_text(encoding="utf-8"))
+    assert st.get("attempts", 0) == 0, st
+    assert not st.get("alerted"), st
+    assert st["last_audit"] == "declined_wedged:rearm"
+    log = _log(tmp_path)
+    assert "GIVING UP" not in log
+    assert fired == []
+    assert log.count(" WEDGED (") == 1, log
+    assert [p["code"] for p in pushes] == ["FLEET-WEDGED"], pushes
+    stall = [f for f in findings if f["code"] == "FLEET-DECLINE-STALL"]
+    assert len(stall) == 1, findings
+    assert "answer any pending dialog" in stall[0]["msg"], stall[0]["msg"]
+
+
+def test_a_rearm_that_really_fired_four_times_still_reaches_crash_loop(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-393Z256I guard: dropping attempt-spending from the WEDGED branch must leave the
+    budget intact for recoveries that actually type — four fired re-arms still trip the gate."""
+    clock = _wedged_clock(monkeypatch, 4_000_000)
+    fleet = [_inst("cron_dead", "/p/proj-loop", {"tmux_pane": "%5"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    for _ in range(daemon.fr.MAX_ATTEMPTS):
+        daemon.task_session_liveness()
+        clock["t"] += 1000
+    assert len(fired) == daemon.fr.MAX_ATTEMPTS
+    daemon.task_session_liveness()                       # budget spent: gate says crash_loop
+    assert len(fired) == daemon.fr.MAX_ATTEMPTS          # no fifth keystroke
+    assert "GIVING UP" in _log(tmp_path)

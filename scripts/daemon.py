@@ -167,6 +167,12 @@ _DECLINE_REMEDY = {
         "the keystroke was held because someone is at this machine's keyboard — it lands on "
         "its own once the machine goes idle; nothing to do"
     ),
+    # TRDD-393Z256I — the wedged decline typed nothing and spends no attempt; this is its
+    # 1 h escalation text (the FLEET-WEDGED push already fired once on the first beat).
+    "declined_wedged": (
+        "a turn has run with queued input for an hour: open the pane and answer any pending "
+        "dialog, or let the turn finish"
+    ),
     "channel_rejected": (
         "the keystroke was sent and the pane's injection channel accepted nothing — the tmux "
         "pane or iTerm session named in that project's state is probably gone; re-open it, or "
@@ -1876,38 +1882,43 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # commands at the transcript tail PROVE typed input is not executing in this
         # pane (a stuck turn: permission dialog / pending question). A SOFT injection
         # would only grow that queue — the exact "janitor keeps printing commands"
-        # pile-up the owner reported — so never type again: spend an attempt (the
-        # 4-attempt budget must still walk to crash_loop, not loop) and push ONE
-        # human notification naming the project. notify's content-hash dedupe + the
-        # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
+        # pile-up the owner reported — so never type again, and push ONE human
+        # notification naming the project. A HARD (ESC-first) rung is exempt: the
         # ESC is the unwedge (same policy _fire_fleet_stop already applies) — and hard
         # rungs dispatched above anyway, so only soft actions reach this check.
+        #
+        # WHY this declines through `_decline` and spends NO attempt (TRDD-393Z256I;
+        # deliberately reverses the attempts+1 of TRDD-8DR0X08A db9c2f01): attempt-spending
+        # predated `_decline`'s 1 h escalation (feddf82b, TRDD-FB84YUGT). A wedged beat types
+        # nothing, so it must not spend the budget whose exhaustion logs "recovery is
+        # looping" — measured: five episodes 10-08..10-10 reached that message with zero
+        # fired rows. This is correct under both readings of a wedge: a long turn with
+        # queued input heals at turn end (the next healthy beat unlinks the state), and a
+        # real wedge gets FLEET-WEDGED once and FLEET-DECLINE-STALL after 1 h — two surfaces,
+        # two meanings, not duplicate alerting. Limit: a wedge whose `action` flaps resets
+        # the 1 h clock (the signature includes the action). The WEDGED log line and the
+        # push fire only on the first beat of a signature; `_decline` also audits once.
         if getattr(inst, "trailing_enqueues", 0) >= 1 and not fr.injection_is_hard(
             inst.diagnosis
         ):
-            sig = f"declined_wedged:{action}"
-            _write_recovery_state(
-                sf,
-                {"attempts": attempts + 1, "last_ts": now, "identity": identity,
-                 "last_audit": sig},
-            )
-            state.log_line(
-                "daemon",
-                f"session-liveness: {tag} WEDGED ({inst.trailing_enqueues} queued "
-                f"unexecuted command(s)) — would {action}; notifying a human instead",
-            )
-            if st.get("last_audit") != sig:
-                _audit(inst, "declined_wedged", action, None)
-            try:
-                notify.push(
-                    sev="HIGH",
-                    code="FLEET-WEDGED",
-                    project=os.path.basename(inst.project_root),
-                    summary="session wedged mid-turn — typed commands queue but never run",
-                    hint="open that project's pane and answer the pending dialog",
+            first = st.get("last_audit") != f"declined_wedged:{action}"
+            if first:
+                state.log_line(
+                    "daemon",
+                    f"session-liveness: {tag} WEDGED ({inst.trailing_enqueues} queued "
+                    f"unexecuted command(s)) — would {action}; notifying a human instead",
                 )
-            except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
-                pass
+                try:
+                    notify.push(
+                        sev="HIGH",
+                        code="FLEET-WEDGED",
+                        project=os.path.basename(inst.project_root),
+                        summary="session wedged mid-turn — typed commands queue but never run",
+                        hint="open that project's pane and answer the pending dialog",
+                    )
+                except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
+                    pass
+            _decline("declined_wedged", action, None)
             continue
         # TRDD-NACCL0CB (owner, 2026-09-02): "the janitor script seems blind and does not
         # check what is in the terminal before giving the commands." A SOFT command typed
