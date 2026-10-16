@@ -469,8 +469,8 @@ def refusal_covered_pages(
     shows up as an uncovered change, and the chore re-arms — no expiry bookkeeping of our own.
     """
     covered: set[str] = set()
-    for key in memory_refusals.read("consolidate", scope, root):
-        covered.update(memory_refusals.live_members("consolidate", scope, root, key, now=now))
+    for entry in memory_refusals.read("consolidate", scope, root).values():
+        covered.update(memory_refusals.live_members("consolidate", root, entry, now=now))
     return covered
 
 
@@ -502,8 +502,8 @@ def group_has_unjudged_pair(
         except ValueError:
             return True  # cannot key it → cannot prove it judged → dispatch
     live_sets: list[set[str]] = []
-    for key in memory_refusals.read("consolidate", scope, root):
-        live = memory_refusals.live_members("consolidate", scope, root, key, now=now)
+    for entry in memory_refusals.read("consolidate", scope, root).values():
+        live = memory_refusals.live_members("consolidate", root, entry, now=now)
         if live:
             live_sets.append(live)
     for i in range(len(rels)):

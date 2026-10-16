@@ -106,6 +106,7 @@ def content_hash(root: Path | str, paths: Sequence[Path | str]) -> str | None:
             return None
     return h.hexdigest()[:16]
 
+
 def page_hash(root: Path | str, relpath: str) -> str | None:
     """sha256 of one page's bytes minus its frontmatter `lmd:` lines, 16 hex; None if unreadable.
 
@@ -210,17 +211,18 @@ def refusal(
         return None
     return None if age >= _ttl_for(intervention, ttl_s) else entry
 
+
 def live_members(
     intervention: str,
-    scope: str,
     root: Path | str,
-    key: str,
+    entry: object,
     *,
     now: int | None = None,
     ttl_s: int | None = None,
 ) -> set[str]:
-    """The members of ledger entry `key` that are individually still judged: entry unexpired,
-    carrying `pages`, and the member's current `page_hash` equal to the stored one.
+    """The members of ledger `entry` that are individually still judged: entry unexpired,
+    carrying `pages`, and the member's current `page_hash` equal to the stored one. Takes the
+    loaded entry so callers parse the ledger once.
 
     TRDD-MHG11027: `refusal()` keys one hash over ALL members, so editing one page of a
     95-page consolidate refusal killed every judged pair and re-dispatched the chore every
@@ -230,7 +232,6 @@ def live_members(
     (accepted limit). For big groups a refusal may have been a skim, so a still-unchanged
     pair staying judged until the TTL is accepted.
     """
-    entry = read(intervention, scope, root).get(key)
     if not isinstance(entry, dict):
         return set()
     pages = entry.get("pages")
