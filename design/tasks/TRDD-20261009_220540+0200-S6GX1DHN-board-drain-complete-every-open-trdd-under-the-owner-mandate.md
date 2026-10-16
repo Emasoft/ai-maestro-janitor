@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-16T20:19:15+0200
+updated: 2026-10-16T20:26:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -196,3 +196,7 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 ## Owner mandate source
 
 The OWNER MANDATE quoted at the top of the STATE block is the owner's own message: transcript session 8a11fda7-edff-47fe-9479-50d1c88dd6bc, record type user, origin human, timestamp 2026-10-09T19:55:54.607Z (21:55 local). Verified 2026-10-16 by reading that record; the frontmatter field owner-mandate: 2026-10-09 makes the keep-going cue point here (TRDD-0TSG80CL, commit 57456d1d) while this card is open.
+
+## Board findings 2026-10-16
+
+trddgrep lint reports ERROR TERMINAL-WITHOUT-CHECKLIST on closed cards that have no acceptance checklist, which is why trddgrep does not archive them; measured 2026-10-16 it lists 58 cards board-wide, including TRDD-J9ZJ2DAR and TRDD-FU8MZ0SL closed this day (both frozen now). A wave that closes cards should add the acceptance checklist BEFORE the closing move; the existing 58 need a per-card decision (rule: no scripted mass repair).
