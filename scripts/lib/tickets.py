@@ -102,6 +102,10 @@ INVALID = "invalid"
 DISPATCHABLE = {OPEN}
 IN_FLIGHT = {DISPATCHED, IN_PROGRESS}
 TERMINAL = {RESOLVED, CANCELLED, NEEDS_HUMAN, INVALID}
+# TRDD-1AD5FF36: needs_human is terminal for the SCHEDULER (never dispatched) but must stay on the LIVE
+# board: archiving it hid it from load_all(), so the "NEEDS A HUMAN" reminder and `list` could never
+# see a ticket the janitor gave up on. Only the statuses nobody needs to act on are archived.
+ARCHIVED = TERMINAL - {NEEDS_HUMAN}
 
 TITLE_CAP = 160
 DETAIL_CAP = 2000
@@ -404,19 +408,21 @@ def load(ticket_id: str, state_dir: Path | None = None) -> Ticket | None:
 
 
 def save(t: Ticket, state_dir: Path | None = None) -> None:
-    """Persist a ticket. Terminal ones are ARCHIVED, never deleted (RULE 0's spirit: the record of
-    what the janitor did to this machine outlives the incident).
+    """Persist a ticket. Archived statuses (see ARCHIVED) are moved to closed/, never deleted (RULE 0's
+    spirit: the record of what the janitor did to this machine outlives the incident). `needs_human` is
+    NOT archived: it waits for a human on the live board.
 
     A ticket lives in EXACTLY ONE of the two dirs, and the move between them runs BOTH ways: `retry`
-    un-archives a `needs_human` ticket. Unlinking only on the way in (the original shape) left the
-    archived copy behind, so the same ticket sat on the live board and in the archive at once — an
-    archive that says "closed" about work that is in flight is a record that lies, and `list --all`
-    printed it twice. Hence: write the destination first, then unlink the other side, so the only
-    crash window leaves a duplicate that `load()` resolves to the LIVE copy — never a vanished ticket.
+    re-opens a closed ticket, and `migrate_needs_human` pulls one back. Unlinking only on the way in
+    (the original shape) left the archived copy behind, so the same ticket sat on the live board and in
+    the archive at once — an archive that says "closed" about work that is in flight is a record that
+    lies, and `list --all` printed it twice. Hence: write the destination first, then unlink the other
+    side, so the only crash window leaves a duplicate that `load()` resolves to the LIVE copy — never a
+    vanished ticket.
     """
-    terminal = t.status in TERMINAL
-    dest = closed_dir(state_dir) if terminal else tickets_dir(state_dir)
-    other = tickets_dir(state_dir) if terminal else closed_dir(state_dir)
+    archived = t.status in ARCHIVED
+    dest = closed_dir(state_dir) if archived else tickets_dir(state_dir)
+    other = tickets_dir(state_dir) if archived else closed_dir(state_dir)
     dest.mkdir(parents=True, exist_ok=True)
     state.atomic_write(dest / f"{t.id}.json", json.dumps(t.to_json(), indent=2))
     try:
@@ -425,6 +431,29 @@ def save(t: Ticket, state_dir: Path | None = None) -> None:
         pass
 
 
+def migrate_needs_human(state_dir: Path | None = None) -> int:
+    """Move every `needs_human` ticket stranded in closed/ back to the live board; return the count.
+
+    TRDD-1AD5FF36: before ARCHIVED existed, save() archived needs_human tickets, so load_all() could
+    not see them. save() now routes them to the live dir and unlinks the closed copy. Idempotent: a
+    second run finds nothing. A corrupt file is skipped, never fatal (same contract as load_all).
+    """
+    d = closed_dir(state_dir)
+    moved = 0
+    if not d.is_dir():
+        return moved
+    for p in sorted(d.glob("T-*.json")):
+        try:
+            t = from_json(json.loads(p.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            continue
+        if t.status == NEEDS_HUMAN:
+            save(t, state_dir)
+            moved += 1
+    return moved
+
+
+# Refusal ledger (issue #128): proven false positives are remembered so they are not re-dispatched.
 def refusals_path(state_dir: Path | None = None) -> Path:
     return tickets_dir(state_dir) / "refusals.json"
 

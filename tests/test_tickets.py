@@ -11,6 +11,7 @@ are security properties, so both are tested from the attacker's side:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -220,6 +221,63 @@ def test_a_resolved_ticket_is_archived_not_deleted(sdir: Path) -> None:
     assert (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
     assert _load_ok(t.id, sdir).status == tickets.RESOLVED
     assert tickets.select_due(tickets.load_all(sdir), now=NOW, per_fire=2, budget_left=20, inflight=0) == []
+
+
+def _archived_needs_human(sdir: Path) -> tickets.Ticket:
+    """Seed a needs_human ticket the way the OLD save() left it: in closed/ (the pre-fix archive)."""
+    t = _open_ok(sdir)
+    tickets.mark_needs_human(t, now=NOW, why="out of reach here")
+    closed = tickets.closed_dir(sdir)
+    closed.mkdir(parents=True, exist_ok=True)
+    (closed / f"{t.id}.json").write_text(json.dumps(t.to_json()), encoding="utf-8")
+    (tickets.tickets_dir(sdir) / f"{t.id}.json").unlink(missing_ok=True)
+    return t
+
+
+def test_a_needs_human_ticket_stays_on_the_LIVE_board(sdir: Path) -> None:
+    """TRDD-1AD5FF36: needs_human is terminal for the scheduler but archiving it hid it from load_all(),
+    so the NEEDS A HUMAN reminder could never fire."""
+    t = _open_ok(sdir)
+    tickets.mark_needs_human(t, now=NOW, why="out of reach here")
+    tickets.save(t, sdir)
+    assert (tickets.tickets_dir(sdir) / f"{t.id}.json").exists()
+    assert not (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
+    assert [x.id for x in tickets.load_all(sdir)] == [t.id]
+
+
+def test_migrate_moves_a_closed_needs_human_ticket_back_and_is_idempotent(sdir: Path) -> None:
+    """Tickets archived by the old save() are rescued once; a second run finds nothing."""
+    t = _archived_needs_human(sdir)
+    assert tickets.migrate_needs_human(sdir) == 1
+    assert (tickets.tickets_dir(sdir) / f"{t.id}.json").exists()
+    assert not (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
+    assert tickets.migrate_needs_human(sdir) == 0
+
+
+def test_migrate_skips_corrupt_files_and_leaves_other_closed_tickets_alone(sdir: Path) -> None:
+    """Only needs_human moves; resolved/invalid stay archived and a corrupt file is not fatal."""
+    resolved = _open_ok(sdir, dedupe_key="a")
+    resolved.status = tickets.RESOLVED
+    tickets.save(resolved, sdir)
+    invalid = _open_ok(sdir, dedupe_key="b")
+    tickets.mark_invalid(invalid, now=NOW, why="disproved")
+    tickets.save(invalid, sdir)
+    (tickets.closed_dir(sdir) / "T-corrupt.json").write_text("{not json", encoding="utf-8")
+    assert tickets.migrate_needs_human(sdir) == 0
+    assert (tickets.closed_dir(sdir) / f"{resolved.id}.json").exists()
+    assert (tickets.closed_dir(sdir) / f"{invalid.id}.json").exists()
+    assert (tickets.closed_dir(sdir) / "T-corrupt.json").exists()
+
+
+def test_a_live_needs_human_ticket_is_never_dispatched_or_reclaimed(sdir: Path) -> None:
+    """Guard: keeping needs_human on the live board must not put it back in the dispatch pool."""
+    t = _open_ok(sdir)
+    tickets.mark_needs_human(t, now=NOW, why="out of reach here")
+    tickets.save(t, sdir)
+    live = tickets.load_all(sdir)
+    assert tickets.select_due(live, now=NOW + 99999, per_fire=2, budget_left=20, inflight=0) == []
+    assert tickets.reclaim_stale(live, now=NOW + 99999, stale_s=1) == []
+    assert live[0].status == tickets.NEEDS_HUMAN
 
 
 # --------------------------------------------------------------------------- #

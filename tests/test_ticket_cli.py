@@ -222,11 +222,12 @@ def test_close_failed_retries_and_then_ASKS_FOR_A_HUMAN(project: Path) -> None:
 
 
 def test_a_retried_ticket_lives_in_exactly_ONE_place(project: Path) -> None:
-    """`retry` un-archives a `needs_human` ticket. The move must be symmetric with the archiving one, or
+    """`retry` re-opens a closed (archived) ticket. The move must be symmetric with the archiving one, or
     the ticket exists in the live queue AND the archive at once — and `list --all` then shows a ticket
     that is actively in flight as also being closed. An archive that contradicts the board is worse than
-    no archive: it is a record that lies."""
-    t = _ticket(status=tickets.NEEDS_HUMAN)
+    no archive: it is a record that lies. (A `needs_human` ticket is already live, so it is archived
+    via `resolved` first to exercise the real cross-directory move.)"""
+    t = _ticket(status=tickets.RESOLVED)
 
     rc, _ = _cli(project, "retry", t.id)
     assert rc == 0

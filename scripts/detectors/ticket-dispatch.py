@@ -113,6 +113,10 @@ def main() -> int:
     # `not live` would make the janitor go quiet about every finding it is forbidden to fix itself.
     due: list[tickets.Ticket] = []
     with gs.ticket_dispatch_lock() as held:
+        if held:
+            # TRDD-1AD5FF36: rescue needs_human tickets the old save() archived into closed/, where
+            # load_all() cannot see them. Idempotent; under the lock so two sessions cannot race the move.
+            tickets.migrate_needs_human()
         live = tickets.load_all() if held else []
         if live:
             # Reclaim tickets whose agent DIED (the weekly rate cap did exactly this to a background
@@ -145,9 +149,18 @@ def main() -> int:
             lines.append(f"{t.id} · {t.agent}")
 
     # A ticket the janitor could not fix must never go quiet. Surface it every fire, with the command.
+    # TRDD-1AD5FF36: this list was always empty while save() archived needs_human tickets out of
+    # load_all(); now they stay live. Up to _REMIND_CAP get a line each (with their age); more than
+    # that collapse into ONE summary line so a pile of stuck tickets cannot flood every session.
     stuck = [t for t in tickets.load_all() if t.status == tickets.NEEDS_HUMAN]
-    for t in stuck:
-        lines.append(f"[ticket] {t.id} NEEDS A HUMAN after {t.attempts} attempts: {t.title[:80]} → inspect: /janitor-support-tickets show {t.id} · retry: /janitor-support-tickets retry {t.id}")
+    if len(stuck) <= _REMIND_CAP:
+        for t in stuck:
+            age_days = max(0, now - t.updated_at) // 86400
+            lines.append(f"[ticket] {t.id} NEEDS A HUMAN after {t.attempts} attempts ({age_days}d old): {t.title[:80]} → inspect: /janitor-support-tickets show {t.id} · retry: /janitor-support-tickets retry {t.id}")
+    else:
+        shown = ", ".join(t.id for t in stuck[:5])
+        more = f" +{len(stuck) - 5} more" if len(stuck) > 5 else ""
+        lines.append(f"[ticket] {len(stuck)} tickets NEED A HUMAN ({shown}{more}) → /janitor-support-tickets list")
 
     lines.extend(_proposal_reminder(now))
 

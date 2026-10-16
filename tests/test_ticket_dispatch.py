@@ -12,8 +12,10 @@ carefully-mocked shape, not the thing that runs on the heartbeat.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -106,6 +108,67 @@ def test_the_reminder_is_capped_and_counts_the_rest(project: Path) -> None:
 
     assert out.count("/janitor-support-open-ticket") == 3
     assert "…and 2 more" in out
+
+
+
+def _needs_human(title: str, *, age_days: int = 0, closed: bool = False) -> tickets.Ticket:
+    """Seed a needs_human ticket last touched `age_days` ago; `closed` plants it where the OLD save()
+    archived it (closed/), which is what migrate_needs_human must rescue."""
+    t, _ = tickets.open_ticket(kind="index-corruption", title=title, now=int(time.time()))
+    assert t is not None
+    tickets.mark_needs_human(t, now=int(time.time()) - age_days * 86400, why="out of reach here")
+    tickets.save(t)
+    if closed:
+        closed_dir = tickets.closed_dir()
+        closed_dir.mkdir(parents=True, exist_ok=True)
+        (closed_dir / f"{t.id}.json").write_text(json.dumps(t.to_json()), encoding="utf-8")
+        (tickets.tickets_dir() / f"{t.id}.json").unlink()
+    return t
+
+
+def test_a_needs_human_ticket_is_reminded_with_its_age(project: Path) -> None:
+    """TRDD-1AD5FF36: the reminder read only the live dir while save() archived needs_human, so it
+    could never fire. A ticket the janitor gave up on must be named on every fire, with how long it waited."""
+    t = _needs_human("a memgrep index fails validation", age_days=3)
+
+    out = _run(project)
+
+    assert f"[ticket] {t.id} NEEDS A HUMAN" in out
+    assert "3d old" in out
+
+
+def test_a_needs_human_ticket_archived_by_the_old_save_is_migrated_and_reminded(project: Path) -> None:
+    """Tickets already stranded in closed/ must reappear on the next fire, not stay hidden forever."""
+    t = _needs_human("a memgrep index fails validation", closed=True)
+    assert tickets.load_all() == []
+
+    out = _run(project)
+
+    assert f"[ticket] {t.id} NEEDS A HUMAN" in out
+    assert (tickets.tickets_dir() / f"{t.id}.json").exists()
+
+
+def test_closing_a_needs_human_ticket_ends_its_reminder(project: Path) -> None:
+    """The reminder must stop when a human resolves the ticket, or it nags about finished work."""
+    t = _needs_human("a memgrep index fails validation")
+    assert f"{t.id} NEEDS A HUMAN" in _run(project)
+
+    t.status = tickets.RESOLVED
+    tickets.save(t)
+
+    assert f"{t.id} NEEDS A HUMAN" not in _run(project)
+
+
+def test_many_needs_human_tickets_collapse_into_ONE_summary_line(project: Path) -> None:
+    """Bounded output: four stuck tickets must not put four lines into every session every fire."""
+    ids = [_needs_human(f"stuck finding number {i}").id for i in range(4)]
+
+    out = _run(project)
+
+    assert "4 tickets NEED A HUMAN" in out
+    assert out.count("NEEDS A HUMAN") == 0
+    assert all(i in out for i in ids)
+    assert "/janitor-support-tickets list" in out
 
 
 def test_an_APPROVED_finding_stops_being_reminded_and_starts_being_DISPATCHED(project: Path) -> None:
