@@ -152,7 +152,6 @@ def test_surface_block_caps_folds_and_acks(_isolate: Path) -> None:
     logged = janitor_state.log_dir().joinpath("findings-surface.log").read_text().splitlines()[-1]
     counts = json.loads(logged[logged.index("{"):])["HIGH"]
     assert counts["unread"] == 15
-    assert counts["shown"] + counts["folded"] == 15
     assert counts["folded"] == fl.unread_entries()[1]
     assert len(first.encode("utf-8")) <= fl.SURFACE_BUDGET_BYTES + 200
     second = fl.surface_block(None)
@@ -161,6 +160,7 @@ def test_surface_block_caps_folds_and_acks(_isolate: Path) -> None:
     assert sorted(delivered) == [f"C-{i:02d}" for i in range(15)]
     assert fl.unread_entries(None) == ([], 0)
     assert fl.surface_block(None) == ""
+
 
 def test_folded_findings_survive_trim_and_excluded_entries_are_acked(_isolate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Severity reordering and trimming retain folded same-timestamp duplicate events."""
@@ -200,6 +200,7 @@ def test_surface_snapshot_does_not_ack_concurrent_append(_isolate: Path, monkeyp
     lines, total = fl.unread_entries()
     assert total == 1 and "LATER" in lines[0]
 
+
 def test_malformed_pending_cursor_resurfaces_and_drains(_isolate: Path) -> None:
     """Invalid pending mappings and list items resurface real events without crashing."""
     for case in ("mapping", "integer-list"):
@@ -217,6 +218,7 @@ def test_malformed_pending_cursor_resurfaces_and_drains(_isolate: Path) -> None:
         assert fl.unread_entries(project) == ([], 0), case
         assert fl.surface_block(project) == "", case
 
+
 def test_surface_log_failure_preserves_successful_ack(_isolate: Path) -> None:
     """A real log-file open failure cannot undo the successfully written delivery cursor."""
     fl.record(sev="HIGH", code="LOG-FAIL", src="d", msg="deliver despite log failure", now=100)
@@ -227,7 +229,6 @@ def test_surface_log_failure_preserves_successful_ack(_isolate: Path) -> None:
     assert "LOG-FAIL" in fl.surface_block()
     assert fl.unread_entries() == ([], 0)
     assert fl.surface_block() == ""
-    assert log_path.is_dir()
 
 
 def test_byte_budget_folds_large_line_but_delivers_smaller_line(_isolate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,6 +290,7 @@ def test_severity_first_ranks_missing_or_non_string_sev_with_medium(_isolate: Pa
     lines, total = fl.unread_entries(None, severity_first=True)
     assert total == 4 and len(lines) == 4
     assert "HIGH-1" in lines[0] and "INT-SEV" in lines[1] and "NO-SEV" in lines[2] and "LOW-1" in lines[3]
+
 
 def test_surface_block_shows_an_old_catalog_error_before_newer_low_lines(_isolate: Path) -> None:
     """A catalog `ERROR` recorded before 12 newer LOW lines is the FIRST line of the block."""

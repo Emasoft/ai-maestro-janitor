@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import tomllib
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -419,15 +420,6 @@ def _read_raw(project_dir: str | os.PathLike[str] | None = None) -> tuple[list[d
     return entries, len(raw)
 
 
-def _read_cursor(project_dir: str | os.PathLike[str] | None = None) -> tuple[int, int]:
-    """(consumed byte offset, newest surfaced ts). (0, 0) when never advanced."""
-    try:
-        data = json.loads(_cursor_path(project_dir).read_text(encoding="utf-8"))
-        return int(data.get("offset", 0)), int(data.get("ts", 0))
-    except Exception:  # noqa: BLE001 -- absent/corrupt cursor = nothing surfaced yet
-        return 0, 0
-
-
 _SEV_RANK = {
     "CRITICAL": 0,
     "HIGH": 1, "ERROR": 1, "MAJOR": 1,
@@ -443,10 +435,9 @@ def _sev_rank(entry: dict) -> int:
     sev = entry.get("sev")
     return _SEV_RANK.get(sev.strip().upper(), 2) if isinstance(sev, str) else 2
 
+
 def _unread_snapshot(project_dir: str | os.PathLike[str] | None) -> tuple[list[dict], int, int]:
     """Read one ledger snapshot, retaining folded event identities across cursor advances."""
-    from collections import Counter
-
     try:
         raw = ledger_path(project_dir).read_bytes()
     except OSError:
@@ -495,7 +486,24 @@ def unread_entries(
     exclude_codes: frozenset[str] = frozenset(),
     severity_first: bool = False,
 ) -> tuple[list[str], int]:
-    """Render unread events without acknowledging them; folded events stay unread."""
+    """(rendered unread lines, capped by count AND byte budget; total unread count).
+    Order: NEWEST first by default; with `severity_first`, by severity rank (CRITICAL,
+    HIGH/ERROR/MAJOR, MEDIUM/WARN/WARNING and unknown, LOW/MINOR, INFO) and NEWEST first
+    within one severity. Read-only — `advance_cursor()` is the separate ack, so a
+    surfacing path that crashes mid-print re-surfaces instead of losing entries.
+
+    Cursor semantics: the primary mark is the consumed BYTE OFFSET (exact). When the
+    structural trim rewrote the file smaller than the stored offset, the offset no
+    longer addresses the same bytes — fall back to the stored newest-surfaced TS
+    (entries with ts > cursor ts are unread), so a trim can neither re-inject the
+    whole history nor lose the tail. Folded event identities (content hashes) kept in
+    the cursor's "pending" list stay unread regardless of offset.
+
+    `exclude_codes` drops entries whose `code` is a member BEFORE counting/capping — the
+    janitor#230 owner directive: those codes are still recorded and still ack'd by
+    `surface_block()`, they are simply invisible to this read (callers that need the
+    full picture, e.g. `/janitor-findings`, pass the default empty set).
+    """
     unread, _size, _stamp = _unread_snapshot(project_dir)
     unread = [e for e in unread if e.get("code") not in exclude_codes]
     ordered = list(reversed(unread))
@@ -524,9 +532,20 @@ def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
 
 
 def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
-    """Surface a bounded severity-first snapshot; acknowledge only shown or excluded events."""
+    """The SessionStart injection: capped severity-first unread lines + ONE fold line.
+    Empty string when nothing is unread (silence — no empty-inbox chatter).
+    ≤ ~1 KB by construction (the owner's context-budget constraint).
+
+    `NEVER_SURFACE_CODES` (janitor#230 — account-window telemetry must never be PUSHED
+    into an agent's context) is excluded from what gets INJECTED here but still acked
+    like a shown entry, so it never piles up into a permanent backlog. Only shown and
+    excluded events are acked; folded ones are kept in the cursor's "pending" list.
+    `/janitor-findings` reads `unread_entries()` with no `exclude_codes`, so the data is
+    never lost, only unpushed.
+    """
     unread, size, stamp = _unread_snapshot(project_dir)
     ordered = [e for e in reversed(unread) if e.get("code") not in NEVER_SURFACE_CODES]
+    # severity_first: a HIGH must not fold behind newer LOW lines (TRDD-6ESS2MGE).
     ordered.sort(key=_sev_rank)
     lines: list[str] = []
     pending: list[str] = []
