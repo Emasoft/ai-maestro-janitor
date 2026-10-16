@@ -4,7 +4,7 @@ title: wave-2 review CUREs — fail-closed inventory read repair-path policy REU
 column: testing
 status: tasked
 created: 2026-09-29T01:58:50+0200
-updated: 2026-10-10T03:40:32+0200
+updated: 2026-10-16T23:51:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,6 +34,7 @@ Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573
 2026-09-29 — review-of-record verdict HOLDS; sequenced to dev before any step-6 dispatch.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Field event not yet seen: a real update-mem-topic --replace-all repair of a control-byte page exiting 0 and passing memgrep validate. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: memgrep update-mem-topic writes no event log line for a repair; the event is a manual command run whose exit code and memgrep validate result are the only evidence.
+2026-10-16 LIVE PASS (scratch run, installed memgrep 0.2.0 5497043 2026-10-07): memgrep update-mem-topic --page <scratch page with two 0x08 bytes in an atom body> --old-file old.txt --new-file new.txt --replace-all exited 0 (edited, 2 replacements, 0 control bytes left); memgrep validate <memory root> exit 0 OK, memgrep lint <page> exit 0 with 0 findings (pre-repair lint exit 1, control-byte-in-page). Unreadable page (chmod 000) refuses exit 1 Permission denied (via the verb's own read, not the retryable inventory message). Evidence: /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/docs_dev/20261016_235052+0200-JFIOO9XO.md
 
 ## Review addenda
 
