@@ -188,6 +188,17 @@ def record_intent_from_prompt(prompt: str, *, state_dir: Path | None = None, now
     # a description of work, never an authorization.
     if prompt.lstrip().startswith("/goal"):
         return []
+    # TRDD-0TSG80CL: a peer agent's message is untrusted data, not the owner's words, so it must
+    # never mint a token that disarm_guard, global_control_cli or terminal_trigger's
+    # injection_allowed read as "a human authorized this". Matched ANYWHERE in the prompt, not in
+    # the first few lines like the presence filter, because here over-blocking costs one lost
+    # token while under-blocking could authorize an irreversible action. Accepted costs: an
+    # owner's prompt containing a pasted or batched peer message mints nothing, and an owner
+    # relaying "disarm" through another session doesn't authorize here. This is hardening: no
+    # historical peer message would have minted a token (all 19 verb matches were negated), and
+    # UserPromptSubmit may not even fire on peer records.
+    if "<cross-session-message" in prompt:
+        return []
     # One negation anywhere disqualifies the WHOLE prompt. Coarse on purpose: a prompt that both
     # forbids and requests the same verb is ambiguous, and ambiguity must not become consent.
     if _NEGATION_RE.search(prompt):
