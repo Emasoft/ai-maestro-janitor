@@ -2,7 +2,7 @@
 name: janitor-skills-and-agents-roster
 description: "why did janitor-pause disappear / arm disarm is the only switch / what skills does the janitor ship / janitor-compact-context soft vs hard / janitor-reload-skills vs janitor-reload-plugins / what are the two janitor agents / janitor-memory-subconscious-agent vs janitor-security-agent / where do janitor tests and TRDDs live / why was maintenance mode removed / can I pause the janitor temporarily / a host had keep-going-off set for 14 days silently / why does a global stop delete the cron instead of silencing it / what does janitor-write-handoff do / how do I reload just non-plugin skills / why were the issues-watch on off skills deleted / how many janitor agents are there and what model do they use / what happened to janitor-maintenance-mode"
 ocd: 2026-08-02
-lmd: 2026-10-10
+lmd: 2026-10-16
 metadata:
   node_type: memory
   type: project
@@ -14,7 +14,7 @@ publish-globally: false
 # janitor-skills-and-agents-roster
 
 
-^ATOM-NH7H-YPR8 [desc: "Agents(2), Tests, and Design docs sections verbatim: the two single-curator agents (memory + security), the pytest test suite conventions, and where TRDDs live", keywords: the_two_agents_janitor-memory-subconscious-agent_janitor-security-agent single_curator_agent_per_domain tests_directory_pytest_per_pattern_lib design_docs_TRDDs_location how_many_janitor_agents_are_there memory_agent_uses_sonnet_security_agent_uses_opus security_agent_hint_is_visible_not_a_silent_marker one_agent_per_domain_never_one-agent-per-task where_do_janitor_tests_actually_live real_no_mocks_isolate_global_state_via_env_vars where_do_janitor_tests_and_trdds_live memory_agent_cost_decision_2026-06-30 both_agents_run_at_effort_high, type: project, ocd: 2026-08-02, lmd: 2026-10-10]
+^ATOM-NH7H-YPR8 [desc: "Agents section: the two single-curator agents (memory + security), their model and effort, and how the security-agent hint works", keywords: the_two_agents_janitor-memory-subconscious-agent_janitor-security-agent single_curator_agent_per_domain how_many_janitor_agents_are_there memory_agent_uses_sonnet_security_agent_uses_opus security_agent_hint_is_visible_not_a_silent_marker one_agent_per_domain_never_one-agent-per-task memory_agent_cost_decision_2026-06-30 both_agents_run_at_effort_high chore_agents_model_haiku_effort_high security_agent_hint_opt_out_env_var what_model_do_the_janitor_agents_use, type: project, ocd: 2026-08-02, lmd: 2026-10-16]
 **Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
 many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one
 line + a report. `janitor-memory-subconscious-agent` (Wikimem editorial: consolidate/
@@ -23,14 +23,17 @@ split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` v
 skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via
 `security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since
 security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`).
-Since 2026-10-10 (owner directive, TRDD-Y2NM51KE) every chore agent in `agents/` (memory, security, and the repair agent this paragraph does not describe) is `model: haiku[1m]`, `effort: high`; the heartbeat rule tells the dispatching session to pass a per-chore effort for memory chores, never above high (not established: that the Agent tool honours an effort passed at spawn for a plugin agent). Read the agent frontmatter for the current values.
+Since 2026-10-10 (owner directive, TRDD-Y2NM51KE) every chore agent in `agents/` (memory, security, and the repair agent this paragraph does not describe) is `model: haiku[1m]`, `effort: high`; the heartbeat rule tells the dispatching session to pass a per-chore effort for memory chores, never above high (not established: that the Agent tool honours an effort passed at spawn for a plugin agent). Read the agent frontmatter for the current values. [^1]
+
+
+^ATOM-8BNU-XLF5 [desc: "Tests and Design docs sections: pytest suite conventions (real, no mocks, isolated global state) and where TRDDs live under design/tasks", keywords: tests_directory_pytest_per_pattern_lib design_docs_TRDDs_location where_do_janitor_tests_actually_live real_no_mocks_isolate_global_state_via_env_vars where_do_janitor_tests_and_trdds_live where_do_TRDDs_live_design_tasks test_marketplace_refresh_daemon_stale_removed JANITOR_GLOBAL_STATE_DIR_test_isolation how_do_I_isolate_global_state_in_janitor_tests one_test_file_per_pattern_lib trdd_rules_trdd-design-tasks_md, type: project, ocd: 2026-10-16, lmd: 2026-10-16]
 
 **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
 (`test_marketplace_lock`, `test_rules_installer`, …). (`test_marketplace_refresh_daemon_stale`
 was removed with the marketplace-refresh chore, 2026-09-17, TRDD-5A4SGMD6.)
 Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`.
 
-**Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`). [^1]
+**Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
 
 ^ATOM-1B0M-ZBXT [desc:"Skills part 1: janitor-arm/disarm (local cron true-stop), janitor-global-disarm/arm (machine-wide) — arm/disarm is the only switch", keywords: arm_disarm_only_switch janitor-global-disarm_janitor-global-arm kill_switch_makes_daemon_exit can_I_pause_the_janitor_temporarily why_was_maintenance_mode_removed pause_and_maintenance_mode_retired_in_v0.67.0 indistinguishable_from_a_healthy_fleet_from_outside stale_flags_are_inert_and_swept_by_dispatch retired_cli_verbs_are_rejected_never_no-ops what_skills_does_the_janitor_ship janitor-global-disarm_stops_the_daemon_machine-wide arm_disarm_is_the_only_switch_owner_directive, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
