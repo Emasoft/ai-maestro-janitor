@@ -643,10 +643,12 @@ def _new_session_transcript(before: dict) -> tuple[Path | None, str]:
     before-phase `ts` (the snapshot taken just before /clear, `gather_before`'s `now`). Chosen by
     START time, never by mtime. Exactly one must qualify.
 
-    AMBIGUOUS (None) when a candidate's start cannot be placed (no aware timestamp) yet its mtime
-    is after the clear: it may be the real successor, and accepting a lone stamped peer beside it
-    would measure the wrong session and could PASS falsely. mtime is only this ambiguity hint,
-    never a selector; stamp-less files last modified before the clear are ignored.
+    AMBIGUOUS (None) when the real successor may be a candidate we cannot accept: one whose start
+    cannot be placed (no aware timestamp) yet whose mtime is after the clear, or one whose first
+    record is AFTER the window (a late successor). Accepting a lone in-window peer beside either
+    would measure the wrong session and could PASS falsely. mtime is only the ambiguity hint for
+    stamp-less files, never a selector; stamp-less files last modified before the clear, and
+    candidates whose first record is at or before the clear, are ignored.
     """
     import memory_scopes  # noqa: PLC0415 - local sibling lib
 
@@ -657,6 +659,7 @@ def _new_session_transcript(before: dict) -> tuple[Path | None, str]:
     slug = memory_scopes.project_slug(str(_project_root()))
     accepted: dict[Path, Path] = {}
     unplaceable: dict[Path, Path] = {}
+    late: dict[Path, Path] = {}
     for root in _projects_roots():
         for candidate in (root / slug).glob("*.jsonl"):
             if isinstance(sid8, str) and sid8 and candidate.stem.startswith(sid8):
@@ -667,11 +670,16 @@ def _new_session_transcript(before: dict) -> tuple[Path | None, str]:
                     unplaceable[candidate.resolve()] = candidate
             elif clear_ts < started.timestamp() <= clear_ts + _NEW_SESSION_WINDOW_S:
                 accepted[candidate.resolve()] = candidate
+            elif started.timestamp() > clear_ts + _NEW_SESSION_WINDOW_S:
+                # Why: the clear chain may have waited before typing /clear, so the real successor can
+                # start after the window; with one in-window peer it would otherwise be a false PASS.
+                late[candidate.resolve()] = candidate
     window = f"{_NEW_SESSION_WINDOW_S // 60}-minute window after the clear"
-    if unplaceable:
+    if unplaceable or late:
         return None, (
             f"{len(unplaceable)} transcript(s) with no placeable first-record time were modified "
-            f"after the clear, so the successor is ambiguous ({len(accepted)} started within the {window})"
+            f"after the clear and {len(late)} started after the {window}, so the successor is ambiguous "
+            f"({len(accepted)} started within the {window})"
         )
     if len(accepted) != 1:
         return None, f"{len(accepted)} transcripts started within the {window} (exactly 1 required)"

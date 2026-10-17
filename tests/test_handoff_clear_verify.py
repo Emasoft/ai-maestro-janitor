@@ -869,9 +869,23 @@ def test_an_unplaceable_candidate_modified_after_the_clear_makes_the_check_SKIP(
 
 def test_a_candidate_starting_outside_the_15_minute_window_is_not_accepted(tmp_path: Path, monkeypatch) -> None:
     tdir = _clear_env(tmp_path, monkeypatch)
-    _write_transcript(tdir / "aaaaaaaa-late.jsonl", [_assistant(_iso(16 * 60), 170_000)])
+    _write_transcript(tdir / "aaaaaaaa-late.jsonl", [_assistant(_iso(20 * 60), 170_000)])
     after = _import().gather_after(dict(_BEFORE), int(time.time()))
     assert after["context_tokens"] is None
-    assert "0 transcripts started within the 15-minute window" in after["context_source"]
-    _write_transcript(tdir / "bbbbbbbb-ontime.jsonl", [_assistant(_iso(14 * 60), 171_000)])
+    assert "ambiguous" in after["context_source"] and "1 started after the 15-minute window" in after["context_source"]
+
+def test_a_late_successor_beside_an_in_window_peer_makes_the_check_SKIP(tmp_path: Path, monkeypatch) -> None:
+    """The real successor started 20 min after the clear; the lone in-window peer must not be accepted."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "aaaaaaaa-successor.jsonl", [_assistant(_iso(20 * 60), 170_000)])
+    _write_transcript(tdir / "bbbbbbbb-peer.jsonl", [_assistant(_iso(2 * 60), 150_000)])
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] is None
+    assert "1 started after the 15-minute window" in after["context_source"]
+    assert "1 started within the 15-minute window" in after["context_source"]
+
+def test_a_candidate_starting_before_the_clear_beside_an_in_window_one_is_ignored(tmp_path: Path, monkeypatch) -> None:
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "aaaaaaaa-older.jsonl", [_assistant(_iso(-600), 400_000)])
+    _write_transcript(tdir / "bbbbbbbb-new.jsonl", [_assistant(_iso(14 * 60), 171_000)])
     assert _import().gather_after(dict(_BEFORE), int(time.time()))["context_tokens"] == 171_000
