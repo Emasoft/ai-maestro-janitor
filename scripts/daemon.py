@@ -180,6 +180,23 @@ _DECLINE_REMEDY = {
     ),
 }
 
+# TRDD-366Y1OUH — what the crash-loop give-up tells the owner, per diagnosis. DESCRIPTIVE only
+# (see the why-comment at the give-up site); every formatted result must stay <= 120 chars
+# (findings_ledger.MAX_MSG_CHARS), pinned by tests.
+_GIVE_UP_TEXT = {
+    "cron_dead": "re-arm was typed {n} times and the session never resumed; a human should look at that pane",
+    "version_mismatch": (
+        "reload was typed {n} times and the session still runs the old plugin version; "
+        "it needs a restart"
+    ),
+    "retry_wedged": "{n} ESC nudges did not clear the API retry wait; a human should look at that pane",
+    "dead_dry_run": (
+        "automatic relaunch is off (dry run): nothing was relaunched; "
+        "the claude process in that pane is gone"
+    ),
+    "dead": "relaunch was attempted {n} times and the session did not come back; a human should look at that pane",
+}
+_GIVE_UP_UNKNOWN = "recovery gave up on {diagnosis} after {n} attempts; a human should look at that pane"
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
 # marketplace-refresh chore retired 2026-09-17: it ran `claude plugin
@@ -1715,6 +1732,37 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 # permanently-looping instance records the give-up exactly once
                 # rather than appending every beat forever.
                 _audit(inst, "declined_crash_loop", None, None)
+                if inst.diagnosis != "frozen":
+                    # TRDD-366Y1OUH: only `frozen` had a finding; 283 of 299 measured give-ups
+                    # were cron_dead and reached no surface the owner reads. The text is
+                    # DESCRIPTIVE on purpose: the ledger is replayed into the next session,
+                    # often an autonomous agent, and an imperative here would be executed
+                    # (memory: status-lines-to-autonomous-readers-cause-escalation). It never
+                    # repeats the failed action and never names /reload-plugins (re-bills the
+                    # whole prompt cache). Both writes sit under the `alerted` gate: once per
+                    # episode.
+                    if inst.diagnosis == "dead" and not fleet_restart.hard_restart_enabled():
+                        _give_up_key = "dead_dry_run"
+                    else:
+                        _give_up_key = inst.diagnosis
+                    _give_up_msg = _GIVE_UP_TEXT.get(_give_up_key, _GIVE_UP_UNKNOWN).format(
+                        n=attempts, diagnosis=inst.diagnosis
+                    )
+                    try:
+                        findings_ledger.record(
+                            sev="HIGH", code="FLEET-GIVE-UP", src="daemon",
+                            msg=_give_up_msg, project_dir=inst.project_root,
+                        )
+                    except Exception:  # noqa: BLE001 -- a finding write must never crash the beat
+                        pass
+                    try:
+                        notify.push(
+                            sev="HIGH", code="FLEET-GIVE-UP",
+                            project=os.path.basename(inst.project_root),
+                            summary=_give_up_msg, hint="open that project's pane",
+                        )
+                    except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
+                        pass
                 # F1 derived 1 (TRDD-L32WC0H7): a `frozen` give-up gets a NAMED, human-facing
                 # finding — the budget is spent on esc_nudge alone (fleet_recovery caps
                 # `frozen` there unconditionally) and the stall's cause is UNSETTLED, so the

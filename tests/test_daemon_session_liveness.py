@@ -16,9 +16,12 @@ crash-loop give-up, healthy-resets-state) runs for real against an isolated
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
@@ -847,3 +850,108 @@ def test_a_rearm_that_really_fired_four_times_still_reaches_crash_loop(
     daemon.task_session_liveness()                       # budget spent: gate says crash_loop
     assert len(fired) == daemon.fr.MAX_ATTEMPTS          # no fifth keystroke
     assert "GIVING UP" in _log(tmp_path)
+
+
+def _spent_budget(monkeypatch, tmp_path: Path, diagnosis: str, root: str, *, pid: int = 1):
+    """Seed a spent attempt budget (matching identity, elapsed cooldown) and capture every
+    finding + push the give-up produces. Returns (fleet, state_file, findings, pushes)."""
+    inst = dataclasses.replace(_inst(diagnosis, root, {"tmux_pane": "%9"}), pid=pid)
+    fleet = [inst]
+    _setup(monkeypatch, tmp_path, fleet)
+    findings: list = []
+    pushes: list = []
+    rec = tmp_path / "recovery"
+    rec.mkdir(parents=True, exist_ok=True)
+    def _record(**kw) -> None:
+        findings.append(kw)
+
+    def _push(**kw) -> str:
+        pushes.append(kw)
+        return "pushed"
+
+    monkeypatch.setattr(daemon.findings_ledger, "record", _record)
+    monkeypatch.setattr(daemon.notify, "push", _push)
+    sf = daemon._recovery_state_path(rec, root)
+    sf.write_text(
+        json.dumps({
+            "attempts": daemon.fr.MAX_ATTEMPTS, "last_ts": 1, "identity": f"{pid}:{inst.tty or ''}",
+        }),
+        encoding="utf-8",
+    )
+    return fleet, sf, findings, pushes
+
+
+def _give_ups(items: list) -> list:
+    return [i for i in items if i.get("code") == "FLEET-GIVE-UP"]
+
+
+@pytest.mark.parametrize(
+    ("diagnosis", "phrase"),
+    [
+        ("cron_dead", "re-arm was typed"),
+        ("version_mismatch", "reload was typed"),
+        ("retry_wedged", "ESC nudges did not clear"),
+    ],
+)
+def test_give_up_on_a_non_frozen_diagnosis_reaches_the_ledger_and_the_owner_once(
+    tmp_path, monkeypatch, diagnosis, phrase
+) -> None:
+    """TRDD-366Y1OUH: a crash-loop give-up on any diagnosis records ONE descriptive
+    FLEET-GIVE-UP finding and ONE owner push per episode, never an imperative, never over 120."""
+    _fleet, _sf, findings, pushes = _spent_budget(monkeypatch, tmp_path, diagnosis, "/p/proj-g")
+    for _ in range(3):
+        daemon.task_session_liveness()
+    ledger = _give_ups(findings)
+    sent = _give_ups(pushes)
+    assert len(ledger) == 1 and len(sent) == 1
+    assert phrase in ledger[0]["msg"]
+    assert sent[0]["summary"] == ledger[0]["msg"]
+    assert ledger[0]["sev"] == "HIGH" and sent[0]["sev"] == "HIGH"
+    assert sent[0]["project"] == "proj-g"
+    for text in (ledger[0]["msg"], sent[0]["summary"], sent[0]["hint"]):
+        assert "/reload-plugins" not in text and "run /" not in text
+    assert len(ledger[0]["msg"]) <= 120
+
+
+def test_give_up_on_a_dead_session_says_nothing_was_relaunched_when_relaunch_is_off(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-366Y1OUH: the hard-restart rung is DEFAULT-OFF (dry run), so the give-up for a
+    `dead` pane must say nothing was relaunched instead of claiming an attempt happened."""
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", raising=False)
+    _fleet, _sf, findings, pushes = _spent_budget(monkeypatch, tmp_path, "dead", "/p/proj-d")
+    daemon.task_session_liveness()
+    ledger = _give_ups(findings)
+    assert len(ledger) == 1 and len(_give_ups(pushes)) == 1
+    assert "nothing was relaunched" in ledger[0]["msg"]
+    assert len(ledger[0]["msg"]) <= 120
+
+
+def test_a_new_session_identity_gets_its_own_give_up_entry(tmp_path, monkeypatch) -> None:
+    """TRDD-366Y1OUH: the once-gate is per episode — a restarted session (new pid) that spends
+    its own budget produces a second FLEET-GIVE-UP entry, not silence."""
+    fleet, sf, findings, pushes = _spent_budget(monkeypatch, tmp_path, "cron_dead", "/p/proj-n")
+    daemon.task_session_liveness()
+    assert len(_give_ups(findings)) == 1
+    fleet[0] = dataclasses.replace(fleet[0], pid=2)      # the session restarted
+    daemon.task_session_liveness()                       # identity changed → budget reset
+    st = json.loads(sf.read_text(encoding="utf-8"))
+    # Prove the reset itself, so the re-alert below cannot come from a rewritten file alone.
+    assert st["identity"].startswith("2:"), st
+    assert "alerted" not in st, st
+    assert st.get("attempts", 0) <= 1, st
+    assert len(_give_ups(findings)) == 1
+    st.update({"attempts": daemon.fr.MAX_ATTEMPTS, "last_ts": 1})  # keep every other key
+    sf.write_text(json.dumps(st), encoding="utf-8")
+    daemon.task_session_liveness()
+    assert len(_give_ups(findings)) == 2 and len(_give_ups(pushes)) == 2
+
+
+def test_frozen_give_up_keeps_its_own_finding_and_adds_no_generic_one(tmp_path, monkeypatch) -> None:
+    """TRDD-366Y1OUH guard: `frozen` keeps exactly one HEARTBEAT-FIRES-STALL and gains no
+    FLEET-GIVE-UP (TRDD-L32WC0H7)."""
+    _fleet, _sf, findings, pushes = _spent_budget(monkeypatch, tmp_path, "frozen", "/p/proj-f")
+    daemon.task_session_liveness()
+    daemon.task_session_liveness()
+    assert [f["code"] for f in findings].count("HEARTBEAT-FIRES-STALL") == 1
+    assert _give_ups(findings) == [] and _give_ups(pushes) == []
