@@ -1,10 +1,10 @@
 ---
 trdd-id: XNQUYVT3
 title: Log the retry attempt number with each pane read on a failed unwedge step
-column: todo
+column: testing
 status: tasked
 created: 2026-10-17T15:01:04+0200
-updated: 2026-10-17T23:27:34+0200
+updated: 2026-10-18T00:52:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-17T15:01:04+0200
+implementation-commits: [71abf205]
 ---
 
 # Log the retry attempt number with each pane read on a failed unwedge step
@@ -26,6 +27,7 @@ Derived from TRDD-315X5OWA (its FINDING lists rival causes H1 wall persists, H2 
 ## Approval log
 
 - 2026-10-17T15:01:04+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T00:52:36+0200 — column → testing. code landed in 71abf205; field check needs a release (see Verify)
 
 ## Implementation notes
 
