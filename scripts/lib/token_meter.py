@@ -296,6 +296,45 @@ def latest_context_size(transcript_path: str | os.PathLike[str]) -> Optional[int
     return None if entry is None else entry[0]
 
 
+# One sum for every context reading below (TRDD-JK2MLS8Z).
+def _usage_total(usage: Mapping) -> int:
+    """Total INPUT context of one assistant `usage` block: input + cache_read + cache_creation.
+
+    The ONE place this sum lives, shared by `latest_context_entry` and `first_context_entry`.
+    """
+    return int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
+
+
+def first_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[int]:
+    """Total input tokens of the FIRST usage-bearing assistant record of a transcript, or None.
+
+    The sibling of `latest_context_size` for "how big was the context when this session started",
+    which the LATEST record cannot answer once the session has read files (TRDD-JK2MLS8Z). Streams
+    from byte 0 and stops at the first record with total > 0 -- no size cap, because a cap would
+    silently turn a big first record into "unknown". None when the file is absent/unreadable or no
+    assistant record carries usage.
+    """
+    p = Path(transcript_path)
+    if not p.is_file():
+        return None
+    try:
+        for _line_no, obj in jsonl_walk.iter_jsonl_entries(p, malformed_lines=[]):
+            if obj.get("type") != "assistant":
+                continue
+            msg = obj.get("message")
+            if not isinstance(msg, dict):
+                continue
+            usage = msg.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            total = _usage_total(usage)
+            if total > 0:
+                return total
+    except OSError:
+        return None
+    return None
+
+
 def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tuple[int, Optional[int]]]:
     """`(tokens, entry_epoch)` for the newest usage-bearing assistant message, or None.
 
@@ -321,7 +360,7 @@ def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tu
         usage = msg.get("usage")
         if not isinstance(usage, dict):
             continue
-        total = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
+        total = _usage_total(usage)
         if total > 0:
             return total, token_history.parse_ts(str(obj.get("timestamp") or ""))
     # No usage-bearing assistant entry found in the tail window. TRDD-L32WC0H7 / F3: if the

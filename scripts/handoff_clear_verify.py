@@ -73,6 +73,10 @@ _RESUME_CONSUMED_FILENAME = "resume-consumed.ts"
 # first turn adds a little on top of it, so an exact-equality test would fail every real run.
 _FLOOR_MARGIN = 0.10
 _TOKEN_METER_FILENAME = "token-meter.jsonl"
+# SessionStart-injection estimate: ~4 characters per token (see `_session_start_injected_tokens`).
+_CHARS_PER_TOKEN = 4
+# A new session counts as the clear's only if its first record is this soon after the before-phase ts.
+_NEW_SESSION_WINDOW_S = 15 * 60
 
 # A wikilink target: the text inside [[ ]], up to a `|` alias or `#` anchor. Kept
 # permissive (letters/digits/dash/underscore/slash/dot/space) so a real page slug is
@@ -322,9 +326,11 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
             "did nothing (see #186)",
         )
     else:
-        v["cron_recreated"] = _verdict(
-            "PASS", f"cron id changed {b_id or '∅'} → {a_id} (destroyed by /clear, recreated by re-arm)"
-        )
+        # No claim about WHY the id changed: every re-arm mints a new id, so a changed id cannot
+        # tell "/clear destroyed the cron" from any other re-arm. The old "destroyed by /clear,
+        # recreated by re-arm" wording was read as an observation and produced a wrong card line
+        # (TRDD-JK2MLS8Z correction note).
+        v["cron_recreated"] = _verdict("PASS", f"cron id changed {b_id or '∅'} → {a_id}")
 
     # 2. context collapsed to base-size.
     b_ctx = before.get("context_tokens")
@@ -339,11 +345,22 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     _raw_floor = after.get("context_floor")
     floor = _raw_floor if isinstance(_raw_floor, int) and _raw_floor > 0 else 0
     has_floor = floor > 0
+    threshold = int(floor * (1.0 + _FLOOR_MARGIN))
+    # TRDD-JK2MLS8Z: `a_ctx` is the FIRST assistant record of the new session. Its SessionStart
+    # injection (`injected_tokens`, ~2.7k measured) is printed for information ONLY and is NOT
+    # added to the threshold: the 10% margin (~17k at a 174k floor) already covers it, and
+    # whether the post-compaction floor already contains SessionStart output is unverified, so
+    # adding it could count the injection twice.
+    _raw_inj = after.get("injected_tokens")
+    injected = f"~{_raw_inj}" if isinstance(_raw_inj, int) and _raw_inj > 0 else "not determined"
+    measured = f"[{after.get('context_source') or 'unknown source'}; SessionStart injection {injected} tokens, information only]"
     if not isinstance(b_ctx, int) or not isinstance(a_ctx, int) or b_ctx <= 0:
-        v["context_collapsed"] = _verdict("SKIP", f"context size unknown (before={b_ctx}, after={a_ctx})")
-    elif has_floor and a_ctx <= floor * (1.0 + _FLOOR_MARGIN):
         v["context_collapsed"] = _verdict(
-            "PASS", f"context {b_ctx} → {a_ctx} tokens (at the install's ~{floor} floor)"
+            "SKIP", f"context size unknown (before={b_ctx}, after={a_ctx}) {measured}"
+        )
+    elif has_floor and a_ctx <= threshold:
+        v["context_collapsed"] = _verdict(
+            "PASS", f"context {b_ctx} → {a_ctx} tokens (at the install's ~{floor} floor) {measured}"
         )
     elif has_floor:
         # With a floor known, the ratio is not consulted at all — the floor ANSWERS the
@@ -355,13 +372,14 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
         v["context_collapsed"] = _verdict(
             "FAIL",
             f"context {b_ctx} → {a_ctx} tokens — still {a_ctx - floor} above the install's "
-            f"~{floor} floor, so the context did not collapse",
+            f"~{floor} floor (threshold {threshold} = floor +{_FLOOR_MARGIN:.0%}), so the "
+            f"context did not collapse {measured}",
         )
     elif a_ctx <= b_ctx * collapse_ratio:
-        v["context_collapsed"] = _verdict("PASS", f"context {b_ctx} → {a_ctx} tokens (collapsed)")
+        v["context_collapsed"] = _verdict("PASS", f"context {b_ctx} → {a_ctx} tokens (collapsed) {measured}")
     else:
         v["context_collapsed"] = _verdict(
-            "FAIL", f"context {b_ctx} → {a_ctx} tokens (did NOT collapse below {collapse_ratio:g}×)"
+            "FAIL", f"context {b_ctx} → {a_ctx} tokens (did NOT collapse below {collapse_ratio:g}×) {measured}"
         )
 
     # 3. every handoff link resolves in the fresh session.
@@ -592,6 +610,105 @@ def _context_tokens() -> tuple[int | None, str]:
     return None, "unknown"
 
 
+# ---------- the NEW session after /clear (TRDD-JK2MLS8Z) -------------------
+def _first_record_time(path: Path) -> datetime | None:
+    """Timezone-aware time of the first transcript record that carries a `timestamp`, else None.
+
+    Records are ISO strings with `Z` or a numeric offset. A naive or unparseable stamp is None --
+    a candidate whose start cannot be placed is never accepted as the new session.
+    """
+    import jsonl_walk  # noqa: PLC0415 - local sibling lib
+
+    try:
+        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
+            raw = entry.get("timestamp")
+            if not isinstance(raw, str):
+                continue
+            try:
+                started = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            return started if started.tzinfo is not None else None
+    except OSError:
+        return None
+    return None
+
+
+def _new_session_transcript(before: dict) -> tuple[Path | None, str]:
+    """The transcript of the session the clear started, or `(None, reason)` -- never a guess.
+
+    Accepted: a `*.jsonl` in the project's transcript dir whose stem does not start with the
+    cleared session's sid8 AND whose FIRST record lies within `_NEW_SESSION_WINDOW_S` after the
+    before-phase `ts` (the snapshot taken just before /clear, `gather_before`'s `now`). Chosen by
+    START time, never by mtime. Exactly one must qualify.
+
+    AMBIGUOUS (None) when a candidate's start cannot be placed (no aware timestamp) yet its mtime
+    is after the clear: it may be the real successor, and accepting a lone stamped peer beside it
+    would measure the wrong session and could PASS falsely. mtime is only this ambiguity hint,
+    never a selector; stamp-less files last modified before the clear are ignored.
+    """
+    import memory_scopes  # noqa: PLC0415 - local sibling lib
+
+    clear_ts = before.get("ts")
+    if not isinstance(clear_ts, int):
+        return None, "the before snapshot has no ts"
+    sid8 = before.get("handoff_sid8")
+    slug = memory_scopes.project_slug(str(_project_root()))
+    accepted: dict[Path, Path] = {}
+    unplaceable: dict[Path, Path] = {}
+    for root in _projects_roots():
+        for candidate in (root / slug).glob("*.jsonl"):
+            if isinstance(sid8, str) and sid8 and candidate.stem.startswith(sid8):
+                continue
+            started = _first_record_time(candidate)
+            if started is None:
+                if candidate.stat().st_mtime > clear_ts:
+                    unplaceable[candidate.resolve()] = candidate
+            elif clear_ts < started.timestamp() <= clear_ts + _NEW_SESSION_WINDOW_S:
+                accepted[candidate.resolve()] = candidate
+    window = f"{_NEW_SESSION_WINDOW_S // 60}-minute window after the clear"
+    if unplaceable:
+        return None, (
+            f"{len(unplaceable)} transcript(s) with no placeable first-record time were modified "
+            f"after the clear, so the successor is ambiguous ({len(accepted)} started within the {window})"
+        )
+    if len(accepted) != 1:
+        return None, f"{len(accepted)} transcripts started within the {window} (exactly 1 required)"
+    return next(iter(accepted.values())), ""
+
+
+def _session_start_injected_tokens(path: Path) -> int | None:
+    """Estimated tokens the clear's own SessionStart hooks injected, or None when undeterminable.
+
+    The new transcript stores every hook output as an `attachment` record (`hook_success`,
+    `hookEvent: SessionStart`, text in `content`) ahead of the first assistant record, so the
+    figure is summed from what the session actually received -- all hooks, not only the handoff.
+    Estimated at ~4 characters per token, the repo's other stdlib estimate
+    (`wikimem_bench.estimate_tokens`; not imported -- that is a CLI script, and the
+    `jevctx.tokens` estimator is barred from this process by tests/test_jev_boundary.py). It
+    under-counts against `jevctx`'s 3.5, which is the safe side: a smaller allowance can only
+    make the verdict stricter.
+    """
+    import jsonl_walk  # noqa: PLC0415 - local sibling lib
+
+    chars = 0
+    try:
+        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
+            if entry.get("type") == "assistant":
+                break
+            att = entry.get("attachment")
+            if (
+                entry.get("type") == "attachment"
+                and isinstance(att, dict)
+                and att.get("hookEvent") == "SessionStart"
+                and isinstance(att.get("content"), str)
+            ):
+                chars += len(att["content"])
+    except OSError:
+        return None
+    return -(-chars // _CHARS_PER_TOKEN) if chars > 0 else None
+
+
 def _rotator_log_tail(n: int) -> list[str]:
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
@@ -712,7 +829,27 @@ def _check_pointers(before: dict) -> dict:
 
 def gather_after(before: dict, now: int) -> dict:
     sd = _state_dir()
-    ctx, ctx_src = _context_tokens()
+    # TRDD-JK2MLS8Z: the collapse verdict needs the context RIGHT AFTER the clear, i.e. the first
+    # assistant record of the new session -- not `_context_tokens()` (agentlensPro or the newest
+    # transcript's LAST record), which reads "now", after the resumed session has already read
+    # files. That live figure is deliberately NOT used here, not even as a fallback: later records
+    # only grow, so it could only turn a good clear into a false FAIL, never into a false PASS.
+    # When the new session cannot be identified or has no assistant record yet, the check
+    # reports SKIP with the reason instead of guessing. `gather_before` keeps the live figure.
+    ctx: int | None = None
+    injected: int | None = None
+    new_transcript, why = _new_session_transcript(before)
+    if new_transcript is None:
+        ctx_src = f"skipped: {why}"
+    else:
+        import token_meter  # noqa: PLC0415 - local sibling lib
+
+        ctx = token_meter.first_context_entry(new_transcript)
+        if ctx is None:
+            ctx_src = "skipped: the new session has no assistant usage record yet"
+        else:
+            ctx_src = "transcript:first-assistant"
+            injected = _session_start_injected_tokens(new_transcript)
     memgrep = None
     try:
         import user_mem_lib  # noqa: PLC0415 - local sibling lib
@@ -727,6 +864,7 @@ def gather_after(before: dict, now: int) -> dict:
         "cron_id": _read_text(sd / _CRON_ID_FILENAME).strip(),
         "context_tokens": ctx,
         "context_source": ctx_src,
+        "injected_tokens": injected,
         "resume_flag_present": (sd / _RESUME_FLAG_FILENAME).is_file(),
         # Direct evidence the resume fired, written at unlink time by the phase that did it
         # (janitor#224 defect 2) — the before/after diff cannot see the common path.

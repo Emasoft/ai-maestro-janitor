@@ -691,3 +691,187 @@ def test_phase_before_records_the_pointers_transcript_and_session_id(tmp_path: P
     assert before["handoff_pointers"] == [f"{_U1}:0"]
     assert before["handoff_transcript"] == transcript
     assert before["handoff_sid8"] == _SID
+
+
+
+# --- TRDD-JK2MLS8Z: the after-figure is the FIRST assistant record of the new session ---------
+
+_CLEAR_TS = 1_800_000_000  # the before-phase `ts`: 2027-01-15T08:00:00Z
+
+
+def _iso(offset_s: int, tz_hours: int = 0) -> str:
+    """ISO timestamp `offset_s` seconds after the clear, written with a `tz_hours` UTC offset."""
+    from datetime import datetime, timedelta, timezone
+
+    tz = timezone(timedelta(hours=tz_hours))
+    stamp = datetime.fromtimestamp(_CLEAR_TS + offset_s, tz=timezone.utc).astimezone(tz)
+    return stamp.isoformat().replace("+00:00", "Z") if tz_hours == 0 else stamp.isoformat()
+
+
+def _assistant(ts: str, total: int) -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {"usage": {"input_tokens": 2, "cache_read_input_tokens": total - 2, "cache_creation_input_tokens": 0}},
+    }
+
+
+def _write_transcript(path: Path, records: list[dict], mtime: int | None = None) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
+def _clear_env(tmp_path: Path, monkeypatch) -> Path:
+    """A tmp project + tmp HOME; returns the project's transcript dir (real files, no mocks)."""
+    from memory_scopes import project_slug
+
+    project = tmp_path / "proj"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    home = tmp_path / "home"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HANDOFF_VERIFY_CONTEXT_COMMAND", "")
+    return home / ".claude" / "projects" / project_slug(str(project))
+
+
+_BEFORE = {"ts": _CLEAR_TS, "handoff_sid8": "6feb5bae", "handoff_links": []}
+
+
+def test_first_context_entry_picks_the_first_record_when_later_ones_are_bigger(tmp_path: Path) -> None:
+    import token_meter
+
+    t = _write_transcript(
+        tmp_path / "s.jsonl",
+        [{"type": "user"}, _assistant(_iso(1), 170_000), _assistant(_iso(2), 230_000), _assistant(_iso(3), 300_000)],
+    )
+    assert token_meter.first_context_entry(t) == 170_000
+    assert token_meter.latest_context_size(t) == 300_000
+
+
+def test_first_context_entry_is_none_without_assistant_usage(tmp_path: Path) -> None:
+    import token_meter
+
+    t = _write_transcript(tmp_path / "s.jsonl", [{"type": "user"}, {"type": "assistant", "message": {"content": "no usage"}}])
+    assert token_meter.first_context_entry(t) is None
+    assert token_meter.first_context_entry(tmp_path / "missing.jsonl") is None
+
+
+def test_gather_after_picks_the_transcript_that_started_after_the_clear(tmp_path: Path, monkeypatch) -> None:
+    """The cleared session (sid8) and a live OTHER session with a fresher mtime are both ignored."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "6feb5bae-aaaa.jsonl", [_assistant(_iso(-3600), 500_000)], _CLEAR_TS - 100)
+    # The peer started BEFORE the clear and has the freshest mtime: mtime must never select it.
+    _write_transcript(tdir / "99999999-other.jsonl", [_assistant(_iso(-600), 400_000), _assistant(_iso(10), 410_000)], _CLEAR_TS + 100)
+    _write_transcript(
+        tdir / "2bef3bfd-new.jsonl",
+        [
+            {"type": "attachment", "timestamp": _iso(5), "attachment": {"type": "hook_success", "hookEvent": "SessionStart", "content": "x" * 3500}},
+            {"type": "attachment", "timestamp": _iso(5), "attachment": {"type": "hook_success", "hookEvent": "PreToolUse", "content": "y" * 3500}},
+            _assistant(_iso(20), 172_635),
+            _assistant(_iso(90), 260_000),
+            {"type": "attachment", "timestamp": _iso(95), "attachment": {"type": "hook_success", "hookEvent": "SessionStart", "content": "z" * 3500}},
+        ],
+        _CLEAR_TS + 50,
+    )
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] == 172_635
+    assert after["context_source"] == "transcript:first-assistant"
+    # Only the SessionStart output before the first assistant record counts (3500 chars / 4).
+    assert after["injected_tokens"] == 875
+
+
+def test_gather_after_skips_when_two_transcripts_started_after_the_clear(tmp_path: Path, monkeypatch) -> None:
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "aaaaaaaa-one.jsonl", [_assistant(_iso(10), 170_000)])
+    _write_transcript(tdir / "bbbbbbbb-two.jsonl", [_assistant(_iso(20), 180_000)])
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] is None
+    assert after["context_source"].startswith("skipped:") and "2 transcripts" in after["context_source"]
+
+
+def test_gather_after_compares_instants_across_different_utc_offsets(tmp_path: Path, monkeypatch) -> None:
+    """A stamp written at -08:00 that is 1 min BEFORE the clear must not beat wall-clock order."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "aaaaaaaa-before.jsonl", [_assistant(_iso(-60, -8), 400_000)])
+    _write_transcript(tdir / "bbbbbbbb-after.jsonl", [_assistant(_iso(60, 5), 171_000)])
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] == 171_000
+
+
+def test_gather_after_ignores_a_stampless_candidate_last_modified_before_the_clear(tmp_path: Path, monkeypatch) -> None:
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(
+        tdir / "aaaaaaaa-notime.jsonl", [{"type": "assistant", "message": {"usage": {"input_tokens": 9}}}], _CLEAR_TS - 5
+    )
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] is None
+    assert "0 transcripts" in after["context_source"]
+
+
+def test_the_agentlenspro_live_reading_does_not_override_the_first_record(tmp_path: Path, monkeypatch) -> None:
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "bbbbbbbb-new.jsonl", [_assistant(_iso(20), 172_635), _assistant(_iso(90), 300_000)])
+    probe = tmp_path / "probe.sh"
+    probe.write_text('#!/bin/sh\necho \'{"context_tokens": 999999}\'\n', encoding="utf-8")
+    probe.chmod(0o755)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HANDOFF_VERIFY_CONTEXT_COMMAND", str(probe))
+    mod = _import()
+    assert mod._context_tokens() == (999_999, "agentlenspro:context_tokens")  # the probe really answers
+    after = mod.gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] == 172_635
+    assert after["context_source"] == "transcript:first-assistant"
+
+
+def test_a_first_record_above_the_threshold_FAILs_and_the_injection_is_only_reported():
+    """Floor 10000 -> threshold 11000. 11400 is above it, and a reported 1500-token injection
+    must NOT be added to the threshold (the 10% margin already covers it)."""
+    v = _import().compute_verdicts(
+        _snap(context_tokens=400_000),
+        _snap(ts=2000, context_tokens=11_400, context_floor=10_000, injected_tokens=1500,
+              context_source="transcript:first-assistant"),
+    )["context_collapsed"]
+    assert v["status"] == "FAIL"
+    assert "threshold 11000" in v["detail"] and "injection ~1500 tokens" in v["detail"]
+
+
+def test_a_first_record_within_the_threshold_PASSes_with_the_injection_reported():
+    v = _import().compute_verdicts(
+        _snap(context_tokens=400_000),
+        _snap(ts=2000, context_tokens=10_900, context_floor=10_000, injected_tokens=1500,
+              context_source="transcript:first-assistant"),
+    )["context_collapsed"]
+    assert v["status"] == "PASS"
+    assert "transcript:first-assistant" in v["detail"] and "injection ~1500 tokens" in v["detail"]
+
+
+def test_cron_id_change_detail_makes_no_claim_about_the_cause():
+    v = _import().compute_verdicts(_snap(cron_id="old"), _snap(ts=2000, cron_id="new"))
+    detail = v["cron_recreated"]["detail"]
+    assert "destroyed" not in detail and detail == "cron id changed old → new"
+
+
+def test_an_unplaceable_candidate_modified_after_the_clear_makes_the_check_SKIP(tmp_path: Path, monkeypatch) -> None:
+    """A real successor without any timestamp (mtime after the clear) beside one stamped peer:
+    accepting the peer would measure the wrong session and could PASS falsely."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(
+        tdir / "aaaaaaaa-successor.jsonl", [{"type": "assistant", "message": {"usage": {"input_tokens": 9}}}], _CLEAR_TS + 30
+    )
+    _write_transcript(tdir / "bbbbbbbb-peer.jsonl", [_assistant(_iso(60), 150_000)], _CLEAR_TS + 40)
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] is None
+    assert "ambiguous" in after["context_source"] and "1 started within the 15-minute window" in after["context_source"]
+
+
+def test_a_candidate_starting_outside_the_15_minute_window_is_not_accepted(tmp_path: Path, monkeypatch) -> None:
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "aaaaaaaa-late.jsonl", [_assistant(_iso(16 * 60), 170_000)])
+    after = _import().gather_after(dict(_BEFORE), int(time.time()))
+    assert after["context_tokens"] is None
+    assert "0 transcripts started within the 15-minute window" in after["context_source"]
+    _write_transcript(tdir / "bbbbbbbb-ontime.jsonl", [_assistant(_iso(14 * 60), 171_000)])
+    assert _import().gather_after(dict(_BEFORE), int(time.time()))["context_tokens"] == 171_000
