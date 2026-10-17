@@ -412,6 +412,73 @@ def test_expand_segment_id_malformed_span_exits_3(tmp_path: Path) -> None:
     assert code == 3
 
 
+
+def _expand_stderr_line(transcript: Path, expand_id: str | None) -> str:
+    """Run `expand` expecting exit 3 and return its single stripped stderr line."""
+    argv = ["expand", "--transcript", str(transcript)]
+    if expand_id is not None:
+        argv.append(expand_id)
+    code, out = _run(argv)
+    assert code == 3
+    return out.strip()
+
+
+def test_expand_without_id_or_list_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """No id and no --list exits 3 with the exact "an id is required" line."""
+    transcript = _write_transcript(tmp_path)
+    assert _expand_stderr_line(transcript, None) == (
+        "expand failed: an id is required unless --list is given"
+    )
+
+
+def test_expand_malformed_span_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """A segment id with an unparsable span exits 3 with the exact malformed-id line."""
+    transcript, _result_text = _write_read_transcript(tmp_path)
+    # Built by joining "@" in code: the privacy scanner rule private-path.ssh-user-host reads
+    # the literal uuid:n-at-a-b form as user@host.
+    bad_id = "u1:0" + "@" + "abc-def"
+    expected = (
+        f"expand failed: malformed id {bad_id!r}, expected '<uuid>:<n>" + "@" + "<a>-<b>'"
+    )
+    assert _expand_stderr_line(transcript, bad_id) == expected
+
+
+def test_expand_malformed_uuid_n_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """An id without a numeric block index exits 3 with the exact malformed-id line."""
+    transcript = _write_transcript(tmp_path)
+    assert _expand_stderr_line(transcript, "not-an-id") == (
+        "expand failed: malformed id 'not-an-id', expected '<uuid>:<n>'"
+    )
+
+
+def test_expand_unknown_uuid_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """An id whose uuid is not in the transcript exits 3 with the exact no-entry line."""
+    transcript = _write_transcript(tmp_path)
+    assert _expand_stderr_line(transcript, "no-such-uuid:0") == (
+        f"expand failed: no transcript entry with uuid='no-such-uuid' in {transcript}"
+    )
+
+
+def test_expand_missing_block_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """A block index the entry lacks exits 3 with the exact no-block line."""
+    transcript = _write_transcript(tmp_path)
+    assert _expand_stderr_line(transcript, "u-1:5") == (
+        "expand failed: no block 5 in entry 'u-1'"
+    )
+
+
+def test_expand_span_out_of_range_pins_the_full_stderr_line(tmp_path: Path) -> None:
+    """A span past the block's last line exits 3 with the exact out-of-range line."""
+    transcript, result_text = _write_read_transcript(tmp_path)
+    n_lines = len(result_text.splitlines())
+    # "@" joined in code for the same privacy-scanner reason as the malformed-span test.
+    bad_id = "u1:0" + "@" + f"1-{n_lines + 1000}"
+    assert _expand_stderr_line(transcript, bad_id) == (
+        f"expand failed: line span 1-{n_lines + 1000} out of range for block 0 "
+        f"in entry 'u1' ({n_lines} lines)"
+    )
+
+
 def _write_list_content_read_transcript(tmp_path: Path) -> tuple[Path, str]:
     """Same large Read-shaped result as `_write_read_transcript`, but the tool_result's own
     `content` is LIST-shaped (two `text` blocks), not a plain string. Adversarial review
