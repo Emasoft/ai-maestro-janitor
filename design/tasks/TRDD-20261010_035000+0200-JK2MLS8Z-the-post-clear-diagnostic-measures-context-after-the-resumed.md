@@ -4,7 +4,7 @@ title: The post-clear diagnostic measures context after the resumed session has 
 column: testing
 status: tasked
 created: 2026-10-10T03:50:00+0200
-updated: 2026-10-17T11:00:45+0200
+updated: 2026-10-17T11:40:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T03:50:00+0200
-implementation-commits: [cc01a57a]
+implementation-commits: [cc01a57a, ddb6e6f1, 14bed610]
 ---
 
 # The post-clear diagnostic measures context after the resumed session has read files and two handoff links do not resolve
@@ -37,3 +37,4 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-17
 
 - **2026-10-17: BUILT in cc01a57a, column testing** (moved from todo directly; the build ran in this session). After-phase judges the clear by the new session's first assistant record (start-time pick within 15 min after before['ts'], exactly one, ambiguous → SKIP); injection reported only. NEXT: field proof — the next real clear's after-phase report shows context_source=transcript:first-assistant and PASS at the floor. KNOWN LIMITATION: before['ts'] is taken by external_handoff_clear._snapshot_before (scripts/external_handoff_clear.py:560) BEFORE the chain spawns, and the chain's type-wait (inject_until_sent defers while the field is busy or the owner is typing; its giveup on this path was not read) can in principle exceed 15 min, which puts the successor outside the window → SKIP (safe, never a false PASS, but the clear goes unjudged). If field reports show such SKIPs, anchor the window on a stamp written at /clear submit. CORRECTION to cc01a57a's message: 'while the late reading failed' is not evidenced for the 2026-10-17 02:21 clear; late-reading FAILs are evidenced for the 2026-10-11 and 2026-10-14 clears (reports 20261011_012620, 20261014_031913). UNVERIFIED: /clear always starting a new transcript file (seen once); the hook-attachment layout (one transcript). NITS LEFT: unguarded candidate.stat() (a vanished file aborts the after-phase loudly); two stale docstrings, fixed in a follow-up commit.
+- **2026-10-17 11:40 — 14bed610 closes a false-PASS path (review of ddb6e6f1).** A candidate whose first record is AFTER the 15-min window now makes the pick ambiguous → SKIP (before, a late successor beside one in-window peer let the peer be measured and PASS falsely). With that, the KNOWN LIMITATION above holds as written: a long type-wait gives SKIP, never a false PASS. New cost: an after-phase run long after the clear, with another session started in the project since, also SKIPs. Full suite 18599 passed; ruff/mypy/pyright clean. The two stale docstrings were fixed in ddb6e6f1; the only nit left is the unguarded candidate.stat().
