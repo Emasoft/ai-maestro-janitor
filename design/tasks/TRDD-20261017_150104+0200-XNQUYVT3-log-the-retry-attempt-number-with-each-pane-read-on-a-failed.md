@@ -4,7 +4,7 @@ title: Log the retry attempt number with each pane read on a failed unwedge step
 column: testing
 status: tasked
 created: 2026-10-17T15:01:04+0200
-updated: 2026-10-18T00:52:36+0200
+updated: 2026-10-18T00:53:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,7 @@ Derived from TRDD-315X5OWA (its FINDING lists rival causes H1 wall persists, H2 
 ## Implementation notes
 
 2026-10-17: the countdown is logged exactly as parsed, inner space kept, e.g. reads=retry_wedge@1[2m 50s]; the example in the body above (2m50s) is illustrative. A read with no attempt prints bare retry_wedge, one with no countdown omits the brackets; non-wedge reads keep their bare kind.
+2026-10-18 correction to 71abf205's message: after the last comment-only edit, ruff was re-run by the main session; the pane tests (44 passed) rest on the worker's report, not a main-session run.
 
 ## Verify
 
