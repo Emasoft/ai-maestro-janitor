@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -139,3 +140,75 @@ def test_unwritable_log_dir_does_not_raise(tmp_path: Path, monkeypatch: pytest.M
     script.write_text("import sys; sys.exit(2)")
     result = daemon._run_workload([sys.executable, str(script)], timeout=20, max_attempts=1)
     daemon._log_rotator_tick_result(result)
+
+
+def _run_tick(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, subprocess_s: float,
+              fleet_raises: bool = False, rc: int | None = None) -> str:
+    """Run the real task_oauth_rotator_tick with a fake clock; the subprocess call 'takes' subprocess_s."""
+    clock = [1000.0]
+
+    def fake_monotonic() -> float:
+        # Advances on every call so any deadline loop on monotonic terminates.
+        clock[0] += 0.001
+        return clock[0]
+
+    monkeypatch.setattr(daemon.time, "monotonic", fake_monotonic)
+
+    def fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str] | None:
+        clock[0] += subprocess_s
+        return None if rc is None else subprocess.CompletedProcess(cmd, rc, "", "")
+
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda: True)
+    monkeypatch.setattr(daemon, "_run_workload", fake_run)
+    monkeypatch.setattr(daemon.gs, "rotation_succeeded_within", lambda *a, **kw: fleet_raises)
+
+    def boom(**kw: object) -> None:
+        raise RuntimeError("scan down")
+
+    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", boom)
+    daemon.task_oauth_rotator_tick()
+    log = tmp_path / "logs" / "daemon.log"
+    return log.read_text() if log.exists() else ""
+
+
+def test_slow_tick_logs_one_line_with_phases_and_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tick of 41 s writes exactly one 'rotator tick slow:' line with both phase times and a load field."""
+    log = _run_tick(monkeypatch, tmp_path, 41)
+    lines = [ln for ln in log.splitlines() if "rotator tick slow:" in ln]
+    assert len(lines) == 1
+    assert "subprocess 41s, esc-pass 0s" in lines[0]
+    assert "rc=timeout" in lines[0]
+    assert "load " in lines[0]
+
+
+def test_fast_tick_writes_no_slow_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tick under 30 s writes no slow line, while a 33 s tick in the same log does (positive control)."""
+    assert "rotator tick slow:" not in _run_tick(monkeypatch, tmp_path, 5)
+    log = _run_tick(monkeypatch, tmp_path, 33)
+    lines = [ln for ln in log.splitlines() if "rotator tick slow:" in ln]
+    assert len(lines) == 1
+    assert "subprocess 33s" in lines[0]
+
+
+def test_slow_tick_with_returncode_logs_rc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow tick whose subprocess returned rc=0 logs rc=0 in the slow line."""
+    log = _run_tick(monkeypatch, tmp_path, 35, rc=0)
+    assert "rotator tick slow:" in log
+    assert "rc=0" in log
+
+
+def test_slow_line_still_written_when_fleet_scan_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The early return after a failed fleet scan must not skip the slow line."""
+    log = _run_tick(monkeypatch, tmp_path, 35, fleet_raises=True)
+    assert "rotation-esc: fleet scan failed" in log
+    assert "rotator tick slow: subprocess 35s" in log
+
+
+def test_getloadavg_oserror_prints_load_na(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When os.getloadavg raises OSError the slow line says 'load n/a' and nothing raises."""
+    def no_load() -> tuple[float, float, float]:
+        raise OSError("unsupported")
+
+    monkeypatch.setattr(daemon.os, "getloadavg", no_load)
+    log = _run_tick(monkeypatch, tmp_path, 31)
+    assert "load n/a" in log

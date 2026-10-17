@@ -876,6 +876,9 @@ def task_oauth_rotator_beat() -> None:
 
 
 _RC_STDERR_TAIL_CHARS = 300
+# TRDD-JY0OBQZ4: a rotator tick (subprocess + ESC pass) at or above this many seconds gets one extra
+# "rotator tick slow:" daemon.log line; 3-6% of ticks ran 30 s+ and the cause was never logged.
+_SLOW_ROTATOR_TICK_S = 30
 _TOKEN_RE = re.compile(r"sk-ant-\S+")
 
 
@@ -970,12 +973,52 @@ def task_oauth_rotator_tick() -> None:
     # is shared by every daemon thread, so writing it there leaked the flag into other threads'
     # subprocesses and mutated the environment under concurrent forks.
     wedge_env = {"JANITOR_ROTATOR_WEDGE_TICK": "1"} if getattr(_thread_state, "wedge_tick", False) else None
+    # TRDD-JY0OBQZ4: time both phases so a >= 30 s tick can be attributed to the subprocess or
+    # to the ESC pass. A fast tick logs nothing extra.
+    started = time.monotonic()
     tick_result = _run_workload(
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,
         env=wedge_env,
     )
-    _log_rotator_tick_result(tick_result)
+    subprocess_s = time.monotonic() - started
+    after_subprocess = time.monotonic()
+    try:
+        _log_rotator_tick_result(tick_result)
+        _rotation_esc_after_tick()
+    finally:
+        # try/finally on purpose: the fleet-scan failure path returns early, and the slow line
+        # must still be written on every path after the subprocess phase.
+        _log_slow_rotator_tick(tick_result, subprocess_s, time.monotonic() - after_subprocess)
+
+
+def _log_slow_rotator_tick(
+    result: Optional[subprocess.CompletedProcess[str]], subprocess_s: float, esc_s: float
+) -> None:
+    """Log ONE daemon.log line when a rotator tick took >= _SLOW_ROTATOR_TICK_S (TRDD-JY0OBQZ4).
+
+    WHY: the scheduler's "done in Ns" shows a slow tick but not which phase or what the host
+    load was, so the "tick under 30 s at high load" acceptance could not be judged. Never
+    raises (same rule as `_log_rotator_tick_result`): it runs in a finally block.
+    """
+    try:
+        if subprocess_s + esc_s < _SLOW_ROTATOR_TICK_S:
+            return
+        try:
+            load = " ".join(f"{v:.2f}" for v in os.getloadavg())
+        except (OSError, AttributeError):  # no getloadavg on Windows / unsupported platform
+            load = "n/a"
+        rc = "timeout" if result is None else str(result.returncode)
+        state.log_line(
+            "daemon",
+            f"rotator tick slow: subprocess {int(subprocess_s)}s, esc-pass {int(esc_s)}s, rc={rc}, load {load}",
+        )
+    except Exception:  # noqa: BLE001, S110 - a logging error must never crash the tick
+        pass
+
+
+def _rotation_esc_after_tick() -> None:
+    """Rotation-ESC pass of the 60 s rotator tick (split out so the tick can time it)."""
     # TRDD-NACCL0CB, second incident 2026-09-02 21:41-21:47: the rotator switched at 21:41:03
     # and the wall landed on the panes between the 21:43 and 21:45 liveness beats; the ESC
     # fired at 21:45:05 — correct, but the owner had seen the red line for ~2 minutes and had
