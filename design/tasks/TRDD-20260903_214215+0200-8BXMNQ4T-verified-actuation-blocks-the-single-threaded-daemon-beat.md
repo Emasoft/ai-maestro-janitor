@@ -4,7 +4,7 @@ title: verified actuation blocks the single-threaded daemon beat — measure the
 column: backburner
 
 created: 2026-09-03T21:42:15+0200
-updated: 2026-10-17T03:49:21+0200
+updated: 2026-10-17T04:12:45+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -36,6 +36,7 @@ blocker-holds-if: exit-nonzero
 - **Derived pattern (2026-10-17):** built from the emitter, `rotation-esc: [A-Z_]+ ESC → ` (ERE). Match count 0 in daemon.log and 0 in daemon.log.1, so no completed actuation line survives in a live log and the card is correctly parked.
 - **Why `unblock-when` was not used:** its `log:` predicate requires a repo-relative path (a PROJECT card is pushed, an absolute path leaks local layout), and daemon.log lives under the plugin data dir outside the repo. So the card stays backburner with review-after, and the blocker-probe recipe is run by an agent on review.
 - **Evidence retention:** TRDD-RX7FXNN7 (backburner) proposes the daemon keep an excerpt of completed rotation-esc lines across log rotation, so this measurement is not lost again.
+2026-10-17, verified by the main agent: the emitter is scripts/daemon.py:2326 and writes `rotation-esc: <STATUS> ESC → <channel>`; `grep -cE 'rotation-esc: [A-Z_]+ ESC → '` gives 0 in both daemon.log and daemon.log.1. The blocker-probe is an agent-runnable recipe: per ai-maestro lib/trdd-doctor.ts (around line 1303), the doctor never executes it. With blocker-holds-if exit-nonzero, both no match (exit 1) and a missing log (exit 2) keep the card parked.
 
 ## (SUPERSEDED 2026-10-17) prior STATE block, kept for history — 2026-09-04
 
