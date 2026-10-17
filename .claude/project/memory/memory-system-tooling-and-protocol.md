@@ -2,7 +2,7 @@
 name: memory-system-tooling-and-protocol
 description: "how does the memgrep engine work / what are the memgrep subcommands / how do I recall / find / links / reindex / what do the three memory skills do / MEMORIZE RECALL UPDATE / what is the update invariant / how does a superseded memory get demoted to a lesson / what do the memory heartbeat detectors do / memory-scope-leak memory-librarian memorize-nudge why-in-commits / what is the wikimem layer / hub aspect component tiers / the link law every link is bidirectional / how do I install the memory system in a new project / memgrep binary is stale on this host / cargo install does not roll forward with the plugin update"
 ocd: 2026-06-13
-lmd: 2026-10-05
+lmd: 2026-10-17
 metadata:
   node_type: memory
   type: project
@@ -25,7 +25,7 @@ format, and the editor's operational gotchas.
 
 ## The memgrep engine
 
-^WQBHAC45 [desc: "memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries, and dedicated memory subcommands (recall/find/overview/index/links); grep flags transfer directly.", keywords: what_is_memgrep how_does_memgrep_engine_work memgrep_subcommand_table what_subcommands_does_memgrep_have memgrep_fact_subcommand memgrep_recall_find_overview_index_links_fact is_memgrep_just_grep_for_markdown grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user, type: project, ocd: 2026-06-13, lmd: 2026-09-06]
+^WQBHAC45 [desc: "memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries and multi-root search; grep flags transfer directly.", keywords: what_is_memgrep how_does_memgrep_engine_work is_memgrep_just_grep_for_markdown grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user memgrep_gitignore_aware_walk memgrep_pip_style_version_ranges memgrep_teaching_doc_skill_md memgrep_json_hidden_flags, type: project, ocd: 2026-06-13, lmd: 2026-10-17]
 `memgrep` is `grep`/`rg` for markdown: gitignore-aware tree walk, per-line regex,
 markdown-structural filters (`--heading`, `--level`, `--code-lang`,
 `--node table,…`, inline `--bold`/`--code-span`/…), boolean `--where 'EXPR'`
@@ -37,6 +37,9 @@ PATTERN [PATH…]`, `--json`, `--hidden`); numeric/version ranges use pip syntax
 
 Multi-root is first-class: every subcommand accepts several `<memdir>` roots, so
 one call searches LOCAL + PROJECT + USER together (`$ROOTS`).
+
+
+^ATOM-C110-YXM0 [desc: "memgrep subcommand reference table: recall, find, overview, index/reindex, links and fact — what each does and its key flags.", keywords: memgrep_subcommand_table what_subcommands_does_memgrep_have memgrep_fact_subcommand memgrep_recall_find_overview_index_links_fact memgrep_overview_subcommand_entry_page memgrep_reindex_sqlite_sidecar memgrep_index_markdown_legacy_memory_index memgrep_links_broken_orphans_semijoin memgrep_find_only_notes_lessons memgrep_recall_symptom_ranked_default_notes how_do_i_rebuild_memgrep_index_full memgrep_fact_cat_comp_session_kind_filters, type: project, ocd: 2026-10-17, lmd: 2026-10-17]
 
 | Subcommand | What it does |
 |---|---|
