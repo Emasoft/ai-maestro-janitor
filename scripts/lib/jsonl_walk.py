@@ -114,7 +114,7 @@ def iter_jsonl_entries(path: Path, *, malformed_lines: list[int]) -> Iterator[tu
     codebase actually consumes.
 
     TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `extract_items` had its
-    own byte-read-and-decode loop and `_read_jsonl_entry` (`scripts/jev_compact.py`) had a
+    own byte-read-and-decode loop and `jev_expand.read_jsonl_entry` (then in `scripts/jev_compact.py`) had a
     SECOND, older one that still opened the file in text mode -- so `expand` crashed with
     `UnicodeDecodeError` on the exact same damaged byte `compact` already knew how to skip, for
     every id located after it. Sharing `parse_jsonl_line` (not just its logic, copy-pasted)

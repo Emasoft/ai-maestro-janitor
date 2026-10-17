@@ -113,6 +113,175 @@ def extract_wikilinks(text: str) -> list[str]:
     return out
 
 
+
+# ---------- Jev pointer expansion check (TRDD-I40IKPWU) ---------------------
+#
+# A handoff written by a Jev compaction elides items and leaves `[[elided id=<uuid>:<n> ...]]`
+# pointers that `jev_compact.py expand` resolves against the cleared session's transcript.
+# Nothing proved those pointers still resolve after the /clear, so a broken one would only
+# surface when the fresh session needed it. This check re-resolves every REAL pointer with the
+# SAME code `expand` runs (`jev_expand.resolve_pointer`).
+
+_COMPACTED_HEADING_RE = re.compile(r"^#{1,2} Compacted context \(Jev compaction\)$")
+_POINTER_LINE_RE = re.compile(r"^\[\[elided id=(\S+?) tokens=")
+# `-- <role> <uuid>:<n> --`: the header of one "Newest messages" section. Only a plain
+# `<uuid>:<n>` id qualifies (no `@a-b` span): that is what the composer writes for an inline pointer.
+_MESSAGE_HEADER_RE = re.compile(r"^-- \S+ ([^\s@]+:\d+) --$")
+_EXPAND_LINE_PREFIX = "pointers expand with:"
+_TRANSCRIPT_ARG_RE = re.compile(r"--transcript (\S+)")
+_ELIDED_LIST_HEADING = "## Elided"
+
+
+def _compacted_block(text: str) -> list[str] | None:
+    """The lines of the handoff's Jev compacted block, or None when it carries none.
+
+    From the FIRST compacted-context heading to the LAST `pointers expand with:` line (to the end
+    of the text when there is none). FIRST heading, LAST expand line: a kept item that quotes a
+    heading or an expand line can only sit INSIDE the real block, so the outermost pair is the
+    real one.
+    """
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines) if _COMPACTED_HEADING_RE.match(ln.rstrip())), None)
+    if start is None:
+        return None
+    end = len(lines) - 1
+    for i in range(len(lines) - 1, start, -1):
+        if lines[i].startswith(_EXPAND_LINE_PREFIX):
+            end = i
+            break
+    return lines[start : end + 1]
+
+
+# WHY two headings: compose() writes "## Newest messages ..." in the injected render and
+# "## Conversation since ..." in the full render (jev_compaction._EXCHANGES_HEADING / _CONVERSATION_HEADING);
+# both hold the same `-- role id --` message blocks.
+_NEWEST_HEADINGS = ("## Newest messages", "## Conversation since")
+# The sections that can follow Newest messages in the composer output; either closes it.
+_NEWEST_END_PREFIXES = ("## Kept items", "## Elided")
+_CANDIDATE_RE = re.compile(r"^\S{0,2}elided id=")
+
+
+def _pointer_regions(block: list[str]) -> tuple[list[str], list[str]]:
+    """(Newest-messages lines, lines after the LAST exact `## Elided`) -- the only places a REAL pointer lives.
+
+    WHY one helper for both callers: `extract_pointers` (what to verify) and
+    `count_pointer_candidates` (format-drift detector) must agree on where real pointers can sit,
+    otherwise a kept item quoting old pointers is verified by one and counted by the other.
+    Newest messages runs from the FIRST line starting `## Newest messages` to the next line
+    starting `## Kept items` or `## Elided` (or the block end).
+    """
+    newest: list[str] = []
+    start = next((i for i, ln in enumerate(block) if ln.startswith(_NEWEST_HEADINGS)), None)
+    if start is not None:
+        for ln in block[start + 1 :]:
+            if ln.startswith(_NEWEST_END_PREFIXES):
+                break
+            newest.append(ln)
+    elided_at = max((i for i, ln in enumerate(block) if ln == _ELIDED_LIST_HEADING), default=None)
+    elided = block[elided_at + 1 :] if elided_at is not None else []
+    return newest, elided
+
+
+def count_pointer_candidates(text: str) -> int:
+    """How many line-start `elided id=` candidates sit where real pointers can live, in ANY bracket form.
+
+    Format-drift detector: if the composer's pointer syntax changes (e.g. `[[` becomes `⟦⟦`),
+    `extract_pointers` finds 0 while this still finds the old-shaped candidates, so the verdict is
+    FAIL, never a quiet SKIP. Counts only the regions `_pointer_regions` names: a kept item that
+    quotes old pointers is not drift.
+    """
+    block = _compacted_block(text)
+    if not block:
+        return 0
+    newest, elided = _pointer_regions(block)
+    return sum(1 for ln in newest + elided if _CANDIDATE_RE.match(ln.strip()))
+
+
+def extract_pointers(text: str) -> tuple[list[str], str | None]:
+    """(real pointer ids in order, transcript path) from a handoff's compacted block. Pure.
+
+    A pointer is REAL in exactly two places, because only there did the composer write it:
+      - INLINE, in a "Newest messages" section: a line-start pointer after the text of the section
+        opened by `-- <role> <uuid>:<n> --` (up to the next header or `## ` heading), and only when
+        its id is exactly that header's `<uuid>:<n>`;
+      - the trailing `## Elided` list: line-start pointers after the LAST line that is exactly
+        `## Elided`.
+    Every other line-start pointer is FOREIGN -- e.g. a raw `expand` output or an `## Elided` list
+    quoted inside a kept item -- and is ignored: it names an entry of some OTHER transcript, so
+    "verifying" it would report a failure the handoff does not have.
+
+    The transcript comes ONLY from a `pointers expand with: ... --transcript <path> <id>` line that
+    is the LAST non-blank line of the block; None when there is none.
+    """
+    block = _compacted_block(text)
+    if not block:
+        return [], None
+    ids: list[str] = []
+
+    def add(pointer_id: str) -> None:
+        if pointer_id not in ids:
+            ids.append(pointer_id)
+
+    newest, elided = _pointer_regions(block)
+    header: str | None = None
+    # WHY only inside Newest messages: a kept item quoting an old compacted file carries its own
+    # `-- role id --` header + matching pointer; outside this section that is FOREIGN, not a defect.
+    for line in newest:
+        # WHY a `## ` line does NOT reset the header: a message body may contain markdown headings;
+        # only a new `-- ... --` header ends the message.
+        head = _MESSAGE_HEADER_RE.match(line)
+        if head:
+            header = head.group(1)
+            continue
+        ptr = _POINTER_LINE_RE.match(line)
+        if ptr and header is not None and ptr.group(1) == header:
+            add(ptr.group(1))
+    for line in elided:
+        ptr = _POINTER_LINE_RE.match(line)
+        if ptr:
+            add(ptr.group(1))
+
+    transcript: str | None = None
+    last_nonblank = next((ln for ln in reversed(block) if ln.strip()), "")
+    if last_nonblank.startswith(_EXPAND_LINE_PREFIX):
+        found = _TRANSCRIPT_ARG_RE.findall(last_nonblank)
+        transcript = found[-1] if found else None
+    return ids, transcript
+
+
+def validate_transcript_path(path: str | None, projects_roots: tuple[Path, ...], sid8: str | None) -> str | None:
+    """Why `path` may not be read as the cleared session's transcript, or None when it may. Pure.
+
+    The path comes out of a handoff file -- data, not trusted input -- so the verifier must not
+    open an arbitrary file on its say-so. Accepted only when it is `<root>/<project>/<sid8...>.jsonl`
+    for one of `projects_roots`. Existence is NOT checked here: a well-formed path to a vanished
+    transcript is a different failure ("gone") from a malformed path ("rejected").
+    """
+    if not path:
+        return "handoff names no transcript"
+    if sid8 is None:
+        return "cannot derive session id"
+    # WHY resolved on BOTH sides: a lexical comparison is fooled by `..` and by symlinked
+    # roots (/var vs /private/var on macOS), accepting a path that really points elsewhere.
+    cand = Path(path).expanduser().resolve(strict=False)
+    if not any(cand.parent.parent == root.resolve() for root in projects_roots):
+        return "not directly under a Claude projects root"
+    if cand.suffix != ".jsonl" or not cand.name.startswith(sid8):
+        return f"not a <session>.jsonl file for session {sid8}"
+    return None
+
+
+def _projects_roots() -> tuple[Path, ...]:
+    """The Claude projects roots a session transcript may live under: `$CLAUDE_CONFIG_DIR/projects`
+    when set, and always `~/.claude/projects` (no shared helper exists in scripts/lib)."""
+    roots: list[Path] = []
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        roots.append(Path(config_dir) / "projects")
+    roots.append(Path.home() / ".claude" / "projects")
+    return tuple(roots)
+
+
 def _verdict(status: str, detail: str) -> dict:
     return {"status": status, "detail": detail}
 
@@ -267,6 +436,45 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
         v["session_restarted"] = _verdict(
             "FAIL", f"newest re-arm {a_armed} predates the {b_ts} snapshot (no fresh re-arm seen)"
         )
+
+    # 6. every elided pointer the handoff carries still resolves (TRDD-I40IKPWU), through the SAME
+    #    `jev_expand.resolve_pointer` that `jev_compact.py expand` runs. Unlike the checks above,
+    #    an UNRUNNABLE check here is a FAIL, never a SKIP: this check guards an invariant that
+    #    holds today, so "could not run" must stay as loud as "ran and failed" or a regression
+    #    in the plumbing would read as a clean bill of health. Only a handoff with no pointers
+    #    at all is a SKIP, and even that FAILs when pointer-shaped text exists but none parsed
+    #    (format drift in the composer).
+    pointers = before.get("handoff_pointers") or []
+    candidates = before.get("handoff_pointer_candidates") or 0
+    expanded = after.get("pointers_expanded") or {}
+    if not pointers and not candidates:
+        v["handoff_pointers_expand"] = _verdict("SKIP", "handoff carried no elided pointers")
+    elif not pointers:
+        v["handoff_pointers_expand"] = _verdict(
+            "FAIL", f"pointer format not recognised: {candidates} candidate(s), 0 parsed"
+        )
+    elif "pointers_expanded_error" in after:
+        v["handoff_pointers_expand"] = _verdict(
+            "FAIL", f"pointer check could not run: {after['pointers_expanded_error']}"
+        )
+    elif "pointers_transcript_rejected" in after:
+        v["handoff_pointers_expand"] = _verdict(
+            "FAIL", f"transcript path rejected: {after['pointers_transcript_rejected']}"
+        )
+    elif after.get("pointers_transcript_missing"):
+        v["handoff_pointers_expand"] = _verdict(
+            "FAIL", f"transcript of the cleared session is gone: {len(pointers)} pointer(s) unrecoverable"
+        )
+    else:
+        failed = [(pid, expanded.get(pid, "not checked")) for pid in pointers]
+        failed = [(pid, err) for pid, err in failed if err is not None]
+        if not failed:
+            v["handoff_pointers_expand"] = _verdict("PASS", f"all {len(pointers)} pointer(s) expand")
+        else:
+            shown = "; ".join(f"{pid}={err}" for pid, err in failed[:5])
+            v["handoff_pointers_expand"] = _verdict(
+                "FAIL", f"{len(failed)}/{len(pointers)} pointer(s) did not expand: {shown}"
+            )
     return v
 
 
@@ -278,6 +486,7 @@ def render_report(before: dict, after: dict, verdicts: dict) -> str:
         ("handoff_links_resolve", "every [[handoff link]] resolves"),
         ("resume_flag_consumed", "resume-after-clear flag consumed"),
         ("session_restarted", "SessionStart re-armed after /clear, if a re-arm was needed"),
+        ("handoff_pointers_expand", "every elided pointer in the handoff expands"),
     ]
     icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "⚪"}
     n_pass = sum(1 for k, _ in order if verdicts.get(k, {}).get("status") == "PASS")
@@ -444,6 +653,11 @@ def gather_before(now: int) -> dict:
     _newest = handoff_files.newest(sd)
     handoff = _read_text(_newest) if _newest is not None else ""
     ctx, ctx_src = _context_tokens()
+    pointers, transcript = extract_pointers(handoff)
+    # The handoff's session key is the first 8 chars of the CLEARED session's id (its filename);
+    # the legacy shared name and the unkeyed fallback carry no usable id.
+    parsed = handoff_files.parse(_newest.name) if _newest is not None else None
+    sid8 = parsed[0] if parsed and parsed[0] not in (handoff_files.LEGACY_KEY, handoff_files.UNKEYED_KEY) else None
     return {
         "ts": now,
         "cron_id": _read_text(sd / _CRON_ID_FILENAME).strip(),
@@ -452,9 +666,47 @@ def gather_before(now: int) -> dict:
         "handoff_bytes": len(handoff.encode("utf-8")),
         "handoff_link_count": len(extract_wikilinks(handoff)),
         "handoff_links": extract_wikilinks(handoff),
+        "handoff_pointers": pointers,
+        "handoff_pointer_candidates": count_pointer_candidates(handoff),
+        "handoff_transcript": transcript,
+        "handoff_sid8": sid8,
         "resume_flag_present": (sd / _RESUME_FLAG_FILENAME).is_file(),
         "rotator_log_tail": _rotator_log_tail(10),
         "token_meter_tail": _tail_lines(sd / _TOKEN_METER_FILENAME, 5),
+    }
+
+
+
+def _check_pointers(before: dict) -> dict:
+    """The `after`-snapshot keys for the elided-pointer check (TRDD-I40IKPWU); {} when the handoff
+    carried no pointers. Exactly one outcome key: `pointers_expanded_error`,
+    `pointers_transcript_rejected`, `pointers_transcript_missing`, or `pointers_expanded`
+    ({pointer id: error text or None})."""
+    pointers = before.get("handoff_pointers") or []
+    if not pointers:
+        return {}
+    # WHY a failed import is recorded, not swallowed into a fallback: if `jev_expand` cannot be
+    # imported the check did not run, and the verdict must say FAIL "could not run" -- a quiet
+    # SKIP here would turn a broken plugin install into a clean bill of health. (Deliberately NOT
+    # the silent `except: pass` the memgrep lookup in `gather_after` uses.)
+    try:
+        import jev_expand  # noqa: PLC0415 - local sibling lib, stdlib-only
+    except Exception as exc:  # noqa: BLE001 - reported verbatim as the verdict detail
+        return {"pointers_expanded_error": f"{type(exc).__name__}: {exc}"}
+    transcript = before.get("handoff_transcript")
+    reason = validate_transcript_path(transcript, _projects_roots(), before.get("handoff_sid8"))
+    if reason is not None:
+        return {"pointers_transcript_rejected": reason}
+    # WHY the resolved path is used for BOTH the existence check and the read: the validated
+    # path and the opened path must be the same file, never the raw string re-interpreted.
+    assert transcript is not None  # validate_transcript_path returned None, so a path exists
+    cand = Path(transcript).expanduser().resolve(strict=False)
+    if not cand.is_file():
+        return {"pointers_transcript_missing": True}
+    return {
+        "pointers_expanded": {
+            pid: jev_expand.resolve_pointer(cand, pid, malformed_lines=[])[1] for pid in pointers
+        }
     }
 
 
@@ -470,7 +722,7 @@ def gather_after(before: dict, now: int) -> dict:
         memgrep = None
     roots = _memory_roots()
     links_resolved = {slug: _resolve_link(slug, roots, memgrep) for slug in before.get("handoff_links", [])}
-    return {
+    after = {
         "ts": now,
         "cron_id": _read_text(sd / _CRON_ID_FILENAME).strip(),
         "context_tokens": ctx,
@@ -486,6 +738,8 @@ def gather_after(before: dict, now: int) -> dict:
         "memgrep": bool(memgrep),
         "links_resolved": links_resolved,
     }
+    after.update(_check_pointers(before))
+    return after
 
 
 def _context_floor() -> int:

@@ -167,7 +167,7 @@ def test_expand_tool_result_block(tmp_path: Path) -> None:
 def test_expand_still_returns_text_for_a_pre_boundary_item(tmp_path: Path) -> None:
     """TRDD-350W5II2 test 4: a pre-boundary tool item is dropped from `scored` (not sent to
     Jev, not rendered) but stays reachable -- `expand <id>` resolves ANY item by uuid straight
-    from the raw JSONL (`jev_compact.py::_read_jsonl_entry`), a path this change never touches.
+    from the raw JSONL (`jev_expand.read_jsonl_entry`), a path this change never touches.
     Not a NEW behavior (unaffected by this change either way), pins the "nothing becomes
     unreachable" half of the card."""
     entries = [
@@ -191,7 +191,7 @@ def test_expand_still_returns_text_for_a_pre_boundary_item(tmp_path: Path) -> No
 
 
 def test_expand_finds_an_id_located_after_a_non_utf8_line(tmp_path: Path) -> None:
-    """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `_read_jsonl_entry`
+    """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `jev_expand.read_jsonl_entry`
     used to open the transcript in TEXT mode (`encoding="utf-8"`), so a single non-UTF-8 byte
     on ANY earlier line raised `UnicodeDecodeError` and crashed `expand` before it ever reached
     a healthy line after it -- even though `compact`'s own `extract_items` already tolerated
@@ -216,7 +216,7 @@ def test_expand_finds_an_id_located_after_a_non_utf8_line(tmp_path: Path) -> Non
 def test_expand_survives_a_lone_surrogate_in_the_expanded_text(tmp_path: Path) -> None:
     """TRDD-DQXMND59 stage 3, item A: 2729b1cb made `extract_items`/`compact` safe for a lone
     (unpaired) UTF-16 surrogate (`Item.__post_init__` sanitizes it) -- but `expand` builds its
-    printed text via `_extract_block`, which never goes through `Item` at all. `text` there was
+    printed text via `jev_expand.extract_block`, which never goes through `Item` at all. `text` there was
     still the RAW string, still holding `"\\ud83d"`, and `print()` to a UTF-8 stdout raises
     `UnicodeEncodeError`. Fails on HEAD.
 
@@ -284,7 +284,7 @@ def test_expand_list_reports_skipped_malformed_line_count_on_a_truncated_line(
 
 def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
     # A typed mid-turn owner message: `attachment.prompt` is a plain str. Fails on HEAD
-    # (before the TRDD-DQXMND59 fix) because `_extract_block` only looked at
+    # (before the TRDD-DQXMND59 fix) because `jev_expand.extract_block` only looked at
     # `entry["message"]`/`entry["content"]`, both absent on an attachment entry.
     transcript = _write_attachment_transcript(tmp_path, "please hold off on the merge")
     code, out = _run(["expand", "--transcript", str(transcript), "att-1:0"])
@@ -295,9 +295,9 @@ def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
 def test_expand_attachment_block_list_prompt(tmp_path: Path) -> None:
     # An owner message with a pasted image alongside text: `attachment.prompt` is a list of
     # content blocks, same shape as `message.content` (TRDD-RAEGS1D5). Must join only the
-    # `text` blocks, via `jc.attachment_item_text` -- the ONE shared rule `extract_items` and
+    # `text` blocks, via `jev_expand.attachment_item_text` -- the ONE shared rule `extract_items` and
     # `expand` both call (TRDD-DQXMND59 follow-up, adversarial review of e23e0b39). Pins
-    # `_extract_block`'s own docstring, which now says plainly this is NOT byte-verbatim for a
+    # `jev_expand.extract_block`'s own docstring, which now says plainly this is NOT byte-verbatim for a
     # list-shaped prompt: the image block is silently excluded, only the text block comes back.
     prompt = [
         {"type": "text", "text": "go ahead and ship it"},
@@ -459,6 +459,20 @@ def test_expand_unknown_uuid_pins_the_full_stderr_line(tmp_path: Path) -> None:
     )
 
 
+
+def test_expand_unknown_uuid_after_a_malformed_line_prints_exactly_two_stderr_lines(tmp_path: Path) -> None:
+    """A truncated line plus an unknown uuid exit 3 with exactly two lines, skipped count first."""
+    transcript = _write_transcript(tmp_path)
+    transcript.write_text('{"type": "user", "uuid": "mid-write", "mess\n' + transcript.read_text(encoding="utf-8"), encoding="utf-8")
+    code, out = _run(["expand", "--transcript", str(transcript), "no-such-uuid:0"])
+    assert code == 3
+    # Order is contract: the caller learns lines were skipped BEFORE it reads the failure.
+    assert out.splitlines() == [
+        "expand: skipped 1 malformed line(s)",
+        f"expand failed: no transcript entry with uuid='no-such-uuid' in {transcript}",
+    ]
+
+
 def test_expand_missing_block_pins_the_full_stderr_line(tmp_path: Path) -> None:
     """A block index the entry lacks exits 3 with the exact no-block line."""
     transcript = _write_transcript(tmp_path)
@@ -482,10 +496,10 @@ def test_expand_span_out_of_range_pins_the_full_stderr_line(tmp_path: Path) -> N
 def _write_list_content_read_transcript(tmp_path: Path) -> tuple[Path, str]:
     """Same large Read-shaped result as `_write_read_transcript`, but the tool_result's own
     `content` is LIST-shaped (two `text` blocks), not a plain string. Adversarial review
-    (TRDD-88DOI824): `jev_compaction._tool_result_text` and this script's own
-    `_extract_block` independently reconstruct list content via `"\\n".join(...)` over the
+    (TRDD-88DOI824): `jev_expand.tool_result_text` and
+    `jev_expand.extract_block` independently reconstruct list content via `"\\n".join(...)` over the
     `text`-typed parts -- nothing exercised that agreement for a SEGMENTED result before this
-    test. `result_text` is built to match `_tool_result_text`'s own join exactly."""
+    test. `result_text` is built to match `jev_expand.tool_result_text`'s own join exactly."""
     lines = []
     n = 1
     for i in range(80):
@@ -495,7 +509,7 @@ def _write_list_content_read_transcript(tmp_path: Path) -> tuple[Path, str]:
     mid = len(lines) // 2
     part_a = "\n".join(lines[:mid])
     part_b = "\n".join(lines[mid:]) + "\n"
-    result_text = "\n".join([part_a, part_b])  # == _tool_result_text's own reconstruction
+    result_text = "\n".join([part_a, part_b])  # == jev_expand.tool_result_text's own reconstruction
     entries = [
         {
             "type": "assistant", "uuid": "a1", "parentUuid": None,
@@ -519,8 +533,8 @@ def _write_list_content_read_transcript(tmp_path: Path) -> tuple[Path, str]:
 
 
 def test_expand_segment_id_is_byte_exact_for_list_shaped_content(tmp_path: Path) -> None:
-    # Closes the adversarial-review gap: `_tool_result_text` (jev_compaction.py, what gets
-    # segmented) and `_extract_block` (this script, what `expand` slices) reconstruct
+    # Closes the adversarial-review gap: `jev_expand.tool_result_text` (what gets
+    # segmented) and `jev_expand.extract_block` (what `expand` slices) reconstruct
     # list-shaped tool_result content independently -- this proves they agree byte for byte
     # for a SEGMENTED result, not just the plain-string shape every other test here uses.
     transcript, result_text = _write_list_content_read_transcript(tmp_path)

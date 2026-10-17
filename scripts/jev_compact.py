@@ -124,6 +124,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 
 import global_state  # noqa: E402  -- needs the sys.path line above
 import jev_compaction as jc  # noqa: E402
+import jev_expand  # noqa: E402  -- TRDD-I40IKPWU: stdlib-only pointer resolution shared with the cross-/clear verifier
 import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7, shadow decision log
 import jsonl_walk  # noqa: E402  -- TRDD-DQXMND59 stage 3: iter_jsonl_entries/parse_jsonl_line/drop_lone_surrogates moved here from jc, its new home
 import state  # noqa: E402
@@ -365,89 +366,6 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_jsonl_entry(
-    transcript: Path, target_uuid: str, *, malformed_lines: list[int],
-) -> dict[str, Any] | None:
-    """Scan the transcript for the entry with ``uuid == target_uuid``.
-
-    A plain linear scan, not an index: a transcript is read here once per `expand` call,
-    which is an interactive, occasional operation (a pointer the model chose to follow) —
-    not the hot path card 3's compaction pass walks. Building an index for a one-shot CLI
-    invocation would be optimizing a call that happens a handful of times per session.
-
-    TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): this used to open
-    the file in TEXT mode (`encoding="utf-8"`) and its own bare `json.loads` loop, so a
-    single non-UTF-8 byte anywhere before `target_uuid`'s line raised `UnicodeDecodeError`
-    and crashed `expand` outright -- the exact damage `compact`'s `extract_items` already
-    knew how to skip. Now shares `jsonl_walk.iter_jsonl_entries`, the SAME byte-safe walk
-    (stage 3: moved out of `jc` into its own stdlib-only module), so a damaged line earlier
-    in the file no longer blocks reaching a healthy one later.
-    """
-    try:
-        for _line_no, entry in jsonl_walk.iter_jsonl_entries(transcript, malformed_lines=malformed_lines):
-            if entry.get("uuid") == target_uuid:
-                return entry
-    except OSError:
-        return None
-    return None
-
-
-def _extract_block(entry: dict[str, Any], index: int) -> str | None:
-    """The original bytes of block ``index`` of ``entry`` — user text (str content, index
-    must be 0), or one block of a list-shaped ``user``/``assistant`` content (a
-    ``text`` block's ``text``, or a ``tool_result`` block's ``content``, verbatim), or an
-    ``attachment`` entry's queued prompt (the joined TEXT blocks only when the prompt is a
-    list of content blocks -- see the WHY comment below; NOT byte-verbatim in that one case).
-    ``thinking``/``tool_use`` blocks are not expandable on their own (card 3 pairs a
-    ``tool_use`` with its ``tool_result`` — expanding the tool_result is the pointer).
-
-    "Verbatim" here means byte-for-byte EXCEPT that a lone (unpaired) UTF-16 surrogate becomes
-    U+FFFD -- this function itself returns the raw block text unchanged, but `cmd_expand` (the
-    only caller that prints it) always runs the result through `jsonl_walk.drop_lone_surrogates`
-    before printing (stage 3b, "also" item)."""
-    if entry.get("type") == "attachment":
-        # TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): this used to restate
-        # `extract_items`'s attachment predicate (the `queued_command` type gate, the
-        # prompt text-join) here, calling the OTHER module's PRIVATE `jc._tool_result_text`
-        # directly -- two independent copies of one rule that could drift the moment either
-        # changed without the other (matrix row V2: `expand` "not found" for a real pointer;
-        # row V10: `expand` accepting an id `extract_items` never generated). Now calls
-        # `jc.attachment_item_text`, the ONE shared, public rule -- see its own docstring.
-        #
-        # WHY this is not byte-verbatim like the other branches: `attachment_item_text` joins
-        # only the `text`-type blocks of a list-shaped prompt (matching what `extract_items`
-        # scores/inlines) -- an image or other non-text block in the same prompt is silently
-        # excluded from the returned string, same as the docstring above now says.
-        if index != 0:
-            return None
-        return jc.attachment_item_text(entry)
-    message = entry.get("message")
-    content = (message.get("content") if isinstance(message, dict) else None) or entry.get("content")
-    if isinstance(content, str):
-        return content if index == 0 else None
-    if not isinstance(content, list):
-        return None
-    if index < 0 or index >= len(content):
-        return None
-    block = content[index]
-    if not isinstance(block, dict):
-        return None
-    block_type = block.get("type")
-    if block_type == "text":
-        text = block.get("text")
-        return text if isinstance(text, str) else None
-    if block_type == "tool_result":
-        result = block.get("content")
-        if isinstance(result, str):
-            return result
-        if isinstance(result, list):
-            # A structured tool_result: concatenate its own text sub-blocks verbatim.
-            parts = [part.get("text", "") for part in result if isinstance(part, dict) and part.get("type") == "text"]
-            return "\n".join(parts)
-        return None
-    return None
-
-
 def cmd_expand(args: argparse.Namespace) -> int:
     transcript = Path(args.transcript)
 
@@ -502,65 +420,30 @@ def cmd_expand(args: argparse.Namespace) -> int:
         print("expand failed: an id is required unless --list is given", file=sys.stderr)
         return 3
 
-    # Card 6 (TRDD-88DOI824): a segment id is "<uuid>:<n>@<a>-<b>" -- split the span off
-    # FIRST (rsplit on the last "@", matching real ids, which never carry one otherwise) so
-    # the "<uuid>:<n>" half below is parsed exactly as it always was, pre-card-6.
-    id_part = args.id
-    line_span: tuple[int, int] | None = None
-    if "@" in id_part:
-        id_part, span_str = id_part.rsplit("@", 1)
-        try:
-            start_str, end_str = span_str.split("-", 1)
-            line_span = (int(start_str), int(end_str))
-        except ValueError:
-            print(
-                f"expand failed: malformed id {args.id!r}, expected '<uuid>:<n>@<a>-<b>'",
-                file=sys.stderr,
-            )
-            return 3
-
-    try:
-        target_uuid, index_str = id_part.rsplit(":", 1)
-        index = int(index_str)
-    except ValueError:
-        print(f"expand failed: malformed id {args.id!r}, expected '<uuid>:<n>'", file=sys.stderr)
-        return 3
-
+    # TRDD-I40IKPWU: id parsing, the transcript read and the block/line-span slice live in
+    # `jev_expand.resolve_pointer` (stdlib-only, shared with the cross-/clear verifier) so the
+    # two can never disagree about what a pointer resolves to. The error text it returns is the
+    # exact message printed here after the "expand failed: " prefix.
     expand_malformed_lines: list[int] = []
-    entry = _read_jsonl_entry(transcript, target_uuid, malformed_lines=expand_malformed_lines)
+    text, error = jev_expand.resolve_pointer(
+        transcript, args.id, malformed_lines=expand_malformed_lines,
+    )
+    # Printed AFTER the read and BEFORE the failure line, on the success path too (exactly as
+    # before the extraction): the caller must be told damaged lines were skipped either way.
     if expand_malformed_lines:
         print(
             f"expand: skipped {len(expand_malformed_lines)} malformed line(s)", file=sys.stderr,
         )
-    if entry is None:
-        print(f"expand failed: no transcript entry with uuid={target_uuid!r} in {transcript}", file=sys.stderr)
+    if error is not None or text is None:
+        print(f"expand failed: {error}", file=sys.stderr)
         return 3
-
-    text = _extract_block(entry, index)
-    if text is None:
-        print(f"expand failed: no block {index} in entry {target_uuid!r}", file=sys.stderr)
-        return 3
-
-    if line_span is not None:
-        # `jev_compaction.py::_segment_tool_result` sliced ITS segment from this SAME raw
-        # block text (never the synthetic "name(input)\n" prefix) -- see that function's own
-        # docstring for why the two must agree on what "the original" is.
-        start, end = line_span
-        lines = text.splitlines(keepends=True)
-        if start < 1 or end < start or end > len(lines):
-            print(
-                f"expand failed: line span {start}-{end} out of range for block {index} "
-                f"in entry {target_uuid!r} ({len(lines)} lines)",
-                file=sys.stderr,
-            )
-            return 3
-        text = "".join(lines[start - 1:end])
 
     # TRDD-N9LDHF7N card 7: an expand of an id `compact` had logged as elided is a false
     # negative -- ground truth the gate was too aggressive (jevctx.shadow.ShadowLog's own
     # docstring). Logged only on this SUCCESS path (never for --list, never for a malformed
     # id that exits 3 above): those never resolve to a real item, so there is nothing to
-    # match against a prior decision.
+    # match against a prior decision. It stays HERE, not in `resolve_pointer`, so the verifier's
+    # probes never feed the shadow log.
     jsl.log_expand_outcome(args.id)
 
     # TRDD-DQXMND59 stage 3, finding A: `text` here is the RAW block bytes -- unlike an

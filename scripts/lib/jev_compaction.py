@@ -32,6 +32,7 @@ if str(_LIB_DIR) not in sys.path:
 
 import jsonl_walk  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared byte-safe JSONL walk (TRDD-DQXMND59 stage 3)
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
+from jev_expand import attachment_item_text, tool_result_text  # noqa: E402  -- needs the sys.path line above; stdlib-only, the ONE attachment-text / tool-result-text rule, shared with `expand` and the cross-/clear verifier (TRDD-I40IKPWU)
 from jevctx import scorer as _scorer  # noqa: E402
 from jevctx.budget import Batch, BudgetPlanner  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see score_items
@@ -338,64 +339,6 @@ class _RetryBudget:
             return True
 
 
-def _tool_result_text(content: Any) -> str:
-    """Text of a `tool_result` block's `content` -- a plain string, or a list of text blocks."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return ""
-
-
-def attachment_item_text(entry: dict[str, Any]) -> str | None:
-    """The item text for a `type: "attachment"` entry, or `None` if `entry` is not one, or if
-    it is one that produces no item at all -- the ONE place the EXISTENCE-and-text rule for an
-    attachment entry is allowed to live.
-
-    TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): before this function, the SAME
-    predicate -- "only `attachment.type == "queued_command"`, text = the joined text blocks of
-    `attachment.prompt`" -- was written out twice: once in `extract_items`'s own attachment
-    branch below, and once in `scripts/jev_compact.py::_extract_block` (which also reached
-    across the module boundary to call this file's PRIVATE `_tool_result_text` directly). Two
-    copies drift the moment one changes without the other: `expand` would start returning
-    "not found" for a real pointer (matrix row V2, TRDD-DQXMND59's own report), or accept an id
-    `extract_items` never actually generated (matrix row V10).
-
-    `entry.get("type") != "attachment"` is checked HERE, first (stage 3, item N -- a second
-    review of this function): the function now owns the WHOLE existence rule, not just the
-    `attachment.type` sub-check, so a caller cannot forget the outer gate the way
-    `_extract_block` almost did on its first cut (it used to check `entry.get("type") ==
-    "attachment"` itself, before ever calling this function).
-
-    Stage 3 correction (item O, same review): this is the existence-and-text rule ONLY. Later
-    filtering in `extract_items`'s own attachment branch (an unmeasured `commandMode` skips
-    item creation entirely -- see the `continue` after the commandMode/origin classification
-    below) is NOT mirrored here, so this function can return text for an attachment
-    `extract_items` itself goes on to drop. Harmless for `expand`: it reaches an entry by its
-    transcript `uuid`, never by asking "did `extract_items` keep this", so a wider accept here
-    does not let `expand` "succeed" on an id `extract_items` could never have generated (matrix
-    row V10 stays closed) -- it only means "not found" (V2) and "id extract_items would keep"
-    are no longer the exact same predicate as "id `attachment_item_text` accepts".
-
-    `_tool_result_text` (not a plain string read) because TRDD-RAEGS1D5: `attachment.prompt`
-    is a plain str for a typed message, but a LIST of content blocks (text/image, same shape
-    as `message.content`) when the owner pastes an image alongside text -- measured on the
-    183 MB c8a95d7e transcript, whose crash was `is_control_input` calling `.strip()` on that
-    list. Fixed in af09571b by reusing `_tool_result_text`, the existing str-or-block-list
-    joiner, rather than assuming str.
-    """
-    if entry.get("type") != "attachment":
-        return None
-    attachment = entry.get("attachment")
-    if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-        return None
-    return _tool_result_text(attachment.get("prompt", "")) or None
-
-
 def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit]
 
@@ -537,7 +480,7 @@ def _segment_tool_result(
     for score-time context below: that prefix is this project's own synthetic addition, never
     a transcript byte, so including it in what gets segmented would (1) violate "a segment is
     an exact slice of the original" and (2) shift every segment's line numbers by one relative
-    to `jev_compact.py::_extract_block`, which returns only the RAW tool_result content for a
+    to `jev_expand.extract_block`, which returns only the RAW tool_result content for a
     `tool_result` block -- `expand`'s `<uuid>:<n>@<a>-<b>` slicing depends on the two agreeing.
 
     Below the threshold, or when segmentation yields at most one piece anyway (nothing to
@@ -645,7 +588,7 @@ def extract_items(
     care still has to write `malformed_lines=[]` -- that one extra word is cheap, "forgot to
     look" is not. See `jsonl_walk.iter_jsonl_entries` (TRDD-DQXMND59 stage 3: moved to its own
     stdlib-only module, see that module's docstring for why), the shared walk this function and
-    `scripts/jev_compact.py::_read_jsonl_entry` both use.
+    `jev_expand.read_jsonl_entry` both use.
 
     KNOWN LIMITATION (adversarial review, 2026-09-24): `errors="replace"` only catches damage
     that ALSO breaks `json.loads` -- a line whose bad bytes decode to U+FFFD but still happens
@@ -756,7 +699,7 @@ def extract_items(
                         # `Item.__post_init__` (it is not an `Item`) so, unlike every scored/
                         # conversation item's `.text`, nothing sanitized a lone surrogate here
                         # until now -- `compose()` writes it straight into the final document.
-                        window.summary = jsonl_walk.drop_lone_surrogates(_tool_result_text(content))
+                        window.summary = jsonl_walk.drop_lone_surrogates(tool_result_text(content))
                     continue
                 if _is_heartbeat_entry(entry):
                     continue  # the fire's OWN prompt -- always dropped, see point 2 above
@@ -801,7 +744,7 @@ def extract_items(
                             name, tool_input = pending_tool_uses.get(
                                 tool_use_id, ("<unknown tool>", "")
                             )
-                            result_text = _tool_result_text(block.get("content"))
+                            result_text = tool_result_text(block.get("content"))
                             # Card 6 (TRDD-88DOI824): one or more Items, per
                             # `_segment_tool_result` -- see that function's own docstring.
                             new_items = _segment_tool_result(
@@ -817,15 +760,15 @@ def extract_items(
                 # owner typed while a turn was running, or a task-notification was delivered
                 # mid-turn. Every other attachment kind (hook output, ...) is noise.
                 # TRDD-DQXMND59 follow-up: the type gate AND the prompt text-join both live in
-                # `attachment_item_text` now, the ONE place this rule is allowed to exist (see
-                # its own docstring) -- `expand` (`jev_compact.py::_extract_block`) calls the
+                # `jev_expand.attachment_item_text` now, the ONE place this rule is allowed to exist (see
+                # its own docstring) -- `expand` (`jev_expand.extract_block`) calls the
                 # SAME function, so the two can never drift apart again.
                 text = attachment_item_text(entry)
                 if text is None:
                     continue
                 attachment = entry.get("attachment")
                 # A `continue` here would be a SILENT skip of a broken invariant: `text is not
-                # None` already proves `attachment_item_text` found `attachment` to be a dict
+                # None` already proves `jev_expand.attachment_item_text` found `attachment` to be a dict
                 # (its own only non-None return path) -- this assert exists to satisfy the type
                 # checker's narrowing, not to handle a real case, so a failure means the
                 # invariant itself broke and must be loud, not swallowed like a normal skip.

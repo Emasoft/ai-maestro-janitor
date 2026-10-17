@@ -1433,7 +1433,7 @@ def test_mid_turn_attachment_with_list_prompt_does_not_crash(tmp_path: Path) -> 
     redacted shape reproduced below. Before the fix, `extract_items` crashed with
     `AttributeError: 'list' object has no attribute 'strip'` inside `is_control_input`, which
     assumed `attachment.prompt` is always a str. The text blocks must be joined the same way
-    `_tool_result_text` already joins a tool_result's block list -- an image block contributes
+    `jev_expand.tool_result_text` already joins a tool_result's block list -- an image block contributes
     nothing, the text block's text survives."""
     record = {
         "type": "attachment",
@@ -3077,7 +3077,7 @@ def test_window_pairs_each_boundary_to_its_own_summary_by_anchor_uuid(tmp_path: 
 
 def test_window_summary_survives_a_lone_surrogate_and_reaches_compose(tmp_path: Path) -> None:
     """TRDD-DQXMND59 stage 3, item G follow-up (adversarial review finding B): `window.summary`
-    is set directly from `_tool_result_text` in `extract_items` -- it is NOT an `Item`, so
+    is set directly from `jev_expand.tool_result_text` in `extract_items` -- it is NOT an `Item`, so
     `Item.__post_init__`'s sanitization (stage 1) never touched it, and `compose()` writes it
     straight into the final document. A lone (unpaired) UTF-16 surrogate in Claude Code's own
     `isCompactSummary` text therefore used to reach `compose()` un-sanitized and raise
