@@ -874,6 +874,7 @@ def test_a_candidate_starting_outside_the_15_minute_window_is_not_accepted(tmp_p
     assert after["context_tokens"] is None
     assert "ambiguous" in after["context_source"] and "1 started after the 15-minute window" in after["context_source"]
 
+
 def test_a_late_successor_beside_an_in_window_peer_makes_the_check_SKIP(tmp_path: Path, monkeypatch) -> None:
     """The real successor started 20 min after the clear; the lone in-window peer must not be accepted."""
     tdir = _clear_env(tmp_path, monkeypatch)
@@ -884,7 +885,9 @@ def test_a_late_successor_beside_an_in_window_peer_makes_the_check_SKIP(tmp_path
     assert "1 started after the 15-minute window" in after["context_source"]
     assert "1 started within the 15-minute window" in after["context_source"]
 
+
 def test_a_candidate_starting_before_the_clear_beside_an_in_window_one_is_ignored(tmp_path: Path, monkeypatch) -> None:
+    """A transcript that started before the clear is ignored, so the lone in-window one is accepted."""
     tdir = _clear_env(tmp_path, monkeypatch)
     _write_transcript(tdir / "aaaaaaaa-older.jsonl", [_assistant(_iso(-600), 400_000)])
     _write_transcript(tdir / "bbbbbbbb-new.jsonl", [_assistant(_iso(14 * 60), 171_000)])
