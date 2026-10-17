@@ -20,6 +20,13 @@ implementation-commits: [36287c9c]
 
 # The unwedge ESC nudge fails at pane retry_wedge and its attempts climb with no recovery
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-17
+
+- column: todo
+- DONE: 36287c9c adds reads=/presses= to the failed pane-policy line (diagnostic only, the failing nudge is NOT fixed).
+- NEXT ACTION: wait for the next 'unwedge: failed' in global-state/daemon.log and read reads=/presses= to tell a persisting retry_wedge from too few ESC presses, then fix the root cause.
+- GOTCHA: the ok line text is unchanged on purpose (TRDD-UA4FAX67 greps it).
+
 Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the board drain (TRDD-S6GX1DHN, step vi); not investigated beyond what is written here. Read in global-state/daemon.log: 10 lines containing '[frozen] attempt=' between 2026-10-09T19:21:26 and 19:56:23 (count by the main session); a worker read them as 5 episodes in two other projects (ai-maestro, llm-externalizer), each 'FIRE-FAILED esc_nudge' at pane=retry_wedge followed by 'unwedge: failed', attempts 0, 1, 2. The line is written at scripts/daemon.py:1602. Related: TRDD-L32WC0H7 (its success case is unseen), TRDD-WKTD5JTC (wedge detection, complete), TRDD-KE88RIKX. To do: read why the fire fails (typing gate, pane kind, or the injector itself), and whether a third failed attempt should change remedy.
 
 ## Approval log

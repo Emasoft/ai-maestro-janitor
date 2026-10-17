@@ -165,7 +165,6 @@ def test_recovery_rung_esc_only_at_a_wedge_uses_the_wedge_esc_law(monkeypatch) -
     assert outcome.status is pa.OutcomeStatus.DONE
 
 
-
 def test_a_failed_wedge_step_logs_its_reads_and_one_counted_press_when_unqueued(monkeypatch) -> None:
     """TRDD-315X5OWA: an unqueued wedge (queued_count 0) that never clears fires ONE ESC, and the failed line carries that step's three reads and presses=1."""
     _frames(monkeypatch, "real-wedged-session-limit.txt")
@@ -199,6 +198,28 @@ def test_an_ok_wedge_step_line_is_unchanged(monkeypatch) -> None:
     outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
     assert outcome.status is pa.OutcomeStatus.DONE
     assert captured == ["pane-policy: recovery_rung recovery_rung unwedge: ok (observed working)"]
+
+
+def test_a_failed_second_step_logs_only_its_own_reads(monkeypatch) -> None:
+    """TRDD-315X5OWA: step 1 (flush) succeeds, step 2 (command) fails; step 2's reads= lists only its own reads, none of step 1's."""
+    _frames(
+        monkeypatch,
+        "real-wedged-fable-limit.txt",
+        "real-calm-working.txt",
+        "synthetic-awaiting-permission.txt",
+    )
+    _seam(monkeypatch)
+    captured: list[str] = []
+    outcome = _act(pa.Event.RECOVERY_RUNG, command="/janitor-arm", esc_first=True, retries=2, log=captured.append)
+    assert outcome.status is pa.OutcomeStatus.FAILED
+    assert outcome.steps_done == 1
+    assert len(captured) == 2
+    assert captured[0].endswith("unwedge: ok (observed working)")
+    failed = captured[1]
+    assert "failed" in failed
+    reads = failed.split("reads=")[1].split(";")[0].split(",")
+    assert len(reads) == 2
+    assert "working" not in reads
 
 
 def test_recovery_rung_stops_when_the_pane_lands_on_a_human_decision(monkeypatch) -> None:
