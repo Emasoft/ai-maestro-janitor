@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-10-16T20:26:27+0200
+updated: 2026-10-18T00:55:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -200,3 +200,4 @@ The OWNER MANDATE quoted at the top of the STATE block is the owner's own messag
 ## Board findings 2026-10-16
 
 trddgrep lint reports ERROR TERMINAL-WITHOUT-CHECKLIST on complete cards that have no acceptance checklist; measured 2026-10-16: x58 over 831 scanned, of which 2 at ERROR level (TRDD-J9ZJ2DAR and TRDD-FU8MZ0SL, closed this day, both frozen now) and 56 at WARN, archived cards among them. Whether the missing checklist is what blocks archiving was NOT verified. A wave that closes cards should add the acceptance checklist BEFORE the closing move; the existing 58 need a per-card decision (rule: no scripted mass repair).
+2026-10-18 01:00 CORRECTIONS to archived TRDD-DS3WDTPV (closed in d7-style commit after 608baeb6; frozen, so recorded here). (a) Its Acceptance line 'all 12 clears whose quoted reply ended on a question' overstates: the source report counts 9 that ended on a question plus 3 borderline, and the pre-fix '2 of 2' was 1 plus 1 borderline. (b) 'tests pass' is now backed by a main-session run today: 256 passed over tests/test_external_clear*.py, test_precompact_handoff_hook.py, test_session_continuity.py. (c) The 2026-10-17 22:10 clear was composed by the external watcher; whether a sidecar was present was not checked, and its follow-up session asked again and waited (the no-task clause), so it repeats the named event only. (d) The closure re-reads the acceptance clause against the 2026-10-11 'STAYS' ruling with no new discriminating evidence; the basis is that the before/after comparison was never the card's clause.
