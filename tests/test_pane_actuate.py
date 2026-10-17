@@ -165,6 +165,42 @@ def test_recovery_rung_esc_only_at_a_wedge_uses_the_wedge_esc_law(monkeypatch) -
     assert outcome.status is pa.OutcomeStatus.DONE
 
 
+
+def test_a_failed_wedge_step_logs_its_reads_and_one_counted_press_when_unqueued(monkeypatch) -> None:
+    """TRDD-315X5OWA: an unqueued wedge (queued_count 0) that never clears fires ONE ESC, and the failed line carries that step's three reads and presses=1."""
+    _frames(monkeypatch, "real-wedged-session-limit.txt")
+    fired = _seam(monkeypatch)
+    captured: list[str] = []
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
+    assert _keys(fired) == ["ESC"]
+    assert outcome.status is pa.OutcomeStatus.FAILED
+    assert captured == [
+        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge,retry_wedge,retry_wedge; presses=1)"
+    ]
+
+
+def test_a_failed_wedge_step_logs_the_counted_presses_when_queued(monkeypatch) -> None:
+    """TRDD-315X5OWA: a wedge with one queued row (fixture queued_count 1) spends 1 + 1 presses; the failed line reports the counted 2, not a constant."""
+    _frames(monkeypatch, "real-wedged-fable-limit.txt")
+    fired = _seam(monkeypatch)
+    captured: list[str] = []
+    _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
+    assert _keys(fired) == ["ESC", "ESC"]
+    assert captured == [
+        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge,retry_wedge,retry_wedge; presses=2)"
+    ]
+
+
+def test_an_ok_wedge_step_line_is_unchanged(monkeypatch) -> None:
+    """TRDD-315X5OWA: the ok line keeps its exact pre-change text (TRDD-UA4FAX67 greps it)."""
+    _frames(monkeypatch, "real-wedged-fable-limit.txt", "real-calm-working.txt")
+    _seam(monkeypatch)
+    captured: list[str] = []
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
+    assert outcome.status is pa.OutcomeStatus.DONE
+    assert captured == ["pane-policy: recovery_rung recovery_rung unwedge: ok (observed working)"]
+
+
 def test_recovery_rung_stops_when_the_pane_lands_on_a_human_decision(monkeypatch) -> None:
     """Wrong post-state: the command was typed but the pane came back showing a permission
     dialog, so `IDLE_OR_WORKING` never holds and the rung reports FAILED."""

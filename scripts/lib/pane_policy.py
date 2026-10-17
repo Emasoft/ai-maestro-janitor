@@ -534,6 +534,7 @@ def execute(
         # as before: one keystroke, up to `retries` re-reads.
         ok = False
         presses = 0
+        reads_start = len(observed)  # `observed` accumulates across steps; this step's reads start here
         for _ in range(max(retries, step.repeat_max)):
             if presses < step.repeat_max:
                 type_keys(step)
@@ -544,7 +545,12 @@ def execute(
             if satisfied(step.expect, state):
                 ok = True
                 break
-        log(f"{step.label}: {'ok' if ok else 'failed'} (observed {observed[-1]})")
+        # TRDD-315X5OWA: the failed line must tell a persisting wall from too few presses.
+        if ok:
+            log(f"{step.label}: ok (observed {observed[-1]})")
+        else:
+            reads = ",".join(observed[reads_start:])
+            log(f"{step.label}: failed (observed {observed[-1]}; reads={reads}; presses={presses})")
         if not ok:
             return Outcome(status=OutcomeStatus.FAILED, steps_done=i, observed=tuple(observed), touched=typed)
     return Outcome(status=OutcomeStatus.DONE, steps_done=len(steps), observed=tuple(observed), touched=typed)
