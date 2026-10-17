@@ -1238,6 +1238,62 @@ def _emit_quiet_if_idle() -> None:
         print("[janitor-quiet]")
         _phase_background_worker_progress()
 
+# TRDD-P64SR014: a detector the dispatcher kills or cannot start protects nothing, yet
+# dispatch.log was the only trace (25 timeouts in one rotation, unseen). Three failed passes in a
+# row become ONE HIGH ledger finding + drift line per episode; the next ok pass records recovery.
+_DETECTOR_FAIL_STREAK = 3
+
+
+
+def _track_detector_streak(name: str, outcome: str) -> None:
+    """Count consecutive dispatcher-visible failures of `name`; alert once at the Kth.
+
+    WHY it counts PROCESS-level failures only (killed, crashed, unspawnable), not semantic ones:
+    the dispatcher sees just the exit code and the timeout. Any outcome NOT starting with
+    `error:` (`ok`, `applied`, `declined:<why>`) is a pass that ran, so it resets the streak.
+    A detector that self-records `declined:` and then exits non-zero is reported by the dispatcher
+    as `error:rc=N` and would count; a grep of scripts/detectors on 2026-10-17 found no detector
+    recording a `declined` outcome via state.record_outcome (none exist), so today nothing is
+    miscounted.
+    spawn-failed is not cadence-gated (`_mark_detector_ran` is skipped), so it counts every fire
+    and K=3 can trip in ~15 min on a transient missing interpreter; accepted, because the
+    DETECTOR-RECOVERED row records the recovery.
+    The `== K` crossing (never `>=`) is the dedupe: findings_ledger.record has none and the ledger
+    has no resolve record, so exactly one row per failure episode. The stamp is written BEFORE
+    the print so a crash in between cannot re-alert on every pass. The stamp is separate from
+    last-outcome-<name>.ts, which must never feed DUE; nothing here is read by `_detector_is_due`.
+    Two concurrent sessions can race the read-modify-write (off-by-one or a duplicate row);
+    accepted. Fail-open: it must never break the heartbeat.
+    """
+    try:
+        stamp = state.state_dir() / f"detector-fail-streak-{name}.ts"
+        try:
+            count = int(stamp.read_text(encoding="utf-8").split(None, 1)[0])
+        except (OSError, ValueError, IndexError):
+            count = 0  # missing or garbled stamp = no streak
+        if not outcome.startswith("error:"):
+            if not stamp.exists():
+                return
+            stamp.unlink(missing_ok=True)
+            if count >= _DETECTOR_FAIL_STREAK:
+                findings_ledger.record(
+                    sev="LOW", code="DETECTOR-RECOVERED", src=name,
+                    msg=f"detector '{name}' recovered after {count} failed passes",
+                )
+            return
+        count += 1
+        state.atomic_write(stamp, f"{count} {outcome}")
+        if count == _DETECTOR_FAIL_STREAK:
+            line = findings_ledger.record(
+                sev="HIGH", code="DETECTOR-FAIL", src=name,
+                msg=f"detector '{name}' failed {_DETECTOR_FAIL_STREAK} passes in a row ({outcome}); not completing",
+            )
+            if line:
+                sys.stdout.write(line + "\n")
+    except (OSError, ValueError):
+        pass
+
+
 
 def _record_default_outcome(name: str, outcome: str, started: int) -> None:
     """Dispatcher-side outcome default (TRDD-COQN6KVA) — the detector's own record wins.
@@ -1248,6 +1304,9 @@ def _record_default_outcome(name: str, outcome: str, started: int) -> None:
     stamp exists to make. Only when the detector said nothing does the dispatcher write the
     coarse truth it can see: exit code + timeout. Best-effort like the stamp itself.
     """
+    # First, before the early return below: the streak counts every pass, including those where the
+    # detector wrote its own outcome stamp (TRDD-P64SR014).
+    _track_detector_streak(name, outcome)
     try:
         p = state.state_dir() / f"last-outcome-{name}.ts"
         if p.is_file():
@@ -3131,7 +3190,7 @@ def _phase_guard_branch_protection() -> None:
     if not script.is_file() or not os.access(script, os.X_OK):
         return
     try:
-        subprocess.run(  # noqa: S603 - explicit args, no shell
+        proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             [str(script)],
             capture_output=False,
             check=False,
@@ -3140,9 +3199,22 @@ def _phase_guard_branch_protection() -> None:
     except subprocess.TimeoutExpired:
         state.log_line("dispatch", "guard branch-protection apply timed out")
         state.record_outcome("guard-branch-protection", "error:timeout")
+        _track_detector_streak("guard-branch-protection", "error:timeout")
     except OSError as exc:
         state.log_line("dispatch", f"guard branch-protection apply spawn failed: {exc}")
         state.record_outcome("guard-branch-protection", "error:spawn-failed")
+        _track_detector_streak("guard-branch-protection", "error:spawn-failed")
+    else:
+        # WHY: a completed run with rc 0 is a pass; a non-zero rc is a crash, counted like
+        # _run_detector's error:rc=N. The guard exits 0 on every decline path
+        # (branch_protection_apply.py returns 0 at 143/261/303/353), so a non-zero rc only ever means
+        # a crash. Without the reset the stamp stays at K after one DETECTOR-FAIL episode and the
+        # guard could never alert or record recovery again (TRDD-P64SR014).
+        if proc.returncode != 0:
+            # WHY: without this stamp a crash leaves last-outcome-guard-branch-protection showing a stale
+            # healthy value; rc 0 writes none (the guard records its own outcome).
+            state.record_outcome("guard-branch-protection", f"error:rc={proc.returncode}")
+        _track_detector_streak("guard-branch-protection", "ok" if proc.returncode == 0 else f"error:rc={proc.returncode}")
     state.atomic_write(last_file, str(int(time.time())))
 
 
