@@ -4,7 +4,7 @@ title: Log the retry attempt number with each pane read on a failed unwedge step
 column: todo
 status: tasked
 created: 2026-10-17T15:01:04+0200
-updated: 2026-10-17T15:02:36+0200
+updated: 2026-10-17T23:27:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -26,3 +26,11 @@ Derived from TRDD-315X5OWA (its FINDING lists rival causes H1 wall persists, H2 
 ## Approval log
 
 - 2026-10-17T15:01:04+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-10-17: the countdown is logged exactly as parsed, inner space kept, e.g. reads=retry_wedge@1[2m 50s]; the example in the body above (2m50s) is illustrative. A read with no attempt prints bare retry_wedge, one with no countdown omits the brackets; non-wedge reads keep their bare kind.
+
+## Verify
+
+After a release via scripts/publish.py and a local plugin update: a daemon.log line containing 'unwedge: failed' carries reads= tokens of the form retry_wedge@<N>[<countdown>] (find it with grep 'unwedge: failed', then read its reads= list). A hit proves only the new format; telling H1, H2 and H3 apart needs an attempt drop or a countdown restart inside one step, which may never be observed. Until such a failure is observed the field case is unobserved and the card stays in testing.

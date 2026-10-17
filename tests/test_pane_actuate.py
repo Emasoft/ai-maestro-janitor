@@ -166,7 +166,7 @@ def test_recovery_rung_esc_only_at_a_wedge_uses_the_wedge_esc_law(monkeypatch) -
 
 
 def test_a_failed_wedge_step_logs_its_reads_and_one_counted_press_when_unqueued(monkeypatch) -> None:
-    """TRDD-315X5OWA: an unqueued wedge (queued_count 0) that never clears fires ONE ESC, and the failed line carries that step's three reads and presses=1."""
+    """TRDD-315X5OWA: an unqueued wedge (queued_count 0) that never clears fires ONE ESC, and the failed line carries that step's three reads (each with its attempt and countdown, TRDD-XNQUYVT3) and presses=1."""
     _frames(monkeypatch, "real-wedged-session-limit.txt")
     fired = _seam(monkeypatch)
     captured: list[str] = []
@@ -174,7 +174,7 @@ def test_a_failed_wedge_step_logs_its_reads_and_one_counted_press_when_unqueued(
     assert _keys(fired) == ["ESC"]
     assert outcome.status is pa.OutcomeStatus.FAILED
     assert captured == [
-        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge,retry_wedge,retry_wedge; presses=1)"
+        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge@1[2m 50s],retry_wedge@1[2m 50s],retry_wedge@1[2m 50s]; presses=1)"
     ]
 
 
@@ -186,8 +186,25 @@ def test_a_failed_wedge_step_logs_the_counted_presses_when_queued(monkeypatch) -
     _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
     assert _keys(fired) == ["ESC", "ESC"]
     assert captured == [
-        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge,retry_wedge,retry_wedge; presses=2)"
+        "pane-policy: recovery_rung recovery_rung unwedge: failed (observed retry_wedge; reads=retry_wedge@1[5h],retry_wedge@1[5h],retry_wedge@1[5h]; presses=2)"
     ]
+
+
+def test_a_failed_wedge_step_logs_each_reads_own_attempt_and_countdown(monkeypatch) -> None:
+    """TRDD-XNQUYVT3: different wedge frames in sequence (attempt 1 at 2m 50s, then attempt 5 at 0s) each appear in reads= with their OWN token, not one copied from the first read."""
+    # The first frame is consumed by planning; the step's three reads are frames 2, 3 and the repeated last.
+    _frames(
+        monkeypatch,
+        "real-wedged-session-limit.txt",
+        "real-wedged-session-limit.txt",
+        "real-wedged-rate-limit-429.txt",
+    )
+    _seam(monkeypatch)
+    captured: list[str] = []
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, log=captured.append)
+    assert outcome.status is pa.OutcomeStatus.FAILED
+    assert len(captured) == 1
+    assert "reads=retry_wedge@1[2m 50s],retry_wedge@5[0s],retry_wedge@5[0s];" in captured[0]
 
 
 def test_an_ok_wedge_step_line_is_unchanged(monkeypatch) -> None:

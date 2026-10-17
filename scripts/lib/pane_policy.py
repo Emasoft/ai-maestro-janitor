@@ -534,7 +534,7 @@ def execute(
         # as before: one keystroke, up to `retries` re-reads.
         ok = False
         presses = 0
-        reads_start = len(observed)  # `observed` accumulates across steps; this step's reads start here
+        details: list[str] = []  # per-read tokens for the failed line only; `observed` stays bare kinds
         for _ in range(max(retries, step.repeat_max)):
             if presses < step.repeat_max:
                 type_keys(step)
@@ -542,15 +542,34 @@ def execute(
                 presses += 1
             state = read()
             observed.append(state.status.kind.value if state is not None else "unreadable")
+            details.append(_read_detail(state))
             if satisfied(step.expect, state):
                 ok = True
                 break
         # TRDD-315X5OWA: the failed line must tell a persisting wall from too few presses.
+        # TRDD-XNQUYVT3: each wedge read also carries its attempt number and countdown. An attempt
+        # that drops, or a countdown that restarts near its maximum, means a new request was made;
+        # an unchanged attempt proves nothing either way (the row may outlive a cancelled request, or the ESC was ignored).
         if ok:
             log(f"{step.label}: ok (observed {observed[-1]})")
         else:
-            reads = ",".join(observed[reads_start:])
+            reads = ",".join(details)
             log(f"{step.label}: failed (observed {observed[-1]}; reads={reads}; presses={presses})")
         if not ok:
             return Outcome(status=OutcomeStatus.FAILED, steps_done=i, observed=tuple(observed), touched=typed)
     return Outcome(status=OutcomeStatus.DONE, steps_done=len(steps), observed=tuple(observed), touched=typed)
+
+
+def _read_detail(state: PaneState | None) -> str:
+    """One read's token for the failed-step log: its kind, plus `@<attempt>[<retry_in>]` for a
+    retry wedge (each part omitted when the parser found none)."""
+    if state is None:
+        return "unreadable"
+    status = state.status
+    token = status.kind.value
+    if status.kind is StatusKind.RETRY_WEDGE:
+        if status.attempt is not None:
+            token += f"@{status.attempt}"
+        if status.retry_in is not None:
+            token += f"[{status.retry_in}]"
+    return token
