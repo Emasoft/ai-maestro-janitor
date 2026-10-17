@@ -1,10 +1,10 @@
 ---
 trdd-id: P64SR014
 title: A detector killed at the 120 s dispatch timeout raises no finding
-column: backburner
+column: todo
 status: tasked
 created: 2026-10-17T04:54:31+0200
-updated: 2026-10-17T04:56:00+0200
+updated: 2026-10-17T04:57:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,3 +37,4 @@ Cites: TRDD-XRT9LOQL.
 
 Scope: all three silent outcomes share the gap: error:timeout (dispatch.py:1316-1334), error:spawn-failed (1337) and error:rc=N (1351) all go through _record_default_outcome with no finding. Absence checked 2026-10-17 across scripts, skills, commands, hooks and agents (all file types) for 'last-outcome', 'error:timeout', and glob forms 'outcome*' / 'last-outcome*': the only hits are the writers (dispatch.py, state.py, guard/branch_protection_apply.py). Column backburner, deliberately: 0 last-outcome stamps in this project carry error:, so no detector has been observed killed or crashed in the field; move to todo on the first real one.
 CORRECTION to the archived TRDD-XRT9LOQL DECISION line (that card is archived and immutable, so it lives here): its claim that the fallback is blind only when the walk overruns the 120 s kill while skip-with-log is blind on every timeout overstates the fallback. Measured: git ls-files 3.51 s cold at 500k untracked files on the external volume, the walk 4 to 10 times slower, so file count does not cause the timeout. A volume-caused timeout (slow, contended or waking disk, git lock) would probably also kill the walk, and a kill is as silent as a skip. Keeping the fallback is the default (no code churn), not a measured advantage. Not measured: contended or cold-disk conditions. The folder/* caveat was not reproduced with a big/* layout; a layout that forces descent was not tried.
+FIELD EVIDENCE (supersedes the backburner reason above, which only saw current stamps; last-outcome stamps are overwritten each pass): this project's .janitor/logs/dispatch.log* (back to 2026-04-24) hold 10 'timed out after 120s -- killed' lines, from 2026-10-03 to 2026-10-05: trdd-drift x6, trdd-state-reconciliation, system-daemon-runaway, pr-reconciler, memory-maintenance x1 each. None raised a finding. Moved to todo. The archived TRDD-XRT9LOQL refused even an Approval-log pointer to this correction (D8: archived cards are fully immutable), so this card is the only place the correction lives.
