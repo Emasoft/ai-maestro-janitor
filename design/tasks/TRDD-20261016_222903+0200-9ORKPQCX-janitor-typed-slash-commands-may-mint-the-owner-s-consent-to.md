@@ -1,10 +1,10 @@
 ---
 trdd-id: 9ORKPQCX
 title: Janitor-typed slash commands may mint the owner's consent tokens
-column: dev
+column: testing
 status: tasked
 created: 2026-10-16T22:29:03+0200
-updated: 2026-10-17T06:51:02+0200
+updated: 2026-10-17T09:42:20+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-16T22:29:03+0200
+implementation-commits: [384807dc]
 ---
 
 # Janitor-typed slash commands may mint the owner's consent tokens
@@ -35,6 +36,7 @@ DISCRIMINATED 2026-10-17 (docs_dev/20261017_063131+0200-9ORKPQCX-prechecks.md an
 CORRECTION: the fleet_stop harm is a LABEL, not an action. fleet_stop types /janitor-disarm only when the kill-switch is set (global_state.py:1093-1101); disarm_guard.authority() (57-71) returns user-asked when a token exists and global-stop otherwise, and main() takes the same action either way. No fleet_stop code change is needed.
 DESIGN (proposal, review, measure and advisor): one crumb per logical send, a file machine-typed/<uuid>.json holding the text and an epoch, rewritten before each type attempt. It is written (a) inside terminal_trigger.inject_until_sent right before type_fn(), with state_dir a REQUIRED parameter threaded from send_verified, run_verified_send and run_chained_inject, and (b) in pane_actuate._type before fire(), via target_state_dir(project_dir) and plan['command'] (the fleet iTerm path bypasses _run_steps). The hook calls spend_machine_typed after the state import and before bump_user_presence, and skips only presence and intent (no early return). TTL is a 2 h module constant, each crumb is consumed once, and a spend prunes expired files. Normalization: the first line, stripped, with any <pasted_content> wrapper removed. NEXT: dispatch the build worker (one commit; no sed or redirects; fastedit only).
 UNKNOWNS AND NOTES: it is unknown whether UserPromptSubmit fires at enqueue or at dequeue for a soft-sent command, and whether it fires for built-ins (/clear, /reload-plugins); the design is correct either way. Mixed-version fleet: crumbs written into projects whose sessions still run the old hook expire unspent. Security: anything that can write the state dir can already forge consent through user-intent-*.ts; a crumb only adds a one-shot denial, so machine-typed/ is not a security boundary.
+- **2026-10-17 BUILT in 384807dc — column dev → testing.** Crumb-before-typing + hook spend, as designed; full suite 18585 passed (exit 0), ruff/mypy/pyright clean; worker report docs_dev/20261017_081203+0200-9ORKPQCX-build.md. ACCEPTED COSTS (not covered): (1) a send that typed but never submitted leaves its crumb up to 2 h and can swallow ONE identical owner command (logged as 'machine-typed crumb spent'); (2) two sessions in one project share machine-typed/; (3) daemon.py stop-flag path with no instance record passes no project_dir, so no crumb; (4) a soft send queued > 2 h mints anyway. READ-OUT PLAN (after the release is installed here, for 7 days): grep 'machine-typed: no crumb matched' .janitor/logs/prompt-submit.log — lines present ⇒ add normalization for that exact received shape; silence decides nothing (the probe sees only the wrapped and /<plugin>:<word> shapes). Field proof needs a release: no user-intent-arm/resume.ts minted at a post-clear bootstrap.
 
 ## Approval log
 
