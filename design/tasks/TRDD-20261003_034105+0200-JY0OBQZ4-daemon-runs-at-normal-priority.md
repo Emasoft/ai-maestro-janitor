@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: todo
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-18T01:06:47+0200
+updated: 2026-10-18T01:25:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:41:05+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
 derived: true
-implementation-commits: [30d320eb]
+implementation-commits: [30d320eb, b1870adb]
 ---
 
 # Daemon runs at normal priority
@@ -51,4 +51,4 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-09T22:19:45+0200 — column → testing by main-agent@ai-maestro-janitor. host step done; waits on the tick-time field check under load
 2026-10-18 01:05 FIELD CHECK NOT MET (slow ticks persist; the at-load clause cannot be judged), measured by the main session from daemon.log.1 and daemon.log ('oauth-rotator-tick' done-in lines, ticks of 30 s or more / all ticks, max): 2026-10-16 37/1129 max 188 s; 2026-10-17 73/1288 max 180 s; 2026-10-18 to 01:00 6/45 max 74 s. The daemon has run at ProcessType Standard since 2026-10-09 (host step N2), and slow ticks persist: 3.3 percent and 5.7 percent on the two full days, 13 percent over 45 ticks on 2026-10-18 (every 'done in' line is whole seconds, checked). The card's two Background baselines disagree (4/66 = 6.1 percent on 2026-10-06, 8/1313 = 0.6 percent on 2026-10-05) and none of the three samples has load, so nothing here shows what priority did. So slow ticks still occur on the Standard job; whether the acceptance 'tick wall time under 30 s at high load' fails cannot be told, because host load is in no log. R1 (ProcessType Standard, ps timeout) is done and stays; the open question is which part of the tick is slow. NEXT (buildable): log the host load average and per-phase times on every tick that takes 30 s or more, so the acceptance can be judged; related: TRDD-6CF3L7IJ (backburner). Returned to todo: slow ticks persist and the acceptance cannot be judged until load is logged.
 - 2026-10-18T00:57:03+0200 — column → todo by main-agent@ai-maestro-janitor. field check failed: 3-6% of ticks still take 30 s or more on the Standard job
-2026-10-18 IN PROGRESS: the daemon now logs 'rotator tick slow: subprocess Ns, esc-pass Ns, rc=..., load L1 L5 L15' for every tick of 30 s or more (uncommitted at the time of writing; commit on this card's implementation-commits). HIGH LOAD for this card's acceptance = load1 at or above the host's CPU core count (sysctl -n hw.ncpu on macOS). The line attributes a slow tick to the rotator subprocess or the ESC pass only; per-step timing inside rotator.py (keychain read, usage call, refresh) is the next step if the subprocess phase dominates. Reaches daemon.log only after a release and a local plugin update.
+2026-10-18 IN PROGRESS: the daemon now logs 'rotator tick slow: subprocess Ns, esc-pass Ns, rc=..., load L1 L5 L15' for every tick of 30 s or more (commit b1870adb). HIGH LOAD for this card's acceptance = load1 at or above the host's logical CPU core count (sysctl -n hw.ncpu on macOS). The line attributes a slow tick to the rotator subprocess or the ESC pass only; per-step timing inside rotator.py (keychain read, usage call, refresh) is the next step if the subprocess phase dominates. Reaches daemon.log only after a release and a local plugin update.
