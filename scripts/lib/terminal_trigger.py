@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -876,6 +877,7 @@ def inject_until_sent(
     *,
     type_fn,
     submit_fn,
+    state_dir: Path,
     clear_fn=None,
     pre_submit=None,
     quiet_s: float = _USER_QUIET_S,
@@ -1028,6 +1030,10 @@ def inject_until_sent(
     last = "not attempted"
     unreadable = 0  # CONSECUTIVE failed reads on a readable channel; reset by any good read
     typed_once = False  # TRDD-L32WC0H7 / F4: has type_fn() run at least once this call?
+    # TRDD-9ORKPQCX: ONE crumb id per logical send, so every retry below rewrites the same
+    # file. `state_dir` is the state dir of the project that OWNS THE TARGET PANE (the project
+    # whose UserPromptSubmit hook will see the typed line), not necessarily this process's own.
+    crumb_id = uuid.uuid4().hex
 
     def _clear_leftover_command() -> None:
         """F4: on ANY non-submit exit AFTER `type_fn()` has run, re-read the pane and clear
@@ -1116,6 +1122,14 @@ def inject_until_sent(
             continue
 
         if not already_typed:
+            # Crumb BEFORE the keystrokes: the hook can fire the instant Enter lands, so a crumb
+            # written afterwards would race it. Written here, not at child start, because the wait
+            # above can last up to an hour. A retry rewrites the same file (same crumb_id).
+            # Accepted cost: a send that typed but then gave up (or was cancelled) is never
+            # submitted, so its one crumb stays behind for up to MACHINE_TYPED_TTL_S (2 h) and can
+            # suppress ONE owner-typed command of the same text in that window -- bounded to one
+            # owner command per failed send, never more, because the id is per logical send.
+            user_intent.note_machine_typed(command, state_dir, crumb_id)
             type_fn()
         typed_once = True
         # POLL for the field to settle — do NOT judge on ONE immediate read. Typing is
@@ -1379,6 +1393,7 @@ def send_verified(
     terminal: Mapping[str, str],
     command: str,
     *,
+    state_dir: Path,
     esc_first: bool = False,
     bypass_interrupt_cooldown: bool = False,
     giveup_s: float | None = None,
@@ -1450,6 +1465,7 @@ def send_verified(
     return inject_until_sent(
         terminal, command,
         type_fn=_runner(command), submit_fn=_submit, clear_fn=_clear,
+        state_dir=state_dir,
         giveup_s=giveup_s, sleeper=sleeper, esc_first=esc_first,
         bypass_interrupt_cooldown=bypass_interrupt_cooldown, **extra,
     )
@@ -1469,6 +1485,7 @@ def send_model_switch_true_error(
     terminal: Mapping[str, str],
     command: str,
     *,
+    state_dir: Path,
     menu_wait_s: float = 10.0,
     poll_s: float = 1.0,
     giveup_s: float | None = None,
@@ -1541,6 +1558,7 @@ def send_model_switch_true_error(
 
     sent, why = send_verified(
         terminal, command, esc_first=False,
+        state_dir=state_dir,
         giveup_s=giveup_s, sleeper=sleeper, reader=reader, is_typing=is_typing,
         bypass_interrupt_cooldown=bypass_interrupt_cooldown,
     )
@@ -1571,6 +1589,7 @@ def run_chained_inject(
     *,
     first: str,
     then: Sequence[str],
+    state_dir: Path,
     gate_stamp: Path,
     gate_baseline: int,
     pre_submit_first=None,
@@ -1622,6 +1641,7 @@ def run_chained_inject(
     ok, why = inject_until_sent(
         terminal, first,
         type_fn=_runner(first), submit_fn=_submit, clear_fn=_clear,
+        state_dir=state_dir,
         pre_submit=pre_submit_first, giveup_s=giveup_s, still_wanted=still_wanted,
         sleeper=sleeper,
     )
@@ -1643,6 +1663,7 @@ def run_chained_inject(
         ok, why = inject_until_sent(
             terminal, cmd,
             type_fn=_runner(cmd), submit_fn=_submit, clear_fn=_clear,
+            state_dir=state_dir,
             giveup_s=giveup_s, sleeper=sleeper,
         )
         if not ok:
@@ -1956,6 +1977,9 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
             sent, why = do_send(
                 terminal, command, esc_first=esc_first and i == 0, giveup_s=remaining,
                 still_wanted=still_wanted,
+                # TRDD-9ORKPQCX: a self-send types into THIS session's own pane, so the crumb goes
+                # to the sender's own state dir (the payload's `state_dir`), where its hook looks.
+                state_dir=sd,
             )
             state.log_line(
                 "terminal_trigger",

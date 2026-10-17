@@ -38,6 +38,7 @@ channel) is reported as `unverified`, never as proof.
 from __future__ import annotations
 
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -263,9 +264,25 @@ def act(
         return Outcome(status=OutcomeStatus.NOOP, steps_done=0, observed=())
 
     accepted: list[bool] = []
+    crumb_ids: dict[str, str] = {}  # TRDD-9ORKPQCX: command text -> its one crumb id (see _type)
 
     def _type(step: Step) -> None:
-        accepted.append(fleet_inject.fire(build_step_plan(terminal, step, submit_ref=submit_ref, fallback=command_plan)))
+        step_plan = build_step_plan(terminal, step, submit_ref=submit_ref, fallback=command_plan)
+        # TRDD-9ORKPQCX: leave the machine-typed crumb in the state dir of the project that OWNS
+        # THE TARGET PANE (`project_dir`, never this daemon's own `state.state_dir()`), right
+        # BEFORE fire(): the fleet iTerm path bypasses terminal_trigger.inject_until_sent, and the
+        # target's UserPromptSubmit hook must not mint consent or presence for this keystroke.
+        # ONE crumb per command text per act() call (`crumb_ids`), rewritten before every attempt,
+        # exactly as inject_until_sent does: a fresh id per attempt would leave an orphan crumb
+        # on every retype, and each orphan silently eats one real owner command of the same text
+        # within the 2 h TTL. Without a `project_dir` the target is unknown and NOTHING is
+        # guessed (no default to the caller's own state dir).
+        if project_dir and step_plan and step_plan.get("command"):
+            text = step_plan["command"]
+            user_intent.note_machine_typed(
+                text, user_intent.target_state_dir(project_dir), crumb_ids.setdefault(text, uuid.uuid4().hex)
+            )
+        accepted.append(fleet_inject.fire(step_plan))
 
     def _read() -> PaneState | None:
         time.sleep(settle_s)

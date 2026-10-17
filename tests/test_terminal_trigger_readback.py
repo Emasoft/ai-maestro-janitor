@@ -22,6 +22,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 
 NBSP = " "
@@ -168,6 +169,7 @@ def test_a_present_user_DEFERS_the_command_instead_of_cancelling_it() -> None:
         reader=_seq(_pane(""), _pane("/compact")),
         is_typing=lambda _t: next(typing),
         sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"]
@@ -186,6 +188,7 @@ def test_a_busy_field_rechecks_after_8_seconds_and_eventually_sends() -> None:
         clear_fn=lambda: None,
         reader=_seq(_pane("half a sentence"), _pane(""), _pane("/compact")),
         is_typing=lambda _t: False, sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     assert slept == [8.0], "a non-empty field means a human is composing — wait the 8s window"
@@ -204,6 +207,7 @@ def test_a_failed_verify_retries_rather_than_pressing_enter() -> None:
         # empty -> type -> read back MANGLED -> clear -> retry -> empty -> type -> clean -> send
         reader=_seq(_pane(""), _pane("xx/compact"), _pane(""), _pane("/compact")),
         is_typing=lambda _t: False, sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     assert slept == [5.0]
@@ -219,6 +223,7 @@ def test_presence_is_rechecked_every_pass_not_once() -> None:
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
         reader=_seq(_pane("busy"), _pane(""), _pane("/compact")),
         is_typing=lambda _t: next(typing), sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     assert list(typing) == [], "every pass must consult presence again"
@@ -236,6 +241,7 @@ def test_it_gives_up_LOUDLY_rather_than_looping_forever() -> None:
         reader=lambda _t: _pane("permanently busy"),
         is_typing=lambda _t: False, sleeper=lambda _s: None,
         clock=lambda: next(clock), giveup_s=10.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False and sent == []
     assert "gave up" in why and "not empty" in why
@@ -249,6 +255,7 @@ def test_an_unreadable_channel_reports_instead_of_spinning() -> None:
         type_fn=lambda: None, submit_fn=lambda: None,
         reader=lambda _t: None, is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False and "not readable" in why
 
@@ -276,6 +283,7 @@ def test_the_owners_worked_example_end_to_end() -> None:
         clear_fn=lambda: None,
         reader=reads, is_typing=lambda _t: False,
         sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"], "Enter only after the form verified"
@@ -302,6 +310,7 @@ def test_a_malformed_injection_is_CLEARED_or_the_loop_deadlocks_on_its_own_text(
         clear_fn=lambda: cleared.append("C-u"),
         reader=reads, is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     assert cleared == ["C-u"], "the malformed text must be cleared before retrying"
@@ -341,6 +350,7 @@ def test_a_timeout_followed_by_a_landed_compaction_cancels_instead_of_retyping()
         reader=reads, is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
         still_wanted=still_wanted,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert "possibly-delivered" in why
@@ -355,6 +365,7 @@ def test_without_a_clear_fn_it_refuses_rather_than_spinning_on_its_own_garbage()
         type_fn=lambda: None, submit_fn=lambda: None, clear_fn=None,
         reader=_seq(_pane(""), _pane("/comp")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert "no clear_fn" in why
@@ -396,6 +407,7 @@ def test_the_DEFAULT_presence_probe_is_callable(monkeypatch) -> None:
         reader=_seq(_pane(""), _pane("/compact")),
         # is_typing deliberately NOT passed — that is the whole point.
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"]
@@ -424,6 +436,7 @@ def test_a_BLINDED_typing_probe_DEFERS_and_never_licenses_injection(monkeypatch)
         reader=_reader,
         # is_typing deliberately NOT passed — the default probe is the one that must defer.
         sleeper=lambda _s: None, clock=lambda: 0.0, giveup_s=2.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False, why
     assert sent == [], "a blinded probe must never be treated as licence to type"
@@ -455,6 +468,7 @@ def test_a_subsecond_quiet_window_does_not_disarm_the_typing_gate(monkeypatch) -
         type_fn=lambda: typed.append("typed"), submit_fn=lambda: None, clear_fn=lambda: None,
         reader=lambda _t: _pane(""),
         sleeper=lambda _s: None, clock=lambda: 0.0, giveup_s=2.0, quiet_s=0.1,
+        state_dir=state.state_dir(),
     )
     assert seen and min(seen) >= 1, f"the gate must never ask for a 0-second window: {seen}"
     assert ok is False and typed == [], "a sub-second quiet window must still defer"
@@ -474,6 +488,7 @@ def test_a_probe_that_confirms_NOT_typing_proceeds(monkeypatch) -> None:
         clear_fn=lambda: None,
         reader=_seq(_pane(""), _pane("/compact")),
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"]
@@ -520,6 +535,7 @@ def test_user_typing_DURING_injection_backs_off_and_never_clears_their_text() ->
                     _pane(""), _pane("/compact")),
         is_typing=lambda _t: next(typing),
         sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert cleared == [], "the user's own keystrokes must NEVER be cleared"
@@ -538,6 +554,7 @@ def test_a_malformed_field_with_the_user_QUIET_is_still_cleared() -> None:
         clear_fn=lambda: cleared.append("C-u"),
         reader=_seq(_pane(""), _pane("/comp"), _pane(""), _pane("/compact")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     assert cleared == ["C-u"], "our own malformed text must still be cleared"
@@ -636,6 +653,7 @@ def test_an_abort_mid_procedure_restarts_the_window_it_does_not_resume() -> None
         clear_fn=lambda: log.append("CLEAR"),
         reader=_reader, is_typing=_probe,
         sleeper=lambda s: log.append(f"wait{s:.0f}"), clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert log == [
@@ -782,6 +800,7 @@ def test_the_chain_submits_clear_THEN_waits_THEN_bootstraps(tmp_path, monkeypatc
         {"kind": "tmux", "pane": "%1"}, first="/clear",
         then=["/janitor-arm", "/janitor-resume"],
         gate_stamp=gate, gate_baseline=100, sleeper=lambda _s: None,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert log == [
@@ -815,6 +834,7 @@ def test_the_bootstrap_is_NOT_typed_when_the_fresh_session_never_appears(tmp_pat
         then=["/janitor-arm", "/janitor-resume"],
         gate_stamp=gate, gate_baseline=100,   # never advances
         gate_timeout_s=3, sleeper=lambda _s: None,
+        state_dir=state.state_dir(),
     )
     assert not ok
     assert "no fresh session" in why
@@ -832,6 +852,7 @@ def test_pre_submit_runs_ONLY_when_the_field_verified(monkeypatch) -> None:
         clear_fn=lambda: None, pre_submit=lambda: wrote.append("flags"),
         reader=_seq(_pane(""), _pane("/clea"), _pane(""), _pane("/clear")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok
     assert wrote == ["flags"], "written exactly once, on the verified pass"
@@ -859,6 +880,7 @@ def test_a_chain_that_never_verifies_writes_NO_resume_state() -> None:
         reader=lambda _t: _pane("the user is typing"),
         is_typing=lambda _t: False, sleeper=lambda _s: None,
         giveup_s=30.0, clock=_clock,
+        state_dir=state.state_dir(),
     )
     assert not ok
     assert wrote == [], "no clear happened, so no resume state may exist"
@@ -875,6 +897,7 @@ def test_a_transient_unreadable_pane_RETRIES_instead_of_aborting() -> None:
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
         reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"]
@@ -884,6 +907,7 @@ def test_a_transient_unreadable_pane_RETRIES_instead_of_aborting() -> None:
         type_fn=lambda: None, submit_fn=lambda: None,
         reader=lambda _t: None, is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert not ok2 and "not readable" in why2
 
@@ -950,7 +974,7 @@ def test_build_esc_only_steps_unsupported_channel_is_none() -> None:
 
 def test_send_verified_refuses_an_unwritable_channel() -> None:
     """No type/submit builders for this channel ⇒ (False, why) BEFORE anything is typed."""
-    ok, why = tt.send_verified({"kind": "unknown"}, "/model opus")
+    ok, why = tt.send_verified({"kind": "unknown"}, "/model opus", state_dir=state.state_dir())
     assert ok is False and "cannot type-then-verify" in why
 
 
@@ -970,6 +994,7 @@ def test_send_verified_escs_then_types_then_submits_in_order(monkeypatch) -> Non
     ok, why = tt.send_verified(
         {"kind": "tmux", "pane": "%1"}, "/model opus", esc_first=True, sleeper=lambda _s: None, giveup_s=5.0,
         reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True, why
     joined = " | ".join(calls)
@@ -985,6 +1010,7 @@ def test_send_verified_without_esc_types_no_escape(monkeypatch) -> None:
     ok, _ = tt.send_verified(
         {"kind": "tmux", "pane": "%1"}, "/model opus", sleeper=lambda _s: None, giveup_s=5.0,
         reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True
     assert not any("Escape" in c for c in calls)
@@ -1006,6 +1032,7 @@ def test_send_verified_esc_suppressed_during_interrupt_cooldown(monkeypatch) -> 
         {"kind": "tmux", "pane": "%1"}, "/model opus", esc_first=True,
         sleeper=lambda _s: None, giveup_s=0.2,
         reader=lambda _t: _pane(""), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is False, why  # never settles: the interrupt cooldown never lifts in this test
     assert not any("Escape" in c for c in calls), f"ESC must be suppressed during cooldown: {calls!r}"
@@ -1028,6 +1055,7 @@ def test_send_verified_escs_types_and_submits_on_ITERM_too(monkeypatch) -> None:
         {"kind": "iterm", "session_id": "ECEF0378-8D5D-4834-A8A9-371F0FDB3720"},
         "/model opus", esc_first=True, sleeper=lambda _s: None, giveup_s=5.0,
         reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True, why
     joined = " | ".join(calls)
@@ -1146,6 +1174,7 @@ def test_true_error_switch_flushes_the_queue_then_submits_then_confirms_the_dete
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=5.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: next(reads, _MENU_PANE), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True and "menu confirmed" in why
     enters = [i for i, c in enumerate(calls) if "Enter" in c]
@@ -1167,6 +1196,7 @@ def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=3.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True and "no ask-user menu" in why
     assert sum(1 for c in calls if "Enter" in c) == 1, f"only the submit Enter is allowed: {calls!r}"
@@ -1195,6 +1225,7 @@ def test_an_EMPTY_readback_is_polled_not_treated_as_malformed() -> None:
         # empty (field free) -> type -> STILL EMPTY (not rendered yet) -> settles to the command
         reader=_seq(_pane(""), _pane(""), _pane("/compact")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"], "the command must be submitted once the field settles"
@@ -1214,6 +1245,7 @@ def test_a_field_that_stays_EMPTY_still_gives_up_rather_than_submitting() -> Non
         reader=lambda _t=None: _pane(""),   # renders nothing, ever
         is_typing=lambda _t: False, sleeper=lambda _s: None,
         clock=lambda: next(clock), giveup_s=1.0,
+        state_dir=state.state_dir(),
     )
     assert not ok, "a field that never shows the command must not report success"
     assert sent == [], "Enter must never be pressed on an unverified field"
@@ -1240,6 +1272,7 @@ def test_still_wanted_cancel_clears_a_leftover_exact_match_command() -> None:
         is_typing=lambda _t: next(is_typing_calls),
         still_wanted=lambda: next(still_wanted_calls),
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False and "cancelled" in why
     assert sent == [], "a cancelled injection must never submit"
@@ -1260,6 +1293,7 @@ def test_still_wanted_cancel_never_clears_the_users_own_text() -> None:
         is_typing=lambda _t: next(is_typing_calls),
         still_wanted=lambda: next(still_wanted_calls),
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False and "cancelled" in why
     assert cleared == [], "the user's own text must never be cleared"
@@ -1280,6 +1314,7 @@ def test_a_field_that_ALREADY_shows_the_command_is_submitted_never_retyped() -> 
         clear_fn=lambda: None,
         reader=_seq(_pane("/compact"), _pane("")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and typed == [] and sent == ["Enter"]
 
@@ -1296,6 +1331,7 @@ def test_the_incidents_own_field_is_NOT_ours_and_is_never_touched() -> None:
         clear_fn=lambda: cleared.append("clear"),
         reader=lambda _t: _pane("/compact/compact"),
         is_typing=lambda _t: False, sleeper=lambda _s: None, giveup_s=1.0, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert not ok and "field not empty" in why
     assert typed == [] and sent == [] and cleared == []
@@ -1314,6 +1350,7 @@ def test_after_enter_the_field_is_re_read_and_enter_is_pressed_again_while_it_st
         # the settle -> Enter again -> empty: the second Enter took.
         reader=_seq(_pane(""), _pane("/compact"), _pane("/compact"), _pane("/compact"), _pane("")),
         is_typing=lambda _t: False, sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter", "Enter"]
     assert slept == [tt._SUBMIT_CONFIRM_INTERVAL_S]
@@ -1328,6 +1365,7 @@ def test_send_verified_forwards_still_wanted_into_the_injector(monkeypatch) -> N
         {"kind": "tmux", "pane": "%1"}, "/x",
         still_wanted=lambda: (False, "gone"),
         reader=lambda _t: _pane(""), is_typing=lambda _t: False, sleeper=lambda _s: None,
+        state_dir=state.state_dir(),
     )
     assert (ok, why) == (False, "cancelled — gone")
     assert ran == [], "cancelled before any keystroke"
@@ -1341,6 +1379,7 @@ def test_the_confirm_is_bounded_and_never_presses_enter_on_other_text() -> None:
         # after Enter the field shows the user's own new text: not ours, hands off.
         reader=_seq(_pane(""), _pane("/compact"), _pane("hello")),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     sent.clear()
@@ -1350,6 +1389,7 @@ def test_the_confirm_is_bounded_and_never_presses_enter_on_other_text() -> None:
         # the field never clears: at most _SUBMIT_CONFIRM_ATTEMPTS extra Enters, then stop.
         reader=lambda _t: _pane("/compact"),
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"] * (1 + tt._SUBMIT_CONFIRM_ATTEMPTS)
 
@@ -1392,6 +1432,7 @@ def test_already_typed_branch_is_ALSO_cancelled_by_still_wanted() -> None:
         reader=_reader, is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
         still_wanted=_still_wanted,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert "possibly-delivered" in why

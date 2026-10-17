@@ -239,6 +239,146 @@ def consume_intent(verb: str, state_dir: Path | None = None) -> None:
     except OSError:
         pass
 
+# TRDD-9ORKPQCX: the janitor TYPES its own commands into the pane (/clear, /janitor-arm,
+# /janitor-resume, /reload-plugins --force, ...), and UserPromptSubmit cannot tell a typed line
+# from a human's, so `record_intent_from_prompt` used to mint a consent token ("a HUMAN asked")
+# for the machine's own keystrokes and `bump_user_presence` stamped a human as present. The typer
+# now leaves a one-shot crumb BEFORE typing and the hook spends it. 2 h, not 120 s: a SOFT send
+# is queued behind a running turn and the hook may fire only when the turn ends (unmeasured).
+# SECURITY NOTE: machine-typed/ is NOT a security boundary. Anything that can write the state
+# dir can already forge consent through user-intent-*.ts; a crumb only adds a one-shot DENIAL.
+MACHINE_TYPED_TTL_S = 7200
+_MACHINE_TYPED_DIR = "machine-typed"
+
+
+def _normalize_typed(text: str) -> str:
+    """First non-empty line, stripped. Both the typer and the hook normalize with THIS function
+    so the two sides compare the same string (a multi-line prompt reaches the hook whole; only
+    its first line is the command). Deliberately NO paste-wrapper stripping: how a long paste
+    reaches the hook is unmeasured, so a guessed wrapper format would be an untested surface.
+    `spend_machine_typed` logs the raw head of any unmatched slash prompt to measure it."""
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _command_token(normalized: str) -> str:
+    """The leading command word only (`/goal`, never its argument): log lines must not copy a
+    /goal line's text, which carries old-transcript content."""
+    words = normalized.split()
+    return words[0] if words else ""
+
+
+def _log_quietly(name: str, message: str) -> None:
+    """A diagnostic log line on a fail-open path: the caller is a keystroke or a prompt hook,
+    so NOTHING the log write raises (OSError, a UnicodeEncodeError from an odd path) may escape."""
+    try:
+        state.log_line(name, message)
+    except Exception:  # noqa: BLE001 - a diagnostic must never block a keystroke or a turn
+        pass
+
+
+_NAMESPACED_RE = re.compile(r"^/[\w.-]+:(\S+)")
+
+
+def _may_be_a_missed_typed_form(prompt: str, live_texts: list[str]) -> bool:
+    """The measurement probe's trigger: exactly two SHAPED clauses, nothing else, so plain owner
+    prose ("this is unclear" while a /clear crumb is live) and unrelated owner slash commands
+    never put owner text into the log.
+    (a) WRAPPED: the raw prompt starts with "<" and one of its lines, stripped, equals a live
+        crumb's text exactly (a <pasted_content> wrapper around the typed command);
+    (b) NAMESPACED: the normalized first line is `/<plugin>:<word>` where <word> is a live crumb's
+        leading command word without its "/" (the picker's `/ai-maestro-janitor:janitor-arm` for a
+        `/janitor-arm` crumb). Only the command word is compared, so arguments do not matter."""
+    if prompt.strip().startswith("<"):
+        lines = {line.strip() for line in prompt.splitlines()}
+        if any(text and text in lines for text in live_texts):
+            return True
+    m = _NAMESPACED_RE.match(_normalize_typed(prompt))
+    if m:
+        words = {_command_token(t)[1:] for t in live_texts if _command_token(t).startswith("/")}
+        if m.group(1) in words:
+            return True
+    return False
+
+
+# Crumb lifecycle (TRDD-9ORKPQCX): note on the typer side, then spend on the hook side.
+def note_machine_typed(text: str, state_dir: Path, crumb_id: str, *, now: int | None = None) -> None:
+    """Record, BEFORE typing, that the janitor is about to type `text` into the pane owned by
+    the project whose state dir is `state_dir`. One file per logical send (`crumb_id`), rewritten
+    on every retry. Fail-open: an OSError must never block a keystroke."""
+    epoch = int(time.time()) if now is None else int(now)
+    normalized = _normalize_typed(text)
+    try:
+        state.atomic_write(
+            Path(state_dir) / _MACHINE_TYPED_DIR / f"{crumb_id}.json",
+            json.dumps({"text": normalized, "epoch": epoch}),
+        )
+    except OSError as exc:
+        # Never block a keystroke over a breadcrumb, but say so: a crumb that was never written
+        # means the target's hook WILL mint consent/presence for this machine keystroke, and a
+        # silent pass would make that indistinguishable from a working crumb. The line lands in
+        # the TYPER process's own log (the daemon's, for a fleet send), not the target's.
+        _log_quietly(
+            "terminal_trigger",
+            f"machine-typed crumb NOT written for {_command_token(normalized)!r} under {str(state_dir)!r}: {exc!r}",
+        )
+
+
+def spend_machine_typed(prompt: str, state_dir: Path, now: int | None = None) -> bool:
+    """True iff `prompt` is a line the janitor typed itself: a non-expired crumb whose text equals
+    the normalized prompt exists. Spends exactly ONE such crumb (the oldest) -- never every match,
+    so two typed commands need two crumbs. Prunes expired crumbs on every call."""
+    current = int(time.time()) if now is None else int(now)
+    wanted = _normalize_typed(prompt)
+    matches: list[tuple[int, Path]] = []
+    live_texts: list[str] = []
+    try:
+        files = sorted((Path(state_dir) / _MACHINE_TYPED_DIR).glob("*.json"))
+    except OSError:
+        return False
+    for path in files:
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+            epoch = int(rec["epoch"])
+            text = str(rec["text"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # unreadable or half-written: not ours to judge, leave it
+        if current - epoch > MACHINE_TYPED_TTL_S:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        live_texts.append(text)
+        if wanted and text == wanted:
+            matches.append((epoch, path))
+    if not matches:
+        if live_texts and _may_be_a_missed_typed_form(prompt, live_texts):
+            # Measurement probe: no crumb matched, yet a crumb is live and the RAW prompt looks
+            # like a typed command the hook received in a form _normalize_typed does not reduce
+            # (a <pasted_content> wrapper, a namespaced picker entry). Tested on the raw prompt
+            # because a wrapper's normalized first line is the wrapper tag, not the command.
+            # DELIBERATE: this logs the head (60 chars) of an OWNER prompt only if that prompt itself
+            # happens to take one of the two shaped forms (rare), never every owner prompt while a
+            # crumb is live; the line goes to the local gitignored log, for measuring the received form.
+            _log_quietly(
+                "prompt-submit",
+                f"machine-typed: no crumb matched {prompt[:60]!r} ({len(live_texts)} unexpired crumb(s))",
+            )
+        return False
+    epoch, spent = min(matches)
+    try:
+        spent.unlink()
+    except OSError:
+        return False  # could not spend it: do not claim suppression
+    # One line per suppressed prompt: if an OWNER command is ever swallowed by a stale crumb
+    # (same text typed by a human within the TTL), this is the only trace that says so. The
+    # crumb IS spent either way; _log_quietly keeps a failed write from flipping the verdict.
+    _log_quietly("prompt-submit", f"machine-typed crumb spent for {_command_token(wanted)!r} (age {current - epoch}s)")
+    return True
+
 
 def _presence_epoch(path: Path) -> int | None:
     """`last_user_input_epoch` from a presence breadcrumb, or None if unreadable/corrupt.

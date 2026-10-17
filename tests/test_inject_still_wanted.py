@@ -23,6 +23,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 
 
@@ -60,6 +61,7 @@ def test_still_wanted_False_cancels_instead_of_waiting_out_the_clock() -> None:
         is_typing=lambda _t: False,
         still_wanted=lambda: (False, "cache is WARM again"),
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert why == "cancelled — cache is WARM again"
@@ -89,6 +91,7 @@ def test_still_wanted_is_asked_BEFORE_the_typing_probe() -> None:
         is_typing=_typing,
         still_wanted=_wanted,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok is False and "cancelled" in why
     assert probes[0] == "wanted", "the cancel condition must be consulted before the typing probe"
@@ -117,6 +120,7 @@ def test_still_wanted_True_keeps_the_8s_defer_cadence() -> None:
         is_typing=lambda _t: next(typing),
         still_wanted=lambda: (True, "cache still expired"),
         sleeper=slept.append, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok, why
     assert sent == ["Enter"]
@@ -140,6 +144,7 @@ def test_absent_still_wanted_changes_nothing() -> None:
         reader=reader,
         is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
     assert ok and sent == ["Enter"]
     with pytest.raises(StopIteration):
@@ -167,6 +172,7 @@ def test_run_chained_inject_gates_ONLY_the_first_command(monkeypatch) -> None:
         first="/clear", then=["/janitor-arm"],
         gate_stamp=Path("/nonexistent/gate"), gate_baseline=0,
         still_wanted=marker,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert seen == [("/clear", marker)], (

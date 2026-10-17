@@ -19,6 +19,7 @@ import pytest
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 
 _SENT = "FIRED:stub-channel"
@@ -188,6 +189,7 @@ def test_an_injection_attempted_30s_after_an_interrupt_defers_and_logs(tmp_path,
         transcript_path=str(transcript),
         sleeper=slept.append, clock=lambda: 0.0,
         quiet_s=1.0, retry_s=1.0, giveup_s=2.0,
+        state_dir=state.state_dir(),
     )
 
     assert ok is False, why
@@ -210,6 +212,7 @@ def test_an_injection_attempted_10min_after_an_interrupt_proceeds(tmp_path):
         reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
         transcript_path=str(transcript),
         sleeper=lambda _s: None, clock=lambda: 0.0,
+        state_dir=state.state_dir(),
     )
 
     assert ok is True, why
@@ -239,6 +242,7 @@ def test_esc_first_alone_does_not_bypass_the_interrupt_cooldown(tmp_path, monkey
         sleeper=slept.append, clock=lambda: 0.0,
         quiet_s=1.0, retry_s=1.0, giveup_s=2.0,
         esc_first=True,
+        state_dir=state.state_dir(),
     )
 
     assert ok is False, why
@@ -267,6 +271,7 @@ def test_bypass_interrupt_cooldown_flag_bypasses_it(tmp_path, monkeypatch):
         sleeper=lambda _s: None, clock=lambda: 0.0,
         esc_first=True,
         bypass_interrupt_cooldown=True,
+        state_dir=state.state_dir(),
     )
 
     assert ok is True, why

@@ -943,6 +943,10 @@ def _run_chain_payload(payload_b64: str) -> int:
             data["terminal"],
             first=data["first"],
             then=list(data["then"]),
+            # TRDD-9ORKPQCX: the chain types into THIS session's own pane (payload `state_dir`), so
+            # its machine-typed crumbs (/clear, /janitor-arm, /janitor-resume, /goal ...) go to this
+            # state dir, where this session's UserPromptSubmit hook looks.
+            state_dir=sd,
             gate_stamp=sd / _GATE_STAMP,
             gate_baseline=int(data["gate_baseline"]),
             settle_between_s=float(data.get("settle_between_s", 0.0)),

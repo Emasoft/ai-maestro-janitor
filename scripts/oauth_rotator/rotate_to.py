@@ -30,6 +30,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
 import rotator  # type: ignore[import-not-found]  # noqa: E402
+import state  # type: ignore[import-not-found]  # noqa: E402
 import terminal_trigger  # type: ignore[import-not-found]  # noqa: E402
 import token_burn  # type: ignore[import-not-found]  # noqa: E402
 
@@ -82,6 +83,10 @@ def _request_model_opus() -> str:
         # self-send interrupt cooldown, same as the rotation send it follows.
         sent, _why = terminal_trigger.send_verified(
             terminal, "/model opus", esc_first=True, bypass_interrupt_cooldown=True,
+            # TRDD-9ORKPQCX: `terminal` is self_terminal() -- THIS process's own pane (its TMUX_PANE /
+            # ITERM_SESSION_ID) -- so the machine-typed crumb belongs in this session's own state dir,
+            # the one its UserPromptSubmit hook reads.
+            state_dir=state.state_dir(),
         )
     except Exception as exc:  # noqa: BLE001 — keystroke failure must not block the rotation
         # Rotation must continue on a failed keystroke, but silently swallowing it

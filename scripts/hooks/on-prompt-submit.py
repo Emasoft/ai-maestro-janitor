@@ -145,8 +145,29 @@ def main() -> int:
     # silently degrade past). It still runs after `_is_cron_marker` above, so a cron fire
     # never pays for it.
     state = importlib.import_module("state")
+
+    # TRDD-9ORKPQCX: a line the JANITOR typed itself (/clear, /janitor-arm, /janitor-resume,
+    # /reload-plugins --force, ...) reaches this hook like a human's keystrokes. The typer left a
+    # one-shot crumb before typing; spending it here means the machine's own command neither
+    # stamps the human as present nor mints a consent token. Skips ONLY those two writes below
+    # (NO early return: everything else this hook does still runs). Placed after the `state`
+    # import because the crumb lives in the state dir, and after the cron filter so a heartbeat
+    # fire still imports nothing. machine-typed/ is not a security boundary: whoever can write the
+    # state dir can already forge consent via user-intent-*.ts; a crumb only adds a one-shot denial.
+    # Fail-open on any error: a broken crumb check must never abort the turn.
+    machine_typed = False
     try:
-        state.bump_user_presence()
+        machine_typed = importlib.import_module("user_intent").spend_machine_typed(prompt, state.state_dir())
+    except Exception as exc:  # noqa: BLE001 - the crumb check must never abort the turn
+        # Fail-OPEN (the prompt is treated as a human's), but LOUD: a silent pass here would
+        # hide a permanently broken check that lets every janitor-typed command mint consent.
+        try:
+            state.log_line("prompt-submit", f"machine-typed check failed: {exc!r}")
+        except Exception:  # noqa: BLE001,S110 - a log write must never abort the turn either
+            pass
+    try:
+        if not machine_typed:
+            state.bump_user_presence()
     except Exception:  # noqa: BLE001 - a breadcrumb write must never abort the turn
         pass
 
@@ -162,7 +183,8 @@ def main() -> int:
     # to itself, and it must never be able to authorize anything.
     try:
         user_intent = importlib.import_module("user_intent")
-        user_intent.record_intent_from_prompt(prompt)
+        if not machine_typed:
+            user_intent.record_intent_from_prompt(prompt)
     except Exception:  # noqa: BLE001 - intent recording must never abort the turn
         pass
     return 0

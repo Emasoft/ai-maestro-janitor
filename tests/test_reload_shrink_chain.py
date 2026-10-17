@@ -43,6 +43,7 @@ def _load(name: str, relpath: str):
 
 rt = _load("reload_trigger_shrink_uut", "scripts/reload_trigger.py")
 ct = _load("clear_trigger_shrink_uut", "scripts/clear_trigger.py")
+import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 import token_meter as tm  # noqa: E402
 
@@ -146,6 +147,7 @@ def test_settle_between_s_pauses_between_bootstrap_commands(monkeypatch) -> None
         gate_baseline=0,
         settle_between_s=4.0,
         sleeper=ch.sleeper,
+        state_dir=state.state_dir(),
     )
 
     assert ok, why
@@ -182,6 +184,7 @@ def test_settle_defaults_to_no_pause(monkeypatch) -> None:
         gate_stamp=Path("/nonexistent"),
         gate_baseline=0,
         sleeper=ch.sleeper,
+        state_dir=state.state_dir(),
     )
     assert ok
     assert not [e for e in ch.events if e.startswith("sleep:")], "default must add no pauses"

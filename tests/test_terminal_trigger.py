@@ -28,6 +28,7 @@ import pytest
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 
 try:  # conftest is importable by test modules (see its module docstring)
@@ -210,7 +211,7 @@ def test_run_verified_send_dedupes_the_same_command_but_lands_a_different_one(tm
     is sent again."""
     calls: list[tuple[str, bool]] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         calls.append((command, esc_first))
         return True, "verified; submitted"
 
@@ -230,7 +231,7 @@ def test_run_verified_send_dedupe_and_lock_are_per_pane_not_per_project(tmp_path
     stamp, and the two must not share a lock file."""
     calls: list[str] = []
 
-    def fake_send(terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         calls.append(terminal["pane"])
         return True, "verified; submitted"
 
@@ -250,7 +251,7 @@ def test_run_verified_send_refuses_to_type_once_the_ceiling_has_passed(tmp_path)
     acquired, then the clock reads t=901 — nothing is typed, the child reports failure."""
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         calls.append(command)
         return True, "verified; submitted"
 
@@ -267,7 +268,7 @@ def test_run_verified_send_refuses_a_budget_too_small_for_the_esc_settles(tmp_pa
     Under the floor, nothing is sent at all."""
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         calls.append(command)
         return True, "verified; submitted"
 
@@ -285,7 +286,7 @@ def test_run_verified_send_re_asks_the_type_time_guard_during_the_wait(tmp_path)
     flag.write_text("1", encoding="utf-8")
     seen: list[tuple[bool, str]] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         assert still_wanted is not None
         seen.append(still_wanted())          # flag still there → wanted
         flag.unlink()                        # the dispatcher consumes it mid-wait
@@ -302,7 +303,7 @@ def test_run_verified_send_re_asks_the_type_time_guard_during_the_wait(tmp_path)
 def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path):
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, state_dir, still_wanted=None):
         calls.append(command)
         return False, "gave up"
 
@@ -730,6 +731,7 @@ def test_two_queued_commands_need_three_escs_before_model_opus_is_typed(monkeypa
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: next(reads, _qf_pane("/model opus")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True, why
     esc_count = sum(1 for c in calls if "Escape" in c)
@@ -755,6 +757,7 @@ def test_a_clean_field_gets_one_esc_then_the_command(monkeypatch) -> None:
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: next(reads, _qf_pane("/model opus")), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is True, why
     esc_count = sum(1 for c in calls if "Escape" in c)
@@ -771,6 +774,7 @@ def test_a_field_still_busy_after_five_escs_types_nothing(monkeypatch) -> None:
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: _qf_pane("/janitor-arm"), is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert why == "queue not cleared after 5 ESC"
@@ -790,6 +794,7 @@ def test_an_unreadable_pane_after_the_first_esc_types_nothing(monkeypatch) -> No
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: None, is_typing=lambda _t: False,
+        state_dir=state.state_dir(),
     )
     assert ok is False
     assert why == "pane not readable — typing nothing"

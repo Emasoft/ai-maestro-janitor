@@ -128,3 +128,81 @@ def test_genuine_prompt_still_imports_state_and_bumps_presence(
     # didn't turn into a silent no-op, without touching the real machine's breadcrumb.
     breadcrumb = isolated_env / "home" / ".aimaestro" / "state" / "user-presence.json"
     assert breadcrumb.is_file(), "genuine-prompt path must still write the presence breadcrumb"
+
+
+
+def _note_crumb(prompt: str) -> None:
+    """Leave the machine-typed crumb a janitor typer would leave before typing `prompt`."""
+    import user_intent  # noqa: PLC0415 -- lib dir is on sys.path above
+
+    user_intent.note_machine_typed(prompt, state.state_dir(), uuid.uuid4().hex)
+
+
+def test_a_machine_typed_prompt_mints_no_consent_token_and_no_presence(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: Path
+) -> None:
+    """TRDD-9ORKPQCX: a crumb plus the typed prompt gives no user-intent token and no presence
+    breadcrumb -- the machine's own /clear must not read as the owner asking for it."""
+    _note_crumb("/clear")
+    hook = _load_hook_tracking_imports([])
+    assert _call_main(hook, monkeypatch, "/clear", []) == 0
+    assert not (state.state_dir() / "user-intent-clear.ts").exists()
+    assert not (isolated_env / "home" / ".aimaestro" / "state" / "user-presence.json").exists()
+    assert not list((state.state_dir() / "machine-typed").glob("*.json")), "the crumb is spent"
+
+
+def test_the_same_prompt_without_a_crumb_still_mints_the_token(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: Path
+) -> None:
+    """The contrast: a human typing /clear (no crumb) still mints the token and stamps presence."""
+    hook = _load_hook_tracking_imports([])
+    assert _call_main(hook, monkeypatch, "/clear", []) == 0
+    assert (state.state_dir() / "user-intent-clear.ts").is_file()
+    assert (isolated_env / "home" / ".aimaestro" / "state" / "user-presence.json").is_file()
+
+
+def test_two_crumbs_suppress_two_prompts_and_the_third_mints(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: Path
+) -> None:
+    """One crumb per typed command: two notes of the same text silence exactly two prompts."""
+    _note_crumb("/clear")
+    _note_crumb("/clear")
+    hook = _load_hook_tracking_imports([])
+    for _ in range(2):
+        assert _call_main(hook, monkeypatch, "/clear", []) == 0
+    assert not (state.state_dir() / "user-intent-clear.ts").exists()
+    assert _call_main(hook, monkeypatch, "/clear", []) == 0
+    assert (state.state_dir() / "user-intent-clear.ts").is_file()
+
+
+def test_a_cron_marker_prompt_with_a_crumb_present_still_imports_no_state(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: Path
+) -> None:
+    """The cron fast path is untouched by the crumb check: no state import, crumb not spent."""
+    _note_crumb("[janitor-heartbeat]")
+    hook = _load_hook_tracking_imports([])
+    calls: list[str] = []
+    assert _call_main(hook, monkeypatch, "[janitor-heartbeat]\nrun the beat", calls) == 0
+    assert "state" not in calls and "user_intent" not in calls, calls
+    assert len(list((state.state_dir() / "machine-typed").glob("*.json"))) == 1
+
+
+
+def test_a_broken_crumb_check_logs_a_line_and_fails_open(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: Path
+) -> None:
+    """A crumb check that raises must not abort the turn, must treat the prompt as a human's
+    (token minted, presence stamped), and must leave a log line: a silent pass would hide a
+    permanently broken check."""
+    import user_intent  # noqa: PLC0415 -- lib dir is on sys.path above
+
+    def _boom(*_a: Any, **_kw: Any) -> bool:
+        raise RuntimeError("crumb dir exploded")
+
+    monkeypatch.setattr(user_intent, "spend_machine_typed", _boom)
+    hook = _load_hook_tracking_imports([])
+    assert _call_main(hook, monkeypatch, "/clear", []) == 0
+    log = state.log_dir() / "prompt-submit.log"
+    assert log.is_file() and "machine-typed check failed: RuntimeError('crumb dir exploded')" in log.read_text()
+    assert (state.state_dir() / "user-intent-clear.ts").is_file(), "fail-open: treated as a human prompt"
+    assert (isolated_env / "home" / ".aimaestro" / "state" / "user-presence.json").is_file()

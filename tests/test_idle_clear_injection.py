@@ -25,6 +25,7 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
 import session_liveness as sl  # noqa: E402
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 
 SCRIPTS = _ROOT / "scripts"
@@ -143,7 +144,7 @@ def test_an_unautomatable_terminal_is_refused_rather_than_silently_dropped():
     terminal = ec.terminal_from_record(sl.capture_terminal_identity({"TERM_PROGRAM": "Apple_Terminal"}))
     assert terminal == {"kind": "unknown"}
     assert tt.build_type_only_steps(terminal, "/x") is None
-    ok, why = tt.send_verified(terminal, "/janitor-handoff-and-clear")
+    ok, why = tt.send_verified(terminal, "/janitor-handoff-and-clear", state_dir=state.state_dir())
     assert ok is False
     assert "cannot type-then-verify" in why
 

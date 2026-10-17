@@ -25,6 +25,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import pytest  # noqa: E402
+import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
 import user_intent  # noqa: E402
 
@@ -106,6 +107,7 @@ def _run_inject(monkeypatch: pytest.MonkeyPatch, verdicts: list[bool | None]) ->
         giveup_s=0.5,
         reader=lambda _t: _pane("/reload-plugins" if typed else ""),
         sleeper=lambda _s: None,
+        state_dir=state.state_dir(),
     )
     return sent, why, len([t for t in typed if t == "typed"])
 
