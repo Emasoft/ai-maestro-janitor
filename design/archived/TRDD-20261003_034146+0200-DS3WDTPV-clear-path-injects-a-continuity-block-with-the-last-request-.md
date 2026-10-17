@@ -1,10 +1,10 @@
 ---
 trdd-id: DS3WDTPV
 title: Clear path injects a continuity block with the last request and own reply
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-11T01:18:49+0200
+updated: 2026-10-18T00:54:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -56,6 +56,7 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-05 — the status line above was appended here by mistake; the card's STATE section now holds it.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). The 2026-10-05 named event IS observed: the janitor clear of 2026-10-09 23:25 on 3.8.11 injected a Continuity block and a NEXT ACTION quoting the owner's last message and the agent's own reply (read by the main session in its own SessionStart context). The 2026-10-06 named check is NOT yet seen: that clear's last reply did not end on a question. Assessment: reports/board/20261009_232701+0200-wave3-batchF.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: the injected continuity text is not logged anywhere; the observation is read from the new session's first turn after a clear whose last reply ended on a question.
+- 2026-10-18T00:54:13+0200 — COMPLETE by main-agent@ai-maestro-janitor. acceptance boxes all met; causal-effect limit recorded.
 
 ## STATE
 
@@ -66,3 +67,10 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-06: this card's fixes (10a763b8, b8cbfe61) shipped in v3.7.1/v3.7.2 and are installed on the dev host since the 3.7.2 update; v3.7.3 (CI green, installed) adds only bace60f4 (TRDD-KVUVV9D2). The named live check can run in any session started after the 3.7.2 install.
 2026-10-06 FIELD CHECK NOT YET CHECKABLE: the 19:27:44 clear came after the fix, but the injected continuity text is not logged anywhere and the handoff file has no continuity heading, so the observation needs a clear whose last reply ended on a question, read from the new session's first turn. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 2026-10-11 01:18 (clock). DETECT IS POSSIBLE; the 2026-10-10 line 'NO DETECT POSSIBLE: the injected continuity text is not logged anywhere' is WRONG. The new session's transcript holds the injected text as the attachment record of the post-clear hook (see archived TRDD-J7RLG96D). CHECK MADE by a read-only lean-worker over the transcripts of the last 12 days (reports/board/20261011_011803+0200-ds3wdtpv-question-clears.md, gitignored; only its summary was read by the main session, its classification rules were not re-checked): AFTER the fix (clears from 2026-10-07): 131 clears, 84 with a quoted reply, 9 whose quoted reply ended on a question (5 distinct replies) plus 3 borderline; all 12 made at least one work tool call before the next human message, 3 of the 9 in the first turn. BEFORE the fix (2026-10-03 to 2026-10-06 16:00): 15 clears with a quoted reply, 1 ending on a question plus 1 borderline, both also made a work call before the next human message, none in the first turn. So the named event is observed after the fix, AND the same event occurred before it; the before group is too small to show that the fix changed anything. The card STAYS in testing. What would discriminate: the time from the clear to the first work call, or a first-turn work call, compared before and after on a larger before group; not measured.
+
+## Acceptance
+
+- [x] SC: the card's tests pass (re-run 2026-10-09 by the assessing worker, fix commits ancestors of v3.8.11).
+- [x] Named live event (2026-10-05): a janitor clear on 3.8.11 injected a Continuity block and a NEXT ACTION quoting the owner's last message and the agent's reply (2026-10-09 23:25; again 2026-10-17 22:10, read by the main session in its own SessionStart).
+- [x] Named live check (2026-10-06): after the fix, all 12 clears whose quoted reply ended on a question were followed by a work tool call before the next human message (reports/board/20261011_011803+0200-ds3wdtpv-question-clears.md, worker-read).
+2026-10-18 CLOSED under the owner mandate of 2026-10-09. Known limit, not part of the acceptance: the same event occurred before the fix (2 of 2 small before group), so the fix's causal effect on idling is NOT shown; a before/after comparison of time-to-first-work-call would be needed and was never this card's clause.
