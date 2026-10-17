@@ -4,7 +4,7 @@ title: A detector killed or crashed in dispatch raises no finding
 column: testing
 status: tasked
 created: 2026-10-17T04:54:31+0200
-updated: 2026-10-17T06:15:10+0200
+updated: 2026-10-17T06:16:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -43,3 +43,4 @@ Evidence scope: this project's surviving dispatch logs only (dispatch.log and di
 CORRECTION to the line above: a detector crash IS logged. Dispatch's own wording is "detector '<name>' exited non-zero" (rc, dispatch.py:1351) and "detector '<name>' spawn failed: <exc>" (dispatch.py:1336); the earlier grep pattern guessed the wording. A wording-free check (every "] detector '" line in dispatch.log*, minus kills) finds 7 crashes, all silent by the same code path: memory-scope-leak 2026-06-12; memory-librarian, memory-maintenance, project-map-drift and memorize-nudge 2026-06-23; ticket-dispatch and fleet-github-config 2026-10-03. Spawn failures: 0. Total field evidence: 10 kills plus 7 crashes, none surfaced. Unrelated observation: 116 lines from pytest temp-dir detectors landed in this real dispatch log on 2026-08-12..18 (a past test-isolation leak; none since).
 Line-cite fix: the rc log line is dispatch.py:1350, its outcome stamp is 1351 (spawn failed: log line 1336). Retitled to cover crashes. The pytest-leak note above is scoped to dispatch.log's detector lines only.
 BUILT 15378195 (2026-10-17): _track_detector_streak in scripts/dispatch.py, one HIGH DETECTOR-FAIL per episode at the 3rd consecutive process-level failure (timeout, rc, spawn-failed), LOW DETECTOR-RECOVERED on the next non-error outcome; also wired into the branch-protection guard (a crash now stamps error:rc=N). Corrected evidence count: 25 kills in dispatch.log.1 (window-burn-rate x8 on 2026-07-09) plus 7 crashes. Full suite 18555 passed. NOT covered, follow-ups: (1) a detector whose script is missing or not executable returns before _record_default_outcome and is never counted; (2) no periodic re-alert for a detector that never recovers (one HIGH can scroll out of the SessionStart findings block). NEXT: field proof after a release ships it: a real detector killed three times in a row produces one DETECTOR-FAIL line in a heartbeat.
+Correction to 15378195's process note: the deviations came from two workers, sed -i from the build worker, and the shell redirect plus fastedit undo from the guard-fix worker. The committed guard else-block was read after the commit: record_outcome error:rc=N runs before the streak call, only on a non-zero rc, with its WHY comment.
