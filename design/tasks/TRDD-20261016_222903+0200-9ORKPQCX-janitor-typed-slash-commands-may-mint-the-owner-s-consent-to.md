@@ -1,10 +1,10 @@
 ---
 trdd-id: 9ORKPQCX
 title: Janitor-typed slash commands may mint the owner's consent tokens
-column: todo
+column: dev
 status: tasked
 created: 2026-10-16T22:29:03+0200
-updated: 2026-10-17T04:41:40+0200
+updated: 2026-10-17T06:51:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -31,6 +31,10 @@ Found by the round-2 review of TRDD-0TSG80CL's consent guard (2026-10-16). The j
 2026-10-17 scope: docs_dev/20261017_043703+0200-9ORKPQCX-scope.md (gitignored). TRDD-W4IZA704 (9b2b1299, unreleased) only filters task notifications. Janitor-typed slash commands still stamp presence and mint verb tokens (user_intent.py _VERB_COMMANDS 99-125, `cmd in prompt` 208-209). The only live harm path: fleet_stop's /janitor-disarm (default off) mints `disarm`, so disarm_guard reports user-asked instead of global-stop. The other tokens are minted but have no reader today (all four self typers pass respect_user_presence=False).
 Evidence, correlated but not yet discriminated: user-intent-arm.ts 02:21:02 and user-intent-resume.ts 02:21:36 appeared right after the janitor typed /janitor-arm and /janitor-resume post-clear. Other writers have not been ruled out, and the namespaced /ai-maestro-janitor:janitor-arm does not contain the substring /janitor-arm, so a match needs the hook's prompt to be the raw typed text.
 NEXT, before any proposal: (1) grep every writer of user-intent- / record_intent in scripts/; (2) ask claude-code-guide what UserPromptSubmit `prompt` carries for a namespaced plugin slash command, and whether it fires for built-in /clear; (3) read disarm_guard.py:55-75 and global_control_cli.py:65-80: does user-asked change an ACTION?; (4) list what on-prompt-submit.py does after line 165, and skip only presence+intent for a machine-typed prompt (not return 0); (5) explain why the existing self-send stamps are not reused (written after the send, double as a 300 s dedupe, and the fleet path writes into another project's state dir); (6) decide the crumb lifetime against wedged panes (tie it to the verified-send outcome, or justify a TTL). Then the proposal, a MEASURE fork and a REVIEW fork. Cross-card: the fix also closes W4IZA704's NOT COVERED presence item. The card stays in todo until the proposal is approved.
+DISCRIMINATED 2026-10-17 (docs_dev/20261017_063131+0200-9ORKPQCX-prechecks.md and docs_dev/20261017_063507+0200-9ORKPQCX-measure.md): the only writer of user-intent-<verb>.ts is record_intent_from_prompt (user_intent.py:213), called only from on-prompt-submit.py:165; the hook receives the typed line (Claude Code hooks docs); the clear chain types the short /janitor-arm and /janitor-resume (clear_trigger.py:76-78), which match the substring matcher. So the 02:21 tokens were minted by the janitor's own typing.
+CORRECTION: the fleet_stop harm is a LABEL, not an action. fleet_stop types /janitor-disarm only when the kill-switch is set (global_state.py:1093-1101); disarm_guard.authority() (57-71) returns user-asked when a token exists and global-stop otherwise, and main() takes the same action either way. No fleet_stop code change is needed.
+DESIGN (proposal, review, measure and advisor): one crumb per logical send, a file machine-typed/<uuid>.json holding the text and an epoch, rewritten before each type attempt. It is written (a) inside terminal_trigger.inject_until_sent right before type_fn(), with state_dir a REQUIRED parameter threaded from send_verified, run_verified_send and run_chained_inject, and (b) in pane_actuate._type before fire(), via target_state_dir(project_dir) and plan['command'] (the fleet iTerm path bypasses _run_steps). The hook calls spend_machine_typed after the state import and before bump_user_presence, and skips only presence and intent (no early return). TTL is a 2 h module constant, each crumb is consumed once, and a spend prunes expired files. Normalization: the first line, stripped, with any <pasted_content> wrapper removed. NEXT: dispatch the build worker (one commit; no sed or redirects; fastedit only).
+UNKNOWNS AND NOTES: it is unknown whether UserPromptSubmit fires at enqueue or at dequeue for a soft-sent command, and whether it fires for built-ins (/clear, /reload-plugins); the design is correct either way. Mixed-version fleet: crumbs written into projects whose sessions still run the old hook expire unspent. Security: anything that can write the state dir can already forge consent through user-intent-*.ts; a crumb only adds a one-shot denial, so machine-typed/ is not a security boundary.
 
 ## Approval log
 
