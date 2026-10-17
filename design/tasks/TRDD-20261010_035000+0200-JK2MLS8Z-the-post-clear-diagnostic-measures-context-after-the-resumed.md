@@ -1,10 +1,10 @@
 ---
 trdd-id: JK2MLS8Z
 title: The post-clear diagnostic measures context after the resumed session has read files and two handoff links do not resolve
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T03:50:00+0200
-updated: 2026-10-10T12:37:21+0200
+updated: 2026-10-17T10:58:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T03:50:00+0200
+implementation-commits: [cc01a57a]
 ---
 
 # The post-clear diagnostic measures context after the resumed session has read files and two handoff links do not resolve
@@ -29,3 +30,4 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 ## Corrections
 
 2026-10-10 12:37 NOTE: the diagnostic's check 1 (cron_recreated) prints 'destroyed by /clear, recreated by re-arm' for ANY change of cron id, and every re-arm changes the id; on 2026-10-10 that wording was read as an observation and produced a wrong card line on TRDD-8SC3YEIG (withdrawn in 5d65a4ba). The check should say only that the id changed.
+2026-10-17 BUILT in cc01a57a (column todo → testing). The collapse verdict now uses the first usage-bearing assistant record of the new session's transcript, picked by start time within 15 min after before['ts'], exactly one, ambiguous → SKIP; the live figure is no longer used in the after-phase. SessionStart injection is reported only (not in the threshold). cron_recreated wording fixed per the 2026-10-10 note. Full suite 18597 passed; ruff/mypy/pyright clean; report docs_dev/20261017_105736+0200-JK2MLS8Z-build.md. UNVERIFIED: that /clear always starts a new transcript file (seen once: 6feb5bae → 2bef3bfd); the hook-attachment layout (one transcript). FIELD PROOF: the next real clear's after-phase report shows context_source=transcript:first-assistant and a PASS when the first record is at the floor. Known nits left: candidate.stat() in _new_session_transcript is not guarded against a file vanishing mid-scan; two docstrings (_first_record_time, _session_start_injected_tokens) still describe the earlier never-accepted/allowance behaviour.
