@@ -1,10 +1,10 @@
 ---
 trdd-id: JQLBZMMN
 title: A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty and sets it by hand
-column: verify_assumptions
+column: todo
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-10T08:58:30+0200
+updated: 2026-10-18T01:40:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,10 @@ Seen once, 2026-10-10 07:34, reported by the consolidate agent the heartbeat mar
 - 2026-10-10T08:17:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-10T08:41:40+0200 — column → verify_assumptions. agent-reported once; reproduce first
 2026-10-10 08:58 CORRECTION to the body, filed here because the card has no other section: 'every chore skill invokes its scripts through that variable' was read for ONE skill only (the consolidate protocol's invocation example); 'an agent that guesses the directory can run a stale version' is a hypothesis, not an observation.
+- 2026-10-18T01:40:07+0200 — column → todo by main-agent@ai-maestro-janitor. reproduced; likely cause found (bare $CLAUDE_PLUGIN_ROOT not substituted in skill text)
+
+## Verification 2026-10-18
+
+REPRODUCED a second time: the split agent spawned by the heartbeat at 2026-10-18 00:15 wrote in its report (reports/janitor-memory-subconscious-agent/20261018_001541+0200-split-project.md:11) 'CLAUDE_PLUGIN_ROOT was unset in the agent shell; used the 3.8.11 cache path'.
+LIKELY CAUSE (main session, read): skills/janitor-arm/SKILL.md:24 writes ${CLAUDE_PLUGIN_ROOT} with braces, and when that skill loaded in this session its text already carried the absolute 3.8.11 cache path, so the harness substitutes the braced form in skill content. The memory skills write the bare form $CLAUDE_PLUGIN_ROOT (e.g. skills/janitor-memory-split/SKILL.md:76, 234, 235), which reaches the agent's shell unsubstituted, where the variable is empty. Counts in skills/, agents/, commands/: 55 bare occurrences in 20 files, 132 braced. UNVERIFIED: that the bare form is never substituted (inferred from the two agent reports, not from Claude Code docs or a controlled test); whether agent-definition bodies (agents/janitor-memory-subconscious-agent.md:25, 135, 149, 176, 211) get any substitution at all.
+PLANNED FIX: convert every bare $CLAUDE_PLUGIN_ROOT in skills/ and commands/ to ${CLAUDE_PLUGIN_ROOT}; for agents/, first confirm from the Claude Code docs whether agent bodies are substituted, and if not, have the agent take the plugin root from the loaded skill's resolved path or fail loudly when it is empty. A test (or CPV rule) must reject the bare form in skills. Checked after release: a heartbeat-spawned memory agent's report no longer says it set the variable by hand.
