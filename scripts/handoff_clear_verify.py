@@ -615,7 +615,8 @@ def _first_record_time(path: Path) -> datetime | None:
     """Timezone-aware time of the first transcript record that carries a `timestamp`, else None.
 
     Records are ISO strings with `Z` or a numeric offset. A naive or unparseable stamp is None --
-    a candidate whose start cannot be placed is never accepted as the new session.
+    such a candidate is never accepted, and if it was modified after the clear it makes the
+    result ambiguous (see `_new_session_transcript`).
     """
     import jsonl_walk  # noqa: PLC0415 - local sibling lib
 
@@ -685,9 +686,9 @@ def _session_start_injected_tokens(path: Path) -> int | None:
     figure is summed from what the session actually received -- all hooks, not only the handoff.
     Estimated at ~4 characters per token, the repo's other stdlib estimate
     (`wikimem_bench.estimate_tokens`; not imported -- that is a CLI script, and the
-    `jevctx.tokens` estimator is barred from this process by tests/test_jev_boundary.py). It
-    under-counts against `jevctx`'s 3.5, which is the safe side: a smaller allowance can only
-    make the verdict stricter.
+    `jevctx.tokens` estimator is barred from this process by tests/test_jev_boundary.py). The
+    figure is information only: it is printed in the verdict detail and is NOT added to the
+    collapse threshold. At ~4 characters per token it under-counts against `jevctx`'s 3.5.
     """
     import jsonl_walk  # noqa: PLC0415 - local sibling lib
 
