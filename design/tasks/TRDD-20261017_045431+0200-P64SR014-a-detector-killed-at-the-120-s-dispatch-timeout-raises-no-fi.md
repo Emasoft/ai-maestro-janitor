@@ -1,10 +1,10 @@
 ---
 trdd-id: P64SR014
-title: A detector killed at the 120 s dispatch timeout raises no finding
+title: A detector killed or crashed in dispatch raises no finding
 column: todo
 status: tasked
 created: 2026-10-17T04:54:31+0200
-updated: 2026-10-17T05:00:17+0200
+updated: 2026-10-17T05:01:04+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,4 @@ CORRECTION to the archived TRDD-XRT9LOQL DECISION line (that card is archived an
 FIELD EVIDENCE (supersedes the backburner reason above, which only saw current stamps; last-outcome stamps are overwritten each pass): this project's .janitor/logs/dispatch.log* (back to 2026-04-24) hold 10 'timed out after 120s -- killed' lines, from 2026-10-03 to 2026-10-05: trdd-drift x6, trdd-state-reconciliation, system-daemon-runaway, pr-reconciler, memory-maintenance x1 each. None raised a finding. Moved to todo. The archived TRDD-XRT9LOQL refused even an Approval-log pointer to this correction (D8: archived cards are fully immutable), so this card is the only place the correction lives.
 Evidence scope: this project's surviving dispatch logs only (dispatch.log and dispatch.log.1, oldest line 2026-04-24); other projects running the same detectors were not checked. The 7 extra matches of a wider grep ('spawn-failed|exited rc=') are unrelated session-start watcher exits, so no crash (error:rc) or spawn failure of a detector is logged. 'None raised a finding' is per the code path (dispatch.py:1316-1334, no reader anywhere), not from the logs. No trdd-drift.py change landed 2026-10-03..07, so the kills stopping after 10-05 is unexplained, not a known fix.
 CORRECTION to the line above: a detector crash IS logged. Dispatch's own wording is "detector '<name>' exited non-zero" (rc, dispatch.py:1351) and "detector '<name>' spawn failed: <exc>" (dispatch.py:1336); the earlier grep pattern guessed the wording. A wording-free check (every "] detector '" line in dispatch.log*, minus kills) finds 7 crashes, all silent by the same code path: memory-scope-leak 2026-06-12; memory-librarian, memory-maintenance, project-map-drift and memorize-nudge 2026-06-23; ticket-dispatch and fleet-github-config 2026-10-03. Spawn failures: 0. Total field evidence: 10 kills plus 7 crashes, none surfaced. Unrelated observation: 116 lines from pytest temp-dir detectors landed in this real dispatch log on 2026-08-12..18 (a past test-isolation leak; none since).
+Line-cite fix: the rc log line is dispatch.py:1350, its outcome stamp is 1351 (spawn failed: log line 1336). Retitled to cover crashes. The pytest-leak note above is scoped to dispatch.log's detector lines only.
