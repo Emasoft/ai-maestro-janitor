@@ -4,7 +4,7 @@ title: Handoff-clear verifier should check that each elided pointer expands
 column: testing
 status: tasked
 created: 2026-10-17T01:38:05+0200
-updated: 2026-10-17T03:52:04+0200
+updated: 2026-10-17T04:22:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -38,3 +38,4 @@ Split from TRDD-AFW0CA65 (7b67bab6). After 7b67bab6, handoff_links_resolve skips
 - Coverage limits: the check runs only on clear paths that call handoff_clear_verify.py; a "transcript missing" FAIL is meaningful only right after a clear (later it is normal ageing); "transcript path rejected" is a separate FAIL class judging handoff well-formedness.
 - Lifecycle note: moved todo -> dev directly; verify_assumptions/plan/dispatch were done in substance (the measurements, reviews and spec above).
 - NEXT ACTION: field proof after a release ships it. On a real /clear, the verifier report shows the row 'every elided pointer in the handoff expands' as PASS. Follow-up (not this card): extract_block's tool_result list branch could call tool_result_text.
+- Verified after the review fixes (2026-10-17): full suite on 939a1f19 = 18542 passed, 2 skipped, exit 0. The pure check over all 183 real handoffs = 95 PASS, 88 SKIP (no pointers), 0 FAIL, including the 86 handoffs carrying '## Conversation since' (that section holds only user/assistant exchange blocks, jev_compaction.py:2120-2125). Residual: a user or assistant message that itself quotes a header plus a matching pointer would be checked against the wrong transcript; rare, and it would be a loud FAIL, not a silent pass.
