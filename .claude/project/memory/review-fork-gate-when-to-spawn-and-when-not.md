@@ -2,7 +2,7 @@
 name: review-fork-gate-when-to-spawn-and-when-not
 description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork"
 ocd: 2026-09-05
-lmd: 2026-10-10
+lmd: 2026-10-17
 publish-globally: true
 metadata:
   node_type: memory
@@ -53,7 +53,7 @@ legitimate and is not defiance.
 **A commit after the review fork re-arms the gate — commit first, then spawn the fork last.** [^1] (overstated; corrected by [^2]) [^2]
 
 
-^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — the exemption is small by construction, and its value is a checkable reason to decline, not a large saving", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad what_turn_correctly_gets_no_fork fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires examples_of_turns_needing_no_review the_criterion's_real_yield, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — the exemption is small by construction; an earlier 'four forks suppressed' claim was struck as uncounted", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress the_exemption_is_small_by_construction how_many_forks_were_correctly_suppressed why_was_the_four_forks_suppressed_claim_struck a_number_that_reads_as_counted_and_was_not trdd_and_memory_prose_is_mostly_evidence_characterisation clause_c_in_place_what_does_the_rule_reduce_to, ocd: 2026-09-05, lmd: 2026-10-17]
 **BE HONEST ABOUT HOW MUCH THIS EXEMPTS: not much.** With clause (c) in place the rule reduces
 to **"fork unless the turn is MECHANICAL or purely SUBTRACTIVE"** — because TRDD and memory prose
 is *mostly* evidence characterisation. **The exemption is small by construction.**
@@ -63,6 +63,9 @@ session. STRUCK — never enumerated, and the count would have conflated three d
 for not spawning: the criterion firing, a RESCOPE rather than a decline, and one decline driven
 by context pressure. Only the first is the rule's yield. A number that reads as counted and was
 not, inside the page that warns against exactly that.)*
+
+
+^ATOM-F1CG-2AFB [desc: "Which turns genuinely get no review fork (timestamp/frontmatter bump, pure formatting or link repair, correcting a false commit-message sentence); the rule's value is a checkable reason to decline", keywords: what_turn_correctly_gets_no_fork examples_of_turns_needing_no_review can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires the_value_is_a_checkable_reason_to_decline declining_the_fork_out_of_fatigue timestamp_or_frontmatter_bump_needs_no_fork formatting_or_link_repair_needs_no_fork relaying_another_agents_report_without_endorsing correcting_a_false_commit_message_removes_a_claim spawn_when_unsure_which_clause_fires, ocd: 2026-10-17, lmd: 2026-10-17]
 
 **What genuinely gets no fork** — turns making no claim about evidence at all: a timestamp or
 frontmatter bump; a pure formatting or link repair; correcting a false sentence in an earlier
