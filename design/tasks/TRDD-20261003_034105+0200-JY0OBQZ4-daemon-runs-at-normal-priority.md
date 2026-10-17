@@ -25,7 +25,7 @@ implementation-commits: [30d320eb, b1870adb]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
-2026-10-18 CURRENT: R1 is done (ProcessType Standard since 2026-10-09, host step N2 done). Open: the tick-time acceptance, which cannot be judged until load is logged; numbers and the buildable next step are in the 2026-10-18 line under Approval log. SUPERSEDED 2026-10-03 list: full uv run pytest after R4c lands; host step N2 (owner decision): re-stage this Mac's LaunchAgent at ProcessType Standard, then check plutil -extract ProcessType and ps -o pri; after release, tick wall time under 30 s at high load in daemon.log.
+2026-10-18 CURRENT: R1 is done (ProcessType Standard since 2026-10-09, host step N2 done). Open: the tick-time acceptance. Since b1870adb the daemon logs 'rotator tick slow:' with phase times and load; the card is in testing (3fc055f6) until a release puts those lines in daemon.log, judged with high load = load1 at or above the logical core count. Numbers and history are in the 2026-10-18 lines under Approval log. SUPERSEDED 2026-10-03 list: full uv run pytest after R4c lands; host step N2 (owner decision): re-stage this Mac's LaunchAgent at ProcessType Standard, then check plutil -extract ProcessType and ps -o pri; after release, tick wall time under 30 s at high load in daemon.log.
 
 ### R1 — normal priority (`scripts/keepalive_install.sh:270`, `oauth_rotator/rotator.py claude_running()`)
 1. Change `ProcessType` to `Standard`.
