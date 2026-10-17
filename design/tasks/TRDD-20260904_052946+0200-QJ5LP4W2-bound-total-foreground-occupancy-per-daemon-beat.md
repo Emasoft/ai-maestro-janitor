@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-10-07T02:41:30+0200
+updated: 2026-10-17T03:48:09+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -252,6 +252,7 @@ bounds that **sum** — only individual subprocess workloads are capped
       body subtracted) and show the stall count falling. **NOT "one log snapshot"** — same
       reason as above: one snapshot is what hid the 100 s+ bodies in the first place. Use a
       window wide enough to contain them, and say which window.
+      EXIT CONDITION: box 4 is not done until the cost of a completed rotation-esc pane actuation is also measured (about 9 s per pane, inside floor tasks that bypass the foreground budget), or is explicitly declared not measurable — from TRDD-8BXMNQ4T, 2026-10-17. Evidence retention: TRDD-RX7FXNN7.
 
 ## Open questions inherited from the measurement
 

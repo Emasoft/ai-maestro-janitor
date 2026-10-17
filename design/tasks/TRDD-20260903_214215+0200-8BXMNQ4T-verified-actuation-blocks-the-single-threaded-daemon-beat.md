@@ -1,10 +1,10 @@
 ---
 trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
-column: todo
+column: backburner
 
 created: 2026-09-03T21:42:15+0200
-updated: 2026-10-07T04:30:08+0200
+updated: 2026-10-17T03:49:21+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -20,11 +20,24 @@ eht: []
 implementation-commits: []
 created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-03)
 status: tasked
+review-after: 2026-11-17
+blocker-probe: [sh, -c, "grep -Eq 'rotation-esc: [A-Z_]+ ESC → ' \"$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log\" \"$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log.1\""]
+blocker-holds-if: exit-nonzero
 ---
 
 # Verified actuation blocks the single-threaded daemon beat
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-17
+
+- **PARKED in `backburner`, review-after 2026-11-17.** The NEXT ACTION below (read daemon.log around the 2026-10-06T17:30:46 completed `rotation-esc: DONE ESC -> iterm` line) can no longer run: that window rotated away. The oldest surviving log is daemon.log.1, which starts 2026-10-14T19:31, and a grep for completed `rotation-esc: <STATUS> ESC` lines finds 0 in both files (scope report: docs_dev/20261017_034643+0200-8BXMNQ4T-scope.md).
+- **Remedy landed:** TRDD-QJ5LP4W2, in 5f7f3dba and 57a7f267 — a 30 s foreground budget with a floor-first ordering. The budget fires in the logs: 122 lines in daemon.log, 32 in daemon.log.1.
+- **Trigger to resume:** a new completed `rotation-esc: <STATUS> ESC → ` line in a live log segment (the emitter, scripts/daemon.py line 2326, writes the Unicode arrow, not ASCII; the `->` spelling elsewhere on this card is an ASCII rendering). The `blocker-probe` frontmatter field is that grep: exit 0 means the trigger fired.
+- **Unmeasured:** the cost of a completed pane actuation, about 9 s per pane, inside floor tasks that bypass the budget. That question now lives in TRDD-QJ5LP4W2 box 4 (Re-measure).
+- **Derived pattern (2026-10-17):** built from the emitter, `rotation-esc: [A-Z_]+ ESC → ` (ERE). Match count 0 in daemon.log and 0 in daemon.log.1, so no completed actuation line survives in a live log and the card is correctly parked.
+- **Why `unblock-when` was not used:** its `log:` predicate requires a repo-relative path (a PROJECT card is pushed, an absolute path leaks local layout), and daemon.log lives under the plugin data dir outside the repo. So the card stays backburner with review-after, and the blocker-probe recipe is run by an agent on review.
+- **Evidence retention:** TRDD-RX7FXNN7 (backburner) proposes the daemon keep an excerpt of completed rotation-esc lines across log rotation, so this measurement is not lost again.
+
+## (SUPERSEDED 2026-10-17) prior STATE block, kept for history — 2026-09-04
 
 - **⚠ THIS CARD'S OWN HYPOTHESIS WAS NEVER TESTED.** The title claims verified *rotation
   actuation* starves the beat. That was never measured. What WAS measured is that *other*
