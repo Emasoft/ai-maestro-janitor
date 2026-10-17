@@ -412,7 +412,6 @@ def test_expand_segment_id_malformed_span_exits_3(tmp_path: Path) -> None:
     assert code == 3
 
 
-
 def _expand_stderr_line(transcript: Path, expand_id: str | None) -> str:
     """Run `expand` expecting exit 3 and return its single stripped stderr line."""
     argv = ["expand", "--transcript", str(transcript)]
