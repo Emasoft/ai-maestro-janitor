@@ -4,7 +4,7 @@ title: The unwedge ESC nudge fails at pane retry_wedge and its attempts climb wi
 column: todo
 status: tasked
 created: 2026-10-10T03:49:58+0200
-updated: 2026-10-10T03:51:17+0200
+updated: 2026-10-17T13:59:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T03:49:58+0200
+implementation-commits: [36287c9c]
 ---
 
 # The unwedge ESC nudge fails at pane retry_wedge and its attempts climb with no recovery
@@ -25,3 +26,4 @@ Goal: investigate, verify and fix the root cause. Found on 2026-10-10 by the boa
 
 - 2026-10-10T03:49:58+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-10 03:51 CORRECTION to the body (review of af8d1b1e; lines read by the main session): the 10 '[frozen] attempt=' lines are 5 pairs, an 'unwedge: failed' pane-policy line and then a 'FIRE-FAILED esc_nudge' line in the same second. That is 5 failed fires in TWO episodes, not five episodes: ai-maestro at 19:21:26, 19:40:46 and 19:56:23 (attempts 0, 1, 2) and llm-externalizer at 19:30:06 and 19:45:13 (attempts 0, 1), all 2026-10-09. No other FIRE-FAILED esc_nudge line is in the logs on disk. The file and line daemon.py:1602 is worker-read; the session-liveness FIRE-FAILED line is built at daemon.py:2108 (grep hit).
+2026-10-17 — 36287c9c: diagnostic only. A failed pane-policy step now logs reads=<every classification read in that step> and presses=<counted presses>, so the next failed unwedge in daemon.log shows whether retry_wedge persists after each ESC or too few ESCs were sent. Root cause not yet fixed; card stays in todo.
