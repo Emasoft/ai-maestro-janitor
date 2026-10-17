@@ -4,7 +4,7 @@ title: The git listing that replaced the detector tree walks has untested branch
 column: todo
 status: tasked
 created: 2026-10-10T20:03:43+0200
-updated: 2026-10-16T23:32:54+0200
+updated: 2026-10-17T04:41:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,3 +30,5 @@ Goal: write the tests the review of 0d42c65f found missing for TRDD-WOI8GO1S. (1
 ## STATE
 
 2026-10-16: added tests/test_git_listing_branches.py (9 tests pass; items 1-4 covered; uncommitted, pending orchestrator commit). OPEN: the timeout-fallback measurement/decision (skip the fire vs full walk) is not done; card stays in todo.
+2026-10-17: CORRECTION. The tests are COMMITTED in 57b3e5c0 (tests/test_git_listing_branches.py, 9 pass), not uncommitted. The timeout-branch test uses a patched run_git_readonly seam; the only alternative is a real 30 s wait.
+Open: the timeout-fallback decision. A measurement worker is running on the external volume (scripts_dev/xrt9-measure/), with a folder/* run and the walk-to-listing ratio per N; its report lands in docs_dev/*-XRT9LOQL-measure.md. Before closing, read tests/test_git_listing_branches.py lines 106-210 against items 2-4. End column: complete if no code change, testing if the decision is skip-with-log. Keep the note that 0d42c65f's claim (git never enters an ignored dir) is false for folder/* rules and must stay out of release notes.
