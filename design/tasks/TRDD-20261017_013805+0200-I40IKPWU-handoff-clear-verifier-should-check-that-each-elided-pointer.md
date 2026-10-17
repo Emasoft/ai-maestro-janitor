@@ -1,10 +1,10 @@
 ---
 trdd-id: I40IKPWU
 title: Handoff-clear verifier should check that each elided pointer expands
-column: todo
+column: dev
 status: tasked
 created: 2026-10-17T01:38:05+0200
-updated: 2026-10-17T01:38:05+0200
+updated: 2026-10-17T03:37:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
