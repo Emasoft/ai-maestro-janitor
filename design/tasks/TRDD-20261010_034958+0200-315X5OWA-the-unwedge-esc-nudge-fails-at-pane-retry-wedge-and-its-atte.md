@@ -4,7 +4,7 @@ title: The unwedge ESC nudge fails at pane retry_wedge and its attempts climb wi
 column: todo
 status: tasked
 created: 2026-10-10T03:49:58+0200
-updated: 2026-10-17T14:26:49+0200
+updated: 2026-10-17T15:02:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T03:49:58+0200
 implementation-commits: [36287c9c, 82a167e5]
+npt: [XNQUYVT3]
 ---
 
 # The unwedge ESC nudge fails at pane retry_wedge and its attempts climb with no recovery
@@ -27,7 +28,7 @@ implementation-commits: [36287c9c, 82a167e5]
 - CAVEAT: on a FAILED step presses= always equals the step's repeat_max (1 unqueued, 2 with one queued row in the two fixtures), and it counts type_keys calls, not delivered keystrokes. reads= shows whether the retry row stayed on screen; neither field shows delivery.
 - PREREQUISITE for the log path: the daemon runs the installed plugin build, so reads= appears in global-state/daemon.log only after a publish via scripts/publish.py and a local plugin update. Until then the old 'failed (observed X)' text is logged.
 - FINDING 2026-10-17 (two rival hypotheses, NEITHER proven; no pane frame was ever captured at a real failure). H1 wall persists (INFERRED): retry_wedge is Claude Code's 'Retrying in … attempt N/M' row; the real-wedged-* fixtures read 'Session limit reached', 'Fable limit reached · Retrying in 5h' and '429 Rate limited · Retrying in 0s' (the last is transient, not a quota wall). If ESC does not take the row off screen, WEDGE_GONE never holds and the remedy is TRDD-BBGDUCSE, because the only rotator request on this path is request_rotator_tick('retry-wedged-esc') under diagnosis == 'retry_wedged' in daemon.py, not on a failed fire at a retry_wedge pane. H2 ESC not delivered or ignored: the comment above that call (TRDD-WKTD5JTC §1b, measured) says an ESC that breaks a retry wedge fires plain Stop and the session then sits idle, i.e. a delivered ESC CAN clear the row; that contradicts H1 for the unqueued case and keeps the card's original suspects (typing gate, pane kind, injector) live. Not a defect: _flush_wedge gives an empty-field wedge repeat_max 1 on purpose (a second ESC onto an empty prompt opens the rewind menu). Unverified secondhand: 'episodes cleared after a rotation' (docs_dev scope note, not re-read; one 10-14 failure was followed by an ok with no rotation named). Supporting report (gitignored, local only): reports/pane-policy/20261017_144357+0200-315X5OWA-retry-wedge-root-cause.md. NEXT ACTION: get a DELIVERY signal - a pane frame captured right after the ESC at a real retry_wedge - before choosing; reads=retry_wedge x3 alone cannot separate H1 from H2. If H1 holds, work TRDD-BBGDUCSE's pre-build conditions; if H2, fix delivery here.
-- AFTER PUBLISH: a failed line showing reads=retry_wedge on every read confirms the row stayed on screen, but does NOT say whether the ESC was delivered (see FINDING); it is not a closing criterion on its own.
+- AFTER PUBLISH: a failed line showing reads=retry_wedge on every read confirms the row stayed on screen, but does NOT say whether the ESC was delivered (see FINDING); it is not a closing criterion on its own. H3 (added by the final review, 2026-10-17): the ESC is delivered and clears the row, then something (e.g. a heartbeat cron that fires only when the REPL is idle) resubmits into the same wall within seconds. Separating H1/H2/H3 needs TRDD-XNQUYVT3 (attempt number per read), now an NPT of this card.
 - GOTCHA: the ok line text is unchanged on purpose (TRDD-UA4FAX67 greps it).
 - NOTE: the 2026-10-17 Approval-log line about 36287c9c duplicates this block and is not an approval event; Approval log is append-only, so it stays. The 82a167e5 commit message wrongly says this block replaced it.
 
