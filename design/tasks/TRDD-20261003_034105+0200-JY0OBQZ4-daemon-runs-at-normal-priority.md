@@ -1,10 +1,10 @@
 ---
 trdd-id: JY0OBQZ4
 title: Daemon runs at normal priority
-column: testing
+column: todo
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-11T01:24:06+0200
+updated: 2026-10-18T00:57:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -49,3 +49,5 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-06T21:08:30+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
 2026-10-09 HOST STEP N2 DONE by the main session under the owner mandate of 2026-10-09 ('just complete all TRDDs and decide yourself'). Before: installed plist ProcessType Background, daemon pid 73460 at pri 4. Ran the installed 3.8.11 keepalive_install.sh install (plist backed up to docs_dev/ first). After: plist ProcessType Standard (plutil), daemon pid 6931 at pri 20 (ps). The log paths in the plist also moved from the retired ~/.claude/janitor-global-state to the plugin DATA global-state dir. The install left the job UNLOADED and the daemon down for about a minute until a manual launchctl bootstrap; that defect is carded as TRDD-V13RIZUI. The stale item 'full uv run pytest after R4c' belongs to TRDD-3OS6AXV3, not here. REMAINING, event-gated: daemon.log tick wall times under 30 s across a high-load period on the Standard job (earlier baseline: 4 of 66 ticks at 30 s or more). Assessment report: reports/board/20261009_221754+0200-wave2-JY0OBQZ4.md.
 - 2026-10-09T22:19:45+0200 — column → testing by main-agent@ai-maestro-janitor. host step done; waits on the tick-time field check under load
+2026-10-18 01:05 FIELD CHECK FAILED, measured by the main session from daemon.log.1 and daemon.log ('oauth-rotator-tick' done-in lines, ticks of 30 s or more / all ticks, max): 2026-10-16 37/1129 max 188 s; 2026-10-17 73/1288 max 180 s; 2026-10-18 to 01:00 6/45 max 74 s. The daemon has run at ProcessType Standard since 2026-10-09 (host step N2), and slow ticks persist at 3 to 6 percent, worse than the 4/66 Background baseline in rate terms only on some days. So normal priority is NOT sufficient for the acceptance 'tick wall time under 30 s at high load'. Host load is still in no log, so load as the cause is not shown either way. R1 (ProcessType Standard, ps timeout) is done and stays; the open question is which part of the tick is slow. NEXT: per-phase timing inside the rotator tick, or fold into the slow-task card TRDD-6CF3L7IJ. Returned to todo under the board-drain rule (a testing card that fails its own check goes back to todo with the failure).
+- 2026-10-18T00:57:03+0200 — column → todo by main-agent@ai-maestro-janitor. field check failed: 3-6% of ticks still take 30 s or more on the Standard job
