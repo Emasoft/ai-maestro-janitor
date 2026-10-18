@@ -1,10 +1,10 @@
 ---
 trdd-id: MHG11027
-title: A consolidate group verdict stops matching when one page joins the group so large groups are dispatched again every few days
-column: testing
-status: tasked
+title: A consolidate group verdict stops matching when one member page is edited
+column: complete
+status: archived
 created: 2026-10-10T10:17:01+0200
-updated: 2026-10-18T03:49:40+0200
+updated: 2026-10-18T04:19:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-10T10:17:01+0200
 implementation-commits: [d491dcca, 52250a20]
 ---
 
-# A consolidate group verdict stops matching when one page joins the group so large groups are dispatched again every few days
+# A consolidate group verdict stops matching when one member page is edited
 
 Found 2026-10-10 by the main session reading the USER consolidate refusal ledger (global-state/memory-maint-consolidate-USER-<hash>.refusals.json in the plugin data dir). Split from TRDD-K5F7US68, whose fix made a one-page key impossible; this is the opposite end.
 
@@ -34,13 +34,14 @@ SMALLEST FIX TO WEIGH: a refused group key covers every pair inside it for the 7
 
 ## Acceptance
 
-- [ ] The reason a refused group is listed again is shown from code and from one reproduced case on a scratch ledger
-- [ ] After the fix, adding one page to a refused group lists only pairs that involve the new page, pinned by a test
-- [ ] uv run pytest, ruff, mypy and pyright pass
+- [x] The reason a refused group is listed again is shown from code and from one reproduced case on a scratch ledger
+- [x] After the fix, adding one page to a refused group lists only pairs that involve the new page, pinned by a test
+- [x] uv run pytest, ruff, mypy and pyright pass
 
 ## Approval log
 
 - 2026-10-10T10:17:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T04:19:22+0200 — COMPLETE by main-agent@ai-maestro-janitor. three boxes verified 2026-10-18: cause shown from the removed whole-group content_hash, reproduced by the fix's tests failing on 52250a20^, full gate green at 828097d1; cause corrected from 'page joins' to 'member edited'.
 
 ## Corrections
 
@@ -49,3 +50,4 @@ SMALLEST FIX TO WEIGH: a refused group key covers every pair inside it for the 7
 ## STATE
 
 2026-10-17 IMPLEMENTED, UNCOMMITTED pending orchestrator commit: memory_refusals.page_hash (sha256 minus frontmatter lmd lines) + record() stores per-member pages + live_members(); memory_content_precheck.group_has_unjudged_pair and refusal_covered_pages use live_members. 7 new tests + 1 deliberately updated; 203 passed in the 4 named test files; ruff, mypy, pyright (-p project) clean. Field criterion: after one recording pass, editing one member of a ~97-page key leaves at most N-1 unjudged pairs, checked from the ledger. Expect one extra consolidate pass per scope because old entries without pages cover nothing. Next cost lever: the 7-day TTL.
+2026-10-18 — SUPERSEDES the 2026-10-17 'UNCOMMITTED' line: committed as d491dcca + 52250a20. CAUSE CORRECTED (title changed from 'when one page joins'): before 52250a20, a refusal stayed live only while the content_hash of the WHOLE group matched (the removed docstring: 'edit any page in a refused group and the whole group's refusal stops matching'), so editing or deleting ONE member revived every pair of the group. A page JOINING did not invalidate the stored refusal. Box 1 reproduced on scratch ledgers (tmp_path): the fix's tests run against 52250a20^ in a temp worktree gave test_editing_one_member_revives_only_that_members_pairs FAILED (all pairs (a,b)... returned, expected only (a,d),(b,d),(c,d)) and test_deleting_one_member_revives_only_that_members_pairs FAILED, while test_adding_a_page_leaves_only_its_pairs_unjudged PASSED on the old code too. So the field growth 95 -> 97 pages did not by itself cause the re-listing; member edits did (inferred: the ledger does not record edits). Box 2: test_adding_a_page_leaves_only_its_pairs_unjudged pins it; it does not distinguish old from new code. Box 3: full gate at 828097d1 (contains both commits): ruff, mypy, pyright clean, pytest 18615 passed, 2 skipped. Field criterion (one recording pass, then an edit leaves at most N-1 unjudged pairs) is optional and not an acceptance box.
