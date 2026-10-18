@@ -1,10 +1,10 @@
 ---
 trdd-id: XOSC5AI5
 title: Memory nudges reach no background memory chore
-column: todo
+column: design
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-18T03:18:41+0200
+updated: 2026-10-18T07:57:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -26,9 +26,11 @@ Route 2 of the owner's routing rule of 2026-09-27 (quoted on TRDD-6ESS2MGE): a f
 ## Approval log
 
 - 2026-10-10T04:55:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T07:57:35+0200 — column → design by main-agent@ai-maestro-janitor. measured; the route needs a reviewed multi-file design before any code
 
 ## Investigation 2026-10-18
 
 MEASURED (worker-read, report docs_dev/20261018_023416+0200-trdd-xosc5ai5-librarian-nudge-readers.md; file:line evidence there): the librarian's proposal file memory-reorg-proposed.md (LOCAL memory dir) has ONE reader, the conflict precheck and chore (scripts/lib/memory_content_precheck.py:1239-1330; skills/janitor-memory-conflict/SKILL.md:68), which read only its Conflict section; its other six sections are display-only. memorize-nudge persists only to the findings ledger (ADVISORY-MEMORIZE-NUDGE, LOW) and no chore reads it: 29 findings in 7.4 days, at least one uncovered-module set recurring (not counted per finding). memory-maintenance.py reads no nudge; its content precheck reads only the proposal's Conflict section (its docstring lines 5-12 say it never reads the corpus, which is slightly inaccurate).
 DECISION: no change for the proposal file (its actionable section is already wired). For memorize-nudge the natural consumer is a chore that writes NEW pages from commit messages (commit discipline puts the WHY there), a CANDIDATE being the janitor-memory-record-recent skill as a background chore (only its name was checked: read its input and whether it can run in the background before designing); consolidate and retro-lesson take existing pages and do not fit. NEXT: design that route (input = the nudge's uncovered modules plus their commits; the marker and claim like the other chores), measured on this corpus first, as the card requires; not built yet.
 CANDIDATE READ (main session, skills/janitor-memory-record-recent/SKILL.md lines 1-40): record-recent calls itself 'the on-demand counterpart of the memorize-nudge heartbeat'. It finds what changed, recalls first, and hands authoring to janitor-memory-write and janitor-memory-update. It is written for a session that knows its own changes; it is not yet a heartbeat chore (no marker, no claim step). Run in the background it would have only git history and commit messages to work from, which commit discipline says carry the WHY. NEXT (design, not built): decide whether memory-maintenance should emit a record-recent marker when memorize-nudge has fired N times on the same module set, with the claim and close steps the other chores use; measure first how many of the 29 nudge findings name the same set.
+MEASURED 2026-10-18 07:57 (reports/board/20261018_075712+0200-xosc5ai5-nudge-recurrence.md, read-only): 30 ADVISORY-MEMORIZE-NUDGE rows in 7.6 days (10-10..10-18) are about 2 persisting uncovered code sets; 25 of 30 name scripts/memgrep/src/mem_split.rs first (last committed 10-07; no memory note mentions it). The signal is real and stable, but the fire count measures elapsed time (about 6 fires per day per set at the 4 h tick), so a trigger belongs in hours per module, not per set: 24-48 h (6-12 fires) is what the data supports. The ledger truncates messages at 120 characters, so a trigger must read the module list from the detector, not the ledger. record-recent needs five changes to run as a claimed chore (marker plus memory-maintenance table row and heartbeat-protocol row; pending record plus memory_dispatch_claim claim/close with scope and root from the record; drop the session-edited-files clause and source recent from the uncovered modules and their commits; drop or redefine its commit step; model pin plus a candidate/abstain step). NEXT: a reviewed design proposal for that route; not built. Card moves to design.
