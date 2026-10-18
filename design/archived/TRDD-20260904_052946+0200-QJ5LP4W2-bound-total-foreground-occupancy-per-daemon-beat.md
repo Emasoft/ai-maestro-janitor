@@ -1,9 +1,9 @@
 ---
 trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
-column: todo
+column: complete
 created: 2026-09-04T05:29:46+0200
-updated: 2026-10-18T03:16:22+0200
+updated: 2026-10-18T03:17:11+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -19,7 +19,7 @@ eht: [9FONCK33]
 implementation-commits: [5f7f3dba, 57a7f267]
 external-refs: [TRDD-8BXMNQ4T]
 review-after: 2026-09-17
-status: tasked
+status: archived
 ---
 
 # Bound total foreground occupancy per daemon beat
@@ -231,7 +231,7 @@ bounds that **sum** — only individual subprocess workloads are capped
       Evidence: `tests/test_daemon_foreground_budget.py::test_floor_task_runs_even_after_budget_exhausted`,
       `::test_deferrable_task_past_budget_is_skipped_and_stays_due`,
       `::test_non_floor_dispatch_is_oldest_last_run_first_not_list_position`.
-- [ ] A test pins the bound, and `oauth-rotator-tick` is shown still firing on
+- [x] A test pins the bound, and `oauth-rotator-tick` is shown still firing on
       cadence with the worst measured occupancy pattern replayed.
       **NOT DONE 2026-09-05 — explicitly OUT OF SCOPE per coordinator ruling.** The synthetic
       tests above pin the mechanism (budget/floor/ordering) with short controlled durations,
@@ -519,9 +519,11 @@ answer is not a better guess; it is naming the missing artifact.**
   scope drift six reviews in is the lesson.
 - 2026-09-16 21:57 — interim (reports/board-drain/20260916_215703+0200-QJ5LP4W2-budget-evidence.md): 12:40→21:54, 495 beats, 15 budget-exceeded beats in two clusters; oauth-rotator-tick and fleet-stop ran in all 495; max tick gap 220 s; no starvation seen. Not box 4: 9 h not 24 h, and beat gaps are not the card's per-task starting-marker stall count. The running daemon (pid 20757, started 10:04) predates the 12:40 3.5.5 install; daemon.py is byte-identical across the 3.5.1/3.5.4/3.5.5 caches (measured). Re-run the stall method after 2026-09-17 12:40.
 2026-10-18 BOX 4 RE-MEASURE (worker-read, method of TRDD-8BXMNQ4T quoted in its report docs_dev/20261018_031558+0200-QJ5LP4W2-box4-measure.md; script scripts_dev/qj5lp4w2_measure.py). Window 2026-10-16T03:24 to 2026-10-18T03:15 (47.85 h, daemon.log.1 + daemon.log), one daemon restart 10-16 12:21 to 12:42. Card-method stalls (wait over 60 s after subtracting the body): 0 of 2590 rotator gaps excluding the restart gap (1 of 2591 including it). Foreground budget exceeded: 11.8/h in the 8.95 h before the restart (cold-cache-clear bodies of about 200 s, session-liveness 231 s), 1.14/h after it, against about 6/h before 3.7.0 and 1.2/h after. Raw rotator gaps over 120 s: 42 of 2590 (1.7 percent, max 249 s), above the 0.08 percent measured after 3.7.0 but far below the 8.3 percent before it. Rotation-esc pane actuation cost: NOT MEASURABLE from these logs (0 completed actuations; 20 'cannot read the pane' skips). So box 4's two clauses hold: the stall count stays down, and the actuation cost is declared not measurable. NOT shown: why raw gaps over 120 s rose from 0.08 to 1.7 percent; whether the pre-restart daemon was the same build.
+2026-10-18 BOX 3 MET by the replay harness of TRDD-9FONCK33 (f2f7656d, tests/test_daemon_foreground_replay.py): run by the main session today with JANITOR_REPLAY_LOG pointing at the 47.85 h window daemon.log.1 + daemon.log (2026-10-16T03:24 to 2026-10-18T03:15): 4 passed, including test_replay_real_host_log_worst_pattern_keeps_tick_within_cadence, which reads the worst pass from that window as a parameter. Every acceptance box is now met. The rise in raw rotator gaps over 120 s (1.7 percent in this window) is not this card's bound failing (card-method stalls 0) and is filed as its own card.
 
 ## Approval log
 
 - 2026-09-05T10:40:00+0200 — box 1 RULED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the advisor consult is satisfied by the standing rule's both-paths-failed exemption, stated explicitly. Column todo -> dev; candidate 3 (per-beat foreground budget with a survival-floor) is being drafted as a reviewable patch first, candidate 4 (cap session-liveness alone) held as the fallback because the 100 s+ beats it would truncate are still unexplained.
 - 2026-09-16T13:05:00+0200 — stays in testing: box 4 needs a 24h daemon.log window under 3.5.5 to re-run the stall analysis against the 12-stalls/6h22m baseline; review-after 2026-09-17.
 - 2026-10-07T02:38:37+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
+- 2026-10-18T03:17:11+0200 — COMPLETE by main-agent@ai-maestro-janitor. all four boxes met; code released in v3.8.11; gap-rate rise filed as TRDD-F1NZMDWF.
