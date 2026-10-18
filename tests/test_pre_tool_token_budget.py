@@ -146,14 +146,14 @@ def test_warns_over_baseline(tmp_path: Path) -> None:
     multiple of this project's own recent per-turn output history fires the nudge."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    _seed_baseline(proj, [2000] * 8)  # bar: 8000 (median 2000 * ratio 4); above the 10k floor too
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(12_000, tool=True))
     ctx = _ctx(_run(str(t), project_dir=str(proj)))
     assert ctx is not None
     assert "Token spike" in ctx
-    # TRDD-YRPUSIFY: the raw per-call count is bucketed away — the exact output (150) must
+    # TRDD-YRPUSIFY: the raw per-call count is bucketed away — the exact output (12000) must
     # NOT appear (a raw count makes the injected nudge a unique, non-cacheable string).
-    assert "150" not in ctx
+    assert "12000" not in ctx
 
 
 def test_no_baseline_history_stays_silent(tmp_path: Path) -> None:
@@ -167,8 +167,8 @@ def test_default_on_when_unset(tmp_path: Path) -> None:
     """DEFAULT-ON (TRDD-KI24GR5Z): with ENABLED unset, an over-baseline turn still fires."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    _seed_baseline(proj, [2000] * 8)
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(12_000, tool=True))
     ctx = _ctx(_run(str(t), enabled=None, project_dir=str(proj)))
     assert ctx is not None and "Token spike" in ctx
 
@@ -237,8 +237,8 @@ def test_silent_when_disabled(tmp_path: Path) -> None:
     """Over baseline but the option is off → no output (zero-cost default)."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    _seed_baseline(proj, [2000] * 8)
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(12_000, tool=True))
     assert _run(str(t), enabled=False, project_dir=str(proj)).stdout.strip() == ""
 
 
@@ -252,19 +252,20 @@ def test_multistep_turn_sums_output(tmp_path: Path) -> None:
     still fires."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)  # baseline-derived bar: 80 (median 20 * ratio 4)
+    _seed_baseline(proj, [2000] * 8)  # baseline-derived bar: 8000 (median 2000 * ratio 4); floor 10000
     tool_result = json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
     t = _write_transcript(
         tmp_path,
         _user("do real work"),
-        _assistant(60, tool=True),
+        _assistant(6000, tool=True),
         tool_result,
-        _assistant(60, tool=True),
+        _assistant(6000, tool=True),
     )
     ctx = _ctx(_run(str(t), project_dir=str(proj)))
     assert ctx is not None
-    # 60 + 60 = 120 crosses the 80 bar (a single 60 stays under it), proving the sum;
-    # TRDD-YRPUSIFY buckets the raw total away, so we assert it FIRED, not the literal 120.
+    # 6000 + 6000 = 12000 crosses both the 8000 bar and the 10k floor (a single 6000 clears
+    # neither), proving the sum; TRDD-YRPUSIFY buckets the raw total away, so we assert it
+    # FIRED, not the literal.
     assert "Token spike" in ctx
 
 
@@ -422,8 +423,8 @@ def test_advisory_nudge_names_the_lean_worker_delegation(tmp_path: Path) -> None
     and the one where redirecting bounded work is still cheap enough to matter."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    _seed_baseline(proj, [2000] * 8)
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(12_000, tool=True))
     ctx = _ctx(_run(str(t), project_dir=str(proj)))
     assert ctx is not None
     assert "Token spike" in ctx and "lean-worker" in ctx
@@ -460,7 +461,7 @@ def test_same_bucket_emits_identical_text(tmp_path: Path) -> None:
     Hard budget is raised so all three stay ADVISORY — isolating the bucket from the tier."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _seed_baseline(proj, [20] * 8)
+    _seed_baseline(proj, [2000] * 8)
 
     def ctx_for(out: int) -> str | None:
         t = _write_transcript(tmp_path, _user("do real work"), _assistant(out, tool=True))
@@ -655,3 +656,73 @@ def test_baseline_drops_corrupt_and_negative_records(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert mod._load_output_baseline(str(proj)) == [700]
+
+
+
+# ---------- TRDD-BEA87JS1 (janitor#342 item 5c): absolute floor under the advisory --------
+#
+# The baseline-relative bar alone fires on a small-but-multiplied turn (a few thousand
+# output tokens on a quiet history). Those advisories rendered "output ~0k" because
+# `_bucket_tokens` floors to 10k, and #246 asked for genuinely extreme cases only.
+
+_QUIET_HISTORY = [800, 1000, 900, 1100, 1000, 950, 1050, 1200]  # median 1000 -> bar ~4000
+
+
+def _advisory_ctx(tmp_path: Path, out: int, *, env_extra: dict[str, str] | None = None) -> str | None:
+    """Run the hook on a turn of `out` output tokens against `_QUIET_HISTORY`."""
+    proj = tmp_path / "proj"
+    proj.mkdir(exist_ok=True)
+    _seed_baseline(proj, _QUIET_HISTORY)
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(out, tool=True))
+    return _ctx(_run(str(t), project_dir=str(proj), env_extra=env_extra))
+
+
+def test_advisory_floor_suppresses_a_sub_10k_turn_over_the_baseline_bar(tmp_path: Path) -> None:
+    """DISCRIMINATING: 6000 output clears the ~4000 baseline bar but is under the 10k floor -> silent."""
+    assert _advisory_ctx(tmp_path, 6000) is None
+
+
+def test_advisory_floor_lets_a_12k_turn_through_with_a_truthful_bucket(tmp_path: Path) -> None:
+    """GUARD: 12000 output is above the floor -> the advisory fires and renders "~10k", never "~0k"."""
+    ctx = _advisory_ctx(tmp_path, 12_000)
+    assert ctx is not None and "output ~10k" in ctx
+
+
+def test_advisory_floor_boundary_9999_silent(tmp_path: Path) -> None:
+    """DISCRIMINATING: one token under the 10k floor stays silent (pins the < comparison)."""
+    assert _advisory_ctx(tmp_path, 9999) is None
+
+
+def test_advisory_floor_boundary_10000_fires(tmp_path: Path) -> None:
+    """GUARD: exactly 10000 output fires (pins that the floor is inclusive, not >)."""
+    ctx = _advisory_ctx(tmp_path, 10_000)
+    assert ctx is not None and "output ~10k" in ctx
+
+
+def test_advisory_floor_leaves_the_hard_tier_alone(tmp_path: Path) -> None:
+    """GUARD: 40000 output still fires the hard tier — the floor only touches the advisory."""
+    ctx = _advisory_ctx(tmp_path, 40_000)
+    assert ctx is not None and "TOKEN RUNAWAY" in ctx
+
+
+def test_suppressed_sub_floor_advisory_is_tracked_as_ok_so_a_real_one_still_fires(tmp_path: Path) -> None:
+    """DISCRIMINATING: a floored advisory must be recorded as ok, else the next real advisory reads as steady and stays silent."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    _seed_baseline(proj, _QUIET_HISTORY)
+    env = {_REPEAT: "600"}
+    small = _write_transcript(tmp_path, _user("one"), _assistant(6000, tool=True))
+    first = _run(str(small), project_dir=str(proj), env_extra=env)
+    assert first.stdout.strip() == ""
+    stamp = (proj / ".janitor" / "state" / "token-budget-last-tier.txt").read_text(encoding="utf-8")
+    assert stamp.startswith("ok "), f"suppressed advisory must be stamped ok, got {stamp!r}"
+    big = _write_transcript(tmp_path, _user("two"), _assistant(12_000, tool=True))
+    second = _run(str(big), project_dir=str(proj), env_extra=env)
+    ctx = _ctx(second)
+    assert ctx is not None and "Token spike" in ctx
+
+
+def test_advisory_floor_is_capped_under_a_lowered_hard_limit(tmp_path: Path) -> None:
+    """GUARD: with hard=12000 the floor caps at 0.75*hard=9000, so a 9500 advisory still fires (a flat 10k floor would make it unreachable)."""
+    ctx = _advisory_ctx(tmp_path, 9500, env_extra={_BUDGET_HARD: "12000"})
+    assert ctx is not None and "Token spike" in ctx

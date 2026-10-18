@@ -75,6 +75,13 @@ import state  # noqa: E402  # atomic_write — the tier-transition state file (i
 import token_meter  # noqa: E402
 
 _DEFAULT_TURN_OUTPUT_HARD = 40_000
+# TRDD-BEA87JS1 / janitor#342 item 5c — a turn that wrote under 10k output tokens is not a spike
+# worth advice (#246 asked for "genuinely extreme cases" only). About 86% of the advisory lines
+# found in this repo's transcripts (316 of 367, duplicates possible) were sub-10k and rendered
+# "output ~0k", because `_bucket_tokens` floors to 10k. This absolute floor STACKS on `token_meter`'s baseline-relative bar (a turn must
+# clear both); it does not replace it. The EFFECTIVE floor is capped at 0.75 * the configured
+# output hard limit (see main), so lowering that limit can never make the advisory unreachable.
+_ADVISORY_MIN_OUTPUT = 10_000
 _DEFAULT_TURN_CACHE_CREATION_HARD = 75_000
 # TRDD-KI6OWCZT — recent-only: the session's OWN RECENT baseline, not its all-time history.
 _MAX_OUTPUT_BASELINE_SAMPLES = 200
@@ -495,6 +502,16 @@ def main() -> int:
         output_baseline_history=_load_output_baseline(project_dir) if baseline_can_matter else [],
         ignore_cache_creation=ignore_cache_creation,
     )
+    # TRDD-BEA87JS1 (janitor#342 item 5c) — absolute floor under the advisory tier. It MUST sit
+    # here, before `_track_tier`: a floored call has to be RECORDED as "ok", otherwise the stamp
+    # would hold "advisory", a later REAL advisory would read as a steady tier and stay silent
+    # (see `_track_tier`). The cap reads `token_meter`'s own advisory ceiling (deliberately the
+    # meter's private constant, not a copied 0.75: one source), so a lowered TURN_OUTPUT_HARD can
+    # never push the floor past what the advisory could reach. A hard limit of 0 is "hard tier
+    # off" in the meter (`if output_hard > 0` in `evaluate_turn_budget`), with no ceiling to cap.
+    advisory_floor = min(_ADVISORY_MIN_OUTPUT, int(output_hard * token_meter._ADVISORY_HARD_CEILING)) if output_hard > 0 else _ADVISORY_MIN_OUTPUT
+    if verdict.tier == "advisory" and usage.output_tokens < advisory_floor:
+        verdict = token_meter.BudgetVerdict(tier="ok", reasons=[])
     # issue #79 — unconditional per-call tier bookkeeping, BEFORE building the response.
     # Must run for every tier (including "ok") so a later climb is a detectable transition
     # (see `_track_tier`), and must run whether the eventual response is a deny or an
