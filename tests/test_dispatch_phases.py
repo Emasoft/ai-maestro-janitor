@@ -4697,6 +4697,56 @@ def test_drift_line_dedupe_is_per_local_day_and_prunes_old_days(
     assert "2026-10-06" not in seen
 
 
+def _drift_printed_records() -> list[str]:
+    import state as _st
+
+    log = _st.log_dir() / "dispatch.log"
+    if not log.is_file():
+        return []
+    return [ln for ln in log.read_text(encoding="utf-8").splitlines() if "drift printed:" in ln]
+
+
+def test_printed_drift_line_leaves_one_drift_printed_record(env_isolation: dict) -> None:
+    """TRDD-0RTDZL56: a printed drift line logs exactly one record with detector and 12-hex key."""
+    dispatch = _import_dispatch()
+    assert dispatch._dedupe_drift_text("fake-drift", "[fake] thing is wrong\n") != ""
+    records = _drift_printed_records()
+    assert len(records) == 1
+    assert re.search(r"drift printed: detector=fake-drift key=[0-9a-f]{12}$", records[0])
+
+
+def test_suppressed_drift_line_leaves_no_new_record(env_isolation: dict) -> None:
+    """TRDD-0RTDZL56: a deduped repeat writes no further drift-printed record."""
+    dispatch = _import_dispatch()
+    line = "[fake] thing is wrong\n"
+    dispatch._dedupe_drift_text("fake-drift", line)
+    dispatch._dedupe_drift_text("fake-drift", line)
+    assert len(_drift_printed_records()) == 1
+
+
+def test_drift_printed_key_is_stable_across_local_days(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-0RTDZL56: the same drift line printed on two local days logs the same 12-hex key."""
+    dispatch = _import_dispatch()
+    line = "[fake] thing is wrong\n"
+    monkeypatch.setattr(dispatch, "_local_day", lambda: "2026-10-06")
+    assert dispatch._dedupe_drift_text("fake-drift", line) == line
+    monkeypatch.setattr(dispatch, "_local_day", lambda: "2026-10-07")
+    assert dispatch._dedupe_drift_text("fake-drift", line) == line
+    keys = [re.search(r"key=([0-9a-f]{12})$", r).group(1) for r in _drift_printed_records()]  # type: ignore[union-attr]
+    assert len(keys) == 2
+    assert keys[0] == keys[1]
+
+
+def test_drift_printed_record_never_contains_the_drift_text(env_isolation: dict) -> None:
+    """TRDD-0RTDZL56: the record holds detector and key only, never the (possibly private) text."""
+    dispatch = _import_dispatch()
+    dispatch._dedupe_drift_text("fake-drift", "[fake] secret-looking-payload-xyz\n")
+    (record,) = _drift_printed_records()
+    assert "secret-looking-payload-xyz" not in record
+
+
 def test_self_deduping_detector_line_passes_the_dispatcher_unchanged(
     env_isolation: dict,
 ) -> None:

@@ -950,6 +950,30 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
     return None
 
 
+def _log_drift_printed(name: str, line: str) -> None:
+    """Record in dispatch.log THAT a human-facing drift line was printed -- never its text.
+
+    WHY (TRDD-0RTDZL56): nothing recorded WHEN a drift line reached stdout (the seen-file holds
+    keys with at most a date; the findings ledger excludes human-facing drift), so "this line
+    repeated every 20 minutes" could only be inferred. The text is omitted because it can hold
+    private data; the key is the first 12 hex of sha256 of `<detector>:<dedupe key>`. It
+    deliberately carries NO local day (unlike the seen-file key) so the same line printed on
+    different days keeps the same key and repeats can be grouped across days; the log line's own
+    timestamp carries the time. Bare action markers are not drift and are skipped. Logging must
+    never block or break the print, hence the broad guard. Only detector output that passes
+    through `_dedupe_drift_text` is recorded; the dispatcher's own printed lines are not.
+    Bounded by `state.log_line` -> `rotate_log_if_big` (1 MiB, one .log.1 level)."""
+    stripped = line.strip()
+    if not stripped or _RESERVED_MARKER_RE.fullmatch(stripped):
+        return
+    key = f"{name}:{_drift_dedupe_key(stripped)}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+    try:
+        state.log_line("dispatch", f"drift printed: detector={name} key={digest}")
+    except Exception:  # noqa: BLE001, S110 - logging must never break the print
+        pass
+
+
 # Detectors whose EVERY printed drift line is gated by their own `dedupe.emit_once` and which
 # `emit_forget` on clearance (except memgrep-binary-stale, whose keys embed the binary stamp and
 # installed sha, so a new occurrence has a new key). WHY exempt (TRDD-37H7QFSF): the dispatcher
@@ -1009,6 +1033,8 @@ def _dedupe_drift_text(name: str, text: str) -> str:
         out_line = _dedupe_drift_line(name, line)
         if out_line is not None:
             kept.append(out_line)
+            # TRDD-0RTDZL56: both detector-output writes (the two sys.stdout.write calls) go through here; the dispatcher's own printed lines do not and are not recorded.
+            _log_drift_printed(name, out_line)
         else:
             suppressed += 1
     count_file = state.state_dir() / f"drift-lines-suppressed-count-{name}.txt"
