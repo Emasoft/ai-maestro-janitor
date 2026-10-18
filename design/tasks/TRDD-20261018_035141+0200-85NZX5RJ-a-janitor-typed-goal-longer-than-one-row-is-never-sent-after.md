@@ -1,10 +1,10 @@
 ---
 trdd-id: 85NZX5RJ
-title: A janitor-typed goal longer than one row failed to send in every logged clear chain
+title: A janitor-typed goal longer than one row failed in all 3 logged goal re-sends after a clear
 column: todo
 status: tasked
 created: 2026-10-18T03:51:41+0200
-updated: 2026-10-18T03:54:52+0200
+updated: 2026-10-18T04:15:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -20,7 +20,7 @@ approval-datetime: 2026-10-18T03:51:41+0200
 parent-trdd: K9AHY1ZB
 ---
 
-# A janitor-typed goal longer than one row failed to send in every logged clear chain
+# A janitor-typed goal longer than one row failed in all 3 logged goal re-sends after a clear
 
 ## Symptom
 

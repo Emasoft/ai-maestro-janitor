@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: blocked
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-18T03:55:38+0200
+updated: 2026-10-18T04:16:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -23,7 +23,7 @@ implementation-commits: [84e54beb, 00c3403b, 852c72ed]
 blocked-by: [85NZX5RJ]
 pre-block-column: testing
 blocker-probe: trddgrep --porcelain show 85NZX5RJ | cut -f3
-blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
+blocker-holds-if: not-match:^(complete|completed|published|live)$
 ---
 
 # Session goal re-set after a janitor clear
@@ -45,9 +45,9 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-09 STAYS in testing (board drain, wave 3): tests pass (tests/test_clear_trigger.py, 62) and the code is released, but the live event has not succeeded: the only 'goal' line in .janitor/logs/clear-trigger.log is a FAILED attempt of 2026-10-05 03:17 ('not sent: gave up after 3600s, field not empty'). Waits on one janitor clear of a session with an unmet goal. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
 2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). NOTE WRONG: a successful goal chain logs 'chain: OK - chain complete' without the word goal, so a search for 'goal' can never show a success (4 goal lines in 25 logs, all failures). A real check needs the session-start log or transcript after a chain OK whose pending step was the goal bootstrap. STILL UNSEEN.
 - 2026-10-18T03:52:01+0200 — column → blocked. the field event happened 3 times (10-05, 10-13, 10-14) and failed every time; root cause tracked by TRDD-85NZX5RJ
-2026-10-18 03:52 BLOCKED on TRDD-85NZX5RJ (board drain): not waiting on an event any more. clear-trigger.log holds two NEW goal-chain failures since the 10-10 note (2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407), same shape as 10-05: gave up after 3600s, field not empty, and the logged field is the wrapped TAIL of the goal (offsets 131/135/135). 3 logged failures; a success logs chain: OK without the goal text, so success is not observable in this log. If 85NZX5RJ confirms its hypothesis 3 (an earlier chain step typed the goal), this card goes back to dev. Caveat: the probe convention treats failed as terminal, and nothing runs the probe automatically (no script under scripts/ reads blocker-probe), so the risk is an agent running it, reading failed as cleared, and restoring this card to testing while still broken. Code-check box: lib/user_intent.py:190 (was 191) returns [] for a typed /goal, so it is not recorded as owner intent. implementation-commits backfilled in e3c1a7c9.
+2026-10-18 03:52 BLOCKED on TRDD-85NZX5RJ (board drain): not waiting on an event any more. clear-trigger.log holds two NEW goal-chain failures since the 10-10 note (2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407), same shape as 10-05: gave up after 3600s, field not empty, and the logged field is the wrapped TAIL of the goal (offsets 131/135/135). 3 logged failures; a success logs chain: OK without the goal text, so success is not observable in this log. If 85NZX5RJ confirms its hypothesis 3 (an earlier chain step typed the goal), this card goes back to dev. Caveat: the board's usual probe treats failed as terminal, so this card's blocker-holds-if lists only done states (complete, completed, published, live); also, nothing runs the probe automatically (no script in this repo names blocker-probe, and trddgrep's validator states it never executes one), so an agent following this card's blocker-holds-if will not clear it on failed; the remaining risk is an agent applying the board's usual terminal set instead. If 85NZX5RJ is superseded, move blocked-by to its successor; if it ends failed or cancelled, this card needs a decision (back to dev, or failed). Code-check box: lib/user_intent.py:190 (was 191) returns [] for a typed /goal, so it is not recorded as owner intent. implementation-commits backfilled in e3c1a7c9.
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-18
 
 - Decision 2 (typing channel): terminal_trigger types the command by LITERAL keys (tmux send-keys -l, iTerm write text, wtype/xdotool), not bracketed paste. An at-sign in the goal would open Claude Code's file picker, so sanitize_goal replaces it with (at).
 - Decision 4 (cleared goal): in real local transcripts goal_status records carry keys condition, met, reason or sentinel, type (met true adds durationMs, iterations, tokens); no record for a cleared or cancelled goal was found. session_continuity treats a typed /goal clear command record (top-level user record, command wrapper) as met; the extractor keys on the top-level attachment type goal_status, so tool output cannot plant a goal. The clear record shape is UNVERIFIED.
@@ -55,4 +55,4 @@ Parent plan: TRDD-K9AHY1ZB
 Gap: on the goal path the resume flag is consumed, and the late-summary note (dispatch _fresh_summary_note) only reaches the session through the janitor-resume path, so a real summary that lands after a template injection is not announced. Follow-up: have dispatch emit that note on its own.
 The sanitizer replaces the at-sign with (at) in the typed goal (literal-key typing would open the file picker); the changed text is intended, not corruption.
 2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: one janitor clear of a session with an unmet goal on an install running v3.7.0 or later; pass when one typed goal line appears and the goal shows active in the new session, with no resume command typed.
-2026-10-18 — SUPERSEDES the 2026-10-05 RESUME POINT. Column blocked on TRDD-85NZX5RJ. The named live event (a janitor clear of a session with an unmet goal) has occurred in 3 logged chains (10-05, 10-13, 10-14) and all 3 failed: gave up after 3600s, field not empty, logged field = the wrapped tail of the goal. Success is not observable in clear-trigger.log. Unblocks when 85NZX5RJ is complete; if 85NZX5RJ confirms its hypothesis 3, this card returns to dev instead.
+2026-10-18 — SUPERSEDES the 2026-10-05 RESUME POINT. Column blocked on TRDD-85NZX5RJ. The named live event (a janitor clear of a session with an unmet goal) has occurred in 3 logged chains (10-05, 10-13, 10-14) and all 3 failed: gave up after 3600s, field not empty, logged field = the wrapped tail of the goal. Success is not observable in clear-trigger.log. Unblocks when 85NZX5RJ reaches a done state (complete, completed, published or live, matching blocker-holds-if); a failed, cancelled or superseded 85NZX5RJ does NOT unblock this card; if 85NZX5RJ confirms its hypothesis 3, this card returns to dev instead.
