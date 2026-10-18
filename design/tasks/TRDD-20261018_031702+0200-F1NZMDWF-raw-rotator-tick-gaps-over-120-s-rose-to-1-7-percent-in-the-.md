@@ -1,10 +1,10 @@
 ---
 trdd-id: F1NZMDWF
 title: Raw rotator tick gaps over 120 s rose to 1.7 percent in the 2026-10-16 to 18 window
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-18T03:17:02+0200
-updated: 2026-10-18T03:17:52+0200
+updated: 2026-10-18T03:17:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-18T03:17:02+0200
 blocked-by: [JY0OBQZ4]
+pre-block-column: todo
 ---
 
 # Raw rotator tick gaps over 120 s rose to 1.7 percent in the 2026-10-16 to 18 window
@@ -27,6 +28,7 @@ Found while re-measuring TRDD-QJ5LP4W2 box 4 on 2026-10-18 (worker-read report d
 ## Approval log
 
 - 2026-10-18T03:17:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T03:17:59+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on TRDD-JY0OBQZ4's slow-tick lines after a release
 
 ## Notes
 
