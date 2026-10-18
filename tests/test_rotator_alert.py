@@ -535,3 +535,128 @@ def test_spare_stale_follows_the_due_backoff(root: Path) -> None:
         _fresh_tick(root, at)  # keep tick-stalled quiet so only spare-stale is counted
         assert "spare-stale" in ra.evaluate(root, now=at, claude_running=True, runner=run)
         assert len(run.argvs) == expected
+
+
+
+def test_drift_parts_classifies_capture_refused_and_spare_stale_as_advisory(root: Path) -> None:
+    """capture-refused:* and spare-stale are advisory; rotation-stuck is the only urgent text."""
+    alerts = {
+        c: {"first_seen": 1, "last_notified": 100, "notified": 1, "action": f"action for {c}"}
+        for c in ("capture-refused:x@example.invalid", "spare-stale", "rotation-stuck")
+    }
+    (root / ra.ALERT_NAME).write_text(json.dumps({"alerts": alerts}))
+    _fresh_tick(root)  # keep the tick-stalled watchdog quiet
+    urgent, advisory = ra.drift_parts(root, NOW)
+    assert set(advisory) == {"capture-refused:x@example.invalid", "spare-stale"}
+    assert urgent == ["action for rotation-stuck"]
+
+
+
+# ---------- dispatch: the advisory throttle (TRDD-MMWDSFB4, janitor#342) ----------
+
+_ADV_TEXT = "a spare account has not been refreshed for hours - run /janitor-capture-all-logins to re-capture the stale spare account"
+_URGENT_TEXT = "account rotation is stuck - run /janitor-capture-all-logins"
+_STALL_TEXT = "the account rotator has stopped ticking - run /janitor-doctor"
+
+
+def _fire_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """(dispatch, rotator home, state module) with a live summary hold so each fire is cheap."""
+    home = tmp_path / "rot-home"
+    home.mkdir()
+    (home / "state.json").write_text(json.dumps({"slots": {}}))
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    dispatch = _import_dispatch()
+    import state
+
+    state.state_dir().mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(state.state_dir(), expires_in_s=900)
+    return dispatch, home, state
+
+
+def _set_alerts(home: Path, **conds: tuple[int, str]) -> None:
+    """Write rotator-alert.json the way the daemon does: cond -> (last_notified, action)."""
+    alerts = {c: {"first_seen": 1, "last_notified": last, "notified": 1, "action": action} for c, (last, action) in conds.items()}
+    (home / ra.ALERT_NAME).write_text(json.dumps({"alerts": alerts}))
+
+
+def test_advisory_alone_prints_once_until_last_notified_advances(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """A standing spare-stale advisory prints on the first fire, not the second, and again when the daemon re-notified."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
+    assert f"rotator alert: {_ADV_TEXT}" in _run_main(dispatch)
+    assert "rotator alert" not in _run_main(dispatch)
+    _set_alerts(home, **{"spare-stale": (4000, _ADV_TEXT)})
+    assert f"rotator alert: {_ADV_TEXT}" in _run_main(dispatch)
+
+
+def test_urgent_alone_prints_on_every_fire(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Regression guard: an urgent condition is never throttled, three fires give three lines."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"rotation-stuck": (100, _URGENT_TEXT)})
+    for _ in range(3):
+        assert f"rotator alert: {_URGENT_TEXT}" in _run_main(dispatch)
+
+
+def test_urgent_plus_advisory_second_fire_keeps_only_the_urgent_text(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """With both held, fire 1 carries both texts and fire 2 only the urgent one."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"rotation-stuck": (100, _URGENT_TEXT), "spare-stale": (100, _ADV_TEXT)})
+    first = _run_main(dispatch)
+    assert _URGENT_TEXT in first and _ADV_TEXT in first
+    second = _run_main(dispatch)
+    assert _URGENT_TEXT in second and _ADV_TEXT not in second
+
+
+def test_advisory_text_change_under_the_same_cond_prints_again(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Fire prints, fire is silent, the action text changes under the same cond, fire prints."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
+    assert "rotator alert" in _run_main(dispatch)
+    assert "rotator alert" not in _run_main(dispatch)
+    _set_alerts(home, **{"spare-stale": (100, "a spare account needs a new login")})
+    assert "rotator alert: a spare account needs a new login" in _run_main(dispatch)
+
+
+def test_advisory_cleared_then_back_with_same_last_notified_stays_silent(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The stamp survives the advisory clearing, so a flap with an unchanged signature is not re-printed."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
+    assert "rotator alert" in _run_main(dispatch)
+    (home / ra.ALERT_NAME).unlink()
+    assert "rotator alert" not in _run_main(dispatch)
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
+    assert "rotator alert" not in _run_main(dispatch)
+
+
+def test_corrupt_advisory_stamp_means_never_printed(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Garbage bytes in the stamp file make the next fire print the advisory again."""
+    dispatch, home, state = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
+    assert "rotator alert" in _run_main(dispatch)
+    stamp = state.state_dir() / "rotator-alert-advisory-printed.txt"
+    assert stamp.exists()
+    stamp.write_bytes(b"\xff\xfe\x00garbage\x80")
+    assert "rotator alert" in _run_main(dispatch)
+
+
+def test_tick_stalled_alert_file_and_stale_tick_watchdog_print_the_text_once(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The daemon's tick-stalled entry and the session watchdog collapse into one stopped-ticking text."""
+    dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
+    _set_alerts(home, **{"tick-stalled": (100, _STALL_TEXT)})
+    _stamp(home, time.time() - 660)
+    out = _run_main(dispatch)
+    assert out.count("the account rotator has stopped ticking") == 1, out

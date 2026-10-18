@@ -2219,9 +2219,19 @@ def _phase_rotator_alert() -> None:
 
     Second channel behind the daemon's desktop notification: it shows the alarm as soon as a
     model turn can run. Called BEFORE the summary-hold gate in main(), so a hold can never
-    suppress it. The alert file is only ever written/cleared by the daemon; `drift_line` also
+    suppress it. The alert file is only ever written/cleared by the daemon; `drift_parts` also
     runs the session-side tick-stalled watchdog (one stat), because a fully hung daemon writes
     no file at all.
+
+    WHY (janitor#342, TRDD-MMWDSFB4): the daemon backs the notification off (first / 1 h /
+    daily) but this line printed on EVERY fire, so a standing advisory (spare-stale,
+    capture-refused:*) was re-read by the model every ~20 minutes. Urgent texts still print on
+    every fire; an advisory prints only when its signature (cond, last_notified, action hash)
+    differs from the one last printed, kept per project in a stamp. The stamp is never deleted
+    when the advisory clears, so a flap back with an unchanged signature stays silent. Known
+    trade-offs: a 2nd session, or a fresh one after /clear, sees an unchanged advisory only at
+    the next backoff step; a print the model turn never reads is lost until then; an older
+    daemon file without last_notified degrades to print-once.
     """
     import rotator_alert  # noqa: PLC0415 - lazy: only this phase needs it
 
@@ -2229,9 +2239,39 @@ def _phase_rotator_alert() -> None:
     import rotator  # noqa: PLC0415 - lazy: the one rotator-home resolver the detectors use
 
     root = rotator.configured_rotator_home()
-    line = rotator_alert.drift_line(root, time.time()) if root is not None else None
-    if line:
-        print(line)
+    if root is None:
+        return
+    urgent, advisory = rotator_alert.drift_parts(root, time.time())
+    included = set(urgent)
+    stamp = state.state_dir() / "rotator-alert-advisory-printed.txt"
+    digest = ""
+    if advisory:
+        # Only the hex digest is stored, so no e-mail from an action text lands in the stamp.
+        sig = "\n".join(
+            sorted(
+                f"{cond}:{last}:{hashlib.sha256(action.encode('utf-8')).hexdigest()[:12]}"
+                for cond, (last, action) in advisory.items()
+            )
+        )
+        digest = hashlib.sha256(sig.encode("utf-8")).hexdigest()
+        try:
+            printed = stamp.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            printed = ""  # unreadable stamp means "never printed"
+        if printed != digest:
+            included.update(action for _, action in advisory.values())
+        else:
+            digest = ""
+    if not included:
+        return
+    line = state.sanitize_for_drift_line("rotator alert: " + "; ".join(sorted(included)))
+    print(line)
+    _log_drift_printed("rotator-alert", line)
+    if digest:
+        try:
+            state.atomic_write(stamp, digest)
+        except OSError as exc:
+            state.log_line("dispatch", f"rotator-alert advisory stamp not written: {exc}")
 
 
 def _resume_flag_expired(

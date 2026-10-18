@@ -305,14 +305,35 @@ def evaluate(
     return list(active)
 
 
-def drift_line(root: Path, now: float) -> Optional[str]:
-    """One drift line for the heartbeat, or None. Merges the daemon's alert file with a
-    session-side watchdog for `tick-stalled`: a fully hung daemon writes no file, so any live
-    session (this runs only inside one) checks the last-completed-tick stamp itself, one stat."""
+def _is_advisory(cond: str) -> bool:
+    # WHY (janitor#342, TRDD-MMWDSFB4): only these two are standing chores the daemon already
+    # backs off (first / 1 h / daily); everything else, tick-stalled included, is urgent and
+    # keeps printing on every fire.
+    return cond == "spare-stale" or cond.startswith("capture-refused:")
+
+
+def drift_parts(root: Path, now: float) -> tuple[list[str], dict[str, tuple[int | None, str]]]:
+    """(urgent action texts, advisory cond -> (last_notified, action)) for the heartbeat.
+    Urgent texts are de-duplicated: the daemon's tick-stalled entry and the session-side
+    watchdog (a fully hung daemon writes no file, so any live session checks the last-completed
+    tick stamp itself, one stat) collapse into one text. Pure: reads state, writes none."""
     alerts = _dict(_read_json(root / ALERT_NAME).get("alerts"))
-    actions = {str(a.get("action", c)) for c, a in alerts.items() if isinstance(a, dict)}
+    urgent: set[str] = set()
+    advisory: dict[str, tuple[int | None, str]] = {}
+    for cond, a in alerts.items():
+        if not isinstance(a, dict):
+            continue
+        action = str(a.get("action", cond))
+        if _is_advisory(cond):
+            last = a.get("last_notified")
+            advisory[cond] = (
+                int(last) if isinstance(last, (int, float)) and not isinstance(last, bool) else None,
+                action,
+            )
+        else:
+            urgent.add(action)
     if (root / "tick-completed.ts").exists() and _tick_age(root, now) > TICK_STALL_S:
-        actions.add(_ACTIONS["tick-stalled"])
-    if not actions:
-        return None
-    return state.sanitize_for_drift_line("rotator alert: " + "; ".join(sorted(actions)))
+        urgent.add(_ACTIONS["tick-stalled"])
+    return sorted(urgent), advisory
+
+
