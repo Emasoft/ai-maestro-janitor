@@ -4,7 +4,7 @@ title: Memory nudges reach no background memory chore
 column: todo
 status: tasked
 created: 2026-10-10T04:55:24+0200
-updated: 2026-10-10T20:10:53+0200
+updated: 2026-10-18T02:35:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -26,3 +26,8 @@ Route 2 of the owner's routing rule of 2026-09-27 (quoted on TRDD-6ESS2MGE): a f
 ## Approval log
 
 - 2026-10-10T04:55:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Investigation 2026-10-18
+
+MEASURED (worker-read, report docs_dev/20261018_023416+0200-trdd-xosc5ai5-librarian-nudge-readers.md; file:line evidence there): the librarian's proposal file memory-reorg-proposed.md (LOCAL memory dir) has ONE reader, the conflict precheck and chore (scripts/lib/memory_content_precheck.py:1239-1330; skills/janitor-memory-conflict/SKILL.md:68), which read only its Conflict section; its other six sections are display-only. memorize-nudge persists only to the findings ledger (ADVISORY-MEMORIZE-NUDGE, LOW) and no chore reads it: 29 findings in 7.4 days, repeating on one uncovered-module set. memory-maintenance.py reads neither (docstring lines 5-12), by design.
+DECISION: no change for the proposal file (its actionable section is already wired). For memorize-nudge the natural consumer is a chore that writes NEW pages from commit messages (commit discipline puts the WHY there), e.g. the janitor-memory-record-recent skill as a background chore; consolidate and retro-lesson take existing pages and do not fit. NEXT: design that route (input = the nudge's uncovered modules plus their commits; the marker and claim like the other chores), measured on this corpus first, as the card requires; not built yet.
