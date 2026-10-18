@@ -4,7 +4,7 @@ title: memgrep update-mem-atom body replace drops lesson citations and two sibli
 column: testing
 status: tasked
 created: 2026-10-18T06:01:14+0200
-updated: 2026-10-18T06:58:33+0200
+updated: 2026-10-18T07:03:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -41,6 +41,7 @@ Source: janitor#337 items 1 to 3 (memgrep 0.2.0, 5497043). Item 4 (recall hook f
 - [x] `--supersedes <ATOM>` works or errors with a hint
 - [x] Real tests for all three
 Evidence 2026-10-18 (f0f760e3): box 1 by tests/cli.rs update_atom_body_replace_refuses_to_drop_a_lesson_citation_and_names_it (lint clean after the escape) and the two-atom neighbour test; box 2 by update_topic_ignores_the_superseded_body_copy_when_counting_and_replacing and update_topic_refuses_text_that_exists_only_in_the_superseded_section; box 3 by update_atom_supersedes_with_a_value_errors_with_a_hint (hint, no value form); box 4: the 4 behaviour tests fail on the pre-fix source. Deferred: the hint also fires on an unrelated unknown argument when --supersedes is present; a NEW dangling [^N] in a body is left to the pre-write lint gate. The installed memgrep is unchanged until a release.
+Close list 2026-10-18 (review of ff66f6f9): (1) memory note ATOM-26TJ-AML8 quotes the two refusals as paraphrases in backticks; replace them with the real fragments 'write refused: the new body of atom ... drops footnote citation(s)' and 'the old text occurs in ... only inside superseded copies' (recall from the real text already ranks the page first, measured). (2) Once a release carries f0f760e3, update the note's 'ship with the release after that commit' to name the version, through the correction protocol.
 
 ## Approval log
 
