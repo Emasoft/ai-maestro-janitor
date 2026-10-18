@@ -189,6 +189,50 @@ def _inject_giveup_s() -> float:
         return 3600.0
 
 
+# Upper bound on tidy passes when clearing a WRAPPED field (TRDD-S8BZI761): one pass removes
+# one visual row, so a command spanning N rows needs N passes. See `_clear_ours`.
+_CLEAR_MAX_PASSES = 8
+
+
+def _field_marker_index(lines: list[str]) -> int | None:
+    """Index of the LAST marker line that is not a menu choice row — the live input field."""
+    start = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(_PROMPT_MARKER) and not _is_choice_row(line):
+            start = i
+    return start
+
+
+def _field_row_count(pane_text: str) -> int | None:
+    """How many visual rows the input field spans (marker row + continuation rows up to the
+    first box rule), or None when no field is found. Same locator as `extract_prompt_field`.
+    With no closing rule it counts the footer lines too and over-counts, which is the safe
+    direction (see `_clear_ours`)."""
+    lines = pane_text.splitlines()
+    start = _field_marker_index(lines)
+    if start is None:
+        return None
+    rows = 1
+    for line in lines[start + 1:]:
+        if _BOX_RULE in line:
+            break
+        rows += 1
+    return rows
+
+
+def _box_width(pane_text: str) -> int | None:
+    """Width of the box rule nearest above the field row (count of box-rule chars), or None
+    when there is no field or no rule above it."""
+    lines = pane_text.splitlines()
+    start = _field_marker_index(lines)
+    if start is None:
+        return None
+    for line in reversed(lines[:start]):
+        if _BOX_RULE in line:
+            return line.count(_BOX_RULE)
+    return None
+
+
 def extract_prompt_field(pane_text: str) -> str | None:
     """The CURRENT text of the input prompt field, or None when no field is found.
 
@@ -210,10 +254,7 @@ def extract_prompt_field(pane_text: str) -> str | None:
     is, which correctly reads as "cannot tell" rather than "free to type").
     """
     lines = pane_text.splitlines()
-    start = None
-    for i, line in enumerate(lines):
-        if line.lstrip().startswith(_PROMPT_MARKER) and not _is_choice_row(line):
-            start = i
+    start = _field_marker_index(lines)
     if start is None:
         return None
     head = lines[start].lstrip()[len(_PROMPT_MARKER):]
@@ -1055,7 +1096,80 @@ def inject_until_sent(
     # whose UserPromptSubmit hook will see the typed line), not necessarily this process's own.
     crumb_id = uuid.uuid4().hex
 
-    def _clear_leftover_command() -> None:
+    def _clear_ours(before_text: str | None) -> str:
+        """Clear OUR text from the input field; return "" on success/no-op, else a reason suffix.
+
+        WHY several passes (TRDD-S8BZI761, measured live on tmux, Claude Code 2.1.302): one tidy
+        pass (build_clear_field_steps: C-a, C-k, C-u) removes ONE visual row of a wrapped field
+        and the rest moves up; 2 rows need 2 passes, 3 rows 3; a pass on an empty field is
+        harmless. A single `clear_fn()` stranded the tail of any wrapped command, and the retype
+        then spliced onto it.
+
+        Pass 1 is EXACTLY the old single `clear_fn()`. Extra passes run only while what is left
+        is the END OF OUR OWN COMMAND: a user's draft is never emptied beyond that one pass (pass
+        1 deleting a leading user row is UNCHANGED behaviour, not endorsed by this code), and a
+        typing probe runs before every extra pass.
+
+        RESIDUAL: if typing or a no-op pass leaves a remainder that is not a suffix of our
+        command, the extra passes stop and the text is reported stranded - the price of never
+        wiping a spliced user draft. A user row that literally equals the end of our command
+        would be cleared. Measured on tmux with Claude Code 2.1.302 only; iTerm is unmeasured.
+
+        `rows = max(rows_seen, rows_expected)`: a half-drawn read can show one row of a two-row
+        command, so the row count is also derived from the command length and the box width.
+        The marker and the continuation indent each take 2 columns, and +1 (only for a command
+        already spanning 2+ rows) covers word-wrap slack; over-counting is harmless (an extra
+        pass first reads "" and returns, and the suffix rule guards it), under-counting strands
+        a row.
+
+        DEADLINE: the budget is this function's own, `local_deadline`, NOT the outer give-up
+        `deadline`. At the give-up exit that deadline has already passed, so bounding the extra
+        passes by it gave a wrapped exact command only pass 1 and stranded its tail (the 10-13
+        shape). Worst case is `limit` passes at 2 x `_SETTLE_READ_INTERVAL_S` each, plus the
+        typing probes, bounded by `_CLEAR_MAX_PASSES`.
+
+        A stuck state is logged immediately and also returned as the reason suffix, never
+        swallowed."""
+        if clear_fn is None:  # both callers check first; this is the type-level proof
+            raise RuntimeError("_clear_ours called without a clear_fn")
+        clear_fn()
+        passes = 1
+        if before_text is None:
+            return ""
+        rows_seen = _field_row_count(before_text)
+        width = _box_width(before_text)
+        # +1 slack applies only to a command that already needs more than one row, so a short
+        # one-row command costs no extra read or sleep (it would change every /clear send).
+        cmd_rows = -(-len(command.strip()) // (width - 2)) if width and width > 2 else 0
+        rows_expected = cmd_rows + 1 if cmd_rows > 1 else cmd_rows
+        rows = max(rows_seen or 1, rows_expected)
+        if rows <= 1:
+            return ""
+        norm_cmd = _norm_wrap_spaces(command.strip())
+        limit = min(rows, _CLEAR_MAX_PASSES)
+        local_deadline = max(deadline, clock() + limit * 2 * _SETTLE_READ_INTERVAL_S)
+        field: str | None = None  # None = unknown (unread, unreadable, or deadline hit)
+        while clock() < local_deadline:
+            sleeper(_SETTLE_READ_INTERVAL_S)
+            text = reader(terminal)
+            field = extract_prompt_field(text) if text is not None else None
+            if field == "":
+                return ""
+            if field is None or passes >= limit:
+                break
+            if not norm_cmd.endswith(_norm_wrap_spaces(field)) or typing_probe(terminal):
+                break
+            clear_fn()
+            passes += 1
+            field = None  # the pass just made is unread
+        if field:
+            reason = f" — field not emptied after {passes} clear passes (stranded text)"
+        else:
+            reason = f" — could not confirm the field emptied after {passes} clear passes"
+        state.log_line("terminal_trigger", "inject clear:" + reason)
+        return reason
+
+    def _clear_leftover_command() -> str:
         """F4: on ANY non-submit exit AFTER `type_fn()` has run, re-read the pane and clear
         it ONLY if it still shows exactly our own command — never the user's own keystrokes
         (owner 2026-08-02: never delete what the user typed). Reached from the `still_wanted`
@@ -1063,12 +1177,16 @@ def inject_until_sent(
         the settle-failure branch below did. That gap left `/clear` sitting in the prompt of a
         0% context session (the card's symptom): `still_wanted` re-asks EVERY iteration, so a
         cancel that lands right after `type_fn()` typed the command, but before the settle-poll
-        judged it, skipped straight past the one branch that would have cleared it."""
+        judged it, skipped straight past the one branch that would have cleared it.
+
+        Returns `_clear_ours`'s reason suffix ("" when the field was emptied) so the caller can
+        append a stranded-text report to the reason it returns."""
         if not typed_once or clear_fn is None:
-            return
+            return ""
         text = reader(terminal)
         if text is not None and prompt_field_shows_only(text, command):
-            clear_fn()
+            return _clear_ours(text)
+        return ""
 
     def _still_shows_ours() -> bool:
         """After Enter: does the field STILL show exactly our command, with nobody typing?
@@ -1083,15 +1201,15 @@ def inject_until_sent(
         max_iters -= 1
         if clock() >= deadline or max_iters <= 0:
             state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
-            _clear_leftover_command()
-            return False, f"gave up after {giveup_s:.0f}s ({last})"
+            tail = _clear_leftover_command()
+            return False, f"gave up after {giveup_s:.0f}s ({last}{tail})"
 
         if still_wanted is not None:
             wanted, wanted_why = still_wanted()
             if not wanted:
                 state.log_line("terminal_trigger", f"inject cancelled: {wanted_why}")
-                _clear_leftover_command()
-                return False, f"cancelled — {wanted_why}"
+                tail = _clear_leftover_command()
+                return False, f"cancelled — {wanted_why}{tail}"
 
         interrupt_age = _recently_interrupted()
         if interrupt_age is not None:
@@ -1243,7 +1361,7 @@ def inject_until_sent(
 
         if clear_fn is None:
             return False, last + " — and no clear_fn to undo it; refusing to loop on our own text"
-        clear_fn()
+        last += _clear_ours(after)
         sleeper(retry_s)
 
 

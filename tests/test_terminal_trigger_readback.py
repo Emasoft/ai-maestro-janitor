@@ -1498,3 +1498,256 @@ def test_already_typed_branch_is_ALSO_cancelled_by_still_wanted() -> None:
     assert typed == [], "type_fn must not run — the cancel fires before the already-typed check"
     assert sent == [], "the pre-existing field text must never be submitted once cancelled"
     assert reads == [], "the pane is never even read once still_wanted says no"
+
+
+# --- Multi-row clear (TRDD-S8BZI761) -------------------------------------------------------
+# A model of the live pane measured on tmux with Claude Code 2.1.302: one tidy pass removes ONE
+# visual row of a wrapped field and the remaining rows move up (the first remaining row loses
+# its two-space indent and becomes the marker row). The box rule is 137 columns wide, as in
+# the live capture that split the /goal below after "base your".
+
+_BOX_WIDTH = 137
+_GOAL_BREAK = "base your"
+
+
+class _WrapPane:
+    """A wrapped input field: `rows` are the visual rows, a clear pass drops the first."""
+
+    def __init__(self, rows: list[str] | None = None) -> None:
+        self.rows = list(rows or [])
+        self.clears = 0
+        self.reads = 0
+        self.t = 0.0
+
+    def render(self, rows: list[str] | None = None) -> str:
+        shown = self.rows if rows is None else rows
+        rule = "─" * _BOX_WIDTH
+        first = shown[0] if shown else ""
+        cont = "".join(f"  {r}\n" for r in shown[1:])
+        return f"some output\n{rule}\n❯{NBSP}{first}\n{cont}{rule}\n"
+
+    def read(self, _t=None) -> str:
+        self.reads += 1
+        return self.render()
+
+    def clear(self) -> None:
+        self.clears += 1
+        if self.rows:
+            self.rows.pop(0)
+
+    def submit(self) -> None:
+        self.rows = []
+
+
+def _split_after(text: str, *breaks: str) -> list[str]:
+    """Wrap `text` into rows, breaking after each `breaks` substring and dropping the space
+    there (as the live render does: the space is eaten, the next row gets the indent)."""
+    rows, rest = [], text
+    for b in breaks:
+        idx = rest.index(b) + len(b)
+        rows.append(rest[:idx])
+        rest = rest[idx:].lstrip(" ")
+    rows.append(rest)
+    return rows
+
+
+_GOAL_ROWS = _split_after(_GOAL, _GOAL_BREAK)
+_BAD_GOAL = _GOAL.replace("complete", "complet")
+_BAD_ROWS = _split_after(_BAD_GOAL, _GOAL_BREAK)
+
+
+def _run_wrapped(pane, command, typed_rows, *, is_typing=None, giveup_s=3600.0, tick_min_s=1e9,
+                 reader=None):
+    """Drive inject_until_sent against `pane`; `typed_rows` is the row set each type_fn call
+    produces (the last one repeats). The clock advances only on sleeps >= `tick_min_s`."""
+    calls = iter(range(10**6))
+
+    def _type() -> None:
+        pane.rows = list(typed_rows[min(next(calls), len(typed_rows) - 1)])
+
+    def _sleep(s: float) -> None:
+        if s >= tick_min_s:
+            pane.t += s
+
+    sent: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, command,
+        type_fn=_type, submit_fn=lambda: (sent.append("Enter"), pane.submit()),
+        clear_fn=pane.clear,
+        reader=reader or pane.read,
+        is_typing=is_typing or (lambda _t: False),
+        sleeper=_sleep, clock=lambda: pane.t, retry_s=1.0, giveup_s=giveup_s,
+        state_dir=state.state_dir(),
+    )
+    return ok, why, sent
+
+
+def test_a_malformed_two_row_field_is_emptied_in_two_passes_then_retyped() -> None:
+    """The live defect: one clear pass stranded row 2, and the retype spliced onto it. Two
+    rows now take two passes, then the retype verifies and Enter is sent."""
+    pane = _WrapPane()
+    ok, _, sent = _run_wrapped(pane, _GOAL, [_BAD_ROWS, _GOAL_ROWS])
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 2
+
+
+def test_a_malformed_three_row_field_is_emptied_in_three_passes() -> None:
+    """Three rows need three passes."""
+    pane = _WrapPane()
+    bad3 = _split_after(_BAD_GOAL, "do not wait for", _GOAL_BREAK)
+    good3 = _split_after(_GOAL, "do not wait for", _GOAL_BREAK)
+    ok, _, sent = _run_wrapped(pane, _GOAL, [bad3, good3])
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 3
+
+
+def test_a_remainder_with_a_leading_space_still_continues() -> None:
+    """After pass 1 the remainder may start with an ordinary space (the break fell before a
+    space); the leading space is preserved by the reader and must still count as our tail."""
+    pane = _WrapPane()
+    tail = " only on verified facts. commit often."
+    bad = [_BAD_GOAL[: _BAD_GOAL.index(tail)], tail]
+    good = [_GOAL[: _GOAL.index(tail)], tail]
+    ok, _, sent = _run_wrapped(pane, _GOAL, [bad, good])
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 2
+
+
+def test_a_half_drawn_read_still_clears_every_row_of_our_command() -> None:
+    """The read-back shows only row 1 of a two-row command (render in flight). The row count
+    is also derived from the command length and the box width, so the tail is still cleared."""
+    pane = _WrapPane()
+    seen = {"n": 0}
+
+    def _reader(_t=None) -> str:
+        seen["n"] += 1
+        if seen["n"] == 2:  # the read-back right after typing
+            return pane.render(pane.rows[:1])
+        return pane.read()
+
+    ok, _, sent = _run_wrapped(pane, _GOAL, [_BAD_ROWS, _GOAL_ROWS], reader=_reader)
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 2
+
+
+def test_a_user_row_first_is_removed_by_pass_one_and_our_tail_is_cleared() -> None:
+    """Pass 1 is today's behaviour (it removes the leading user row, not endorsed); the rest
+    is exactly our command, so the extra passes empty it."""
+    pane = _WrapPane()
+    user_first = ["a draft the user was writing", *_GOAL_ROWS]
+    ok, _, sent = _run_wrapped(pane, _GOAL, [user_first, _GOAL_ROWS])
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 3
+
+
+def test_our_text_then_a_user_row_stops_after_pass_one_and_reports_it() -> None:
+    """SPLICE: the user's row sits AFTER our text. The remainder is not the end of our command,
+    so no further pass runs: their row is left, and the reason says text is stranded."""
+    pane = _WrapPane()
+    spliced = [*_GOAL_ROWS, "the user's own words"]
+    ok, why, sent = _run_wrapped(pane, _GOAL, [spliced], giveup_s=1.0, tick_min_s=1.0)
+    assert ok is False and sent == []
+    assert pane.clears == 1
+    assert pane.rows == [_GOAL_ROWS[1], "the user's own words"]
+    assert "stranded" in why
+
+
+def test_typing_between_clear_passes_stops_the_clearing() -> None:
+    """The typing probe runs before every extra pass: a keystroke mid-clear stops it."""
+    pane = _WrapPane()
+    probes = iter([False, False, True])  # loop top, malformed check, first extra pass
+    ok, why, sent = _run_wrapped(
+        pane, _GOAL, [_BAD_ROWS], is_typing=lambda _t: next(probes, True),
+        giveup_s=1.0, tick_min_s=1.0,
+    )
+    assert ok is False and sent == []
+    assert pane.clears == 1
+    assert "stranded" in why
+
+
+def test_a_giveup_exit_still_clears_every_row_of_our_exact_command() -> None:
+    """The 10-13 shape: at the give-up exit the outer deadline has already passed, yet a field
+    holding our EXACT two-row command must end empty (both rows cleared), with no stranded
+    suffix in the reason. The extra passes run on `_clear_ours`'s own budget."""
+    pane = _WrapPane()
+
+    def _type() -> None:
+        pane.rows = list(_BAD_ROWS)
+
+    def _sleep(s: float) -> None:
+        if s >= 1.0:  # the retry wait: the clock passes the give-up deadline and the TUI
+            pane.t += s  # redraws our exact command, so the give-up exit meets it
+            pane.rows = list(_GOAL_ROWS)
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, _GOAL,
+        type_fn=_type, submit_fn=lambda: None, clear_fn=pane.clear, reader=pane.read,
+        is_typing=lambda _t: False, sleeper=_sleep, clock=lambda: pane.t, retry_s=1.0,
+        giveup_s=1.0, state_dir=state.state_dir(),
+    )
+    assert ok is False and "gave up" in why
+    assert pane.rows == []
+    assert "stranded" not in why and "could not confirm" not in why
+
+
+def test_a_single_row_field_gets_exactly_one_clear_and_no_extra_read() -> None:
+    """Short commands keep today's behaviour: one clear_fn call, and the reads are only the
+    main loop's (initial, read-back, post-clear, read-back, post-submit)."""
+    pane = _WrapPane()
+    ok, _, sent = _run_wrapped(pane, "/compact", [["/comp"], ["/compact"]])
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 1
+    assert pane.reads == 5
+
+
+def test_a_field_that_never_empties_stops_at_the_pass_cap() -> None:
+    """If the clear never takes effect the passes are capped, and the stuck state is reported."""
+    pane = _WrapPane()
+    words = _BAD_GOAL.split(" ")
+    size = max(1, len(words) // 10)
+    ten = [" ".join(words[i:i + size]) for i in range(0, len(words), size)]
+    assert len(ten) > tt._CLEAR_MAX_PASSES
+
+    def _stuck_clear() -> None:
+        if pane.clears == 0:
+            pane.rows.pop(0)  # pass 1 drops the bad first row; later passes do nothing
+        pane.clears += 1
+
+    pane.clear = _stuck_clear  # type: ignore[method-assign]
+    ok, why, sent = _run_wrapped(pane, _GOAL, [ten], giveup_s=1.0, tick_min_s=1.0)
+    assert ok is False and sent == []
+    assert pane.clears == tt._CLEAR_MAX_PASSES
+    assert "stranded" in why
+
+
+
+def test_a_half_drawn_read_of_a_three_row_command_still_clears_all_three_rows() -> None:
+    """A command just over 2 x (137 - 2) characters wraps to 3 rows; the read-back shows only
+    row 1 (render in flight), so the row count comes from the command length and box width."""
+    cmd = "/" + " ".join(f"w{i:02d}" for i in range(75))
+    assert len(cmd) > 2 * (_BOX_WIDTH - 2)
+    good = _split_after(cmd, "w33", "w66")
+    bad = _split_after(cmd.replace("w00", "x00"), "w33", "w66")
+    pane = _WrapPane()
+    seen = {"n": 0}
+
+    def _reader(_t=None) -> str:
+        seen["n"] += 1
+        if seen["n"] == 2:  # the read-back right after typing
+            return pane.render(pane.rows[:1])
+        return pane.read()
+
+    ok, _, sent = _run_wrapped(pane, cmd, [bad, good], reader=_reader)
+    assert ok and sent == ["Enter"]
+    assert pane.clears == 3
+
+
+def test_a_stranded_field_is_logged_as_well_as_returned(monkeypatch) -> None:
+    """`_clear_ours` logs the stuck state immediately (not only through the caller's reason)."""
+    logged: list[str] = []
+    monkeypatch.setattr(state, "log_line", lambda _name, msg, *a, **k: logged.append(msg))
+    pane = _WrapPane()
+    spliced = [*_GOAL_ROWS, "the user's own words"]
+    ok, why, _ = _run_wrapped(pane, _GOAL, [spliced], giveup_s=1.0, tick_min_s=1.0)
+    assert ok is False and "stranded" in why
+    assert any(m.startswith("inject clear:") and "stranded" in m for m in logged)
