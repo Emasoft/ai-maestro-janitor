@@ -4,7 +4,7 @@ title: A janitor-typed goal longer than one row failed in all 3 logged goal re-s
 column: todo
 status: tasked
 created: 2026-10-18T03:51:41+0200
-updated: 2026-10-18T06:01:14+0200
+updated: 2026-10-18T10:25:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ All 3 logged janitor-typed `/goal` re-sends after a clear failed, in `.janitor/l
 2. The marker row is excluded by `_is_choice_row` or the marker is not at the start of the row once the text wraps.
 3. The text already sat in the field before the inject loop ran (an earlier step typed it), so the first read saw a field that was not ours-only. If this one is confirmed, the defect is in the TRDD-B3PY3HV7 chain code and B3PY3HV7 goes back to dev instead of waiting here.
 4. The continuation row carries a marker-like glyph (for example a cursor glyph at the row start), so the last-marker rule lands on row 2 and returns exactly the tail. It would produce exactly the tail and is the only hypothesis that keeps the head row in the capture; 1 and 2 also produce exactly the tail. Not ranked: none is measured.
+2026-10-18 10:30 MEASURED. Hypothesis 4 REFUTED on a real capture: Claude Code 2.1.302, tmux 3.7c, 137-column pane, the janitor's own argv (tmux capture-pane -p -t <pane>, scripts/lib/terminal_trigger.py:636); a typed 164-char /goal wraps to a second row that begins with two ASCII spaces, not the marker, and extract_prompt_field returns the full text (reports/board/20261018_102355+0200-85NZX5RJ-real-capture.md). A synthetic marker-on-row-2 screen reproduces the tail only by construction (reports/board/20261018_102008+0200-85NZX5RJ-probe.md), so it is not evidence. Hypothesis 1 is unlikely: the 10-13 tail was read identically at 14:41, 17:40, 18:40 and 19:40, a steady screen. Untested: the post-clear screen state in which the re-send actually runs, older Claude Code versions (10-05 to 10-14), and the 131-offset split of 10-05 (no leading space). Separate defect found in the same log: the goal text stayed in the input field for hours, blocking every later /clear with field not empty; it needs its own card. Constraint for any fix (review): extract_prompt_field callers must treat None as unreadable, never as empty, or a fix turns give-up into typing over existing text. NEXT: capture the screen right after a /clear with a long goal typed in, then read every caller's handling of None and partial reads.
 
 ## Acceptance
 
