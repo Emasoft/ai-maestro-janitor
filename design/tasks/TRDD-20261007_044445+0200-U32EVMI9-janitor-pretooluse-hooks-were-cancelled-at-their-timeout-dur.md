@@ -4,7 +4,7 @@ title: Janitor PreToolUse hooks were cancelled at their timeout during host stal
 column: testing
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-18T03:49:39+0200
+updated: 2026-10-18T03:53:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,6 +38,7 @@ TRDD-QX59MA4H (the detector half), TRDD-9438CGJZ.
 - 2026-10-07T04:57:25+0200 — column → dev by main-agent@ai-maestro-janitor. first step merged; detector and lighter start-up path pending
 - 2026-10-07T05:15:55+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release
 2026-10-09 STAYS in testing (board drain, wave 3): its one acceptance box says the security agent's verdict is recorded privately; that private record was deliberately not read by the assessment and its existence is not verified, so the box is not ticked. The chosen response is in place: guard hooks at 60 s and advisory hooks at 30 s (f21ffbff, on main, unreleased), with tests/test_session_start_hook_timeout.py passing. Assessment: reports/board/20261009_232221+0200-wave3-batchD.md.
+2026-10-18 backfill note: implementation-commits lists f21ffbff although its subject names no card. It is not inside merge cd6f7119 (that side branch holds only d28f3127); it is listed because it sets exactly the guards 60 s / advisory 30 s timeouts this card's 2026-10-09 line describes. The link is inferred from that match, not recorded in git.
 
 ## STATE
 
