@@ -1,10 +1,10 @@
 ---
 trdd-id: B3PY3HV7
 title: Session goal re-set after a janitor clear
-column: testing
+column: blocked
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-18T03:49:37+0200
+updated: 2026-10-18T03:52:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,6 +20,10 @@ project-id: ai-maestro-janitor
 parent-trdd: K9AHY1ZB
 derived: true
 implementation-commits: [84e54beb, 00c3403b, 852c72ed]
+blocked-by: [85NZX5RJ]
+pre-block-column: testing
+blocker-probe: trddgrep --porcelain show 85NZX5RJ | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Session goal re-set after a janitor clear
@@ -40,6 +44,8 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T10:58:30+0200 — column → testing. code ready; field check after release: after a janitor clear of a session with an unmet goal, /goal is typed once and the goal is active in the new session
 2026-10-09 STAYS in testing (board drain, wave 3): tests pass (tests/test_clear_trigger.py, 62) and the code is released, but the live event has not succeeded: the only 'goal' line in .janitor/logs/clear-trigger.log is a FAILED attempt of 2026-10-05 03:17 ('not sent: gave up after 3600s, field not empty'). Waits on one janitor clear of a session with an unmet goal. Assessment: reports/board/20261009_232136+0200-wave3-batchE.md.
 2026-10-10 03:48 STAY NOTE RE-CHECKED against rotated logs (board drain; reports/board/20261010_034608+0200-stay-notes-rotated-logs.md; worker-read unless marked). NOTE WRONG: a successful goal chain logs 'chain: OK - chain complete' without the word goal, so a search for 'goal' can never show a success (4 goal lines in 25 logs, all failures). A real check needs the session-start log or transcript after a chain OK whose pending step was the goal bootstrap. STILL UNSEEN.
+- 2026-10-18T03:52:01+0200 — column → blocked. the field event happened 3 times (10-05, 10-13, 10-14) and failed every time; root cause tracked by TRDD-85NZX5RJ
+2026-10-18 03:52 BLOCKED on TRDD-85NZX5RJ (board drain): not waiting on an event any more. clear-trigger.log holds two NEW goal-chain failures since the 10-10 note (2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407), same shape as 10-05: gave up after 3600s, field not empty, and the logged field is the wrapped TAIL of the goal (offsets 131/135/135). 3 of 3 field attempts failed, 0 succeeded. Code-check box: lib/user_intent.py:190 (was 191) returns [] for a typed /goal, so it is not recorded as owner intent. implementation-commits backfilled in e3c1a7c9.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
