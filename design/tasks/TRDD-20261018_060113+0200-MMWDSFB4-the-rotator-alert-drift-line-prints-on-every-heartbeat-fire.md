@@ -1,10 +1,10 @@
 ---
 trdd-id: MMWDSFB4
 title: The rotator alert drift line prints on every heartbeat fire
-column: dev
+column: testing
 status: tasked
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T07:20:52+0200
+updated: 2026-10-18T07:39:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-18T06:01:13+0200
 parent-trdd: FQVEILVK
+implementation-commits: [2e75ea93]
 ---
 
 # The rotator alert drift line prints on every heartbeat fire
@@ -43,10 +44,11 @@ The revision-2 design below passed two review rounds and is the one implemented.
 - Trade-off 3: an older daemon file with no last_notified degrades to print once.
 
 ## Acceptance
-- [ ] An unchanged ADVISORY condition prints once per notification cadence, not on every fire; urgent ones print every fire
-- [ ] drift_parts writes no state (it only reads rotator-alert.json and tick-completed.ts)
-- [ ] ~~The tick-stalled watchdog has its own first-seen stamp~~ (dropped in revision 2: the watchdog is urgent and prints every fire)
-- [ ] The TRDD-5CCRBM1H test passes
+- [x] An unchanged ADVISORY condition prints once per notification cadence, not on every fire; urgent ones print every fire
+- [x] drift_parts writes no state (it only reads rotator-alert.json and tick-completed.ts)
+- [x] ~~The tick-stalled watchdog has its own first-seen stamp~~ (dropped in revision 2: the watchdog is urgent and prints every fire)
+- [x] The TRDD-5CCRBM1H test passes
+Evidence 2026-10-18 (2e75ea93): box 1 by tests/test_rotator_alert.py test_advisory_alone_prints_once_until_last_notified_advances, test_urgent_plus_advisory_second_fire_keeps_only_the_urgent_text and test_urgent_alone_prints_on_every_fire; box 2 by reading drift_parts (reads the two files, writes nothing) and test_drift_parts_classifies_capture_refused_and_spare_stale_as_advisory; box 3 ticked as not applicable (dropped in revision 2, the watchdog is urgent; test_tick_stalled_alert_file_and_stale_tick_watchdog_print_the_text_once); box 4: the TRDD-5CCRBM1H tests pass in the full gate (18,625 passed). Unreleased: the installed janitor still prints the line every fire until a release carries 2e75ea93.
 
 ## Approval log
 
@@ -54,3 +56,4 @@ The revision-2 design below passed two review rounds and is the one implemented.
 - 2026-10-18T06:27:38+0200 — column → design. fix design not yet reviewed; todo only after its review round
 - 2026-10-18T07:20:33+0200 — column → todo by main-agent@ai-maestro-janitor. revision-2 design passed its two review rounds
 - 2026-10-18T07:20:33+0200 — column → dev by main-agent@ai-maestro-janitor. revision-2 design passed its two review rounds
+- 2026-10-18T07:39:35+0200 — column → testing by main-agent@ai-maestro-janitor. built and gated at 2e75ea93; unreleased
