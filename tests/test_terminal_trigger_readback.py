@@ -84,6 +84,65 @@ def test_the_LAST_prompt_wins_over_scrollback() -> None:
     assert tt.prompt_field_shows_only(stale + live, "/compact") is False
 
 
+_GOAL = (
+    "/goal complete all TRDDs nomatter what. decide by yourself on everything. do not wait for "
+    "me. do not procrastinate. base your decisions only on verified facts. commit often."
+)
+_WRAPPED_FIXTURE = _ROOT / "tests" / "fixtures" / "claude-input-wrapped-2.1.302.txt"
+
+
+def _wrapped(*rows: str) -> str:
+    """A capture whose field spans several rows: marker row, then continuation rows."""
+    rule = "─" * 40
+    return rule + f"\n❯{NBSP}{rows[0]}\n" + "".join(r + "\n" for r in rows[1:]) + rule + "\n"
+
+
+def test_a_real_wrapped_capture_VERIFIES_despite_the_wrap_indent() -> None:
+    """TRDD-85NZX5RJ: Claude Code 2.1.302 indents the continuation row by two spaces, so the
+    joined read-back has a doubled space at the wrap. The raw extract must still show it (pins
+    the rendering assumption), and the verifier must accept the command regardless."""
+    pane = _WRAPPED_FIXTURE.read_text(encoding="utf-8")
+    assert "  " in (tt.extract_prompt_field(pane) or "")
+    assert tt.prompt_field_shows_only(pane, _GOAL) is True
+
+
+def test_a_changed_word_next_to_the_wrap_join_is_REJECTED() -> None:
+    """Collapsing the wrap indent must not loosen the text compare: a different word right at
+    the join still fails."""
+    pane = _WRAPPED_FIXTURE.read_text(encoding="utf-8")
+    assert tt.prompt_field_shows_only(pane, _GOAL.replace("your decisions", "our decisions")) is False
+
+
+def test_a_three_row_wrapped_command_verifies() -> None:
+    """Two wraps, each continuation row indented by two spaces."""
+    pane = _wrapped("/goal alpha beta gamma", "  delta epsilon zeta", "  eta theta")
+    assert tt.prompt_field_shows_only(pane, "/goal alpha beta gamma delta epsilon zeta eta theta") is True
+
+
+def test_a_wrap_join_where_the_space_starts_row_two_verifies() -> None:
+    """The command space can land at the start of row 2: indent + space = three spaces."""
+    pane = _wrapped("/goal alpha beta", "   gamma delta")
+    assert tt.prompt_field_shows_only(pane, "/goal alpha beta gamma delta") is True
+
+
+def test_trailing_padding_on_row_one_before_the_join_verifies() -> None:
+    """Row 1 may keep terminal padding spaces before the join."""
+    pane = _wrapped("/goal alpha beta   ", "  gamma delta")
+    assert tt.prompt_field_shows_only(pane, "/goal alpha beta gamma delta") is True
+
+
+def test_a_double_space_inside_the_field_is_collapsed_ANYWHERE() -> None:
+    """Pins the collapse-anywhere decision: runs are collapsed everywhere, not only at wrap
+    joins, accepted because the field must still equal OUR command once collapsed."""
+    assert tt.prompt_field_shows_only(_pane("/goal a  b"), "/goal a b") is True
+
+
+def test_user_text_after_our_wrapped_command_is_REJECTED() -> None:
+    """Our command followed by the user's own text on the continuation row must not verify."""
+    pane = _wrapped("/goal alpha beta", "  gamma delta and the user words")
+    assert tt.prompt_field_shows_only(pane, "/goal alpha beta gamma delta") is False
+
+
 def test_wait_for_empty_polls_until_the_field_clears() -> None:
     reads = iter([_pane("still typing"), _pane("still typing"), _pane("")])
     slept: list[float] = []

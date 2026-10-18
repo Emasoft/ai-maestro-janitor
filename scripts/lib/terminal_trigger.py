@@ -237,16 +237,36 @@ def prompt_field_is_empty(pane_text: str) -> bool:
     return extract_prompt_field(pane_text) == ""
 
 
-def prompt_field_shows_only(pane_text: str, command: str) -> bool:
-    """True iff the field contains EXACTLY `command` and nothing else.
+def _norm_wrap_spaces(s: str) -> str:
+    """`s` with every run of 2+ spaces collapsed to one, except the FIRST character, which is
+    kept as-is so a leading-space field still differs from its trimmed command."""
+    return s[:1] + re.sub(r" {2,}", " ", s[1:])
 
-    The owner's shape requirement, enforced literally: `/any-command`, with no space before
-    or after the `/`. Anything else — leftover user text, a doubled paste, a stray leading
-    space that would make Claude Code treat the line as prose rather than a command — fails,
-    and the caller retries instead of pressing Enter on it.
+
+def prompt_field_shows_only(pane_text: str, command: str) -> bool:
+    """True iff the field contains `command` and nothing else, modulo the wrap indent.
+
+    The owner's shape requirement, enforced literally (after collapsing space runs):
+    `/any-command`, with no space before or after the `/`. Anything else — leftover user
+    text, a doubled paste, a stray leading space that would make Claude Code treat the line
+    as prose rather than a command — fails, and the caller retries instead of pressing Enter
+    on it. "Modulo the wrap indent": runs of spaces are compared collapsed (see the WHY below).
     """
     field = extract_prompt_field(pane_text)
-    if field is None or field != command.strip():
+    if field is None:
+        return False
+    # WHY the compare is on collapsed spaces (TRDD-85NZX5RJ): Claude Code indents every wrapped
+    # input-box row by two spaces, so the joined read-back has a run of spaces at each wrap and
+    # an exact compare can never verify a wrapped command. All 3 logged /goal re-sends after a
+    # clear (10-05, 10-13, 10-14) failed this way, and the tidy then stranded the tail. The
+    # first character is kept so a leading-space field still fails; runs are collapsed
+    # anywhere, not only at the joins — accepted because the field must still equal OUR
+    # command. The shape regex below runs on the normalized field because (?: \S+)* rejects
+    # the doubled space. LIMIT: a wrap where the command has NO space (mid-word, possibly
+    # after a hyphen or slash) still fails verify (refuses, never submits). Verified on tmux
+    # with Claude Code 2.1.302 only.
+    field = _norm_wrap_spaces(field)
+    if field != _norm_wrap_spaces(command.strip()):
         return False
     # No space BEFORE or AFTER the `/` — the owner's literal shape. Arguments ARE allowed
     # (single-spaced): the guard used to be `/[^\s/][^\s]*`, which rejected every field
@@ -254,7 +274,7 @@ def prompt_field_shows_only(pane_text: str, command: str) -> bool:
     # (TRDD-QE390SJA) or `/reload-plugins --force`. That failed in the worst way: the field
     # held exactly the right text, the verifier refused it, the caller CLEARED the field and
     # retried forever until the give-up. Note the equality check above already pins the field
-    # to the exact intended command, so widening this shape guard cannot admit user prose or
+    # to the intended command, so widening this shape guard cannot admit user prose or
     # a doubled paste — it only stops rejecting our own valid commands.
     return bool(re.fullmatch(r"/[^\s/]\S*(?: \S+)*", field))
 
@@ -1149,7 +1169,8 @@ def inject_until_sent(
         # an injection, which this session must not do. Polling is the right change either
         # way, because it is asymmetric — it can only turn a PREMATURE empty read into a
         # correct one; it can never turn a genuinely malformed field into a submit, since the
-        # exact-match check below is unchanged and still gates Enter.
+        # match below (exact after collapsing space runs, see prompt_field_shows_only) is not
+        # touched by this polling and still gates Enter.
         #
         # `verify_then_submit` (the sibling helper other call sites use) has always polled.
         # This loop was the odd one out, reading exactly once.
