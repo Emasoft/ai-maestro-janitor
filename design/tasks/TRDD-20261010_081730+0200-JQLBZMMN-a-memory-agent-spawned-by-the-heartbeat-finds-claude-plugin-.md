@@ -1,10 +1,10 @@
 ---
 trdd-id: JQLBZMMN
 title: A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty and sets it by hand
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-18T02:21:29+0200
+updated: 2026-10-18T02:32:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ Seen once, 2026-10-10 07:34, reported by the consolidate agent the heartbeat mar
 - 2026-10-10T08:41:40+0200 — column → verify_assumptions. agent-reported once; reproduce first
 2026-10-10 08:58 CORRECTION to the body, filed here because the card has no other section: 'every chore skill invokes its scripts through that variable' was read for ONE skill only (the consolidate protocol's invocation example); 'an agent that guesses the directory can run a stale version' is a hypothesis, not an observation.
 - 2026-10-18T01:40:07+0200 — column → todo by main-agent@ai-maestro-janitor. reproduced; likely cause found (bare $CLAUDE_PLUGIN_ROOT not substituted in skill text)
+- 2026-10-18T02:32:38+0200 — column → testing by main-agent@ai-maestro-janitor. built (2cc76e87, 0ef70cd6), gates green; field check after a release
 
 ## Verification 2026-10-18
 
@@ -41,3 +42,4 @@ FIX, as revised and narrowed: classify each of the 55 bare uses (command line to
 BUILT in 2cc76e87 (braced form in loaded Markdown, pointers in disk-read references, agents load skills with the Skill tool, guard test). OPEN BLOCKER: skills/janitor-memory-repair/SKILL.md is ~5003 estimated tokens after its three brace swaps; CPV strict reports one MAJOR (limit 5000). fastedit refused every shortening edit: replacing section 'PRE-REPLACE verb fixes — REQUIRED when applicable' with a shorter pointer was rejected after 9 retries ('model hallucinated on 1 chunk ... unmentioned original line dropped'). Planned trim: replace the duplicated control-flow summary in that section (covered by references/pre-transaction-verb-fixes.md lines 10, 36, 49-55) with one pointer sentence; an uncommitted copy of moved text sits at the end of references/repair-background.md. NEXT: the trim (needs a writer fastedit accepts, or the owner's leave to use the Edit tool once), then a probe that the agent definition's braced lines arrive absolute, then a release.
 BLOCKER CLEARED in 0ef70cd6: a same-line-count fastedit edit shortened one line of the repair skill; strict CPV now exits 0 (CRITICAL=0 MAJOR=0 MINOR=0 NIT=0, WARNING=42). Uncommitted, unreferenced copy of the 'On a refusal' text remains at the end of references/repair-background.md (a worker's leftover; the restore was blocked by the git guard and is not needed). NEXT: full suite result on the committed tree, then a probe that the agent definition's braced lines arrive absolute, then a release.
 ORDER CORRECTION (review of 00827f42): spawned agents load the INSTALLED definition from the plugin cache (3.8.11), so the probe of the agent body comes after a release and a local plugin update, not before. NEXT: release, local update, then the probe. Skill-text tests re-run on 0ef70cd6 by the main session (29 passed: tests/test_memory_chore_claim_step.py and tests/test_plugin_root_reference_form.py).
+FULL SUITE on 2cc76e87's tree after the two test fixes: 18611 passed, 2 skipped, 0 failed (reports/board/gate-jqlbzmmn-2.txt). Code complete; remaining acceptance is field-only: after a release and a local update, a heartbeat-spawned memory agent finds the plugin path without setting it by hand, and a probe shows the agent definition's braced lines arrive absolute.
