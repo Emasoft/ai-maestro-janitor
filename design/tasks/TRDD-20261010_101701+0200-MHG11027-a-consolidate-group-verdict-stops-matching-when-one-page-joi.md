@@ -4,7 +4,7 @@ title: A consolidate group verdict stops matching when one page joins the group 
 column: testing
 status: tasked
 created: 2026-10-10T10:17:01+0200
-updated: 2026-10-17T00:17:51+0200
+updated: 2026-10-18T03:49:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T10:17:01+0200
+implementation-commits: [d491dcca, 52250a20]
 ---
 
 # A consolidate group verdict stops matching when one page joins the group so large groups are dispatched again every few days

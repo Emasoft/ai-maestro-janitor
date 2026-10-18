@@ -4,7 +4,7 @@ title: The rotator's stuck marker restarts its first-seen time on every tick so 
 column: testing
 status: tasked
 created: 2026-10-05T22:08:48+0200
-updated: 2026-10-10T15:16:55+0200
+updated: 2026-10-18T03:49:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:48+0200
+implementation-commits: [293c9be6]
 ---
 
 # The rotator's stuck marker restarts its first-seen time on every tick so the measured duration is always zero

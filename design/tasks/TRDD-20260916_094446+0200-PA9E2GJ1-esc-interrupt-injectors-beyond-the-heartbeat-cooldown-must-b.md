@@ -3,7 +3,7 @@ trdd-id: PA9E2GJ1
 title: Esc interrupt injectors beyond the heartbeat cooldown must be found and closed
 column: testing
 created: 2026-09-16T09:44:46+0200
-updated: 2026-10-10T03:40:32+0200
+updated: 2026-10-18T03:49:35+0200
 current-owner: session
 created-by: session
 task-type: spike
@@ -17,6 +17,7 @@ approval-datetime: 2026-09-16T09:44:46+0200
 parent-trdd: V3BQT7QE
 derived: true
 review-after: 2026-09-24
+implementation-commits: [a3ae1b04]
 ---
 
 # Esc interrupt injectors beyond the heartbeat cooldown must be found and closed

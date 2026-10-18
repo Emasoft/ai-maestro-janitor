@@ -4,7 +4,7 @@ title: Install git-cliff on the CI Tests job so the stale-tag changelog tests ru
 column: testing
 status: tasked
 created: 2026-10-07T09:36:03+0200
-updated: 2026-10-10T22:31:48+0200
+updated: 2026-10-18T03:49:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T09:36:03+0200
+implementation-commits: [c08fb8ea]
 ---
 
 # Install git-cliff on the CI Tests job so the stale-tag changelog tests run there

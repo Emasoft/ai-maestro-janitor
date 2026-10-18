@@ -4,7 +4,7 @@ title: Summarizer holds every pane on a sibling's live transcript
 column: testing
 status: tasked
 created: 2026-10-03T03:42:01+0200
-updated: 2026-10-09T23:14:23+0200
+updated: 2026-10-18T03:49:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -20,6 +20,7 @@ review-after: 2026-10-17
 parent-trdd: K9AHY1ZB
 blocker-probe: trddgrep --porcelain show K9AHY1ZB | cut -f3   # probe is VESTIGIAL: this card is NOT blocked (no blocked-by, column testing); parent-trdd K9AHY1ZB is LINEAGE, not a blocker claim — re-verify the actual chain before treating a release as go-ahead
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
+implementation-commits: [d6bd166f, 537e5079, 252a8e8c]
 ---
 
 # Summarizer holds every pane on a sibling's live transcript

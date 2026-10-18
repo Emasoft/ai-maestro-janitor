@@ -4,7 +4,7 @@ title: Janitor PreToolUse hooks were cancelled at their timeout during host stal
 column: testing
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-09T23:23:38+0200
+updated: 2026-10-18T03:49:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T04:44:45+0200
+implementation-commits: [d28f3127, f21ffbff]
 ---
 
 # Janitor PreToolUse hooks were cancelled at their timeout during host stalls

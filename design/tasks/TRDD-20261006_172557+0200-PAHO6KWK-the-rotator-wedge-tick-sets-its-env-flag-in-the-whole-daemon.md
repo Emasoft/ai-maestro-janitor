@@ -4,7 +4,7 @@ title: The rotator wedge tick sets its env flag in the whole daemon process so o
 column: testing
 status: tasked
 created: 2026-10-06T17:25:57+0200
-updated: 2026-10-10T21:59:19+0200
+updated: 2026-10-18T03:49:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T17:25:57+0200
+implementation-commits: [bdf9d50a]
 ---
 
 # The rotator wedge tick sets its env flag in the whole daemon process so other threads' subprocesses inherit it

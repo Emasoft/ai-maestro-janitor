@@ -4,7 +4,7 @@ title: C31 — shrink repair skill
 column: testing
 status: tasked
 created: 2026-10-01T19:45:18+0200
-updated: 2026-10-09T04:09:07+0200
+updated: 2026-10-18T03:49:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, OLNPXGBC]
 blocker-holds-if: not-match:READY
+implementation-commits: [8ac50260, af5a919f, bafc24e9, b76c4351, 9b8b9314]
 ---
 
 # C31 — shrink repair skill

@@ -4,7 +4,7 @@ title: The publish validator and the push-hook validator disagree, so a nit fail
 column: testing
 status: tasked
 created: 2026-10-07T17:56:57+0200
-updated: 2026-10-10T23:12:41+0200
+updated: 2026-10-18T03:49:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T17:56:57+0200
+implementation-commits: [24eb3afa]
 ---
 
 # The publish validator and the push-hook validator disagree, so a nit fails only after the bump

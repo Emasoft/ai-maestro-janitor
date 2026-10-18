@@ -4,7 +4,7 @@ title: A hang leaves no evidence because nothing saves a process snapshot that s
 column: testing
 status: tasked
 created: 2026-10-05T22:11:19+0200
-updated: 2026-10-10T18:59:43+0200
+updated: 2026-10-18T03:49:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:19+0200
+implementation-commits: [73f04476]
 ---
 
 # A hang leaves no evidence because nothing saves a process snapshot that survives a reboot

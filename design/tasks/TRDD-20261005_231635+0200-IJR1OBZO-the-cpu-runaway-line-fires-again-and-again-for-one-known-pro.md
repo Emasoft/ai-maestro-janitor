@@ -4,7 +4,7 @@ title: The CPU runaway line fires again and again for one known program
 column: testing
 status: tasked
 created: 2026-10-05T23:16:35+0200
-updated: 2026-10-10T20:27:21+0200
+updated: 2026-10-18T03:49:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T23:16:35+0200
+implementation-commits: [19e57a11]
 ---
 
 # The CPU runaway line fires again and again for one known program

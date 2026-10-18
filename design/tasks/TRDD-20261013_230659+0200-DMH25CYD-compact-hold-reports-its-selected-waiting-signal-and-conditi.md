@@ -4,7 +4,7 @@ title: Compact hold reports its selected waiting signal and conditional expiry
 column: testing
 status: tasked
 created: 2026-10-13T23:06:59+0200
-updated: 2026-10-17T00:31:15+0200
+updated: 2026-10-18T03:49:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-13T23:06:59+0200
 relevant-rules: [5, 6]
+implementation-commits: [0e131aa8, 815acb25]
 ---
 
 # Compact hold reports its selected waiting signal and conditional expiry

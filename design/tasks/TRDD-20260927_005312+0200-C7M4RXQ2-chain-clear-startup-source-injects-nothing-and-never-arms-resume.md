@@ -3,11 +3,12 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-10-10T03:48:04+0200
+updated: 2026-10-18T03:49:35+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
 status: tasked
+implementation-commits: [14431416, b123a392]
 ---
 
 # Chain-clear births a `source=startup` process — nothing injected, resume never armed

@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-09T19:03:08+0200
+updated: 2026-10-18T03:49:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, JD2QR5SQ]
 blocker-holds-if: not-match:READY
+implementation-commits: [b7a22bb4, 435051cf, 1f2a2896, b21881dd, e5dd8e50]
 ---
 
 # C22 — wire fixers into lint

@@ -4,7 +4,7 @@ title: Spare accounts stop decaying (account B root cause, spare-age alert)
 column: testing
 status: tasked
 created: 2026-10-03T03:41:36+0200
-updated: 2026-10-10T03:48:06+0200
+updated: 2026-10-18T03:49:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -20,6 +20,7 @@ review-after: 2026-10-17
 parent-trdd: JSQSJ3PZ
 blocker-probe: trddgrep --porcelain show JSQSJ3PZ | cut -f3   # probe is VESTIGIAL: this card is NOT blocked (no blocked-by, column testing); parent-trdd JSQSJ3PZ is LINEAGE, not a blocker claim — re-verify the actual chain before treating a release as go-ahead
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
+implementation-commits: [60f9c15b, 0ec2e372, 1e1cc0b9]
 ---
 
 # Spare accounts stop decaying (account B root cause, spare-age alert)

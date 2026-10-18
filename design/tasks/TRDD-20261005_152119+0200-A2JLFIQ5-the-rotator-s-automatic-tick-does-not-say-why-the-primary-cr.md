@@ -4,7 +4,7 @@ title: the rotator's automatic tick does not say why the primary credential was 
 column: testing
 status: tasked
 created: 2026-10-05T15:21:19+0200
-updated: 2026-10-10T14:14:07+0200
+updated: 2026-10-18T03:49:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T15:21:19+0200
 parent-trdd: QQ7QCS3T
+implementation-commits: [0449b637]
 ---
 
 # the rotator's automatic tick does not say why the primary credential was not read

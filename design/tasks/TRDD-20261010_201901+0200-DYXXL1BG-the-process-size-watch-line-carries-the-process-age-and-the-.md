@@ -4,7 +4,7 @@ title: The process-size watch line carries the process age and the size of the l
 column: testing
 status: tasked
 created: 2026-10-10T20:19:01+0200
-updated: 2026-10-10T20:27:22+0200
+updated: 2026-10-18T03:49:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T20:19:01+0200
 derived: true
 parent-trdd: DKID2PYP
+implementation-commits: [e272b9d6]
 ---
 
 # The process-size watch line carries the process age and the size of the largest file it was given
