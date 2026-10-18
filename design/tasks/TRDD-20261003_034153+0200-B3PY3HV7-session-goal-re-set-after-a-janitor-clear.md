@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: blocked
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-18T04:16:02+0200
+updated: 2026-10-18T11:04:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -56,3 +56,4 @@ Gap: on the goal path the resume flag is consumed, and the late-summary note (di
 The sanitizer replaces the at-sign with (at) in the typed goal (literal-key typing would open the file picker); the changed text is intended, not corruption.
 2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: one janitor clear of a session with an unmet goal on an install running v3.7.0 or later; pass when one typed goal line appears and the goal shows active in the new session, with no resume command typed.
 2026-10-18 — SUPERSEDES the 2026-10-05 RESUME POINT. Column blocked on TRDD-85NZX5RJ. The named live event (a janitor clear of a session with an unmet goal) has occurred in 3 logged chains (10-05, 10-13, 10-14) and all 3 failed: gave up after 3600s, field not empty, logged field = the wrapped tail of the goal. Success is not observable in clear-trigger.log. Unblocks when 85NZX5RJ reaches a done state (complete, completed, published or live, matching blocker-holds-if); a failed, cancelled or superseded 85NZX5RJ does NOT unblock this card; if 85NZX5RJ confirms its hypothesis 3, this card returns to dev instead.
+2026-10-18 11:04 Still blocked on TRDD-85NZX5RJ: its cause is fixed in 8dae3e5e (wrapped commands now verify); this card unblocks after a release logs one 'chain: OK' after a /goal re-send in .janitor/logs/clear-trigger.log.

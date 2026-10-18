@@ -4,7 +4,7 @@ title: Goal text left in the input box after a failed re-send blocks every later
 column: todo
 status: tasked
 created: 2026-10-18T10:27:17+0200
-updated: 2026-10-18T10:32:16+0200
+updated: 2026-10-18T11:03:55+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ MAIN-SESSION READ of .janitor/logs/clear-trigger.log (2026-10-18 10:35), replaci
 
 Split from TRDD-85NZX5RJ on 2026-10-18 (review of 40171956). SYMPTOM, worker-read from .janitor/logs/clear-trigger.log (reports/board/20261018_102008+0200-85NZX5RJ-probe.md): after the 2026-10-13 14:41 goal re-send gave up (field not empty), the same goal tail was read in the input field at 17:40, 18:40 and 19:40 (session c436b9d9) and each later /clear was not sent: the unsent goal text stayed in the box and switched off the clear lever for over 5 hours. TO DO FIRST: read the log lines yourself, then the give-up path of the chain (TRDD-B3PY3HV7 owns the goal chain; terminal_trigger inject loop around scripts/lib/terminal_trigger.py:1119) and say whether a give-up leaves typed text behind and whether anything clears it. Any fix must never erase text the user typed. Acceptance: a give-up never leaves janitor-typed text in the field, shown by a test, or a recorded reason why it cannot be cleared safely.
 2026-10-18 10:40 CORRECTION (review of 0cf5de3f), every item now main-session-read: the line above was written at about 10:28, not 10:35. Read in full: log line 329 (14:41:21 s:3a6129dd /goal FAILED, reason field not empty (' only on verified facts. commit often.')) and every non-skip line of 331-424: only the three c436b9d9 '/clear not sent ... field not empty' failures at 17:40:08 (355), 18:40:15 (380), 19:40:26 (404), each followed by 'resume state untouched', then 20:30:08 clear landing and 20:31:12 chain OK. 'Explanation 2 ruled out' overstates: the log records no chain START lines, so it shows only that c436b9d9 logged no goal re-send; an unlogged re-type by a resume or bootstrap step (14:41 says 'resume state KEPT (persisted at verified submit)') stays possible (TRDD-B3PY3HV7, TRDD-5ID9CQY8). Duration: the tail was read in the field at 14:41:21 and 19:40:26 and the box was empty again before 20:30:08, so between 5 h and 5 h 49 m, not 'about 6 hours'. The npt on 85NZX5RJ gates only a fix that clears the field; reading the give-up path and reporting the stuck state need nothing from it. This card is a sibling split of 85NZX5RJ, not its npt or eht.
+2026-10-18 11:03 The npt on TRDD-85NZX5RJ stays: 85NZX5RJ's fix (8dae3e5e) is the normalization a safe clear needs to compare the field with what the janitor typed (an earlier review called the npt likely unneeded; that predates the shows_only: False finding). Live tmux test: the tidy C-a/C-k/C-u leaves the last wrapped row; extra C-u or Escape does not remove it, while repeated C-u from the end emptied a field in another run, so a kill-and-re-read loop is feasible. Corrections to the 10:40 line: it was appended at 10:32:16; the stuck span is 4 h 59 m to 5 h 49 m and continuous presence is inferred from four reads; the box reading empty by 20:30:08 is inferred from the clear landing.
 
 ## Approval log
 
