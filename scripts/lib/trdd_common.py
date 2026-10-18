@@ -111,6 +111,10 @@ def project_design_root(project_dir: str | None = None) -> Path | None:
     return None if tasks is None else tasks.parent
 
 
+class GitRootError(RuntimeError):
+    """git could not resolve the main checkout root inside a known repo."""
+
+
 @lru_cache(maxsize=None)
 def _main_checkout_root(project_dir: str) -> Path:
     """Resolve `project_dir` to its MAIN git checkout, for the LOCAL design corpus.
@@ -155,12 +159,22 @@ def _main_checkout_root(project_dir: str) -> Path:
         return path  # no git binary, or it hung — fall back to the given root
     if probe.returncode != 0:
         return path  # not a git repo at all — nothing to resolve
-    result = subprocess.run(
-        ["git", "-C", project_dir, "worktree", "list", "--porcelain"],
-        capture_output=True, text=True, timeout=5, env=git_env,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_dir, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=5, env=git_env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # janitor#342 item 2: a hung `worktree list` inside a known repo is the same anomaly as a
+        # non-zero exit, so it raises the same GitRootError. NEVER return a fallback path here: the
+        # lru_cache does not memoise a raised exception but WOULD memoise a returned path for the
+        # whole process lifetime (the daemon reaches this), silently pointing a linked worktree at
+        # the wrong LOCAL design root. A bare TimeoutExpired also printed a traceback to the agent.
+        raise GitRootError(
+            f"git worktree list --porcelain timed out after 5s inside known git repo {project_dir}"
+        ) from exc
     if result.returncode != 0:
-        raise RuntimeError(
+        raise GitRootError(
             f"git worktree list --porcelain failed (exit {result.returncode}) inside "
             f"known git repo {project_dir}: {result.stderr.strip()}"
         )
@@ -175,13 +189,13 @@ def _main_checkout_root(project_dir: str) -> Path:
                 )
                 if toplevel.returncode == 0 and toplevel.stdout.strip():
                     return Path(toplevel.stdout.strip())
-                raise RuntimeError(
+                raise GitRootError(
                     f"git worktree list --porcelain reported a gitdir ({candidate}) as "
                     f"the worktree for {project_dir}, and rev-parse --show-toplevel "
                     "failed to recover the real checkout root"
                 )
             return candidate
-    raise RuntimeError(
+    raise GitRootError(
         f"git worktree list --porcelain produced no worktree line for {project_dir}"
     )
 

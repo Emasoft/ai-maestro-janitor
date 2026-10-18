@@ -13,6 +13,7 @@ carefully-mocked shape, not the thing that runs on the heartbeat.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -231,3 +232,78 @@ def test_a_HARNESS_finding_dispatches_with_NO_human_in_the_loop(project: Path) -
 def test_nothing_pending_nothing_printed(project: Path) -> None:
     """The zero-output contract: a quiet fire costs the reader nothing."""
     assert _run(project) == ""
+
+
+@pytest.fixture
+def hanging_git(project: Path) -> Path:
+    """A git repo in `project` plus a fake `git` for the PATH. `rev-parse --is-inside-work-tree` answers at
+    once; ONLY `worktree list` hangs (exec sleep, so no orphan holds a pipe); everything else is the real
+    git. The real git is resolved BEFORE any PATH override. Returns the fake-bin dir."""
+    real_git = shutil.which("git")
+    assert real_git is not None, "git must be installed to run this test"
+    init = subprocess.run([real_git, "init", "-q"], capture_output=True, text=True, cwd=project)
+    assert init.returncode == 0, init.stderr
+    fake_bin = project / "fakebin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/bin/sh\n"
+        "case \" $* \" in\n"
+        "  *\" rev-parse --is-inside-work-tree \"*) echo true; exit 0;;\n"
+        "  *\" worktree list \"*) exec sleep 30;;\n"
+        "esac\n"
+        f"exec \"{real_git}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    return fake_bin
+
+
+def _path_with_fake_git(fake_bin: Path) -> str:
+    """Fake git first, then the real git's dir and the system dirs `sleep`/`sh` live in."""
+    real_git = shutil.which("git")
+    assert real_git is not None
+    return f"{fake_bin}:{Path(real_git).parent}:/usr/bin:/bin"
+
+
+def test_a_hung_git_is_one_stderr_line_and_exit_1_not_a_traceback(project: Path, hanging_git: Path) -> None:
+    """janitor#342 item 2: `git worktree list` hanging past its 5 s timeout used to escape
+    `_main_checkout_root` as a TimeoutExpired traceback on the agent-visible stderr. The detector must
+    say ONE line on stderr and exit 1 so the dispatcher records error:rc=1 and its 3-strike streak counts
+    (a quiet exit 0 would hide the failure). The needs_human line is built BEFORE `_proposal_reminder`
+    runs in main(), so it must still be printed. Slow (~5 s: the real timeout)."""
+    t = _needs_human("a memgrep index fails validation", age_days=3)
+    env = {
+        "PATH": _path_with_fake_git(hanging_git),
+        "HOME": str(project / "home"),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(project / "gs"),
+    }
+
+    proc = subprocess.run([sys.executable, str(DETECTOR)], capture_output=True, text=True, env=env, cwd=project)
+
+    assert proc.returncode == 1, proc.stderr
+    assert "Traceback" not in proc.stderr
+    detector_lines = [ln for ln in proc.stderr.splitlines() if ln.startswith("ticket-dispatch:")]
+    assert len(detector_lines) == 1, proc.stderr
+    assert "git failed resolving the design root" in detector_lines[0]
+    assert f"[ticket] {t.id} NEEDS A HUMAN" in proc.stdout
+
+
+@pytest.mark.no_timeout_scale  # the 5 s timeout IS the subject; the suite otherwise scales it away
+def test_main_checkout_root_raises_gitrooterror_when_worktree_list_hangs(
+    project: Path, hanging_git: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timeout surfaces as GitRootError (same type as the non-zero-exit branch), never as a bare
+    TimeoutExpired and never as a returned fallback path (lru_cache would memoise a returned path).
+    Slow (~5 s: the real timeout)."""
+    import trdd_common
+
+    monkeypatch.setenv("PATH", _path_with_fake_git(hanging_git))
+    trdd_common._main_checkout_root.cache_clear()
+    try:
+        with pytest.raises(trdd_common.GitRootError, match="timed out after 5s"):
+            trdd_common._main_checkout_root(str(project))
+    finally:
+        trdd_common._main_checkout_root.cache_clear()
+

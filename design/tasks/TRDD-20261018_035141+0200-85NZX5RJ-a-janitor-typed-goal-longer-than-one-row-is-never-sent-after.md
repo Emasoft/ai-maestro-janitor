@@ -4,7 +4,7 @@ title: A janitor-typed goal longer than one row failed in all 3 logged goal re-s
 column: todo
 status: tasked
 created: 2026-10-18T03:51:41+0200
-updated: 2026-10-18T04:15:59+0200
+updated: 2026-10-18T06:01:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ parent-trdd: K9AHY1ZB
 ## Symptom
 
 All 3 logged janitor-typed `/goal` re-sends after a clear failed, in `.janitor/logs/clear-trigger.log` (2026-10-05 03:17 s:20d63f12, 2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407). Each logged `not sent: gave up after 3600s (field not empty (<text>))`, and `<text>` is the TAIL of the goal itself, never the head. A successful chain logs `chain: OK` without the goal text, so this log cannot show whether any goal chain ever succeeded: 3 logged failures, success not observable here. No `inject` line between the clear and the give-up shows a typing or settle failure.
+2026-10-18 GitHub issue janitor#343 reports this defect; the card, not the issue, holds the live analysis (the issue's whitespace hypothesis does not explain a tail-only capture).
 
 ## Measured so far (2026-10-18)
 

@@ -58,6 +58,7 @@ import issue_catalog  # noqa: E402
 import state  # noqa: E402
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
+import trdd_common  # noqa: E402
 
 _NEEDS_HUMAN_REMIND_CAP = 3  # its own cap: the needs_human reminder must not shift when the proposal cap does
 
@@ -167,11 +168,27 @@ def main() -> int:
         more = f" +{len(stuck) - 5} more" if len(stuck) > 5 else ""
         lines.append(f"[ticket] {len(stuck)} tickets NEED A HUMAN ({shown}{more}) → /janitor-support-tickets list")
 
-    lines.extend(_proposal_reminder(now))
+    # janitor#342 item 2: `_proposal_reminder` reaches `trdd_common._main_checkout_root`, which raises
+    # GitRootError when `git worktree list` hangs or exits non-zero inside a known repo. Fail fast and
+    # loud, but compactly: NO fallback root (a guess could be memoised and point a linked worktree at the
+    # wrong LOCAL design root), and NO traceback (the inherited stderr lands in the agent context). Exit 1
+    # so the dispatcher records error:rc=1 and the 3-strike DETECTOR-FAIL streak still counts; whatever
+    # was already collected is still printed.
+    failed = False
+    try:
+        lines.extend(_proposal_reminder(now))
+    except trdd_common.GitRootError as exc:
+        failed = True
+        what = " ".join(str(exc).split()[:3])
+        print(
+            f"ticket-dispatch: git failed resolving the design root ({what}); proposal reminder skipped this pass",
+            file=sys.stderr,
+        )
+        state.log_line("ticket-dispatch", f"git failed resolving the design root: {exc}")
 
     if lines:
         print("\n".join(lines), flush=True)
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
