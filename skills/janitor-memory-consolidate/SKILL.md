@@ -28,7 +28,7 @@ Full framing + why over-merging is worse than a missed merge:
 ## Preconditions (cheap gate, run first)
 
 ```bash
-JANITOR_ROOT="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$CLAUDE_PLUGIN_ROOT")"
+JANITOR_ROOT="$(git -C "${CLAUDE_PLUGIN_ROOT}" rev-parse --show-toplevel 2>/dev/null || echo "${CLAUDE_PLUGIN_ROOT}")"
 uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_txn
@@ -49,7 +49,7 @@ the `export` below — the guard on the next line refuses to run without it.
 ```bash
 export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
 : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore consolidate --state-dir "$STATE_DIR"
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore consolidate --state-dir "$STATE_DIR"
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
@@ -125,7 +125,15 @@ non-mergeable tier, cross-type). Run it and the refusal catalog:
 A merge fuses exactly two sources; confirm A and B match, no third: [merge-protocol § No-third-page check](references/merge-protocol.md#no-third-page-check-pre-merge).
 
 **RECORD EVERY abstain** with `scripts/memory_refusal_cli.py record` — unrecorded, it
-re-dispatches forever. Invocation + why it expires: [merge-protocol](references/merge-protocol.md#recording-an-abstain). When no pair in a group shares a subject, record one abstain in a single call naming every page of that group you read in full; leave an unread page out (a key with fewer than two distinct pages is refused).
+re-dispatches forever. Why it expires: [merge-protocol](references/merge-protocol.md#recording-an-abstain). Invocation (one `--page` per page of the group):
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention consolidate --scope "$SCOPE" --root "$MEMDIR" \
+  --page <A>.md --page <B>.md --reason "<why the named pages do NOT merge>"
+```
+
+When no pair in a group shares a subject, record one abstain in a single call naming every page of that group you read in full; leave an unread page out (a key with fewer than two distinct pages is refused).
 
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 
@@ -196,8 +204,8 @@ Boundary vs. write/update/split/conflict:
 after (details, incl. the exit-2 retry: [close-claim.md](references/close-claim.md)):
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
 ## Resources

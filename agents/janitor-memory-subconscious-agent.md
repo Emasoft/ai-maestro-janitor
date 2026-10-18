@@ -21,9 +21,11 @@ session's context.
 
 ## Your editorial passes (load ONLY the one you're dispatched for)
 
-Each launch names exactly ONE pass. **Load ONLY that pass's skill dynamically** — Read
-and follow `$CLAUDE_PLUGIN_ROOT/skills/<name>/SKILL.md` EXACTLY (it is your detailed,
-authoritative procedure) — and do NOT load the other chores' skills. Loading just the one
+Each launch names exactly ONE pass. **Load ONLY that pass's skill dynamically** — LOAD
+it with the Skill tool (`ai-maestro-janitor:janitor-memory-<chore>`) and follow it EXACTLY (it is
+your detailed, authoritative procedure). NEVER read its SKILL.md from disk: only Skill-tool
+loading substitutes `${CLAUDE_PLUGIN_ROOT}` with the real plugin path, a disk read leaves it
+literal (TRDD-JQLBZMMN). Do NOT load the other chores' skills. Loading just the one
 skill your chore needs is how you stay token-light. Then return:
 
 - **CONSOLIDATE** — merge same-subject pages → `janitor-memory-consolidate`
@@ -132,7 +134,7 @@ SLUG=local                  # short subject for the filename — lowercase, e.g.
 # the pass with the claim left open, since a missing/garbled header match makes
 # the claim indistinguishable from an orphaned one -- janitor#242 follow-up).
 # || true: a miss must yield an empty path, not abort the block under set -e (the retry and fallback below handle it)
-REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+REPORT_FILE="$(uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" \
   report-path --state-dir "$STATE_DIR" --chore "$PASS" || true)"
 # Retry once WITHOUT --chore before falling back to create-and-paste: a
 # mistyped $PASS must not fork the report. `_resolve_claim` (memory_dispatch_claim.py)
@@ -146,7 +148,7 @@ REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispa
 # only the create-and-paste fallback below can.
 if [ -z "$REPORT_FILE" ]; then
   echo "report-path --chore $PASS found no in-flight claim; retrying without --chore" >&2
-  REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+  REPORT_FILE="$(uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" \
     report-path --state-dir "$STATE_DIR" || true)"
 fi
 # Fallback (the write failed, or "report-path" found no in-flight claim to
@@ -173,7 +175,7 @@ echo "$REPORT_FILE"
 # just re-confirms it (and is the ONLY check-in needed after the fallback
 # above). No --chore/--scope: `set-report` resolves the one in-flight claim on
 # $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING).
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" \
   set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
 ```
 
@@ -208,7 +210,7 @@ printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
 - `mutation` — you merged, split, atomized, repaired, harvested, or otherwise WROTE.
 
 **MANDATORY next step — check your claim in** (never by report filename):
-`uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete
+`uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete
 --state-dir "$STATE_DIR"` — RETYPE `$STATE_DIR` as your claim step's printed path (a fresh
 Bash call has no variables from an earlier one). No id, `--report`, `--chore`, or `--scope`
 needed: both the claim id and `$REPORT_FILE` are already recorded to disk, keyed by the

@@ -61,7 +61,7 @@ changes `ocd`, never merges/splits/deletes.
    ```bash
    export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
    : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore enrich --state-dir "$STATE_DIR"
+   uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore enrich --state-dir "$STATE_DIR"
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute path —
@@ -165,8 +165,8 @@ touched, phrases added, duplicates removed, and any refusals. End the report wit
 alive here); `complete` runs right after:
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
 If `complete` exits 2 saying more than one claim is in flight, re-run it adding `--chore enrich

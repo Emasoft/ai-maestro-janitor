@@ -56,7 +56,7 @@ distinction: [repair-background § Execution context and what this is](reference
    ```bash
    export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
    : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore repair --state-dir "$STATE_DIR"
+   uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore repair --state-dir "$STATE_DIR"
    ```
 
    Prints `(intervention, scope, root)` (absolute path; capture `CLAIM_ID=<id>`).
@@ -212,8 +212,8 @@ only work was a pre-transaction verb fix (no whole-page replace run) still print
 Output line, writes a report, and closes the claim exactly like any other pass.
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
 If `complete` exits 2 saying more than one claim is in flight, re-run it adding `--chore repair

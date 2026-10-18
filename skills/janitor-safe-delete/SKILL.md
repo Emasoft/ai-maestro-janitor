@@ -74,7 +74,7 @@ the safe paths and report refusals on stderr.
 Two channels — every agent has at least one:
 
 - Skill: `Skill({skill: "janitor-safe-delete", args: "p1 p2"})`
-- Bash: `"$CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py" -- p1 p2`
+- Bash: `"${CLAUDE_PLUGIN_ROOT}/scripts/safe_delete.py" -- p1 p2`
 
 When briefing a subagent, mention the Bash channel — it works
 regardless of tool surface.

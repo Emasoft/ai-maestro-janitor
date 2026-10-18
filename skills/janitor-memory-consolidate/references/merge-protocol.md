@@ -405,11 +405,8 @@ re-check your judgement from it without re-reading the named pages.
 
 The invocation, shown for a pair (add one --page per further page of the group):
 
-```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root <memdir> \
-  --page <A>.md --page <B>.md --reason "<why the named pages do NOT merge>"
-```
+Run the `memory_refusal_cli.py record` command exactly as written in SKILL.md (step 4, RECORD EVERY
+abstain); it carries the resolved plugin path, which this disk-read file cannot (TRDD-JQLBZMMN).
 
 ## Candidate selection details
 

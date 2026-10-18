@@ -24,7 +24,7 @@ cwd — your cwd is not the project root, and a self-resolved pool is the wrong 
 ```bash
 export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
 : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore relocate --state-dir "$STATE_DIR"
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore relocate --state-dir "$STATE_DIR"
 ```
 
 `--chore` is not optional (janitor#275): without it the claim is FIFO-by-age and chore-BLIND,
@@ -38,7 +38,7 @@ report line, close nothing, return.
 ## The candidate step (the scheduler's own predicate, never your own scan)
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_candidates_cli.py" \
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
   --intervention relocate --scope <scope-from-claim> --root <root-from-claim>
 ```
 

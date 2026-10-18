@@ -14,7 +14,7 @@ session is already saved and just re-runs the OAuth MINT for all of them in
 one pass — the fleet-wide "top up before a crisis" flow the periodic
 `oauth-login-topup` nudge points at.
 
-Backing script: `$CLAUDE_PLUGIN_ROOT/scripts/capture_all_logins.py`. It lists
+Backing script: `${CLAUDE_PLUGIN_ROOT}/scripts/capture_all_logins.py`. It lists
 the roster via `rotator.py known-emails`, then runs
 `slot_capture_browser.py <email>` for each account in sequence, printing
 progress per account.
@@ -33,14 +33,14 @@ progress per account.
 1. **Preflight.** Confirm the backing script exists.
 
    ```bash
-   [ -f "$CLAUDE_PLUGIN_ROOT/scripts/capture_all_logins.py" ] || { echo "missing: capture_all_logins.py"; exit 1; }
+   [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/capture_all_logins.py" ] || { echo "missing: capture_all_logins.py"; exit 1; }
    ```
 
 2. **Run the walk.** One call — the script itself prints per-account progress
    and returns non-zero if any account failed:
 
    ```bash
-   env -u CLAUDE_PLUGIN_DATA uv run "$CLAUDE_PLUGIN_ROOT/scripts/capture_all_logins.py"
+   env -u CLAUDE_PLUGIN_DATA uv run "${CLAUDE_PLUGIN_ROOT}/scripts/capture_all_logins.py"
    ```
 
 3. **Report the outcome.** On full success, tell the user every account is
@@ -54,7 +54,7 @@ progress per account.
    every slot now holds a refresh-bearing token:
 
    ```bash
-   env -u CLAUDE_PLUGIN_DATA python3 "$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator/rotator.py" list
+   env -u CLAUDE_PLUGIN_DATA python3 "${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotator.py" list
    ```
 
 ## Scope
@@ -66,9 +66,9 @@ rotate the live account.
 
 ## Resources
 
-- `$CLAUDE_PLUGIN_ROOT/scripts/capture_all_logins.py` — the walker (this
+- `${CLAUDE_PLUGIN_ROOT}/scripts/capture_all_logins.py` — the walker (this
   skill's only moving part).
-- `$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator/` — the engine (`rotator.py`,
+- `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/` — the engine (`rotator.py`,
   `slot_capture_browser.py`).
 - `/janitor-refresh-cc-logins` — run this FIRST for any account whose saved
   session has lapsed (this skill cannot log a human in).

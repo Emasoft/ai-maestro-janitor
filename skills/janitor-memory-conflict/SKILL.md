@@ -51,7 +51,7 @@ hard-gated). Full execution-context rationale and the DEMOTE/DELETE overview:
    ```bash
    export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
    : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore conflict --state-dir "$STATE_DIR"
+   uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore conflict --state-dir "$STATE_DIR"
    ```
 
    Prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
@@ -87,8 +87,14 @@ candidate DEMOTE. **(F) Contradictory** (exactly one is correct now) → DEMOTE 
 superseded one, or DELETE only if the wrong one is provably FALSE *and* has
 provenance (→ the gates).
 
-**WRITE DOWN EVERY `skip`** (else the librarian re-surfaces it forever) — command +
-convention: [conflict-protocol § Stage 1](references/conflict-protocol.md#stage-1--classify-the-conflict).
+**WRITE DOWN EVERY `skip`** (else the librarian re-surfaces it forever) — convention:
+[conflict-protocol § Stage 1](references/conflict-protocol.md#stage-1--classify-the-conflict). Command:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention conflict --scope "$SCOPE" --root "$SCOPE_ROOT" \
+  --page <a.md> --page <b.md> --reason "<why these two are NOT in conflict>"
+```
 
 ### Stage 2 — source the WHY + resolve the repo (one agent, READ-ONLY)
 Resolve provenance via the FIXED chain (never inferred), repo from provenance NOT a
@@ -161,8 +167,8 @@ Boundary + the PROJECT-scope opt-in:
 after (details, incl. the exit-2 retry: [close-claim.md](references/close-claim.md)):
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
 ## Resources

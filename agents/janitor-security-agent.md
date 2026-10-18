@@ -23,8 +23,10 @@ A sub-agent spawned this way gets the standard context, not 1M (the spawn option
 ## Your security domains (load ONLY the one you're dispatched for)
 
 Each launch names exactly ONE domain (or `full-sweep`). **Load ONLY that domain's skill
-dynamically** — Read and follow `$CLAUDE_PLUGIN_ROOT/skills/<name>/SKILL.md` EXACTLY (it is
-your detailed, authoritative procedure) — and do NOT load the other domains' skills. Loading
+dynamically** — LOAD it with the Skill tool (`ai-maestro-janitor:<name>`) and follow it
+EXACTLY (it is your detailed, authoritative procedure). NEVER read its SKILL.md from disk: only
+Skill-tool loading substitutes `${CLAUDE_PLUGIN_ROOT}` with the real plugin path, a disk read
+leaves it literal (TRDD-JQLBZMMN). Do NOT load the other domains' skills. Loading
 just the one skill your domain needs is how you stay token-light. Then return:
 
 - **SUPPLY-CHAIN** — dependency advisories (npm/PyPI/pnpm vs GHSA + OSV) → `janitor-supply-chain-watcher`

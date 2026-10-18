@@ -120,11 +120,9 @@ This is a `Workflow` script. The shape (full code + prompts in the sibling
 you keep to yourself costs a full dispatch to re-derive next pass — the same "no", at
 ~170k–260k tokens, forever. Record it:
 
-```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention conflict --scope "$SCOPE" --root "$SCOPE_ROOT" \
-  --page <a.md> --page <b.md> --reason "<why these two are NOT in conflict>"
-```
+Run the `memory_refusal_cli.py record` command exactly as written in SKILL.md (Stage 1); it
+carries the resolved plugin path, which this disk-read file cannot (TRDD-JQLBZMMN). Its
+arguments are `--intervention conflict --scope --root`, one `--page` per page, and `--reason`.
 
 Also write the verdict into the pages as a cross-linked See-also when a human would
 hit the same confusion. The refusal re-arms by itself when either page's bytes

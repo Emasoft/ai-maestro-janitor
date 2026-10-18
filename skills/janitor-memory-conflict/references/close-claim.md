@@ -5,8 +5,7 @@ alive here). `complete` runs later with STATE_DIR RETYPED as the literal path fr
 prompt, and only adds `--chore conflict --scope <literal scope from the claim step's output>`
 if it exits 2 saying more than one claim is current:
 
-```bash
-DC="$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
-uv run --script --quiet "$DC" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$DC" complete --state-dir "$STATE_DIR"
-```
+The two commands (`set-report`, then `complete`) are in the report-closing step of this
+chore's SKILL.md, where `${CLAUDE_PLUGIN_ROOT}` is already resolved to the absolute plugin
+path. Run them exactly as written there. This file is read from disk, so a plugin-root
+variable written here would stay literal (TRDD-JQLBZMMN).

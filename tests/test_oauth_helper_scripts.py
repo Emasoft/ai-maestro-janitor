@@ -85,7 +85,7 @@ def test_refresh_logins_skill_shipped() -> None:
     assert body.startswith("---") and "description:" in body[:600], "skill needs frontmatter with a description"
     assert "name: janitor-refresh-cc-logins" in body[:600], "skill name field must be janitor-refresh-cc-logins"
     assert "claude" not in _skill_name_field(body), "skill NAME must not contain the reserved word 'claude'"
-    assert "$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator" in body, "skill must drive the in-plugin helpers"
+    assert "${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator" in body, "skill must drive the in-plugin helpers"
     # The pre-rename command form must be gone (one source of truth).
     assert not (REPO / "commands" / "janitor-refresh-claude-logins.md").is_file(), (
         "the pre-rename command must not coexist with the skill"

@@ -91,9 +91,9 @@ Per the spec's "Path traversal limitations" section, the design is fully complia
 
 **See also.**
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatcher-stub.py` — the stub source.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — the per-version dispatcher the stub `execv`'s into.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the drift detectors `dispatch.py` invokes each fire.
+- `scripts/dispatcher-stub.py` (under the plugin root) — the stub source.
+- `scripts/dispatch.py` (under the plugin root) — the per-version dispatcher the stub `execv`'s into.
+- `scripts/detectors/` (under the plugin root) — the drift detectors `dispatch.py` invokes each fire.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files (separate from `${CLAUDE_PLUGIN_DATA}`).
 - Top-level README — user-facing summary of the heartbeat, detectors, and configuration.
 

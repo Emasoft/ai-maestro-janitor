@@ -135,10 +135,10 @@ hits by score. A hit is one of two shapes:
 notes/lessons/see-also are **per-ATOM** (tied to the atom by its inline `[^N]` footnote
 references — the atom's see-also is a footnote whose def sits under the page's `# See also`
 section), so an atom hit is self-contained. The atom grammar + record shape live in
-`$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` ("Atoms — per-fact recall").
+`${CLAUDE_PLUGIN_ROOT}/scripts/memgrep/SKILL.md` ("Atoms — per-fact recall").
 
 If memgrep is not installed, install once (it ships in this plugin):
-`cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"`.
+`cargo install --path "${CLAUDE_PLUGIN_ROOT}/scripts/memgrep"`.
 
 ## The lessons come back for free
 
@@ -219,7 +219,7 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
   - Atoms — first-class body elements (block-properties)
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" recall
   law + schema + dual-test method.
-- `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
 - `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) — the
   write legs; run RECALL before both. They now author via `memgrep new-mem-topic`
   (was: `new-page`) / `new-mem-atom` (was: `add-atom`) / `update-mem-atom --lesson`

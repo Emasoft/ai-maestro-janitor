@@ -50,7 +50,7 @@ so SPLIT recursion iterates ACROSS heartbeat cycles, never nested in-turn.
 ## Preconditions (check first; abstain cleanly if any fails)
 
 ```bash
-PLUGIN="$CLAUDE_PLUGIN_ROOT"   # this plugin's scripts live here
+PLUGIN="${CLAUDE_PLUGIN_ROOT}"   # this plugin's scripts live here
 ```
 
 If `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off` or the janitor kill-switch
@@ -73,7 +73,7 @@ the guard on the next line refuses to run without it.
 ```bash
 export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
 : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore split --state-dir "$STATE_DIR"
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" --chore split --state-dir "$STATE_DIR"
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
@@ -231,8 +231,8 @@ that just wrote `$REPORT_FILE`; `complete` runs right after. Details:
 [close-claim.md](references/close-claim.md).
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
 If `complete` exits 2 saying more than one claim is in flight, re-run it adding `--chore split

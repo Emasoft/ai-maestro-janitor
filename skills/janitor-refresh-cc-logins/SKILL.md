@@ -29,7 +29,7 @@ the `oauth-rotation-renew-reauth` PROJECT memory page (the ROTATE → RENEW → 
 Scripts (in the plugin, beside the rotator engine):
 
 ```bash
-ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
+ROT="${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator"
 #   $ROT/rotator.py               — the engine (read-only subcommands + the RENEW tick)
 #   $ROT/open-login.sh <email>    — open a clean REAL Chrome on the account's profile (blocks until Cmd+Q)
 #   $ROT/check-login.sh <email>   — verify the profile saved a LIVE session (exit 0 = saved)
@@ -58,7 +58,7 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    anything is missing, tell the user exactly what and stop.
 
    ```bash
-   ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
+   ROT="${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator"
    for f in rotator.py open-login.sh check-login.sh slot_capture_browser.py lifetime-status.sh; do
      [ -f "$ROT/$f" ] || { echo "missing: $ROT/$f"; exit 1; }
    done
@@ -150,7 +150,7 @@ Rotate deliberately with `/janitor-rotate-account-to`; toggle daemon-managed rot
 
 ## Resources
 
-- `$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator/` — the engine (`rotator.py`, `reauth.py`,
+- `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/` — the engine (`rotator.py`, `reauth.py`,
   `slot_capture_browser.py`, …) + the helpers (`open-login.sh`, `check-login.sh`,
   `lifetime-status.sh`).
 - `/janitor-auto-manage-oauth-on` / `-off` — toggle daemon-managed rotation.

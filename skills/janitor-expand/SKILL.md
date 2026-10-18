@@ -26,13 +26,13 @@ The compacted context's LAST line carries the full expand command, path
 included:
 
 ```
-pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /path/to/the/old/session/transcript.jsonl <id>
+pointers expand with: uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/jev_compact.py" expand --transcript /path/to/the/old/session/transcript.jsonl <id>
 ```
 
 Replace `<id>` with a pointer's id to expand it:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand \
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/jev_compact.py" expand \
   --transcript /path/to/the/old/session/transcript.jsonl a1b2c3-...-uuid:4
 ```
 
@@ -44,7 +44,7 @@ Or replace `<id>` with `--list --grep TEXT` to list every item's id instead
 (optionally filtered by `TEXT`), when you don't have an id yet:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand \
+uv run --script "${CLAUDE_PLUGIN_ROOT}/scripts/jev_compact.py" expand \
   --transcript /path/to/the/old/session/transcript.jsonl --list --grep auth
 ```
 
