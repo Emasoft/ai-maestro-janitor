@@ -3,7 +3,7 @@ trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
 column: todo
 created: 2026-09-17T20:12:13+0200
-updated: 2026-10-05T10:56:59+0200
+updated: 2026-10-18T02:55:11+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -49,3 +49,4 @@ retro-fitted from commit subjects; original criteria unreadable (no STATE block)
 - This supersedes the Description's "Do NOT touch created-by or approval-judge" and "Do NOT touch the prose Approval log lines": the name is relabelled to Emasoft (same person, public identity), so no provenance is falsified. Root cause is in ai-maestro scripts/trddgrep.mjs:1096 and :1278 (author/approver default to process.env.USER); until fixed there, every trddgrep new passes --author Emasoft and every move passes --approver Emasoft.
 - Historical "by Emasoft" approval-log lines include moves made by Claude sessions under the old $USER default; they are not individually attributable.
 - The relabel bumped updated: on cards whose Approval-log lines were edited (trddgrep edit has no --no-bump); those bumps carry no change of fact. The blocker-probe "never run through a shell" claim was checked against trddgrep's source only, not the janitor detectors.
+2026-10-18 CHECK (main session): no card created after 2026-09-24 carries the OS login in assignee, current-owner, created-by or approval-judge (grep over design/tasks and design/proposals; 2 cards remain, D7RLXAN1 and IYNS7H83, both created 2026-09-24, login only in created-by and approval-judge). trddgrep move now refuses to run without --approver or AID_AUTH ('refusing to guess who is writing'), so the $USER default this card blamed appears fixed for moves; whether 'new' still defaults --author was not tested. Relabelling the two cards' fields to Emasoft per the owner directive was REFUSED by trddgrep edit: 'created-by: is write-once' and 'approval-judge: is written only by the create/approve code paths'. The archived 350W5II2 is frozen. These three need the owner's call: accept them as historical, or a tool-level override upstream.
