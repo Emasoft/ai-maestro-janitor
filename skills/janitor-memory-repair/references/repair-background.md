@@ -215,3 +215,12 @@ per pass, IN PLACE through memgrep's gated write verbs. Does NOT create pages
 (`/janitor-memory-consolidate`), split oversized pages (`/janitor-memory-split`),
 or resolve contradictions (`/janitor-memory-conflict`). Never moves a page across
 scopes. PROJECT-scope editing is opt-in, never pushed standalone.
+
+
+## State after a refused replace
+
+The live page is untouched by a refused replace, and a pre-transaction verb fix (link/desc)
+already landed and is NOT rolled back; the page is left with that fix applied and
+its remaining defects still open, exactly as
+[references/pre-transaction-verb-fixes.md](pre-transaction-verb-fixes.md#pre-replace-verb-fixes-run-first-live-per-candidate-page)
+describes.
