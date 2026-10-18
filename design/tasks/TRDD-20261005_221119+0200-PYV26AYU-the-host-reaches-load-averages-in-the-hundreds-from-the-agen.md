@@ -4,7 +4,7 @@ title: The host reaches load averages in the hundreds from the agent fleet itsel
 column: testing
 status: tasked
 created: 2026-10-05T22:11:19+0200
-updated: 2026-10-18T03:49:39+0200
+updated: 2026-10-18T04:35:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -27,6 +27,7 @@ Load average 232 on 2026-10-05 and 335 to 403 on 2026-10-02. Find the main contr
 ## Approval log
 
 - 2026-10-05T22:11:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-18 board drain: stays in testing. 74ce4320 (and its prerequisite 763ccf10) are not in v3.8.11, so the DETECT line 'top-cpu at load' cannot appear before a release. After the first recorded episode the card still owes the unanswered question of what the janitor can throttle: a decision, not a blocker yet.
 
 ## Corrections
 

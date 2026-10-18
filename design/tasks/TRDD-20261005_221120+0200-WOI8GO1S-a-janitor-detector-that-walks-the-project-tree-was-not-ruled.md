@@ -1,10 +1,10 @@
 ---
 trdd-id: WOI8GO1S
 title: A janitor detector that walks the project tree was not ruled out for a project with a very large ignored folder
-column: testing
+column: blocked
 status: tasked
 created: 2026-10-05T22:11:20+0200
-updated: 2026-10-18T03:49:38+0200
+updated: 2026-10-18T04:35:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -17,6 +17,10 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:20+0200
 eht: [XRT9LOQL]
 implementation-commits: [0d42c65f]
+blocked-by: [XDH7KPK2]
+blocker-probe: trddgrep --porcelain show XDH7KPK2 | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
+pre-block-column: testing
 ---
 
 # A janitor detector that walks the project tree was not ruled out for a project with a very large ignored folder
@@ -28,6 +32,7 @@ In a project holding a folder of more than 100 GB, heartbeat fires were cleared 
 ## Approval log
 
 - 2026-10-05T22:11:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T04:35:51+0200 — column → blocked by main-agent@ai-maestro-janitor. its only remaining check reads another project's dispatch.log, which waits on the owner's answer in TRDD-XDH7KPK2 (human_review); it also needs a release (0d42c65f is not in v3.8.11)
 
 ## Findings
 
