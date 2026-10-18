@@ -4,7 +4,7 @@ title: A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty an
 column: todo
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-10-18T01:41:43+0200
+updated: 2026-10-18T02:16:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T08:17:30+0200
+implementation-commits: [2cc76e87]
 ---
 
 # A memory agent spawned by the heartbeat finds CLAUDE_PLUGIN_ROOT empty and sets it by hand
@@ -37,3 +38,4 @@ DOCS (claude-code-guide, code.claude.com plugins manifest reference, env-var tab
 REVISED PLANNED FIX (supersedes the line above it): (1) convert every bare $CLAUDE_PLUGIN_ROOT in skills/, agents/ and commands/ to ${CLAUDE_PLUGIN_ROOT}, so loaded content carries the absolute path; (2) the memory agent loads its chore skill through the Skill tool (substituted on load), never by reading SKILL.md from disk, and its definition says so; (3) a test rejects the bare form in skills/, agents/ and commands/. FIRST STEP before (2): spawn the memory agent with a prompt that only reports how it got its skill text and what ${CLAUDE_PLUGIN_ROOT} resolved to in its own definition.
 PROBE RESULT (memory agent type spawned read-only, 2026-10-18 ~01:55; its own answers, quoted by the main session): (1) its definition line reads '$CLAUDE_PLUGIN_ROOT/skills/<name>/SKILL.md' literally; (2) its memory_dispatch_claim.py line is literal $CLAUDE_PLUGIN_ROOT; (3) echo of ${CLAUDE_PLUGIN_ROOT} in its Bash printed 'root=[]'; (4) the janitor-memory-split skill loaded by the Skill tool INSIDE the subagent kept the bare $CLAUDE_PLUGIN_ROOT literal, while in the same loaded skills the braced ${CLAUDE_PLUGIN_ROOT} lines (memory_candidates_cli.py, e.g. skills/janitor-memory-repair/SKILL.md:72) arrived as the absolute 3.8.11 path. CAUSE CONFIRMED: the braced form is substituted in skill text loaded by the Skill tool, also from a subagent; the bare form is never substituted; the shell variable is empty. This answers the review's two open premises (Skill tool substitutes inside a subagent; agent-definition bare form arrives literal). Whether the braced form is substituted in an AGENT definition body is still unobserved (no braced line there today).
 FIX, as revised and narrowed: classify each of the 55 bare uses (command line to run, prose path reference, or a real shell variable that a hook or an earlier export sets) and convert the first two kinds to the braced form; none of the export or assignment kind was found by a grep for 'export CLAUDE_PLUGIN_ROOT' or 'CLAUDE_PLUGIN_ROOT='. Then verify on a probe that the agent definition's braced lines arrive absolute; if they do not, the agent definition tells the agent to take the root from its loaded skill text. Add a test that rejects the bare form.
+BUILT in 2cc76e87 (braced form in loaded Markdown, pointers in disk-read references, agents load skills with the Skill tool, guard test). OPEN BLOCKER: skills/janitor-memory-repair/SKILL.md is ~5003 estimated tokens after its three brace swaps; CPV strict reports one MAJOR (limit 5000). fastedit refused every shortening edit: replacing section 'PRE-REPLACE verb fixes — REQUIRED when applicable' with a shorter pointer was rejected after 9 retries ('model hallucinated on 1 chunk ... unmentioned original line dropped'). Planned trim: replace the duplicated control-flow summary in that section (covered by references/pre-transaction-verb-fixes.md lines 10, 36, 49-55) with one pointer sentence; an uncommitted copy of moved text sits at the end of references/repair-background.md. NEXT: the trim (needs a writer fastedit accepts, or the owner's leave to use the Edit tool once), then a probe that the agent definition's braced lines arrive absolute, then a release.
