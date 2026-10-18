@@ -1,10 +1,10 @@
 ---
 trdd-id: KXZJOZBQ
 title: Janitor-typed text stranded by an earlier send blocks every later injection
-column: todo
+column: human_review
 status: tasked
 created: 2026-10-18T11:11:22+0200
-updated: 2026-10-18T11:11:22+0200
+updated: 2026-10-18T12:08:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,5 @@ Split from TRDD-S8BZI761 (review of its round-2 plan, 2026-10-18). S8BZI761's fi
 ## Approval log
 
 - 2026-10-18T11:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-18 12:08 OWNER DECISION NEEDED. Investigation: reports/board/20261018_120633+0200-KXZJOZBQ-investigate.md. A crumb-based clear at rule 1 was designed and rejected by review and measure: (1) it would NOT have fixed 10-13 — the crumb is rewritten only when typing, so after the 13:41 strand it kept that epoch and expired at ~15:41 (TTL 7200 s), an hour before the blocked /clear sends began ~16:40; (2) it can delete the owner's own text — an owner who retypes or pastes the janitor's goal and pauses matches the crumb exactly (no minimum length for exact matches); (3) it amends the owner's verbatim rule 1 of 2026-08-02 (inject only into an EMPTY field; never delete what the user typed), on every inject_until_sent path. Options for the owner: (A) keep rule 1 unchanged and rely on reporting the stuck state, already logged since 59c6a5ac ('inject clear:'), plus the strand no longer forming after 8dae3e5e and 59c6a5ac; (B) a narrower 'stranded record': when _clear_ours gives up, record the exact leftover text, pane and time; rule 1 clears only a field byte-identical (after space normalization) to that record and only with nobody typing — no TTL dependence, an owner retyping a goal from its start never matches a recorded tail, but text stranded by the released version is not covered; (C) the crumb design with the owner-retype risk accepted explicitly. Recommendation: A now, B only if stuck-field reports appear after a release.
+- 2026-10-18T12:08:56+0200 — column → human_review. owner decision on rule 1 (options A/B/C on the card)
