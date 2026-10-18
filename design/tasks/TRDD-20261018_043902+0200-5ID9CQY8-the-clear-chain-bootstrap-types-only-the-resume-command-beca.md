@@ -4,7 +4,7 @@ title: The clear chain bootstrap types only the resume command because the cron 
 column: todo
 status: tasked
 created: 2026-10-18T04:39:02+0200
-updated: 2026-10-18T04:39:24+0200
+updated: 2026-10-18T08:56:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -31,6 +31,7 @@ Item C5 of TRDD-K9AHY1ZB Release 2, never built and never carded until 2026-10-1
 
 - `scripts/clear_trigger.py:82` still reads `_BOOTSTRAP_CMDS: tuple[str, ...] = (ARM_CMD, RESUME_CMD)`, exported as `BOOTSTRAP_CMDS` for other triggers via `spawn_shrink_chain`. No commit names C5.
 - Evidence that a cron survives `/clear`: after the 2026-10-18 03:44 janitor clear, the re-arm's `CronDelete` of the prior heartbeat id 19df26ee SUCCEEDED ("Cancelled job 19df26ee"), so that cron still existed after the clear. `scripts/handoff_clear_verify.py` labelled the same id change "destroyed by /clear, recreated by re-arm", which the successful delete contradicts. That success is evidence because CronDelete fails not-found for an id that no longer exists (the janitor-arm skill relies on exactly that), and the id cannot have been re-created: the SessionStart self-check only re-plumbs when no heartbeat exists and would store a new id. One observation only, on Claude Code 2.1.302; a later Claude Code version re-opens the question.
+- 2026-10-18 08:10 clear (Jev compaction, session 77e6aba3 to 33ef3d73): the re-arm's CronDelete of the prior heartbeat id 590dbe30 SUCCEEDED ('Cancelled job 590dbe30.'), so that cron survived this /clear too; handoff_clear_verify.py again reported it as 'destroyed by /clear, recreated by re-arm' (reports/continuity-build/20261018_081056+0200-handoff-clear-verify.md). Second observation after the 03:44 one; box 1 asks for at least two more beyond 03:44, so one more is owed.
 
 ## Acceptance
 
