@@ -1,10 +1,10 @@
 ---
 trdd-id: XSO4N6AW
 title: The CI Validate job may run the validator without its integrity check ever verifying anything
-column: verify_assumptions
+column: blocked
 status: tasked
 created: 2026-10-10T13:05:14+0200
-updated: 2026-10-18T03:30:56+0200
+updated: 2026-10-18T03:31:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T13:05:14+0200
 unblock-when: [issue:Emasoft/claude-plugins-validation#243]
 blocked-by: []
+review-after: 2026-11-18
+pre-block-column: verify_assumptions
 ---
 
 # The CI Validate job may run the validator without its integrity check ever verifying anything
@@ -24,6 +26,7 @@ blocked-by: []
 ## Approval log
 
 - 2026-10-10T13:05:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T03:31:05+0200 — column → blocked by main-agent@ai-maestro-janitor. verified; waits on upstream claude-plugins-validation issue 243 (unblock-when), re-check by 2026-11-18
 
 ## Question
 
