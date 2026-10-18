@@ -1,10 +1,10 @@
 ---
 trdd-id: 85NZX5RJ
-title: A janitor-typed goal longer than one row is never sent after a clear
+title: A janitor-typed goal longer than one row failed to send in every logged clear chain
 column: todo
 status: tasked
 created: 2026-10-18T03:51:41+0200
-updated: 2026-10-18T03:51:52+0200
+updated: 2026-10-18T03:54:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -20,11 +20,11 @@ approval-datetime: 2026-10-18T03:51:41+0200
 parent-trdd: K9AHY1ZB
 ---
 
-# A janitor-typed goal longer than one row is never sent after a clear
+# A janitor-typed goal longer than one row failed to send in every logged clear chain
 
 ## Symptom
 
-Every janitor-typed `/goal` re-send after a clear has failed in all 3 logged attempts in `.janitor/logs/clear-trigger.log` (2026-10-05 03:17 s:20d63f12, 2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407). Each logged `not sent: gave up after 3600s (field not empty (<text>))`, and `<text>` is the TAIL of the goal itself, never the head. A successful chain logs `chain: OK` without the goal text, so this log cannot show whether any goal chain ever succeeded: 3 logged failures, success not observable here. No `inject` line between the clear and the give-up shows a typing or settle failure.
+All 3 logged janitor-typed `/goal` re-sends after a clear failed, in `.janitor/logs/clear-trigger.log` (2026-10-05 03:17 s:20d63f12, 2026-10-13 14:41 s:3a6129dd, 2026-10-14 02:04 s:1e85b407). Each logged `not sent: gave up after 3600s (field not empty (<text>))`, and `<text>` is the TAIL of the goal itself, never the head. A successful chain logs `chain: OK` without the goal text, so this log cannot show whether any goal chain ever succeeded: 3 logged failures, success not observable here. No `inject` line between the clear and the give-up shows a typing or settle failure.
 
 ## Measured so far (2026-10-18)
 
@@ -37,7 +37,7 @@ Every janitor-typed `/goal` re-send after a clear has failed in all 3 logged att
 1. The capture does not contain the marker row (cursor/scroll or a capture line limit).
 2. The marker row is excluded by `_is_choice_row` or the marker is not at the start of the row once the text wraps.
 3. The text already sat in the field before the inject loop ran (an earlier step typed it), so the first read saw a field that was not ours-only. If this one is confirmed, the defect is in the TRDD-B3PY3HV7 chain code and B3PY3HV7 goes back to dev instead of waiting here.
-4. The continuation row carries a marker-like glyph (for example a cursor glyph at the row start), so the last-marker rule lands on row 2 and returns exactly the tail. This fits the evidence best and differs from 2.
+4. The continuation row carries a marker-like glyph (for example a cursor glyph at the row start), so the last-marker rule lands on row 2 and returns exactly the tail. It would produce exactly the tail and is the only hypothesis that keeps the head row in the capture; 1 and 2 also produce exactly the tail. Not ranked: none is measured.
 
 ## Acceptance
 
