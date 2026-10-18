@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-10-17T03:48:09+0200
+updated: 2026-10-18T03:16:22+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -248,7 +248,7 @@ bounds that **sum** — only individual subprocess workloads are capped
       level out. These boxes were written before the wider measurement and were not
       revisited when the STATE was corrected; that is how a retracted premise survives, in
       the section nobody re-reads.
-- [ ] Re-measure after the change with the same method (per-task `starting` markers,
+- [x] Re-measure after the change with the same method (per-task `starting` markers,
       body subtracted) and show the stall count falling. **NOT "one log snapshot"** — same
       reason as above: one snapshot is what hid the 100 s+ bodies in the first place. Use a
       window wide enough to contain them, and say which window.
@@ -518,6 +518,7 @@ answer is not a better guess; it is naming the missing artifact.**
   carry a design decision it had no criteria for. The split is the fix; noticing the
   scope drift six reviews in is the lesson.
 - 2026-09-16 21:57 — interim (reports/board-drain/20260916_215703+0200-QJ5LP4W2-budget-evidence.md): 12:40→21:54, 495 beats, 15 budget-exceeded beats in two clusters; oauth-rotator-tick and fleet-stop ran in all 495; max tick gap 220 s; no starvation seen. Not box 4: 9 h not 24 h, and beat gaps are not the card's per-task starting-marker stall count. The running daemon (pid 20757, started 10:04) predates the 12:40 3.5.5 install; daemon.py is byte-identical across the 3.5.1/3.5.4/3.5.5 caches (measured). Re-run the stall method after 2026-09-17 12:40.
+2026-10-18 BOX 4 RE-MEASURE (worker-read, method of TRDD-8BXMNQ4T quoted in its report docs_dev/20261018_031558+0200-QJ5LP4W2-box4-measure.md; script scripts_dev/qj5lp4w2_measure.py). Window 2026-10-16T03:24 to 2026-10-18T03:15 (47.85 h, daemon.log.1 + daemon.log), one daemon restart 10-16 12:21 to 12:42. Card-method stalls (wait over 60 s after subtracting the body): 0 of 2590 rotator gaps excluding the restart gap (1 of 2591 including it). Foreground budget exceeded: 11.8/h in the 8.95 h before the restart (cold-cache-clear bodies of about 200 s, session-liveness 231 s), 1.14/h after it, against about 6/h before 3.7.0 and 1.2/h after. Raw rotator gaps over 120 s: 42 of 2590 (1.7 percent, max 249 s), above the 0.08 percent measured after 3.7.0 but far below the 8.3 percent before it. Rotation-esc pane actuation cost: NOT MEASURABLE from these logs (0 completed actuations; 20 'cannot read the pane' skips). So box 4's two clauses hold: the stall count stays down, and the actuation cost is declared not measurable. NOT shown: why raw gaps over 120 s rose from 0.08 to 1.7 percent; whether the pre-restart daemon was the same build.
 
 ## Approval log
 
