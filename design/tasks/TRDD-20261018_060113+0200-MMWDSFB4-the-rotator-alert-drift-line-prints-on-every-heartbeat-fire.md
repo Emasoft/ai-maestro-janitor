@@ -1,10 +1,10 @@
 ---
 trdd-id: MMWDSFB4
 title: The rotator alert drift line prints on every heartbeat fire
-column: todo
+column: design
 status: tasked
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T06:06:20+0200
+updated: 2026-10-18T06:27:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,7 +34,7 @@ scripts/dispatch.py:2215-2234 `_phase_rotator_alert` prints `rotator_alert.drift
 - The TRDD-5CCRBM1H test must keep passing.
 
 After this fix the absence of the line no longer means a condition cleared; a session that needs to know whether every account is at its limit reads rotation-stuck.json (fresh within 1 h).
-Status: this design is PROPOSED, subject to its own review round before any implementation.
+The fix design above has not had its own review round yet; it gets one before any implementation, which is why the card sits in the design column.
 
 ## Acceptance
 - [ ] An unchanged active condition prints once per notification cadence, not on every fire
@@ -45,3 +45,4 @@ Status: this design is PROPOSED, subject to its own review round before any impl
 ## Approval log
 
 - 2026-10-18T06:01:13+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T06:27:38+0200 — column → design. fix design not yet reviewed; todo only after its review round

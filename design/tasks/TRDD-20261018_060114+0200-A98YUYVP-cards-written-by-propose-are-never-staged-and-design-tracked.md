@@ -4,7 +4,7 @@ title: Cards written by propose() are never staged and design-tracked only warns
 column: backburner
 status: tasked
 created: 2026-10-18T06:01:14+0200
-updated: 2026-10-18T06:11:11+0200
+updated: 2026-10-18T06:27:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -47,3 +47,4 @@ Owner question (primary): may the janitor stage files in the git index of EVERY 
 
 - 2026-10-18T06:01:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-18T06:06:21+0200 — column → backburner. needs a USER decision on fleet-wide index writes
+- 2026-10-18 — correction: the MANDATE line above was self-issued against a user floor and is void; approved and mandate are now false. The card waits for the owner's decision on fleet-wide index writes.

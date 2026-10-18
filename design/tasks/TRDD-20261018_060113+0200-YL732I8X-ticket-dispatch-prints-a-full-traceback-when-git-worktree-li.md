@@ -4,7 +4,7 @@ title: ticket-dispatch prints a full traceback when git worktree list times out
 column: testing
 status: tasked
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T06:26:31+0200
+updated: 2026-10-18T06:27:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,10 +35,11 @@ KNOWN AND STILL UNCOVERED by this fix (same path, same unhandled RuntimeError): 
 2026-10-18: born in dev against the brief (it should have started in todo); the work lands with this card's first commit. The raised type is now trdd_common.GitRootError, a RuntimeError subclass; no DIRECT caller on this path (files naming trdd_files, design_roots or local_design_root) has an except clause catching the old TimeoutExpired around a design-root call; of the known INDIRECT callers, daemon.py:2813 wraps issue_catalog in contextlib.suppress(Exception), dispatch.py:3123 sits inside the outer try of _phase_crash_loop_rollback whose except Exception is at :3161, so neither behaves differently (dispatch.py:756 calls tickets.open_dedupe_keys, but tickets.py does not import trdd_common, so it is not on this path). Other indirect callers were not checked.
 
 ## Acceptance
-- [ ] A git hang makes ticket-dispatch exit 1 with one stderr line and no Traceback
-- [ ] Tickets already collected still print
-- [ ] A real test (no mocks of the code under test) fails before and passes after
-- [ ] _main_checkout_root raises RuntimeError (not TimeoutExpired, no returned path) on a worktree-list timeout
+- [x] A git hang makes ticket-dispatch exit 1 with one stderr line and no Traceback
+- [x] Tickets already collected still print
+- [x] A real test (no mocks of the code under test) fails before and passes after
+- [x] _main_checkout_root raises RuntimeError (not TimeoutExpired, no returned path) on a worktree-list timeout
+Evidence 2026-10-18 (c7b73d86): boxes 1-2 by tests/test_ticket_dispatch.py::test_a_hung_git_is_one_stderr_line_and_exit_1_not_a_traceback; box 3 by the same test failing on the pre-fix code on its Traceback assertion (the unit test fails there only by the missing GitRootError symbol); box 4 by ::test_main_checkout_root_raises_gitrooterror_when_worktree_list_hangs (GitRootError is a RuntimeError subclass). Full gate 18,617 passed, 2 skipped.
 
 ## Approval log
 
