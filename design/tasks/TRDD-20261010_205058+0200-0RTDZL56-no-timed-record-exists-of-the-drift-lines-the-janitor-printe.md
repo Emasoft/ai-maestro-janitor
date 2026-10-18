@@ -1,10 +1,10 @@
 ---
 trdd-id: 0RTDZL56
 title: No timed record exists of the drift lines the janitor printed
-column: todo
+column: testing
 status: tasked
 created: 2026-10-10T20:50:58+0200
-updated: 2026-10-10T20:50:58+0200
+updated: 2026-10-18T03:00:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T20:50:58+0200
+implementation-commits: [ed848ae5]
 ---
 
 # No timed record exists of the drift lines the janitor printed
@@ -26,3 +27,8 @@ Found while working TRDD-IJR1OBZO on 2026-10-10: the repeats of the CPU runaway 
 ## Approval log
 
 - 2026-10-10T20:50:58+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T03:00:34+0200 — column → testing by main-agent@ai-maestro-janitor. built in ed848ae5, gate green; field check after a release
+
+## Implementation
+
+2026-10-18 BUILT in ed848ae5: dispatch.log gets 'drift printed: detector=<name> key=<12 hex>' for each printed detector drift line (key = sha256 of detector plus dedupe key, no day, so repeats group across days; text never written; dispatcher-own lines not covered). dispatch.log is the place (it already logs suppressions; state.log_line rotates it at 1 MiB). Per-fire cost: one log append per printed line, none for suppressed ones. Verify met in tests (printed leaves one record, suppressed none). Gate green: 18615 passed. Field check after a release: a repeated human-facing line shows as several records with the same key.
