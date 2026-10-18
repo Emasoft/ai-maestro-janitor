@@ -4,7 +4,7 @@ title: C31 — shrink repair skill
 column: testing
 status: tasked
 created: 2026-10-01T19:45:18+0200
-updated: 2026-10-18T04:35:49+0200
+updated: 2026-10-18T04:37:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -40,6 +40,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-09T02:17:10+0200 — column → dev. pulled 2026-10-09 with --clear-blocker: the blocker JD2QR5SQ is itself waiting on a DEPENDENT to run --apply-fixes in the field; C31 is that dependent — clearing is the sanctioned break of the circular gate, documented on both cards Cleared blocked-by (--clear-blocker override).
 - 2026-10-09T02:48:02+0200 — column → testing. landed 8ac50260; awaits the next real repair dispatch to exercise the new Pass-1 field use (event-gated, same shape as C22's own completion condition)
 2026-10-18 CORRECTION (board drain, measured this session with the repo's own counter, tests/test_rules_installer.py::_skill_body_claude_tokens): skills/janitor-memory-repair/SKILL.md body = 4999/5000 at 9b8b9314 (and at 1b273532), NOT 4965; the 4965/5000 (35 headroom) figure in the 2026-10-09 lines and the close list is WRONG, as 1b273532 (TRDD-IKZROIE5) already found: the Q5 restore is infeasible without a trim, not a one-commit add. At HEAD the body is 4986/5000 after 0ef70cd6 (TRDD-JQLBZMMN). Card stays in testing: its skill commits are not in v3.8.11, and acceptance is a real repair dispatch running Pass 1 after a release.
+2026-10-18: CLOSE LIST item 1 in the 2026-10-09 lines is SUPERSEDED by the correction above. The closing STATE line must say 4999/5000 at 9b8b9314 (4986 at HEAD) and that the Q5 restore is infeasible without a trim (1b273532), not 'file 4965/5000, Q5 one-commit add pending'.
 
 ## STATE
 

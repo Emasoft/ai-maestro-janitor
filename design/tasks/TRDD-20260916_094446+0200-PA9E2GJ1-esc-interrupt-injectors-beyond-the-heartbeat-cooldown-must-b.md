@@ -3,7 +3,7 @@ trdd-id: PA9E2GJ1
 title: Esc interrupt injectors beyond the heartbeat cooldown must be found and closed
 column: testing
 created: 2026-09-16T09:44:46+0200
-updated: 2026-10-18T04:35:49+0200
+updated: 2026-10-18T04:37:10+0200
 current-owner: session
 created-by: session
 task-type: spike
@@ -39,6 +39,7 @@ Evidence: owner complaint 2026-09-15; TRDD-6P0KUSO9 (dispatch.py _phase_interrup
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). HUMAN-ONLY: box 1 needs the owner to press Esc during a live turn, armed and disarmed, three times each. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 2026-10-10 DETECT (board drain step iv): NO DETECT POSSIBLE: human-only, needs the owner to press Esc during a live turn.
 2026-10-18 board drain: box 4 ticked. Its text ('Candidates 4 and 5 ... have NO fix landed yet') and the 2026-09-17 'no fix landed' lines are SUPERSEDED: TRDD-ECHOKVZC is complete (archived) and its fix 8059663a ('fleet wedge-recovery ESC honours the target session's user-interrupt cooldown') is in v3.8.11 (git tag --contains). Only box 1 stays open, and it is HUMAN-ONLY: the owner presses Esc during a live turn, armed and disarmed, three times each.
+2026-10-18 box-4 evidence, verified this session: candidate 5 needs no fix of its own. scripts/lib/session_liveness.py imports only re, collections.abc and datetime (no subprocess, no terminal_trigger, no fleet_inject), so it has no keystroke path; its wedge verdict is acted on by pane_actuate/fleet_inject, which 8059663a gated on the target session's interrupt cooldown (pane_actuate.py +47 lines, tests/test_pane_actuate.py +139).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 

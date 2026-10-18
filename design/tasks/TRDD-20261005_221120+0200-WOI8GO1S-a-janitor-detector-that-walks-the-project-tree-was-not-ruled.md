@@ -4,7 +4,7 @@ title: A janitor detector that walks the project tree was not ruled out for a pr
 column: blocked
 status: tasked
 created: 2026-10-05T22:11:20+0200
-updated: 2026-10-18T04:35:51+0200
+updated: 2026-10-18T04:37:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -33,6 +33,7 @@ In a project holding a folder of more than 100 GB, heartbeat fires were cleared 
 
 - 2026-10-05T22:11:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-18T04:35:51+0200 — column → blocked by main-agent@ai-maestro-janitor. its only remaining check reads another project's dispatch.log, which waits on the owner's answer in TRDD-XDH7KPK2 (human_review); it also needs a release (0d42c65f is not in v3.8.11)
+2026-10-18 note on the block: the probe uses the board's usual terminal set, so XDH7KPK2 ending cancelled, failed or superseded reads as cleared. If the owner's answer there is NO (no cross-project reads), this card does not unblock to testing: re-plan its DETECT so it runs in the big project's own session instead.
 
 ## Findings
 

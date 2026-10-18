@@ -1,10 +1,10 @@
 ---
 trdd-id: K9AHY1ZB
 title: Janitor clear keeps what native compaction keeps and resumes in one push
-column: blocked
+column: testing
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-10T20:11:50+0200
+updated: 2026-10-18T04:37:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,8 +18,8 @@ approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
 npt: [5MOX0FPO, DS3WDTPV, PHS3DIBD]
 eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
-blocked-by: [DS3WDTPV]
-pre-block-column: dev
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, K9AHY1ZB]
 blocker-holds-if: not-match:READY
 ---
@@ -330,6 +330,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-05T01:33:37+0200 — column → dev by main-agent@ai-maestro-janitor. Reverses the 2026-10-04 move to blocked. Measured 2026-10-05 on two scratch cards: after a blocker is closed, trddgrep why on the blocked card prints BLOCKED with no locally-resolvable blocker and never READY, and the card does not leave blocked by itself, so the probe not-match:READY would hold forever. dev is where the card linter lets a parent wait for its prerequisite cards Cleared blocked-by (--clear-blocker override).
 - 2026-10-07T02:27:25+0200 — column → blocked by main-agent@ai-maestro-janitor. blocked-by lists open cards 5MOX0FPO, DS3WDTPV; dev asserted active work
 - 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
+- 2026-10-18T04:37:09+0200 — column → testing by main-agent@ai-maestro-janitor. all npt complete (5MOX0FPO, DS3WDTPV, PHS3DIBD); the 2026-10-04 move to testing was reverted only for ORDER-NPT-VIOLATED, which no longer applies. Umbrella with no code in flight: waits on the clear-path field acceptance and its eht 7X9WXDK9 (testing), B3PY3HV7 (blocked on 85NZX5RJ), MMUSDJHQ (blocked) Cleared blocked-by (--clear-blocker override).
 
 ## STATE
 
@@ -343,6 +344,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-05 — prerequisite TRDD-PHS3DIBD has its root-cause fix landed (unpublished) and is in testing, waiting on the first janitor clear on a release that carries it. This umbrella stays blocked on that same live event and on its other prerequisites; it is NOT unblocked.
 2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers 5MOX0FPO, DS3WDTPV; the shipped parts of this umbrella ship independently.
 2026-10-07: This card does not gate the 3.8.2 release: it is blocked, not in a work column. Restore to dev is manual: clear blocked-by when the children finish. Blockers: 5MOX0FPO (human_review; the symbol its NEXT ACTION would delete, `_release_summary_hold`, is absent from scripts/ and tests/ — a human judges whether its acceptance is met) and DS3WDTPV (testing).
+2026-10-18 — column testing (was blocked on DS3WDTPV since 2026-10-07). Every npt is complete: 5MOX0FPO, DS3WDTPV, PHS3DIBD. No code is in flight on this umbrella. It stays open on: the clear-path field acceptance; its eht 7X9WXDK9 (testing, waits on a clear of a task-bearing session), B3PY3HV7 (blocked on TRDD-85NZX5RJ: all 3 logged goal re-sends after a clear failed), MMUSDJHQ (blocked); and the release-2 items still listed under Release 2. It cannot reach complete before every eht is terminal.
 
 ## Release status
 
