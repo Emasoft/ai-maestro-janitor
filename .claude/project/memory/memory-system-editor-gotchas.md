@@ -1,8 +1,8 @@
 ---
 name: memory-system-editor-gotchas
-description: "add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / can I raise the atom budget knob / memgrep refused my write because the atom is too big / no memory chore runs on PROJECT scope by default / edit_project_scope / why did the repair chore skip my project page / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises / memgrep binary is stale on this host / cargo install does not roll forward with a plugin update / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached / why does the old atom id point to the wrong topic / wikilink dangles after a memory split / ticket citing an old atom id resolves wrong / id kept is not continuity after a split"
+description: "add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / can I raise the atom budget knob / memgrep refused my write because the atom is too big / no memory chore runs on PROJECT scope by default / edit_project_scope / why did the repair chore skip my project page / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises / memgrep binary is stale on this host / cargo install does not roll forward with a plugin update / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached / why does the old atom id point to the wrong topic / wikilink dangles after a memory split / ticket citing an old atom id resolves wrong / id kept is not continuity after a split / update-mem-atom refused: the new body drops footnote citation(s) / update-mem-topic: the old text occurs only inside superseded copies / redact history with replace-mem-topic"
 ocd: 2026-06-13
-lmd: 2026-09-28
+lmd: 2026-10-18
 metadata:
   node_type: memory
   type: project
@@ -199,6 +199,15 @@ linked-to"* — phrasing that only makes sense if unlinking is deliberately abse
 verb list found none either, but the full flag surface was not read.)* So the USER side is
 corrected with `update-mem-topic --old-file/--new-file`, replacing the link with a comment
 recording that the absence is deliberate — which is the tool's own prescription above.
+
+
+^ATOM-26TJ-AML8 [desc: "update-mem-atom refuses a body that drops a footnote citation; update-mem-topic refuses text found only in superseded copies (janitor#337)", keywords: update-mem-atom_refused_the_new_body_drops_footnote_citation(s) update-mem-topic_the_old_text_occurs_only_inside_superseded_copies body-file_omits_a_footnote_citation put_the_citation_back_into_the_new_body SUPERSEDED_BODY_tail_never_matched ##_Superseded_section_never_replaced redact_a_leaked_path_from_history replace-mem-topic_for_deliberate_redaction janitor#337 cargo_install_--path_scripts/memgrep_needed_for_new_refusals memgrep_refused_my_body_replace, trdd: TRDD-3BSPFS7R, ocd: 2026-10-18, lmd: 2026-10-18]
+
+Two refusals added to memgrep by commit f0f760e3 (TRDD-3BSPFS7R, janitor#337). They ship with the release after that commit; the installed binary does not have them until `cargo install --path scripts/memgrep` is run.
+
+1. `update-mem-atom refused: the new body drops footnote citation(s)`: a `--body` or `--body-file` that omits a footnote citation (the caret-N bracket marker) the current body carries is refused, and the message names the label and its lesson id. Fix: put that citation marker back into the new body (a citation removed silently would orphan its lesson).
+
+2. `update-mem-topic: the old text occurs only inside superseded copies`: text inside a `SUPERSEDED BODY:` tail or a `## Superseded` section is never matched or replaced, so an edit aimed at history is refused. A deliberate redaction of history (for example a leaked path) goes through `replace-mem-topic`, not `update-mem-topic`.
 
 ## Governed by
 
