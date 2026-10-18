@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: testing
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-18T04:37:09+0200
+updated: 2026-10-18T04:39:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
 npt: [5MOX0FPO, DS3WDTPV, PHS3DIBD]
-eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
+eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ, 5ID9CQY8]
 blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, K9AHY1ZB]
@@ -345,6 +345,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers 5MOX0FPO, DS3WDTPV; the shipped parts of this umbrella ship independently.
 2026-10-07: This card does not gate the 3.8.2 release: it is blocked, not in a work column. Restore to dev is manual: clear blocked-by when the children finish. Blockers: 5MOX0FPO (human_review; the symbol its NEXT ACTION would delete, `_release_summary_hold`, is absent from scripts/ and tests/ — a human judges whether its acceptance is met) and DS3WDTPV (testing).
 2026-10-18 — column testing (was blocked on DS3WDTPV since 2026-10-07). Every npt is complete: 5MOX0FPO, DS3WDTPV, PHS3DIBD. No code is in flight on this umbrella. It stays open on: the clear-path field acceptance; its eht 7X9WXDK9 (testing, waits on a clear of a task-bearing session), B3PY3HV7 (blocked on TRDD-85NZX5RJ: all 3 logged goal re-sends after a clear failed), MMUSDJHQ (blocked); and the release-2 items still listed under Release 2. It cannot reach complete before every eht is terminal.
+2026-10-18 Release 2 map (each item checked in git this session): R5 built by 2a60eb87 under TRDD-HSRERK5S (complete; daemon.py logs 'rotator tick rc=... stderr'); R8 = TRDD-B78NJU35 (testing); C3 = TRDD-7X9WXDK9, C4 = TRDD-B3PY3HV7, C7 part 2 = TRDD-MMUSDJHQ (all eht); C6 = TRDD-LXUZYFD9 (testing); T = TRDD-3LNZ2B13 (proposal, owner decision; it superseded 66EMACDD); C5 was NEITHER built nor carded (scripts/clear_trigger.py:82 is still (ARM_CMD, RESUME_CMD)), now TRDD-5ID9CQY8, added to eht. With every item owned by a card, nothing unbuilt lives only on this umbrella. implementation-commits stays empty here on purpose: C1 and C2 commits are recorded on the children (DS3WDTPV: bdc81d1c, 4e2e4fa4, 767c4904, a48d8974, a5903a15; 5MOX0FPO: cc48b42f, 10a763b8, b8cbfe61), which supersedes the 2026-10-03 'still owed' line.
 
 ## Release status
 
