@@ -4115,18 +4115,41 @@ struct UpdateAtomArgs {
 /// PLACE: the atom's `id:` (and any field this call doesn't touch — `type`, `ocd`, `status`,
 /// `superseded-by`, …) is preserved verbatim; only `desc`/`keywords` change when given, and
 /// `lmd` is always stamped to today (a body/prop rewrite is a real content change, not the
-/// mechanical class `bump_page_lmd` excludes). The atom's `[^N]` lesson anchors are untouched —
-/// this verb only ever replaces the marker line and the body span `locate_atom_body_matching`
-/// finds, never the footnote definitions a lesson anchored into that body.
+/// mechanical class `bump_page_lmd` excludes). The atom's `[^N]` lesson anchors live INSIDE the
+/// body span this verb replaces, so a `--body` that omits one is REFUSED (janitor#337) naming the
+/// dropped citation ids — carry the `[^N]` into the new body; the footnote definitions themselves
+/// are never touched.
 ///
 /// With `--lesson`, delegates to `add_lesson_impl` instead: allocate the next `[^N]` label + a
 /// fresh corpus-unique `ATOM-…` id, emit the ONE canonical lesson form under the notes section,
 /// and anchor `[^N]` onto `--atom`'s body. A lesson IS a correction, so this is where it lives —
 /// not on `new-mem-atom`, which only ever creates fresh facts.
 pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
-    let a = UpdateAtomArgs::parse_from(
+    let a = match UpdateAtomArgs::try_parse_from(
         std::iter::once("memgrep update-mem-atom".to_string()).chain(args.iter().cloned()),
-    );
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            // janitor#337 item 3: `--supersedes <ATOM>` is the shape `add-atom --supersedes <ATOM>`
+            // teaches, so callers type it here too; clap alone only says "unexpected argument" and
+            // never says what the flag IS. Here it is a bare switch paired with `--lesson` (the
+            // corrected atom is the one `--atom` already names), so say that — error text only,
+            // no value-taking form is accepted.
+            let misused_supersedes = e.kind() == clap::error::ErrorKind::UnknownArgument
+                && args.iter().any(|x| x == "--supersedes");
+            // `print` routes help/version to stdout and real errors to stderr, as `exit` would.
+            let _ = e.print();
+            if misused_supersedes {
+                eprintln!(
+                    "hint: on update-mem-atom `--supersedes` takes NO value — it is a flag used together with \
+                     `--lesson`, and the atom it corrects is the one `--atom` names: \
+                     `update-mem-atom --page P --atom A --lesson --supersedes --keywords K`. \
+                     To replace an atom with a fresh one, use `add-atom --supersedes <ATOM>`."
+                );
+            }
+            std::process::exit(e.exit_code());
+        }
+    };
     if a.lesson {
         // The lesson path never reads `--status`; refuse rather than silently drop it.
         if a.status.is_some() {
@@ -4249,6 +4272,13 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         );
     }
     let body = explicit_body.unwrap_or_default();
+    // janitor#337 item 1: a body replacement must carry forward every `[^N]` citation the current
+    // body has — they sit INSIDE the span being replaced, and dropping one orphans its lesson.
+    // Refuse (naming the ids) rather than auto-append, so the caller decides where the anchor goes.
+    if rewrite_body && body_last_idx > marker_idx {
+        let old_body: Vec<&str> = text.lines().skip(marker_idx + 1).take(body_last_idx - marker_idx).collect();
+        refuse_dropped_citations(&text, &a.atom, &old_body, &body)?;
+    }
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     // TRDD-XI9UYD4E: a footnote-lesson marker (`[^N]: [id:ATOM-…, …]`) is not a leading `^id`
@@ -4717,6 +4747,72 @@ fn atom_verbatim_body(text: &str, marker_idx: usize, body_last_idx: usize) -> St
         .map(|s| s.join(" "))
         .unwrap_or_default();
     collapse_strip_anchors(&joined)
+}
+
+/// Labels of the `[^N]` footnote CITATIONS (references, not `[^N]:` definitions) carried by
+/// `lines`, skipping fenced code, inline code and HTML comments — the same exclusions the lint's
+/// citation scan applies, so a literal `[^N]` in a code example is never counted as a citation.
+fn cited_footnote_labels(lines: &[&str]) -> BTreeSet<String> {
+    let mut fence: Option<Fence> = None;
+    let mut in_comment = false;
+    let mut out = BTreeSet::new();
+    for raw in lines {
+        let masked = mask_html_comment(raw, &mut in_comment);
+        if fence_step(raw, &mut fence) || fence.is_some() {
+            continue;
+        }
+        for (label, is_def) in scan_footnotes(&mask_inline_code(&masked)) {
+            if !is_def {
+                out.insert(label);
+            }
+        }
+    }
+    out
+}
+
+/// Refuse a body replacement that would drop a `[^N]` citation the current body carries (janitor#337
+/// item 1). WHY: `update-mem-atom --body` replaces the whole body span, and the citations that
+/// `add-lesson` anchored there live INSIDE that span — the old code dropped them silently, leaving
+/// the lesson definition on the page uncited (`lesson-uncited`) and detached from its atom. The
+/// escape is to write the citation into the new body; nothing is auto-appended, so the caller keeps
+/// control of where the anchor lands. Names labels (and the lesson ids when the def is on the page).
+fn refuse_dropped_citations(
+    page_text: &str,
+    atom: &str,
+    old_body: &[&str],
+    new_body: &str,
+) -> Result<()> {
+    let new_lines: Vec<&str> = new_body.lines().collect();
+    let kept = cited_footnote_labels(&new_lines);
+    let dropped: Vec<String> = cited_footnote_labels(old_body)
+        .into_iter()
+        .filter(|l| !kept.contains(l))
+        .collect();
+    if dropped.is_empty() {
+        return Ok(());
+    }
+    let page_lines: Vec<&str> = page_text.lines().collect();
+    let defs = raw_footnote_defs(&page_lines);
+    let named: Vec<String> = dropped
+        .iter()
+        .map(|label| {
+            let id = defs
+                .get(label)
+                .and_then(|raw| split_note_metadata(raw).0)
+                .and_then(|meta| parse_block_props(&meta).get("id").and_then(|v| v.first()).cloned());
+            match id {
+                Some(id) => format!("[^{label}] (lesson `{id}`)"),
+                None => format!("[^{label}]"),
+            }
+        })
+        .collect();
+    anyhow::bail!(
+        "write refused: the new body of atom `{atom}` drops footnote citation(s) the current body \
+         carries — {} — which would leave the lesson(s) uncited (lint `lesson-uncited`). Write the \
+         citation(s) into the new body (e.g. end the sentence with `[^N]`) and retry; nothing was \
+         written",
+        named.join(", ")
+    )
 }
 
 // ─────────────────────────── `memgrep migrate` ───────────────────────────
@@ -5261,7 +5357,28 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
         anyhow::bail!(write_gate::STALE_MSG)
     };
 
-    let count = text.matches(old.as_str()).count();
+    // janitor#337 item 2: count and replace only OUTSIDE the superseded copies. `add-lesson
+    // --supersedes` embeds the atom's old body verbatim as `SUPERSEDED BODY: …` (and
+    // `add-atom --supersedes` relocates the whole block under `## Superseded`), so any phrase the
+    // live atom shares with its own history matched TWICE, and `--replace-all` rewrote the
+    // preserved old fact — the very text that exists to stay unedited.
+    let excluded = superseded_copy_ranges(&text);
+    let all_hits: Vec<usize> = text.match_indices(old.as_str()).map(|(at, _)| at).collect();
+    let hits: Vec<usize> = all_hits
+        .iter()
+        .copied()
+        .filter(|&at| !excluded.iter().any(|&(s, e)| at < e && at + old.len() > s))
+        .collect();
+    let count = hits.len();
+    if count == 0 && !all_hits.is_empty() {
+        anyhow::bail!(
+            "the old text occurs in {} only inside superseded copies (`SUPERSEDED BODY:` lesson \
+             text or the `## Superseded` section), which update-mem-topic never edits — anchor on \
+             live text instead; a deliberate redaction of history (e.g. a leaked path) goes \
+             through replace-mem-topic",
+            a.page.display()
+        );
+    }
     if count == 0 {
         // janitor#201: this is NOT the same precondition the CAS check guards. `check_base`
         // above already proved the page's BYTES are exactly what the caller last read (or the
@@ -5284,11 +5401,17 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
         );
     }
 
-    let out = if a.replace_all {
-        text.replace(old.as_str(), new.as_str())
-    } else {
-        text.replacen(old.as_str(), new.as_str(), 1)
-    };
+    // Splice only the live hits (all of them under --replace-all, else the first), leaving every
+    // superseded copy byte-identical (janitor#337 item 2).
+    let take = if a.replace_all { &hits[..] } else { &hits[..1] };
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for &at in take {
+        out.push_str(&text[last..at]);
+        out.push_str(&new);
+        last = at + old.len();
+    }
+    out.push_str(&text[last..]);
     let out = bump_page_lmd(&out, &today_date());
     // A2 step 3 (TRDD-XI10BA5D): this is the FIRST verb wired through the shared pre-write gate —
     // the proposed bytes are linted against the write floor and the write is refused (nothing
@@ -5312,6 +5435,40 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tedited ({count} replacement(s))", rel(&a.page));
     Ok(())
+}
+
+/// Byte ranges of `text` that hold SUPERSEDED copies of an atom body, which `update-mem-topic` must
+/// treat as history, never as live text: every footnote-definition line's `SUPERSEDED BODY: …` tail
+/// (what `--lesson --supersedes` writes) and the whole `## Superseded` section (what `add-atom
+/// --supersedes` writes) up to the next level-1/2 heading. A prose line that merely MENTIONS the
+/// marker is not a footnote definition and stays editable.
+fn superseded_copy_ranges(text: &str) -> Vec<(usize, usize)> {
+    const BODY_MARK: &str = "SUPERSEDED BODY:";
+    let mut out = Vec::new();
+    let mut section_start: Option<usize> = None;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_end();
+        if let Some(start) = section_start
+            && (t.starts_with("# ") || t.starts_with("## "))
+        {
+            out.push((start, offset));
+            section_start = None;
+        }
+        if section_start.is_none() && t.eq_ignore_ascii_case("## Superseded") {
+            section_start = Some(offset);
+        }
+        if line.trim_start().starts_with("[^")
+            && let Some(at) = line.find(BODY_MARK)
+        {
+            out.push((offset + at, offset + line.len()));
+        }
+        offset += line.len();
+    }
+    if let Some(start) = section_start {
+        out.push((start, text.len()));
+    }
+    out
 }
 
 // ─────────────────────────── `memgrep lint` ───────────────────────────

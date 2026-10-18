@@ -6792,3 +6792,212 @@ fn validate_is_silent_about_a_page_with_no_repeated_section() {
     assert_eq!(code, 0, "{o}");
     assert!(!o.contains("page-duplicated-section"), "{o}");
 }
+
+
+/// A page with ONE atom and ONE `--lesson --supersedes` correction of it, built through the real
+/// verbs: the atom body ends `[^1]` and the lesson carries a `SUPERSEDED BODY:` copy of the old
+/// body. Returns `(page path, atom id, lesson id)`. Shared by the janitor#337 tests below.
+fn page_with_superseding_lesson(d: &TempDir, atom_body: &str) -> (std::path::PathBuf, String, String) {
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        &format!(
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-AAAA-1111 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+             {atom_body}\n\n## Notes and lessons learned\n"
+        ),
+    );
+    let lesson_out = run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-AAAA-1111",
+            "--lesson", "--supersedes", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.",
+    );
+    let lesson_id = lesson_out.split_whitespace().next().unwrap().to_string();
+    (page, "ATOM-AAAA-1111".to_string(), lesson_id)
+}
+
+/// janitor#337 item 1: `update-mem-atom --body` used to drop the `[^N]` the lesson was anchored
+/// with, leaving the lesson uncited. It must now REFUSE, naming the dropped citation and its
+/// lesson id, and leave the page byte-identical; a body that carries the citation still lands.
+#[test]
+fn update_atom_body_replace_refuses_to_drop_a_lesson_citation_and_names_it() {
+    let d = TempDir::new("updateatom-drops-citation");
+    let (page, atom, lesson_id) = page_with_superseding_lesson(&d, "The original fact.");
+    assert!(
+        std::fs::read_to_string(&page).unwrap().contains("The original fact. [^1]"),
+        "setup: the lesson anchored [^1] on the atom body"
+    );
+    let before = std::fs::read(&page).unwrap();
+
+    let (_, err, code) = run_stdin_full(
+        &["update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom, "--body", "-"],
+        "The corrected fact, with no citation.",
+    );
+    assert_ne!(code, 0, "a citation-dropping body must refuse: stderr={err}");
+    assert!(err.contains("[^1]"), "the dropped citation label is named: {err}");
+    assert!(err.contains(&lesson_id), "the lesson id behind the citation is named: {err}");
+    assert!(err.contains("nothing was written"), "the refusal says nothing landed: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "the page is byte-identical after the refusal");
+
+    // The escape: write the citation into the new body.
+    let (_, err2, code2) = run_stdin_full(
+        &["update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom, "--body", "-"],
+        "The corrected fact, citation kept. [^1]",
+    );
+    assert_eq!(code2, 0, "a body that carries [^1] lands: {err2}");
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(after.contains("The corrected fact, citation kept. [^1]"), "{after}");
+    let (lint_out, _) = run_with_code(&["lint", "--no-fix", page.to_str().unwrap()]);
+    assert!(!lint_out.contains("lesson-uncited"), "the lesson is still cited: {lint_out}");
+}
+
+/// janitor#337 item 1, negative side: an atom whose body carries NO citation is replaced exactly
+/// as before, and a `[^N]` that only appears inside a code fence (literal text, not a citation)
+/// is not counted as one to preserve.
+#[test]
+fn update_atom_body_replace_without_citations_still_lands() {
+    let d = TempDir::new("updateatom-no-citation");
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-AAAA-1111 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         Plain fact.\n```\nliteral [^7] in a fence\n```\n\n## Notes and lessons learned\n",
+    );
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-AAAA-1111",
+            "--body", "-",
+        ],
+        "A different plain fact.",
+    );
+    assert_eq!(code, 0, "no citation to drop, so the rewrite lands: {err}");
+    assert!(std::fs::read_to_string(&page).unwrap().contains("A different plain fact."));
+}
+
+/// janitor#337 item 2: a phrase shared by the live atom body and the lesson's embedded
+/// `SUPERSEDED BODY:` copy must count as ONE match, and the replacement (including
+/// `--replace-all`) must leave the preserved copy untouched.
+#[test]
+fn update_topic_ignores_the_superseded_body_copy_when_counting_and_replacing() {
+    let d = TempDir::new("updatetopic-superseded-copy");
+    let (page, _, _) = page_with_superseding_lesson(&d, "The sentinel SHARED-PHRASE lives here.");
+    let old = d.join("old.txt");
+    let new = d.join("new.txt");
+    std::fs::write(&old, "SHARED-PHRASE").unwrap();
+    std::fs::write(&new, "REPLACED-PHRASE").unwrap();
+    let before = std::fs::read_to_string(&page).unwrap();
+    assert_eq!(before.matches("SHARED-PHRASE").count(), 2, "setup: live body + superseded copy");
+
+    let variants: [&[&str]; 2] = [&[], &["--replace-all"]];
+    for extra in variants {
+        std::fs::write(&page, &before).unwrap();
+        let mut args = vec![
+            "update-mem-topic", "--page", page.to_str().unwrap(),
+            "--old-file", old.to_str().unwrap(), "--new-file", new.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra);
+        let (out, err, code) = run_stdin_full(&args, "");
+        assert_eq!(code, 0, "one live match, so no ambiguity refusal (args {extra:?}): {err}");
+        assert!(out.contains("1 replacement"), "exactly one live replacement: {out}");
+        let after = std::fs::read_to_string(&page).unwrap();
+        assert!(after.contains("The sentinel REPLACED-PHRASE lives here."), "live body edited: {after}");
+        assert!(
+            after.contains("SUPERSEDED BODY: The sentinel SHARED-PHRASE lives here."),
+            "the superseded copy is byte-preserved (args {extra:?}): {after}"
+        );
+    }
+}
+
+/// janitor#337 item 2, the `add-atom --supersedes` shape: text that lives only under the
+/// `## Superseded` section is history, so an edit anchored there refuses with a message naming
+/// the cause instead of the misleading "no match".
+#[test]
+fn update_topic_refuses_text_that_exists_only_in_the_superseded_section() {
+    let d = TempDir::new("updatetopic-superseded-section");
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-NEW0-0001 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         The current fact.\n\n## Superseded\n\n\
+         ^ATOM-OLD0-0001 [keywords: k, status: superseded, superseded-by: ATOM-NEW0-0001, \
+         ocd: 2026-01-01, lmd: 2026-01-01]\nOLD-ONLY-PHRASE history.\n\n\
+         ## Notes and lessons learned\n",
+    );
+    let old = d.join("old.txt");
+    let new = d.join("new.txt");
+    std::fs::write(&old, "OLD-ONLY-PHRASE").unwrap();
+    std::fs::write(&new, "REWRITTEN").unwrap();
+    let before = std::fs::read(&page).unwrap();
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-topic", "--page", page.to_str().unwrap(),
+            "--old-file", old.to_str().unwrap(), "--new-file", new.to_str().unwrap(),
+        ],
+        "",
+    );
+    assert_ne!(code, 0, "history is not editable through update-mem-topic: {err}");
+    assert!(err.contains("only inside superseded copies"), "the cause is named: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "the page is untouched");
+}
+
+/// janitor#337 item 3: `update-mem-atom ... --supersedes <ATOM>` is a clap error (the flag is a
+/// bare switch paired with `--lesson`), and the error now says so and points at the right forms.
+#[test]
+fn update_atom_supersedes_with_a_value_errors_with_a_hint() {
+    let d = TempDir::new("updateatom-supersedes-hint");
+    let (page, atom, _) = page_with_superseding_lesson(&d, "The original fact.");
+    let before = std::fs::read(&page).unwrap();
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom,
+            "--supersedes", &atom,
+        ],
+        "",
+    );
+    assert_ne!(code, 0, "no value-taking form exists: {err}");
+    assert!(err.contains("unexpected argument"), "clap's own error is still shown: {err}");
+    assert!(err.contains("hint:") && err.contains("takes NO value"), "the hint explains the flag: {err}");
+    assert!(err.contains("--lesson --supersedes"), "the hint names the working form: {err}");
+    assert!(err.contains("add-atom --supersedes"), "and the add-atom alternative: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing was written");
+}
+
+/// janitor#337 item 1, boundary: rewriting the FIRST atom must not mistake the NEXT atom's `[^1]`
+/// citation for one the rewrite drops — the checked span ends at the first atom's last body line.
+#[test]
+fn update_atom_body_replace_ignores_the_next_atoms_lesson_citation() {
+    let d = TempDir::new("updateatom-neighbour-citation");
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-AAAA-1111 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         First plain fact.\n\n\
+         ^ATOM-BBBB-2222 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         Second fact.\n\n## Notes and lessons learned\n",
+    );
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-BBBB-2222",
+            "--lesson", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.",
+    );
+    assert_eq!(code, 0, "setup: the second atom gets a lesson: {err}");
+    assert!(std::fs::read_to_string(&page).unwrap().contains("Second fact. [^1]"), "setup: [^1] cites the second atom");
+
+    let (_, err2, code2) = run_stdin_full(
+        &["update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-AAAA-1111", "--body", "-"],
+        "First rewritten fact.",
+    );
+    assert_eq!(code2, 0, "the first atom has no citation to drop: {err2}");
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(after.contains("First rewritten fact."), "{after}");
+    assert!(after.contains("Second fact. [^1]"), "the neighbour's citation survives: {after}");
+    let (lint_out, _) = run_with_code(&["lint", "--no-fix", page.to_str().unwrap()]);
+    assert!(!lint_out.contains("lesson-uncited"), "no lesson became uncited: {lint_out}");
+}

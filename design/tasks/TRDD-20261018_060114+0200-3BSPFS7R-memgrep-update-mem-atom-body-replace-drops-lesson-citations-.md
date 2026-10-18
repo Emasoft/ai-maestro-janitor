@@ -1,10 +1,10 @@
 ---
 trdd-id: 3BSPFS7R
 title: memgrep update-mem-atom body replace drops lesson citations and two sibling defects
-column: todo
+column: dev
 status: tasked
 created: 2026-10-18T06:01:14+0200
-updated: 2026-10-18T06:01:14+0200
+updated: 2026-10-18T06:48:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -43,3 +43,4 @@ Source: janitor#337 items 1 to 3 (memgrep 0.2.0, 5497043). Item 4 (recall hook f
 ## Approval log
 
 - 2026-10-18T06:01:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T06:48:59+0200 — column → dev by main-agent@ai-maestro-janitor. working the three #337 items
