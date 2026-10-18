@@ -1,10 +1,10 @@
 ---
 trdd-id: YL732I8X
 title: ticket-dispatch prints a full traceback when git worktree list times out
-column: dev
+column: testing
 status: tasked
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T06:10:27+0200
+updated: 2026-10-18T06:26:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-18T06:01:13+0200
 parent-trdd: FQVEILVK
+implementation-commits: [c7b73d86]
 ---
 
 # ticket-dispatch prints a full traceback when git worktree list times out
@@ -42,3 +43,4 @@ KNOWN AND STILL UNCOVERED by this fix (same path, same unhandled RuntimeError): 
 ## Approval log
 
 - 2026-10-18T06:01:13+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-18T06:26:31+0200 — column → testing. built and gated at c7b73d86 (18,617 passed); unreleased, so testing until a release carries it
