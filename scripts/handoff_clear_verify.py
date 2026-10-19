@@ -35,8 +35,9 @@ state):
       token-meter log tails. Written to the JSON.
 
   --phase after   (run by the resumed session, driven by the resume directive):
-      re-read the cron id (≠ before ⇒ destroyed AND recreated), the context size
-      (« before ⇒ collapse proven), resolve EACH persisted link via memgrep (all
+      re-read the cron id (≠ before ⇒ classified by the re-arm's CronDelete evidence when
+      present in the after-snapshot; neutral wording otherwise — see compute_verdicts), the
+      context size (« before ⇒ collapse proven), resolve EACH persisted link via memgrep (all
       resolve ⇒ handoff recoverable), confirm the resume flag was consumed, and
       confirm a re-arm happened after the snapshot (⇒ SessionStart ran on clear).
       Emits a PASS/FAIL table to reports/continuity-build/.
@@ -77,6 +78,11 @@ _TOKEN_METER_FILENAME = "token-meter.jsonl"
 _CHARS_PER_TOKEN = 4
 # A new session counts as the clear's only if its first record is this soon after the before-phase ts.
 _NEW_SESSION_WINDOW_S = 15 * 60
+# The tool-result line a successful CronDelete prints ("Cancelled job <id>") — direct evidence
+# the deleted id still existed, when paired with its CronDelete tool_use. CronDelete fails
+# not-found for a dead id, so this line for the PRIOR heartbeat id proves that id SURVIVED the
+# /clear (TRDD-5ID9CQY8 box 4).
+_CANCELLED_JOB_RE = re.compile(r"Cancelled job ([A-Za-z0-9_-]{1,64})")
 
 # A wikilink target: the text inside [[ ]], up to a `|` alias or `#` anchor. Kept
 # permissive (letters/digits/dash/underscore/slash/dot/space) so a real page slug is
@@ -326,11 +332,22 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
             "did nothing (see #186)",
         )
     else:
-        # No claim about WHY the id changed: every re-arm mints a new id, so a changed id cannot
-        # tell "/clear destroyed the cron" from any other re-arm. The old "destroyed by /clear,
-        # recreated by re-arm" wording was read as an observation and produced a wrong card line
-        # (TRDD-JK2MLS8Z correction note).
-        v["cron_recreated"] = _verdict("PASS", f"cron id changed {b_id or '∅'} → {a_id}")
+        # TRDD-5ID9CQY8 box 4: the re-arm's CronDelete of the PRIOR id is the only signal that can
+        # tell "the prior cron SURVIVED the clear" from any other id change — CronDelete fails
+        # not-found for a dead id, so a successful delete of exactly the prior id proves it still
+        # existed after /clear. The evidence arrives as the after-snapshot's `prior_cron_deleted`
+        # MATCHED ID — only from a tool_result paired with a real CronDelete tool_use; anything
+        # else stays neutral (TRDD-JK2MLS8Z).
+        matched = after.get("prior_cron_deleted")
+        if isinstance(matched, str) and matched == b_id:
+            v["cron_recreated"] = _verdict(
+                "PASS",
+                f"cron id changed {b_id or '∅'} → {a_id} — SURVIVED the clear: the re-arm's "
+                f"CronDelete of the prior id {b_id} succeeded (CronDelete fails not-found for a "
+                "dead id), so the prior cron still existed after /clear and the re-arm replaced it",
+            )
+        else:
+            v["cron_recreated"] = _verdict("PASS", f"cron id changed {b_id or '∅'} → {a_id}")
 
     # 2. context collapsed to base-size.
     b_ctx = before.get("context_tokens")
@@ -718,6 +735,76 @@ def _session_start_injected_tokens(path: Path) -> int | None:
     return -(-chars // _CHARS_PER_TOKEN) if chars > 0 else None
 
 
+def _prior_cron_deleted(path: Path, prior_id: str) -> str | bool:
+    """The prior heartbeat id, when a real CronDelete call for it SUCCEEDED in this transcript.
+
+    A "Cancelled job <id>" tool_result is direct evidence the deleted cron still existed
+    (CronDelete fails not-found for a dead id), but ONLY when the result is paired — by
+    `tool_use_id` — with the `tool_use` block that issued the delete AND that call's own
+    `input.id` is the prior id: transcripts freely quote the same string inside OTHER
+    tool_results (a Read of a report or card quoting "Cancelled job <id>" is text, not
+    evidence), so a bare text scan false-positives on quoted lines (TRDD-5ID9CQY8 review
+    item 1). Returns the MATCHED id (== `prior_id`) on success, False otherwise — an
+    unpaired line or a delete of an unrelated job is no evidence about the prior id.
+    Best-effort: False on any read failure, which just leaves the id-change verdict's
+    wording neutral.
+    """
+    import jsonl_walk  # noqa: PLC0415 - local sibling lib
+
+    if not prior_id:
+        return False
+    delete_ids: set[str] = set()
+    try:
+        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
+            message = entry.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = block.get("name")
+                tool_input = block.get("input")
+                if (
+                    isinstance(name, str)
+                    and "CronDelete" in name
+                    and isinstance(tool_input, dict)
+                    and tool_input.get("id") == prior_id
+                ):
+                    use_id = block.get("id")
+                    if isinstance(use_id, str) and use_id:
+                        delete_ids.add(use_id)
+        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
+            message = entry.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                if block.get("tool_use_id") not in delete_ids:
+                    continue
+                inner = block.get("content")
+                if isinstance(inner, str):
+                    texts = [inner]
+                elif isinstance(inner, list):
+                    texts = [
+                        b.get("text", "")
+                        for b in inner
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    ]
+                    texts += [c for c in inner if isinstance(c, str)]
+                else:
+                    texts = []
+                for text in texts:
+                    m = _CANCELLED_JOB_RE.search(text)
+                    if m and m.group(1) == prior_id:
+                        return m.group(1)
+    except OSError:
+        return False
+    return False
+
+
 def _rotator_log_tail(n: int) -> list[str]:
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
@@ -871,6 +958,14 @@ def gather_after(before: dict, now: int) -> dict:
     after = {
         "ts": now,
         "cron_id": _read_text(sd / _CRON_ID_FILENAME).strip(),
+        # TRDD-5ID9CQY8 box 4: the MATCHED id of a successful CronDelete of the PRIOR id in the new
+        # session's transcript (result paired with its CronDelete tool_use) — direct evidence the
+        # PRIOR cron survived the clear, since CronDelete fails not-found for a dead id. False when
+        # no paired delete matched the prior id, and also when the successor transcript is
+        # unidentifiable.
+        "prior_cron_deleted": _prior_cron_deleted(new_transcript, before.get("cron_id") or "")
+        if new_transcript is not None
+        else False,
         "context_tokens": ctx,
         "context_source": ctx_src,
         "injected_tokens": injected,

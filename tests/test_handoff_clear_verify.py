@@ -854,6 +854,121 @@ def test_cron_id_change_detail_makes_no_claim_about_the_cause():
     assert "destroyed" not in detail and detail == "cron id changed old → new"
 
 
+# --- TRDD-5ID9CQY8 box 4: a successful re-arm CronDelete of the prior id proves SURVIVAL ----
+
+
+def _tool_use(use_id: str, name: str, tool_input: dict | None = None) -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": _iso(29),
+        "message": {"role": "assistant", "content": [{"type": "tool_use", "id": use_id, "name": name, "input": tool_input or {}}]},
+    }
+
+
+def _tool_result(text: str, use_id: str = "toolu_result") -> dict:
+    return {
+        "type": "user",
+        "timestamp": _iso(30),
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": use_id, "content": [{"type": "text", "text": text}]}],
+        },
+    }
+
+
+def test_cron_id_change_with_successful_prior_cron_delete_reports_survived():
+    """Measured 2026-10-18: after the 03:44 and 08:10 clears the re-arm's CronDelete of the
+    prior id SUCCEEDED ("Cancelled job 19df26ee" / "Cancelled job 590dbe30") — direct evidence
+    the prior cron survived, because CronDelete fails not-found for a dead id. The verdict must
+    say "SURVIVED the clear", never "destroyed by /clear, recreated by re-arm"."""
+    v = _import().compute_verdicts(
+        _snap(cron_id="19df26ee"), _snap(ts=2000, cron_id="b8567125", prior_cron_deleted="19df26ee")
+    )
+    d = v["cron_recreated"]
+    assert d["status"] == "PASS"
+    assert "SURVIVED the clear" in d["detail"]
+    assert "destroyed" not in d["detail"]
+    assert "19df26ee" in d["detail"]
+
+
+def test_a_cancelled_job_line_for_an_unrelated_id_gives_no_survival_claim():
+    """The matched id must equal the PRIOR heartbeat id: a "Cancelled job <other-id>" is no
+    evidence about the prior cron, so the wording stays neutral."""
+    v = _import().compute_verdicts(
+        _snap(cron_id="19df26ee"), _snap(ts=2000, cron_id="b8567125", prior_cron_deleted="different-id")
+    )
+    assert v["cron_recreated"]["detail"] == "cron id changed 19df26ee → b8567125"
+
+
+def test_cron_id_change_without_delete_evidence_stays_neutral():
+    """No "Cancelled job <prior_id>" evidence → the neutral wording (TRDD-JK2MLS8Z), never a
+    destruction claim."""
+    v = _import().compute_verdicts(_snap(cron_id="old"), _snap(ts=2000, cron_id="new", prior_cron_deleted=False))
+    assert v["cron_recreated"]["detail"] == "cron id changed old → new"
+
+
+def test_prior_cron_deleted_is_false_when_the_cancelled_id_differs(tmp_path: Path):
+    """A 'Cancelled job <other-id>' from a REAL CronDelete is NOT evidence about the prior id —
+    the returned MATCHED id must equal the prior heartbeat id."""
+    mod = _import()
+    transcript = _write_transcript(
+        tmp_path / "s.jsonl",
+        [_tool_use("toolu_del", "CronDelete", {"id": "different-id"}), _tool_result("Cancelled job different-id", "toolu_del")],
+    )
+    assert mod._prior_cron_deleted(transcript, "19df26ee") is False
+    assert mod._prior_cron_deleted(transcript, "different-id") == "different-id"
+
+
+def test_prior_cron_deleted_returns_the_matched_id_on_a_paired_crondelete_success(tmp_path: Path):
+    mod = _import()
+    transcript = _write_transcript(
+        tmp_path / "s.jsonl",
+        [_tool_use("toolu_del", "CronDelete", {"id": "590dbe30"}), _tool_result("Cancelled job 590dbe30.", "toolu_del")],
+    )
+    assert mod._prior_cron_deleted(transcript, "590dbe30") == "590dbe30"
+
+
+def test_prior_cron_deleted_rejects_a_paired_delete_whose_input_id_differs(tmp_path: Path):
+    """The delete call's own input.id must be the prior id: a CronDelete of an unrelated job
+    whose (implausible) result text names the prior id is no evidence about the prior cron."""
+    mod = _import()
+    transcript = _write_transcript(
+        tmp_path / "s.jsonl",
+        [
+            _tool_use("toolu_del", "CronDelete", {"id": "unrelated-id"}),
+            _tool_result("Cancelled job 590dbe30.", "toolu_del"),
+        ],
+    )
+    assert mod._prior_cron_deleted(transcript, "590dbe30") is False
+
+
+def test_prior_cron_deleted_rejects_a_quoted_cancel_line_from_a_non_crondelete_tool(tmp_path: Path):
+    """TRDD-5ID9CQY8 review item 1, measured in session 07404448: the string 'Cancelled job
+    6a2a8817' appears QUOTED inside a Read tool_result (a report quoting the delete), with no
+    real delete in that session. An unpaired line is text, not evidence — the matcher must not
+    fire on it even when it names the prior id."""
+    mod = _import()
+    transcript = _write_transcript(
+        tmp_path / "s.jsonl",
+        [
+            _tool_use("toolu_read", "Read", {"file_path": "/tmp/report.md"}),
+            _tool_result("9\t160\tCronDelete({\"id\": \"6a2a8817\"})\n10\t161\tCancelled job 6a2a8817.\n", "toolu_read"),
+        ],
+    )
+    assert mod._prior_cron_deleted(transcript, "6a2a8817") is False
+
+
+def test_prior_cron_deleted_is_false_without_any_cancelled_line_or_bad_path(tmp_path: Path):
+    mod = _import()
+    transcript = _write_transcript(
+        tmp_path / "s.jsonl",
+        [_tool_use("toolu_del", "CronDelete", {"id": "590dbe30"}), _tool_result("Job armed successfully.", "toolu_del")],
+    )
+    assert mod._prior_cron_deleted(transcript, "590dbe30") is False
+    assert mod._prior_cron_deleted(tmp_path / "missing.jsonl", "590dbe30") is False
+    assert mod._prior_cron_deleted(transcript, "") is False
+
+
 def test_an_unplaceable_candidate_modified_after_the_clear_makes_the_check_SKIP(tmp_path: Path, monkeypatch) -> None:
     """A real successor without any timestamp (mtime after the clear) beside one stamped peer:
     accepting the peer would measure the wrong session and could PASS falsely."""
@@ -892,3 +1007,39 @@ def test_a_candidate_starting_before_the_clear_beside_an_in_window_one_is_ignore
     _write_transcript(tdir / "aaaaaaaa-older.jsonl", [_assistant(_iso(-600), 400_000)])
     _write_transcript(tdir / "bbbbbbbb-new.jsonl", [_assistant(_iso(14 * 60), 171_000)])
     assert _import().gather_after(dict(_BEFORE), int(time.time()))["context_tokens"] == 171_000
+
+
+def test_gather_after_records_a_successful_prior_cron_delete_as_survival_evidence(tmp_path: Path, monkeypatch) -> None:
+    """TRDD-5ID9CQY8 box 4 end-to-end: the new session's transcript carries the re-arm's
+    successful "Cancelled job <prior id>" → the after-snapshot stores the matched id, and
+    compute_verdicts then reports the id change as "SURVIVED the clear"."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(
+        tdir / "bbbbbbbb-new.jsonl",
+        [_tool_use("toolu_del", "CronDelete", {"id": "590dbe30"}), _tool_result("Cancelled job 590dbe30.", "toolu_del"), _assistant(_iso(40), 171_000)],
+    )
+    (_clear_env_state(tmp_path) / "heartbeat-cron-id.txt").write_text("b8567125", encoding="utf-8")
+    mod = _import()
+    before = {**_BEFORE, "cron_id": "590dbe30"}
+    after = mod.gather_after(before, int(time.time()))
+    assert after["cron_id"] == "b8567125"
+    assert after["prior_cron_deleted"] == "590dbe30"
+    v = mod.compute_verdicts(before, after)
+    assert "SURVIVED the clear" in v["cron_recreated"]["detail"]
+    assert "destroyed" not in v["cron_recreated"]["detail"]
+
+
+def test_gather_after_leaves_prior_cron_deleted_false_without_the_evidence(tmp_path: Path, monkeypatch) -> None:
+    """No "Cancelled job" line → False, and the id-change verdict wording stays neutral."""
+    tdir = _clear_env(tmp_path, monkeypatch)
+    _write_transcript(tdir / "bbbbbbbb-new.jsonl", [_assistant(_iso(40), 171_000)])
+    (_clear_env_state(tmp_path) / "heartbeat-cron-id.txt").write_text("b8567125", encoding="utf-8")
+    mod = _import()
+    before = {**_BEFORE, "cron_id": "590dbe30"}
+    after = mod.gather_after(before, int(time.time()))
+    assert after["prior_cron_deleted"] is False
+    assert mod.compute_verdicts(before, after)["cron_recreated"]["detail"] == "cron id changed 590dbe30 → b8567125"
+
+
+def _clear_env_state(tmp_path: Path) -> Path:
+    return tmp_path / "proj" / ".janitor" / "state"
