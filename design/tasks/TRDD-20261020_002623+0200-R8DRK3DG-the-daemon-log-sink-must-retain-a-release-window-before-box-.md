@@ -4,7 +4,7 @@ title: The daemon log sink must retain a release window before box 2 can be obse
 column: todo
 status: tasked
 created: 2026-10-20T00:26:23+0200
-updated: 2026-10-20T00:26:23+0200
+updated: 2026-10-20T00:27:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -17,6 +17,7 @@ mandated-by: manager
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T00:26:23+0200
+parent-trdd: A70YJLXN
 ---
 
 # The daemon log sink must retain a release window before box 2 can be observed
