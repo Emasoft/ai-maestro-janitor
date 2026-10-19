@@ -33,7 +33,7 @@ its own lessons-learned section and links back here.
 
 ^ATOM-6WEW-R28X [desc: "an UNRELEASED fix cannot fix this machine: the heartbeat runs the newest CACHED plugin version, so a committed fix is invisible until it is published", keywords: unreleased_fix_not_live the_fix_is_committed_but_the_bug_still_happens the_machine_runs_old_code dispatcher_stub_re-resolves_newest_cached_version 599_commits_ahead_of_the_release alert_keeps_repeating_after_the_fix_is_written release_gap board_drain_rule_blocks_the_release repo-state_LOW_advisory_does_not_escalate PLUGIN_SKIP_GITHUB_INTEGRITY CPV_integrity_manifest_mismatch No_publish_until_the_board_is_drained 3451_mismatching_files, ocd: 2026-10-19, lmd: 2026-10-19]
 
-THE RELEASE GAP, measured 2026-10-20 (TRDD-PWL9GD4E, TRDD-5CGGMH0, TRDD-U0VLVJVT).
+THE RELEASE GAP, measured 2026-10-20 (TRDD-PWL9GD4E, TRDD-5CGPEK4V, TRDD-U0VLVJVT).
 
 A fix COMMITTED but NOT PUBLISHED does not exist for the janitor. The dispatcher
 stub (the plugin DATA dir's `dispatcher-stub.py`) re-resolves the newest CACHED
