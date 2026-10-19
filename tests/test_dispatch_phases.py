@@ -728,28 +728,25 @@ def test_phase_compact_resume_emits_directive_and_clears(env_isolation: dict) ->
 
 
 def test_resume_marker_line_is_bare_whole_line(env_isolation: dict) -> None:
-    """F7 (wikimem audit): BOTH resume phases emit the [janitor-resume] marker as a
-    BARE whole line with the prose/directive on line 2 — the cron prompt honors
-    whole-line markers only, so a prose-carrying marker line would legitimize
-    prefix-mimicry (`[janitor-resume] …` inside any detector line being honored)."""
+    """Resume markers stay bare and carry only generic text plus exact directives."""
     dispatch = _import_dispatch()
     import state
 
-    # Post-compact resume: marker bare, directive on line 2.
     _arm_compact_flag(state, "continue TRDD-31095269", age_s=42)
     out = _capture_stdout(dispatch._phase_compact_resume)
     lines = out.splitlines()
     assert lines[0] == "[janitor-resume]", f"marker line must be bare, got {lines[0]!r}"
     assert "continue TRDD-31095269" in lines[1]
 
-    # Rate-limit resume: same two-line shape.
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("", encoding="utf-8")
-    state.atomic_write(sd / "rate-limited-since.ts", str(int(__import__("time").time()) - 30))
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
     out2 = _capture_stdout(dispatch._phase_rate_limit_recovery)
     lines2 = out2.splitlines()
     assert lines2[0] == "[janitor-resume]", f"marker line must be bare, got {lines2[0]!r}"
-    assert "rate-limit cleared" in lines2[1]
+    assert lines2[1] == "Resume the previous pending task."
+    assert "rate-limit" not in out2.lower()
+    assert "30" not in out2
 
 
 def test_phase_compact_resume_returns_true_when_emitted(env_isolation: dict) -> None:
@@ -2292,8 +2289,7 @@ def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detector
 
 
 def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A prior rate-limit resume returns early — the keep-going nudge (even with the flag set)
-    must NOT also appear; only the rate-limit resume cue does."""
+    """Rate-limit recovery emits one generic resume cue and skips the ordinary nudge."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -2313,9 +2309,9 @@ def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(env_isola
     )
 
     out = _capture_stdout(dispatch.main)
-    # F7: bare marker line, prose on line 2 (whole-line-only marker contract).
-    assert out.startswith("[janitor-resume]\nrate-limit cleared"), f"rate-limit resume must lead, got {out!r}"
-    assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
+    assert out.splitlines() == ["[janitor-resume]", "Resume the previous pending task."]
+    assert "rate-limit" not in out.lower()
+    assert out.count("[janitor-resume]") == 1
 
 
 def test_main_compact_resume_short_circuits_before_keep_going_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3298,13 +3294,10 @@ def test_cardinal_postcompact_and_over_budget_resumes_never_disarms(env_isolatio
 # --- the alarm: reports, and does nothing else -------------------------------
 
 
-def test_over_budget_prints_the_spend_and_actuates_nothing(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE inversion, end to end. Far over budget → ONE line that names the cost and the budget,
-    tells the human what they can do, and leaves every piece of state untouched.
-
-    The three predecessors of this test asserted the opposite for each rung: `slow` returned True
-    to clamp the cadence, `maintenance` wrote the LOCAL flag plus an ownership sentinel, and the
-    next fire's mode resolution came back `maintenance`. None of those actuators exist."""
+def test_over_budget_is_control_plane_only_and_actuates_nothing(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A budget crossing writes owner-readable control state and no automatic context."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -3312,14 +3305,20 @@ def test_over_budget_prints_the_spend_and_actuates_nothing(env_isolation: dict, 
     gs.init_global_state()
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
+    before = {
+        "mode": dispatch._resolve_heartbeat_mode(),
+        "kill": gs.kill_switch_present(),
+    }
 
     out = _run_self_cost(dispatch)
-    assert "5000" in out and "1000" in out, f"the line must name the spend and the budget: {out!r}"
-    assert "Nothing was switched off" in out
-    assert "[janitor-self-disarm]" not in out
-    assert "[janitor-resume]" not in out, "a cost line is not an action marker"
+    log = state.log_dir() / "heartbeat-cost-control-plane.log"
+    assert out == ""
+    assert log.is_file()
+    text = log.read_text(encoding="utf-8")
+    assert "5000" in text and "1000" in text
     _no_actuation(dispatch, state, gs)
-    assert dispatch._resolve_heartbeat_mode() == "full", "cost must not change the next fire's mode"
+    assert dispatch._resolve_heartbeat_mode() == before["mode"]
+    assert gs.kill_switch_present() is before["kill"]
 
 
 def test_under_budget_is_silent(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3348,23 +3347,26 @@ def test_no_budget_set_is_silent_at_any_cost(env_isolation: dict, monkeypatch: p
     _no_actuation(dispatch, state, gs)
 
 
-def test_the_line_is_deduped_per_day_but_re_alarms_as_the_spend_grows(
+def test_the_control_record_is_deduped_per_day_but_re_records_growth(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A flat overrun states itself once a day; a spend that keeps GROWING re-alarms the same
-    day. Firing every fire would tax the very thing it measures — a per-fire stdout line costs
-    output tokens on every heartbeat — but staying silent while the number doubles would hide
-    the case the human most needs to see."""
+    """A flat crossing writes once; a larger budget multiple appends a new control record."""
     dispatch = _import_dispatch()
     import state
 
     _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 1500)  # 1x the budget
-    assert _run_self_cost(dispatch) != "", "first crossing alarms"
-    assert _run_self_cost(dispatch) == "", "the same bucket is silent on the next fire"
+    _seed_heartbeat_cost(state, 1500)
+    assert _run_self_cost(dispatch) == ""
+    log = state.log_dir() / "heartbeat-cost-control-plane.log"
+    first = log.read_text(encoding="utf-8")
+    assert "1500" in first
+    assert _run_self_cost(dispatch) == ""
+    assert log.read_text(encoding="utf-8") == first
 
-    _seed_heartbeat_cost(state, 2500)  # 2x the budget — a materially bigger spend
-    assert "2500" in _run_self_cost(dispatch), "a growing spend re-alarms the same day"
+    _seed_heartbeat_cost(state, 2500)
+    assert _run_self_cost(dispatch) == ""
+    grown = log.read_text(encoding="utf-8")
+    assert "2500" in grown and grown != first
 
 
 def test_a_retired_maintenance_flag_is_neither_written_nor_cleared(
@@ -3387,15 +3389,10 @@ def test_a_retired_maintenance_flag_is_neither_written_nor_cleared(
     assert not (sd / "self-budget-maintenance.flag").exists(), "and mints no ownership sentinel"
 
 
-def test_an_actively_waiting_session_still_gets_its_cost_named(
+def test_an_actively_waiting_session_records_cost_without_context(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """INVERTED. The throttle SUPPRESSED itself for an actively-waiting session, because
-    throttling a session mid-recovery was the cardinal sin. Reporting is not throttling: there is
-    nothing to suppress, and the working session is the one whose spend is most worth naming.
-
-    The recovery FIRES are still protected — they return before this phase (see the two cardinal
-    tests above); this is the fire AFTER one."""
+    """An active wait still records the crossing, but emits no automatic context."""
     dispatch = _import_dispatch()
     import state
 
@@ -3403,25 +3400,16 @@ def test_an_actively_waiting_session_still_gets_its_cost_named(
     _seed_heartbeat_cost(state, 5000)
     state.atomic_write(state.state_dir() / "last-resume.ts", str(int(time.time())))
 
-    assert "5000" in _run_self_cost(dispatch)
+    assert _run_self_cost(dispatch) == ""
+    assert "5000" in (state.log_dir() / "heartbeat-cost-control-plane.log").read_text(
+        encoding="utf-8"
+    )
 
 
-def test_every_crossing_is_recorded_to_the_ledger_not_just_printed(
+def test_every_crossing_stays_out_of_stdout_and_findings_ledger(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each crossing lands in the findings ledger, marked human-only.
-
-    The audit that produced this test asked one question of every phase that prints a
-    human-facing finding: if the receiving session forgets, can the condition still be
-    reconstructed? Here it cannot — `cost` is a ROLLING 7d window over a log the meter
-    TRIMS, so an overrun that ages out leaves nothing behind. Printing alone made
-    'the cadence was too expensive last week' an unfalsifiable claim, which is exactly
-    the defect fixed in the iTerm alarm (299f775c).
-
-    The `actor="human"` prefix is asserted, not incidental: the message's two remedies
-    are slow-the-cadence and /janitor-disarm, and an agent that applied the second would
-    let cost pressure switch the guard off — the owner's 'never self-disable' ruling.
-    """
+    """Control-plane budget evidence is durable without becoming an agent finding."""
     import json as _json
 
     dispatch = _import_dispatch()
@@ -3430,73 +3418,38 @@ def test_every_crossing_is_recorded_to_the_ledger_not_just_printed(
 
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
-    assert "5000" in _run_self_cost(dispatch), "precondition: the alarm fired"
+    assert _run_self_cost(dispatch) == ""
+    control = state.log_dir() / "heartbeat-cost-control-plane.log"
+    assert "5000" in control.read_text(encoding="utf-8")
 
-    entries = [
-        _json.loads(ln)
-        for ln in findings_ledger.ledger_path(None).read_text(encoding="utf-8").splitlines()
-        if ln.strip()
-    ]
-    mine = [e for e in entries if e.get("code") == "HEARTBEAT-COST"]
-    assert len(mine) == 1, f"exactly one durable record per crossing, got {mine}"
-    assert "5000" in mine[0]["msg"] and "1000" in mine[0]["msg"], (
-        "the record must carry BOTH numbers — a record that says 'over budget' without "
-        f"the spend and the bar is not evidence: {mine[0]['msg']!r}"
+    ledger = findings_ledger.ledger_path(None)
+    entries = (
+        [_json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line]
+        if ledger.exists()
+        else []
     )
-    assert mine[0]["actor"] == findings_ledger.HUMAN_ONLY_ACTOR, (
-        "must be marked human-only so a reading agent surfaces it and stops"
-    )
-    assert findings_ledger.HUMAN_ONLY_DIRECTIVE in findings_ledger.render_line(mine[0]), (
-        "and the marking must actually reach the reader at delivery"
-    )
-    assert findings_ledger.HUMAN_ONLY_DIRECTIVE not in mine[0]["msg"], (
-        "but it must NOT be stored inside msg — the directive is 98 chars against a "
-        "120-char cap, so storing it there truncates the finding to 22 chars of itself"
-    )
-    assert mine[0]["sev"] == "LOW", "a budget report the user opted into must never page"
+    assert all(entry.get("code") != "HEARTBEAT-COST" for entry in entries)
 
 
-def test_the_ledger_records_once_per_reported_crossing_not_once_per_fire(
+def test_control_plane_records_once_per_crossing_not_once_per_fire(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The record sits INSIDE the phase's dedupe gate, so the ledger granularity is one
-    entry per reported crossing (per day, per whole budget multiple) — not per fire.
-
-    That placement is deliberate. At the default cadence a fire happens ~96×/day, and the
-    ledger is a TRIMMED log: recording every fire would evict every other finding within
-    hours to say the same thing 96 times. What the audit needed back was the TIMELINE of
-    crossings, and a growing spend still re-alarms — so the shape that survives is
-    'when did it cross, and at what multiple', which is exactly the evidence a human
-    reading it days later has to have.
-    """
-    import json as _json
-
+    """Dedupe bounds control-log records while a worse crossing remains observable."""
     dispatch = _import_dispatch()
-    import findings_ledger
     import state
 
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
-    assert _run_self_cost(dispatch) != "", "first fire prints"
-    assert _run_self_cost(dispatch) == "", "second fire in the same bucket is silent"
+    assert _run_self_cost(dispatch) == ""
+    log = state.log_dir() / "heartbeat-cost-control-plane.log"
+    first = log.read_text(encoding="utf-8")
+    assert _run_self_cost(dispatch) == ""
+    assert log.read_text(encoding="utf-8") == first
 
-    def _crossings() -> list[dict]:
-        return [
-            e
-            for ln in findings_ledger.ledger_path(None).read_text(encoding="utf-8").splitlines()
-            if ln.strip()
-            for e in [_json.loads(ln)]
-            if e.get("code") == "HEARTBEAT-COST"
-        ]
-
-    assert len(_crossings()) == 1, "the silent repeat fire adds no entry"
-
-    _seed_heartbeat_cost(state, 15000)  # 15x the budget — a materially bigger spend
-    assert "15000" in _run_self_cost(dispatch), "a growing spend re-alarms"
-    assert len(_crossings()) == 2, (
-        "and the NEW crossing is recorded — the dedupe bounds repetition, it must not "
-        "swallow a genuinely worse number"
-    )
+    _seed_heartbeat_cost(state, 15000)
+    assert _run_self_cost(dispatch) == ""
+    later = log.read_text(encoding="utf-8")
+    assert "15000" in later and later != first
 
 
 def test_the_autofix_reminder_is_deliberately_not_recorded(
@@ -3538,18 +3491,20 @@ def test_the_autofix_reminder_is_deliberately_not_recorded(
     assert entries == [], f"the nudge must write no ledger entry, got {entries}"
 
 
-def test_a_harness_session_reports_too(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """INVERTED. The throttle refused to actuate inside an ai-maestro agent (#J thin mode),
-    because auto-maintenance there would break server-delegated continuity. A phase that only
-    prints has nothing to break, so the gate is gone — and a harness agent's own spend is worth
-    naming for exactly the same reason a standalone session's is."""
+def test_a_harness_session_records_control_cost_too(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Harness sessions retain the same control-plane cost evidence without context output."""
     dispatch = _import_dispatch()
     import state
 
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
-    monkeypatch.setenv("AIMAESTRO_AGENT", "1")  # → is_harness_session True
-    assert "5000" in _run_self_cost(dispatch)
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    assert _run_self_cost(dispatch) == ""
+    assert "5000" in (state.log_dir() / "heartbeat-cost-control-plane.log").read_text(
+        encoding="utf-8"
+    )
 
 
 # --- fail-open (NORMATIVE) ---------------------------------------------------

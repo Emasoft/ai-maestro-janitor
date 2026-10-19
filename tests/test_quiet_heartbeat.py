@@ -139,6 +139,52 @@ def test_non_advisory_detectors_are_untouched(monkeypatch):
     assert dispatch._quiet_filter("janitor-self-integrity", text) == text
 
 
+
+def test_control_plane_sources_never_reach_stdout_or_findings(monkeypatch):
+    """Source identity excludes telemetry before quiet-filter ledger routing."""
+    recorded: list[dict] = []
+    logged: list[tuple[str, str]] = []
+    _quiet(monkeypatch, recorded)
+    monkeypatch.setattr(dispatch.state, "log_line", lambda source, line: logged.append((source, line)))
+    forbidden = "usage window 97%; weighted tokens 42000; all accounts maxed"
+    for detector in dispatch._CONTROL_PLANE_ONLY_DETECTORS:
+        assert dispatch._exclude_control_plane_output(detector, forbidden) == ""
+    assert recorded == []
+    assert all(source.endswith("-control-plane") for source, _ in logged)
+    assert {line for _, line in logged} == {forbidden}
+
+
+def test_source_exclusion_preserves_actionable_detector_output(monkeypatch):
+    """Security and project-actionable sources remain byte-identical through exclusion."""
+    text = "CRITICAL: repository corruption detected\n"
+    assert dispatch._exclude_control_plane_output("janitor-self-integrity", text) == text
+
+
+
+def test_all_automatic_context_emitters_use_the_exclusion_boundary(monkeypatch) -> None:
+    """Inventory every automatic surface and pin the upstream source exclusion boundary."""
+    logged: list[tuple[str, str]] = []
+    monkeypatch.setattr(dispatch.state, "log_line", lambda source, line: logged.append((source, line)))
+    emitters = {
+        "heartbeat-stdout": dispatch._run_detector,
+        "findings-ledger": dispatch._quiet_filter,
+        "session-start": dispatch.findings_ledger.surface_block,
+        "handoff": dispatch._phase_clear_resume,
+        "resume": dispatch._emit_decision,
+    }
+    assert set(emitters) == {
+        "heartbeat-stdout", "findings-ledger", "session-start", "handoff", "resume"
+    }
+    for detector, text in (
+        ("oauth-login-needed", "owner telemetry"),
+        ("model-fallback", "model window 99 percent"),
+        ("token-usage-anomaly", "token telemetry"),
+        ("window-burn-rate", "usage telemetry"),
+    ):
+        assert dispatch._exclude_control_plane_output(detector, text) == ""
+    assert len(logged) == 4
+
+
 def test_no_security_detector_is_on_the_advisory_list():
     """A standing guard on the LIST itself, not on the filter: the whole design rests on
     security-class detectors never appearing here, and a list is edited by people."""

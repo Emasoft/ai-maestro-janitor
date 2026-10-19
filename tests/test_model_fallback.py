@@ -274,6 +274,23 @@ def test_no_headroom_passes_the_configured_target_as_command(monkeypatch, capsys
     assert called["command"] == ["/model sonnet"]
 
 
+
+def test_confirmed_unconfirmed_and_unknown_outcomes_are_durable(monkeypatch, capsys, tmp_path) -> None:
+    """Every touched model-switch outcome remains visible without relying on telemetry prose."""
+    for confirmed, expected in ((True, "confirmed"), (False, "unconfirmed"), (None, "unknown")):
+        det = _load_detector()
+        state_dir = tmp_path / expected
+        state_dir.mkdir()
+        monkeypatch.setattr(det.state, "state_dir", lambda state_dir=state_dir: state_dir)
+        _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+        monkeypatch.setattr(det.terminal_trigger, "confirm_model_switch", lambda *_a, confirmed=confirmed: confirmed)
+        assert det.main() == 0
+        payload = (state_dir / "model-fallback-outcome.json").read_text(encoding="utf-8")
+        assert f"\"status\": \"{expected}\"" in payload
+        assert "scoped_util" not in payload and "account_max_util" not in payload
+        capsys.readouterr()
+
+
 def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkeypatch, capsys) -> None:
     """TRDD-M4HVFU2A, 2026-09-06 incident (owner ruling): rotation must come BEFORE any
     model change — a model switch resets the whole cache, burning millions of tokens

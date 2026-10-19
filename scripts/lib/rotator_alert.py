@@ -126,6 +126,21 @@ def clear_auth_failed(root: Path) -> None:
     (root / AUTH_FAILED_NAME).unlink(missing_ok=True)
 
 
+# WHY (TRDD-JWIGGMH0): owner remediation is control-plane state, not a finding source.
+# Desktop delivery may fail or dedupe; this record remains readable by explicit pull diagnostics.
+OWNER_REMEDIATION_NAME = "owner-remediation.json"
+_AGENT_VISIBLE_CONDITIONS = frozenset({"tick-stalled"})
+
+
+def record_owner_remediation(root: Path, condition: str, action: str, now: float) -> None:
+    """Durably record an owner-only remediation without creating agent-context output."""
+    path = root / OWNER_REMEDIATION_NAME
+    records = _dict(_read_json(path).get("conditions"))
+    records[condition] = {"action": action, "last_seen": int(now)}
+    root.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(path, json.dumps({"conditions": records}, sort_keys=True))
+
+
 
 # WHY a marker file (TRDD-0SU2C2IM): the capture is launched DETACHED, so the launcher never sees
 # its exit code; the capture itself knows when it refused (wrong account, nothing clicked), so it
@@ -261,13 +276,7 @@ def evaluate(
     claude_running: bool,
     runner: Optional[Callable[[list[str]], None]] = None,
 ) -> list[str]:
-    """Keep `rotator-alert.json` equal to the live set of conditions (every evaluation), delete
-    it when none hold, and notify with a backoff: first occurrence, again after 1 h, then at
-    most daily while it holds; a NEW condition notifies at once. A condition that was active
-    within the last DEBOUNCE_S is not new when it reappears: it resumes its old backoff (sessions
-    sharing one login flip `auth-failed` on and off, and each flip must not be a banner). The
-    recent-state lives in its own file because the alert file is deleted when nothing holds.
-    Returns the active condition names."""
+    """Persist active alarms, notify with backoff, and retain owner remediation state."""
     active = active_conditions(root, now, claude_running)
     path = root / ALERT_NAME
     recent_path = root / "rotator-alert-recent.json"
@@ -282,6 +291,10 @@ def evaluate(
     for cond, action in active.items():
         p = _dict(prior.get(cond)) or _dict(recent.get(cond))
         last, n = p.get("last_notified"), p.get("notified")
+        # WHY (TRDD-JWIGGMH0): write before notification so disabled, deduped, or failed
+        # delivery cannot erase the persistent owner-readable remediation.
+        if cond not in _AGENT_VISIBLE_CONDITIONS:
+            record_owner_remediation(root, cond, action, now)
         if cond in new or _due(p, now):
             if notify.enabled():
                 notify._deliver(f"[janitor] {action}", runner=runner)
@@ -313,27 +326,16 @@ def _is_advisory(cond: str) -> bool:
 
 
 def drift_parts(root: Path, now: float) -> tuple[list[str], dict[str, tuple[int | None, str]]]:
-    """(urgent action texts, advisory cond -> (last_notified, action)) for the heartbeat.
-    Urgent texts are de-duplicated: the daemon's tick-stalled entry and the session-side
-    watchdog (a fully hung daemon writes no file, so any live session checks the last-completed
-    tick stamp itself, one stat) collapse into one text. Pure: reads state, writes none."""
+    """Return only agent-actionable rotator output; owner telemetry stays control-plane-only."""
     alerts = _dict(_read_json(root / ALERT_NAME).get("alerts"))
     urgent: set[str] = set()
-    advisory: dict[str, tuple[int | None, str]] = {}
-    for cond, a in alerts.items():
-        if not isinstance(a, dict):
+    for cond, alert in alerts.items():
+        if cond not in _AGENT_VISIBLE_CONDITIONS or not isinstance(alert, dict):
             continue
-        action = str(a.get("action", cond))
-        if _is_advisory(cond):
-            last = a.get("last_notified")
-            advisory[cond] = (
-                int(last) if isinstance(last, (int, float)) and not isinstance(last, bool) else None,
-                action,
-            )
-        else:
-            urgent.add(action)
+        urgent.add(str(alert.get("action", cond)))
     if (root / "tick-completed.ts").exists() and _tick_age(root, now) > TICK_STALL_S:
         urgent.add(_ACTIONS["tick-stalled"])
-    return sorted(urgent), advisory
+    # The second value remains for dispatch compatibility; no owner-only advisory may enter it.
+    return sorted(urgent), {}
 
 

@@ -30,6 +30,7 @@ crash must never break the heartbeat.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -115,6 +116,31 @@ def _declined_age_s(now: int) -> float | None:
 def _stamp_declined(now: int) -> None:
     """A switch was SENT but not confirmed — back off, don't stamp the retry cooldown."""
     state.atomic_write(state.state_dir() / _DECLINED_STAMP, str(now))
+
+
+
+def _record_actuation_outcome(status: str, target: str, now: int, detail: str = "") -> None:
+    """Persist a generic model-actuation outcome outside automatic context sources."""
+    # WHY (TRDD-JWIGGMH0): continuation may depend on knowing actuation failed, while the
+    # usage percentages and capacity rationale that triggered it remain control-plane-only.
+    payload = {"ts": now, "status": status, "target": target, "detail": detail}
+    state.atomic_write(
+        state.state_dir() / "model-fallback-outcome.json",
+        json.dumps(payload, sort_keys=True),
+    )
+
+
+
+def _record_touched_outcome(confirmed: bool | None, target: str, now: int) -> None:
+    """Persist the three confirmation states after model-switch keystrokes landed."""
+    status = "confirmed" if confirmed is True else "unconfirmed" if confirmed is False else "unknown"
+    _record_actuation_outcome(status, target, now)
+
+
+
+def _record_failed_outcome(target: str, now: int, detail: str) -> None:
+    """Persist a failed model actuation without usage or capacity rationale."""
+    _record_actuation_outcome("failed", target, now, detail)
 
 
 def _sibling_has_headroom(verdict: dict, now: int) -> tuple[str, float] | None:
@@ -279,6 +305,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         after = None
     confirmed = terminal_trigger.confirm_model_switch(after, target) if after else None
+    _record_touched_outcome(confirmed, target, now)
 
     line = token_burn.format_model_fallback_line(verdict, target)
     if confirmed is True:

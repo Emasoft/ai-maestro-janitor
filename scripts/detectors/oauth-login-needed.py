@@ -226,6 +226,29 @@ def _forget_resolved_stuck(home: Path) -> None:
         dedupe.emit_forget(seen, k)
 
 
+
+def _record_owner_remediation(home: Path, condition: str, message: str, now: float) -> None:
+    """Persist owner-only remediation before any best-effort notification."""
+    rotator_alert.record_owner_remediation(home, condition, message, now)
+
+
+def _notify_capture_stalled(home: Path, message: str, count: int, login_sh: str, now: float) -> None:
+    """Keep capture-stalled owner-visible even when notification delivery fails or dedupes."""
+    # WHY (TRDD-JWIGGMH0): the control-plane record is written first and never enters
+    # automatic context; notification remains a best-effort attention channel.
+    _record_owner_remediation(home, "oauth-capture-stalled", message, now)
+    try:
+        notify.push(
+            sev="CRITICAL",
+            code="OAUTH-CAPTURE-STALLED",
+            project="oauth-rotator",
+            summary=f"OAuth capture stalled for {count} account(s)",
+            hint=login_sh,
+        )
+    except Exception:  # noqa: BLE001 -- durable remediation already exists
+        pass
+
+
 def main() -> int:
     state.init_state()
 
@@ -288,6 +311,7 @@ def main() -> int:
         line = dedupe.emit_once(seen, f"due-{day}-{sig}", msg)
         if line is not None:
             print(line)
+        rotator_alert.record_owner_remediation(home, "oauth-login-needed", msg, now)
 
         # Root cause 4 (the decisive gap) — a heartbeat print is invisible to an
         # UNATTENDED session. Route through the real human channel too. notify.push
@@ -342,6 +366,7 @@ def main() -> int:
         line2 = dedupe.emit_once(seen2, f"stalled-{day}-{sig2}", msg2)
         if line2 is not None:
             print(line2)
+        _notify_capture_stalled(home, msg2, len(stalled), login_sh, now)
 
     # TERTIARY nudge — rotation is IMPOSSIBLE right now, and no human knows.
     #

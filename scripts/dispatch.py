@@ -721,6 +721,23 @@ def _heartbeat_is_quiet() -> bool:
     return not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", False)
 
 
+# WHY (TRDD-JWIGGMH0): these detectors measure control-plane token/account telemetry. Their
+# output remains in dedicated logs and must never enter stdout or the findings ledger, because
+# both are automatic agent-context sources. Source identity is stable; prose classification is not.
+_CONTROL_PLANE_ONLY_DETECTORS = frozenset({"token-usage-anomaly", "window-burn-rate"})
+
+
+def _exclude_control_plane_output(detector: str, text: str) -> str:
+    """Persist source-classified telemetry to its control log and return no agent text."""
+    excluded = _CONTROL_PLANE_ONLY_DETECTORS | {"model-fallback", "oauth-login-needed"}
+    if detector not in excluded:
+        return text
+    for line in text.splitlines():
+        if line.strip():
+            state.log_line(f"{detector}-control-plane", line.strip())
+    return ""
+
+
 # janitor#326: the only detectors whose ticket-key marker is honoured (see _drop_ticketed_blocks).
 _TICKET_KEY_DETECTORS = frozenset({"package-manager-policy"})
 
@@ -1345,53 +1362,25 @@ def _record_default_outcome(name: str, outcome: str, started: int) -> None:
 
 
 def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) -> None:
+    """Run one due detector and route its output according to source identity."""
     script = _HERE / "detectors" / f"{name}.py"
     if not script.is_file():
-        state.log_line("dispatch", f"detector '{name}' missing at {script}")
+        state.log_line("dispatch", f"detector {name!r} missing at {script}")
         return
     if not os.access(script, os.X_OK):
-        # FIX IT, do not report it (TRDD-WP7TCRME Rule 3). A detector that exists but lost its
-        # executable bit is the quietest failure this system has: it is skipped on every fire
-        # forever, and the old message called it "missing" -- so anyone reading the log went
-        # looking for a deleted file that was sitting right there. Whatever it was meant to
-        # detect simply stops being detected, and nothing says so.
-        #
-        # Single defensible answer, so the janitor takes it: a file in `detectors/` that
-        # dispatch is iterating IS meant to be run. There is no second reading of a detector
-        # that should exist but must not execute -- that would be a deletion, not a mode.
-        #
-        # This happens for real: `orphaned-memory-maint.py` landed at 100644 in 9e75a7d9 and
-        # was dark until a TEST caught it (2026-08-12) -- a test that only runs in CI, on a repo
-        # checkout, and so says nothing about an INSTALLED plugin whose cache lost the bit.
         try:
             script.chmod(script.stat().st_mode | 0o111)
-            state.log_line("dispatch", f"detector '{name}' was not executable -- fixed (chmod +x)")
+            state.log_line("dispatch", f"detector {name!r} was not executable -- fixed (chmod +x)")
         except OSError as exc:
-            state.log_line("dispatch", f"detector '{name}' not executable and chmod failed: {exc}")
+            state.log_line("dispatch", f"detector {name!r} not executable and chmod failed: {exc}")
             return
     if not _detector_is_due(name, interval):
         return
-    # stdout passes through to the cron prompt as drift findings; stderr
-    # goes to the detector's own log via state.log_line.
-    #
-    # A wall-clock `timeout` is mandatory: the detector roster is iterated
-    # in order (main() Phase 2), so a single hung detector -- an infinite
-    # pure-Python loop, an un-timed inner subprocess / network / `gh` call,
-    # a blocking flock wait -- would wedge THIS fire and starve every detector
-    # after it, every fire, until the cron process is killed. Mirrors the
-    # guard phase (_phase_guard_branch_protection), which already bounds its
-    # subprocess. Well-behaved detectors self-limit via state.run_subprocess
-    # (timeout=10s), but that's a convention, not an enforced bound -- this is
-    # the enforced one.
     timeout = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT"), 120)
     started = int(time.time())
     try:
-        # stdout is CAPTURED (not inherited) so the F6 central defang above can
-        # neutralize forged reserved markers before they reach the cron turn.
-        # stderr stays inherited -- it never carries drift lines.
         proc = subprocess.run(
             [str(script), "--one-shot"],
-            # Opt in to ticket-key markers: dispatch is the one reader that strips them (janitor#326).
             env={**os.environ, tickets.EMIT_ENV: "1"},
             stdout=subprocess.PIPE,
             text=True,
@@ -1399,10 +1388,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        state.log_line("dispatch", f"detector '{name}' timed out after {timeout}s -- killed")
-        # With a PIPE the partial output is on the exception -- print it (defanged)
-        # so a slow detector's already-produced findings aren't silently dropped
-        # (they used to stream live under capture_output=False).
+        state.log_line("dispatch", f"detector {name!r} timed out after {timeout}s -- killed")
         partial_raw = exc.stdout
         partial: str | None
         if isinstance(partial_raw, bytes):
@@ -1410,29 +1396,40 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         else:
             partial = partial_raw
         if partial:
-            sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _drop_suppressed_lines(_defang_foreign_markers(name, partial)))))
+            partial = _exclude_control_plane_output(name, partial)
+            sys.stdout.write(
+                _dedupe_drift_text(
+                    name,
+                    _quiet_filter(
+                        name,
+                        _drop_suppressed_lines(_defang_foreign_markers(name, partial)),
+                    ),
+                )
+            )
             sys.stdout.flush()
-        # Stamp last-run even on timeout so a chronically-slow detector backs
-        # off to its cadence instead of re-firing (and re-hanging) every fire.
         _record_default_outcome(name, "error:timeout", started)
         _mark_detector_ran(name)
         return
     except OSError as exc:
-        state.log_line("dispatch", f"detector '{name}' spawn failed: {exc}")
+        state.log_line("dispatch", f"detector {name!r} spawn failed: {exc}")
         _record_default_outcome(name, "error:spawn-failed", started)
         return
     if proc.stdout:
-        out = proc.stdout
-        # TRDD-LDSCQ0NU / janitor#300: the LAST point machine code can still catch a
-        # `[janitor-memory-<chore>]` marker whose claim pool went empty since the
-        # scheduler wrote it (a peer session's agent claimed it in the interim) --
-        # after this, the marker is heartbeat stdout and the session decides to spawn.
+        out = _exclude_control_plane_output(name, proc.stdout)
         if name == "memory-maintenance":
             out = _suppress_stale_memory_markers(out, force=cooldown_active)
-        sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _drop_suppressed_lines(_defang_foreign_markers(name, out)))))
+        sys.stdout.write(
+            _dedupe_drift_text(
+                name,
+                _quiet_filter(
+                    name,
+                    _drop_suppressed_lines(_defang_foreign_markers(name, out)),
+                ),
+            )
+        )
         sys.stdout.flush()
     if proc.returncode != 0:
-        state.log_line("dispatch", f"detector '{name}' exited non-zero")
+        state.log_line("dispatch", f"detector {name!r} exited non-zero")
         _record_default_outcome(name, f"error:rc={proc.returncode}", started)
     else:
         _record_default_outcome(name, "ok", started)
@@ -1855,44 +1852,20 @@ def _phase_background_worker_progress() -> None:
 
 
 def _phase_rate_limit_recovery() -> bool:
-    """Return True if a [janitor-resume] line was emitted (caller should exit)."""
+    """Emit a generic resume decision when the rate-limit marker clears."""
     flag = state.state_dir() / "rate-limited.flag"
     if not flag.is_file():
         return False
 
     since_file = state.state_dir() / "rate-limited-since.ts"
     now = int(time.time())
-    since = state.read_int_state(since_file, now)
-    age = now - since
+    # WHY (TRDD-JWIGGMH0): duration and API/rate-limit explanations are control-plane
+    # telemetry. The agent needs only the continuation instruction and exact pending directives.
+    _emit_decision(
+        "[janitor-resume]",
+        ["Resume the previous pending task.", *_pending_agent_directive_lines_stale_only()],
+    )
 
-    # F7 (wikimem audit): the marker is emitted BARE on its own line — same
-    # whole-line-only contract as renew/reload/memory markers — with the prose
-    # as PAYLOAD (the keep-going two-line idiom). A prose-carrying marker line
-    # would legitimize prefix-mimicry: any detector line starting with
-    # "[janitor-resume] …" would be honored by the cron prompt. D5 (TRDD-82JRK0CY)
-    # routes this through _emit_decision so the marker auto-flushes at the decision
-    # AND every payload line is defanged.
-    if age > 0:
-        note = f"rate-limit cleared after {age}s — API is reachable again. Resume the previous pending task."
-    else:
-        # since-file was missing or in the future (clock skew); still cue resume.
-        note = "rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task."
-    # W1 (TRDD-82OP4EN9): a rate-limit window kills BACKGROUND agents too, and
-    # nothing else resumes them — list each one for a deterministic SendMessage
-    # resume instead of hoping the model re-reads its transcript (2026-07-08:
-    # four forks died at the 5h cap and needed a manual "resume"). These lines are
-    # untrusted-shaped (an agent description), so _emit_decision defangs each.
-    # TRDD-2MLFZ7DL sub-step 5: stale/dead agents ONLY — see
-    # `_pending_agent_directive_lines_stale_only`'s docstring for why this phase
-    # (unlike compact/clear resume) is the one the acceptance box actually named.
-    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines_stale_only()])
-
-    # Also clear any pending post-COMPACT resume flag: a rate-limit resume cue already
-    # says "resume the pending task", which subsumes it — both describe the SAME
-    # already-happened event, so no cue is lost. `resume-after-clear.*` is deliberately
-    # NOT in this list: it is a PRE-marker for a /clear that has not run yet, and a rate
-    # limit landing in that gap is exactly the case that used to strand the fresh session
-    # with no cue at all. Only `_phase_clear_resume` may consume it.
     sd = state.state_dir()
     for p in (
         flag,
@@ -1904,11 +1877,7 @@ def _phase_rate_limit_recovery() -> bool:
             p.unlink()
         except FileNotFoundError:
             pass
-    # The flags are gone, but the cadence phase (which runs only on a LATER fire, since
-    # this one returns early) still needs to know a resume just happened — otherwise a
-    # rate-limited session would keep retrying at its idle SLOW cadence. TRDD-0QQX9H0G.
     _stamp_resume(sd, now)
-    state.log_line("dispatch", f"rate-limit cleared after {age}s, resume cue emitted")
     return True
 
 
@@ -4617,73 +4586,31 @@ def _phase_heartbeat_cost() -> None:
 
 
 def _phase_self_cost_alarm() -> None:
-    """SURFACE the janitor's own heartbeat spend once it crosses the user's weekly budget.
-
-    The janitor is a token-forensics tool that bounds OTHER sessions' cost but never named
-    its own. A cron fire re-reads the whole cached transcript, so an idle session pinned at
-    FAST can spend for a week with nothing reporting the total. This phase reports it, from
-    the meter that already exists (`token-meter.jsonl`, heartbeat records only — counting
-    the USER's own interactive turns would blame them for their work).
-
-    IT ACTUATES NOTHING, and that is the whole change (owner ruling 2026-07-31: *"never
-    self-disable"*). The previous version (TRDD-ZCODD6YS) escalated a two-rung throttle —
-    cap the cadence, then auto-enter LOCAL maintenance — which let cost pressure switch the
-    guard off by itself: every fire still happened, so the fleet looked healthy while doing
-    nothing, the exact shape janitor-has-no-off-switch-but-disarm forbids. Detectors and the
-    daemon keep running; a HUMAN reads this line and decides (slow the cadence, or
-    /janitor-disarm here, which is loud because it deletes the cron).
-
-    Per-project channeling (TRDD-X92VBFNF): the line carries THIS project's spend and
-    nothing about any other. At most one line per local day per whole multiple of the
-    budget, so a flat overrun states itself daily while a spend that keeps GROWING re-alarms
-    the same day. Silent when `CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET` is unset or 0 —
-    that knob is a REPORTING threshold, never an enable-switch for janitor work. FAIL-OPEN:
-    any exception → say nothing (a metering bug must never break a fire)."""
+    """Persist heartbeat budget crossings to a control-plane log without agent context."""
     try:
-        budget = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET"), 0)
+        budget = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET"), 0
+        )
         if budget <= 0:
             return
         sd = state.state_dir()
-        cost = tm.heartbeat_cost_7d(tm.load_log(sd / "token-meter.jsonl"), now=int(time.time()))
+        cost = tm.heartbeat_cost_7d(
+            tm.load_log(sd / "token-meter.jsonl"), now=int(time.time())
+        )
         if cost < budget:
             return
         today = datetime.now().astimezone().strftime("%Y%m%d")
+        # WHY (TRDD-JWIGGMH0): a dedicated control-plane record preserves the owner-readable
+        # crossing without placing usage, cost, or budget telemetry in stdout or agent findings.
+        key = f"self-cost@{today}:{cost // budget}"
         line = dedupe.emit_once(
             sd / "self-cost-seen.txt",
-            f"self-cost@{today}:{cost // budget}",
-            f"[heartbeat-cost] This project's janitor heartbeat has spent {cost} weighted tokens "
-            f"over the last 7d, past the {budget} budget. Nothing was switched off. To spend less, "
-            f"slow the cadence (CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW) or run /janitor-disarm in "
-            f"this project.",
+            key,
+            f"7d heartbeat cost {cost} weighted tokens >= budget {budget}",
         )
         if line is not None:
-            print(line)
-            state.log_line("dispatch", f"self-cost: 7d heartbeat cost {cost} >= budget {budget}")
-            # RECORD each crossing, not just the dedupe marker — the same defect the iTerm
-            # alarm had (299f775c). `cost` is a ROLLING 7d window: it is recomputed from a
-            # log the meter trims, so an overrun that has aged out is unreconstructable
-            # later. Without this, "the cadence was too expensive last Tuesday" is a claim
-            # nobody can check — and the whole point of the line is that a human decides,
-            # possibly days after the fire that saw it.
-            #
-            # `actor="human"` is load-bearing, not decoration: it prefixes the entry with
-            # HUMAN_ONLY_DIRECTIVE so a later agent reading "heartbeat cost over budget"
-            # surfaces it and STOPS. The two remedies in the message are slow-the-cadence
-            # and /janitor-disarm — an agent that "helpfully" applied the second would be
-            # cost pressure switching the guard off by itself, exactly what the owner
-            # ruling in this docstring forbids. The ledger ENTRY is still always appended;
-            # only record()'s RETURN is suppressed on a repeat, and we ignore the return
-            # (the print above already happened, gated by this phase's own emit_once).
-            #
-            # LOW, so it can never escalate into a push: this is a budget report the user
-            # opted into by setting the knob, not a defect. `notify` is omitted (it is a
-            # CALLABLE — see 299f775c; the print is already the human surface).
-            findings_ledger.record(
-                sev="LOW", code="HEARTBEAT-COST", src="self-cost-alarm",
-                msg=f"7d heartbeat cost {cost} weighted tokens >= budget {budget}",
-                ref="", actor=findings_ledger.HUMAN_ONLY_ACTOR,
-            )
-    except Exception as exc:  # noqa: BLE001 — FAIL-OPEN normative: a metering bug must never break a fire
+            state.log_line("heartbeat-cost-control-plane", line)
+    except Exception as exc:  # noqa: BLE001 - metering must never break a fire
         state.log_line("dispatch", f"self-cost phase failed: {exc}")
 
 

@@ -381,6 +381,30 @@ def test_capture_stalled_daily_dedupe(tmp_path: Path) -> None:
     assert "[oauth-capture-stalled]" not in second  # deduped within the same day
 
 
+
+def test_capture_stalled_persists_and_notifies_even_when_stdout_dedupes(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A repeat capture-stalled pass keeps owner state and attempts notification despite dedupe."""
+    pushed: list[dict] = []
+    monkeypatch.setattr(det.notify, "push", lambda **kwargs: pushed.append(kwargs) or "deduped")
+
+    def fixture(home: Path) -> None:
+        _write_login_slot(home, "stalled@example.com", expires_in_days=-1.0)
+        profile = tmp_path / "profiles" / "chrome-profile-stalled@example.com"
+        _make_cookies(profile, 2.0)
+
+    first, rc1 = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=fixture)
+    second, rc2 = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=fixture)
+    record = tmp_path / "rotator" / "owner-remediation.json"
+    assert rc1 == rc2 == 0
+    assert "oauth-capture-stalled" in first
+    assert "oauth-capture-stalled" not in second
+    assert record.is_file()
+    assert "oauth-capture-stalled" in record.read_text(encoding="utf-8")
+    assert len([call for call in pushed if call["code"] == "OAUTH-CAPTURE-STALLED"]) == 2
+
+
 def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:
     """No rotator home with a state.json anywhere → silent no-op (opt-in by presence)."""
     env = dict(os.environ)

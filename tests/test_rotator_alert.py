@@ -391,11 +391,12 @@ def test_the_daemon_logs_a_malformed_spare_stale_env_only_when_it_changes(
 # ---------- dispatch: the drift line is printed even under a live summary hold ----------
 
 
-def test_dispatch_prints_the_alert_line_before_a_live_summary_hold(
-    env_isolation: dict,  # noqa: F811 -- the imported fixture
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_dispatch_excludes_owner_alert_before_a_live_summary_hold(
+    env_isolation: dict,  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A live hold + an alert file: main() returns at the hold but the drift line is out."""
+    """A live hold never leaks owner-only rotation telemetry into heartbeat stdout."""
     home = tmp_path / "rot-home"
     home.mkdir()
     (home / "state.json").write_text(json.dumps({"slots": {}}))
@@ -410,9 +411,7 @@ def test_dispatch_prints_the_alert_line_before_a_live_summary_hold(
     sd = state.state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(sd, expires_in_s=900)
-    out = _run_main(dispatch)
-    assert "rotator alert: account rotation is stuck - run /janitor-capture-all-logins" in out, out
-    assert "summary hold" not in out
+    assert _run_main(dispatch) == ""
 
 
 def test_dispatch_prints_nothing_without_an_alert_file(
@@ -538,17 +537,49 @@ def test_spare_stale_follows_the_due_backoff(root: Path) -> None:
 
 
 
-def test_drift_parts_classifies_capture_refused_and_spare_stale_as_advisory(root: Path) -> None:
-    """capture-refused:* and spare-stale are advisory; rotation-stuck is the only urgent text."""
+def test_drift_parts_excludes_all_owner_conditions(root: Path) -> None:
+    """Credential, stale-spare, and rotation-capacity conditions never enter heartbeat text."""
     alerts = {
         c: {"first_seen": 1, "last_notified": 100, "notified": 1, "action": f"action for {c}"}
-        for c in ("capture-refused:x@example.invalid", "spare-stale", "rotation-stuck")
+        for c in (
+            "capture-refused:x@example.invalid",
+            "spare-stale",
+            "rotation-stuck",
+            "no-rotation-target",
+            "auth-failed",
+        )
     }
     (root / ra.ALERT_NAME).write_text(json.dumps({"alerts": alerts}))
-    _fresh_tick(root)  # keep the tick-stalled watchdog quiet
+    _fresh_tick(root)
+    assert ra.drift_parts(root, NOW) == ([], {})
+
+
+
+def test_owner_only_alerts_are_persisted_but_never_returned_to_heartbeat(root: Path) -> None:
+    """Owner remediation stays durable while only tick-stalled remains agent-visible."""
+    _write_state(root, live_exp_s=NOW + 1000, spare_exp_s=None)
+    _fresh_tick(root)
+    runner = Runner()
+    ra.evaluate(root, now=NOW, claude_running=True, runner=runner)
+    record = root / ra.OWNER_REMEDIATION_NAME
+    assert record.is_file()
+    text = record.read_text(encoding="utf-8")
+    assert "no-rotation-target" in text
     urgent, advisory = ra.drift_parts(root, NOW)
-    assert set(advisory) == {"capture-refused:x@example.invalid", "spare-stale"}
-    assert urgent == ["action for rotation-stuck"]
+    assert urgent == []
+    assert advisory == {}
+
+
+def test_tick_stalled_remains_agent_visible_and_is_not_owner_remediation(root: Path) -> None:
+    """The watchdog action remains automatic because the current agent can investigate it."""
+    _write_state(root, live_exp_s=NOW + 1000, spare_exp_s=NOW + 1000)
+    _stamp(root, NOW - ra.TICK_STALL_S - 1)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=Runner())
+    urgent, advisory = ra.drift_parts(root, NOW)
+    assert urgent == ["the account rotator has stopped ticking - run /janitor-doctor"]
+    assert advisory == {}
+    record = root / ra.OWNER_REMEDIATION_NAME
+    assert not record.exists() or "tick-stalled" not in record.read_text(encoding="utf-8")
 
 
 
@@ -579,76 +610,70 @@ def _set_alerts(home: Path, **conds: tuple[int, str]) -> None:
     (home / ra.ALERT_NAME).write_text(json.dumps({"alerts": alerts}))
 
 
-def test_advisory_alone_prints_once_until_last_notified_advances(
+def test_advisory_never_prints_when_last_notified_advances(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """A standing spare-stale advisory prints on the first fire, not the second, and again when the daemon re-notified."""
+    """Notification backoff changes remain control-plane-only on every heartbeat."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
-    assert f"rotator alert: {_ADV_TEXT}" in _run_main(dispatch)
-    assert "rotator alert" not in _run_main(dispatch)
-    _set_alerts(home, **{"spare-stale": (4000, _ADV_TEXT)})
-    assert f"rotator alert: {_ADV_TEXT}" in _run_main(dispatch)
+    assert _run_main(dispatch) == ""
+    _set_alerts(home, **{"spare-stale": (200, _ADV_TEXT)})
+    assert _run_main(dispatch) == ""
 
 
-def test_urgent_alone_prints_on_every_fire(
+def test_rotation_capacity_condition_never_prints(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """Regression guard: an urgent condition is never throttled, three fires give three lines."""
+    """A rotation-capacity condition is owner-only despite its former urgent class."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"rotation-stuck": (100, _URGENT_TEXT)})
     for _ in range(3):
-        assert f"rotator alert: {_URGENT_TEXT}" in _run_main(dispatch)
+        assert _run_main(dispatch) == ""
 
 
-def test_urgent_plus_advisory_second_fire_keeps_only_the_urgent_text(
+def test_rotation_capacity_plus_advisory_never_prints(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """With both held, fire 1 carries both texts and fire 2 only the urgent one."""
+    """Mixed owner-only conditions cannot recreate a heartbeat payload."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"rotation-stuck": (100, _URGENT_TEXT), "spare-stale": (100, _ADV_TEXT)})
-    first = _run_main(dispatch)
-    assert _URGENT_TEXT in first and _ADV_TEXT in first
-    second = _run_main(dispatch)
-    assert _URGENT_TEXT in second and _ADV_TEXT not in second
+    assert _run_main(dispatch) == ""
+    assert _run_main(dispatch) == ""
 
 
-def test_advisory_text_change_under_the_same_cond_prints_again(
+def test_advisory_text_change_stays_out_of_context(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """Fire prints, fire is silent, the action text changes under the same cond, fire prints."""
+    """Changing owner-only prose cannot bypass source-aware exclusion."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
-    assert "rotator alert" in _run_main(dispatch)
-    assert "rotator alert" not in _run_main(dispatch)
-    _set_alerts(home, **{"spare-stale": (100, "a spare account needs a new login")})
-    assert "rotator alert: a spare account needs a new login" in _run_main(dispatch)
+    assert _run_main(dispatch) == ""
+    _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT + " changed")})
+    assert _run_main(dispatch) == ""
 
 
-def test_advisory_cleared_then_back_with_same_last_notified_stays_silent(
+def test_advisory_clear_and_recurrence_stay_out_of_context(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """The stamp survives the advisory clearing, so a flap with an unchanged signature is not re-printed."""
+    """A recurrence remains owner-only regardless of prior advisory stamp state."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
-    assert "rotator alert" in _run_main(dispatch)
-    (home / ra.ALERT_NAME).unlink()
-    assert "rotator alert" not in _run_main(dispatch)
+    assert _run_main(dispatch) == ""
+    _set_alerts(home)
+    assert _run_main(dispatch) == ""
     _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
-    assert "rotator alert" not in _run_main(dispatch)
+    assert _run_main(dispatch) == ""
 
 
-def test_corrupt_advisory_stamp_means_never_printed(
+def test_corrupt_advisory_stamp_cannot_leak_owner_text(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """Garbage bytes in the stamp file make the next fire print the advisory again."""
+    """Corrupt legacy dedupe state cannot bypass the source-aware exclusion boundary."""
     dispatch, home, state = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"spare-stale": (100, _ADV_TEXT)})
-    assert "rotator alert" in _run_main(dispatch)
     stamp = state.state_dir() / "rotator-alert-advisory-printed.txt"
-    assert stamp.exists()
-    stamp.write_bytes(b"\xff\xfe\x00garbage\x80")
-    assert "rotator alert" in _run_main(dispatch)
+    stamp.write_bytes(b"\xff\xfe")
+    assert _run_main(dispatch) == ""
 
 
 def test_tick_stalled_alert_file_and_stale_tick_watchdog_print_the_text_once(
