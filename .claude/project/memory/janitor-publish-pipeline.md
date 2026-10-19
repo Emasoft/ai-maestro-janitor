@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline
 description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing / the gate timed out but the test passes on its own / TimeoutExpired on an xdist worker / is this flaky or a real regression — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy / the test gate blocks a publish at random / tests fail only in the full suite and pass alone / a detector exits 0 with empty stdout / assert something in an empty string / which load-flake category is this / should I scale every timeout call site or enumerate them / enumerating call sites keeps missing some / scale timeouts at a seam not per site / my timeout scaling looks applied but does nothing / a module-level constant reads the env before the fixture sets it / timeout_scale frozen at 1.0 / a vacuous fix that looks scaled / gh-reply-watch floor test flaked under load / two projects reported the same reply / the deferred project polled again / a wall-clock floor spanning sequential spawns / I checked the gate would pass but it blocked anyway / hand-wrote a regex to approximate the lint / how do I dry-run the address lint before publishing / phantom hits from a stub known_for / an email-shaped filename blocked the release / dot-invalid is allow-listed but the publish still blocked / the release tag points at an old commit / tag and HEAD disagree after publish / duplicate chore bump version commits on main / publish exited 0 but the tag is wrong / renamed a test file and the address lint exploded / grandfathered addresses stopped being grandfathered"
 ocd: 2026-06-13
-lmd: 2026-09-22
+lmd: 2026-10-19
 metadata:
   node_type: memory
   type: project
@@ -29,6 +29,56 @@ is no skip, no force, no bypass.
 This page is the entry point; the detail lives in four sub-pages (split from
 this page on 2026-09-05 — it had outgrown a single load). Each still carries
 its own lessons-learned section and links back here.
+
+
+^ATOM-6WEW-R28X [desc: "an UNRELEASED fix cannot fix this machine: the heartbeat runs the newest CACHED plugin version, so a committed fix is invisible until it is published", keywords: unreleased_fix_not_live the_fix_is_committed_but_the_bug_still_happens the_machine_runs_old_code dispatcher_stub_re-resolves_newest_cached_version 599_commits_ahead_of_the_release alert_keeps_repeating_after_the_fix_is_written release_gap board_drain_rule_blocks_the_release repo-state_LOW_advisory_does_not_escalate PLUGIN_SKIP_GITHUB_INTEGRITY CPV_integrity_manifest_mismatch No_publish_until_the_board_is_drained 3451_mismatching_files, ocd: 2026-10-19, lmd: 2026-10-19]
+
+THE RELEASE GAP, measured 2026-10-20 (TRDD-PWL9GD4E, TRDD-5CGGMH0, TRDD-U0VLVJVT).
+
+A fix COMMITTED but NOT PUBLISHED does not exist for the janitor. The dispatcher
+stub (the plugin DATA dir's `dispatcher-stub.py`) re-resolves the newest CACHED
+version directory on EVERY fire and `os.execv`s into it, so the running code is
+the newest PUBLISHED build — never the working tree. A published release alone
+is not enough either: the new version must land in the plugin CACHE.
+
+THE LOOP, self-perpetuating and invisible: alert repeats -> an agent diagnoses
+it correctly -> the agent writes and commits the fix -> the fix sits in the tree
+-> the heartbeat keeps running the old build -> the alert keeps repeating. Each
+cycle produces a better commit and the SAME alert, and the alert is the only
+thing the owner actually sees. DO NOT read a repeated alert as an unfixed
+defect: FIRST check whether the fix is already on main and merely unreleased.
+Measured 2026-10-20: 599 commits sat on main after v3.8.11, and the fix for the
+owner's complaint was `f795816c` (TRDD-JWIGGMH0, 2026-10-19) — on main, not an
+ancestor of the release, absent from the installed build.
+
+
+
+^ATOM-N44N-KU9B [desc: "TWO blockers stop a janitor release, and only one is a real decision: the CPV integrity abort is bypassable, the board-drain rule is not", keywords: publish_blocked what_stops_the_release CPV_integrity_manifest_mismatch 3451_mismatching_files PLUGIN_SKIP_GITHUB_INTEGRITY No_publish_until_the_board_is_drained board_drain_rule carve-out_for_live_owner_complaint repo-state_LOW_advisory_never_escalates publish.py_step_4_of_11 TRDD-S6GX1DHN TRDD-CWKM5218 TRDD-U0VLVJVT how_do_I_release_the_janitor, ocd: 2026-10-19, lmd: 2026-10-19]
+
+TWO BLOCKERS STOP A JANITOR RELEASE, and only one is a real decision.
+
+1. THE CPV VALIDATOR'S OWN INTEGRITY CHECK aborts at publish step 4 of 11 with
+   "[CPV integrity] CRITICAL: integrity manifest mismatch" and 3451
+   mismatching files (the validator's header total: 50 listed as "deleted
+   locally" plus "...and 3401 more"). Cause is upstream (TRDD-CWKM5218): under
+   uvx the validator takes site-packages as its plugin root, the hard-coded
+   REPO_RAW_MAIN_URL names branch main while the repo's branch is master, every
+   fetch 404s, and a stale `~/.cache/cpv/github-manifest-vmain.json` then makes
+   every manifest entry read as deleted. `publish.py` exempts it via `PLUGIN_SKIP_GITHUB_INTEGRITY=1`,
+   and every release from 3.7.1 to 3.8.11 shipped under that exemption, so it
+   is BYPASSABLE.
+
+2. THE PROJECT RULE on TRDD-S6GX1DHN: "No publish until the board is drained."
+   The board is ~344 cards, so this is the REAL blocker — and it is the OWNER's
+   decision, not a tooling failure. The rule has NO carve-out for a fix that
+   answers a LIVE owner complaint; that is the structural defect
+   (TRDD-U0VLVJVT carries the proposed rule text).
+
+DO NOT CONFLATE THEM. `repo-state` reports unreleased commits, but it sits in
+`_ADVISORY_DETECTORS` ("informational: ... never an incident") and the quiet
+filter records such lines as `sev="LOW"` — a repo whose SHIPPED artifact is
+hundreds of commits behind its own working tree is reported at the same
+severity as a merely dirty repo. No detector escalates this class.
 
 ## Applies to
 
