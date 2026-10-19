@@ -1,0 +1,40 @@
+---
+trdd-id: U0VLVJVT
+title: The board-drain rule must not make a live-complaint fix unreachable
+column: todo
+status: tasked
+created: 2026-10-20T01:30:36+0200
+updated: 2026-10-20T01:30:36+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: infra
+min-approval-requirement: none
+scope: project
+project-id: ai-maestro-janitor
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: manager
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-20T01:30:36+0200
+---
+
+# The board-drain rule must not make a live-complaint fix unreachable
+
+THE RULE UNDER EXAMINATION. TRDD-S6GX1DHN (the board-drain card) records, in its body: "No publish until the board is drained (project rule: finish pending cards first)." The board it refers to measured 343 open cards on 2026-10-20 (66 testing, 39 blocked, 14 human_review, 6 todo, 2 dev, 101 complete-but-unarchived, 109 backburner). The rule's purpose is sound — it stops a half-finished board from being shipped as a release. But it is stated WITHOUT a carve-out, and the consequence of that is measured, not theoretical.
+
+THE CONSEQUENCE, MEASURED. The owner complained on 2026-10-20 that janitor alerts it cannot act on repeat on every heartbeat fire. The fix for that complaint is commit f795816c (TRDD-JWIGGMH0, 2026-10-19), which is on main and unreleased. 599 commits sit between it and the v3.8.11 release. The heartbeat's dispatcher stub re-resolves the newest CACHED version on every fire, so the machine runs the pre-fix build and the repetition continues. Every additional day of board-drain work adds another day of the owner seeing the same un-actionable line. The rule that is meant to protect release quality is, in this instance, holding the owner's fix on the shelf.
+
+WHY A CARVE-OUT IS THE RIGHT SHAPE rather than an exception list. The rule conflates two different releases: one that ships a board's worth of accumulated work, and one that ships a fix for a condition the owner is looking at RIGHT NOW. The first is a release of history and deserves the full drain; the second is a repair of a live symptom and does not carry the risk the drain protects against — a half-finished card on the board is not made more finished by waiting for an unrelated fix to ship, and the fix is not made less safe by shipping early, because it goes through the SAME gate (ruff, mypy, pyright, the full test suite, the CPV validate step) whether the board is drained or not. The gate is the quality control; the drain is a scope control. For a single named fix answering a live complaint, the gate is the binding constraint and the drain is not.
+
+THE PROPOSED RULE TEXT, for the owner to accept or reject — it amends TRDD-S6GX1DHN, and it does not weaken the drain for anything else: "No publish until the board is drained, EXCEPT a release carrying at least one fix that answers a live owner complaint raised within the last 7 days. Such a release may go ahead while the board is undrained, provided (a) the whole gate is green on ONE commit, (b) the release is cut by scripts/publish.py and nothing else, and (c) the card carrying the complaint is named in the release's commit subject. Releases under this carve-out are recorded on the board so the drain is not silently abandoned."
+
+WHAT THIS CARD DOES NOT DECIDE, and why it is still a card. A carve-out to a project rule is the owner's call: the rule's own text lives in a TRDD the owner mandated, and TRDD-S6GX1DHN's own "FOR THE OWNER, not decided by the main session" line already shows that the publish-timing question was escalated to the owner on 2026-10-10 and never answered. This card exists to make that question DECIDABLE — with the measurement, the mechanism, and the exact rule text — rather than to have the main session assume the authority to publish. Whether to publish the 599 commits at all, with or without the carve-out, remains a separate decision that the owner's standing mandate reserves: publishing is outward-facing, and it is permitted only through scripts/publish.py.
+
+THE OBSTRUCTION TO RECORD, because it is separate from the rule and will bite either way. The publish dry-run on this tree FAILS at step 4 of 11 ("Validating plugin (remote CPV)": "[CPV integrity] CRITICAL: integrity manifest mismatch", 3451 mismatching files (50 listed as "(deleted locally)" plus "…and 3401 more"), exit 2) while steps 0-3 are green. That is the known upstream defect on TRDD-CWKM5218, and every release from 3.7.1 through 3.8.11 shipped under the PLUGIN_SKIP_GITHUB_INTEGRITY=1 exemption that publish.py itself sanctions (publish.py:1643, exemptions = {PLUGIN_SKIP_GITHUB_INTEGRITY, CPV_SKIP_GH_AUTH_CHECK}). So a release IS reachable on this host under the documented exemption, and the board-drain rule is the only thing between the tree and the release — but the exemption is a trust decision about an upstream validator, and it should be the owner's informed one, which is one more reason the timing question goes to the owner rather than being taken by the main session.
+
+NEXT ACTION: put the proposed rule text to the owner together with the two measurements above (599 unreleased commits; the step-4 CPV failure and its documented exemption), and record the owner's answer as a dated entry in this card AND in TRDD-S6GX1DHN, so the rule and its exception live in the same place the rule lives. If the owner declines the carve-out, this card closes as "the rule stands as written" and the release question moves to TRDD-PWL9GD4E, which carries the 599 commits.
+
+## Approval log
+
+- 2026-10-20T01:30:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
