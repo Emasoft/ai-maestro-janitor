@@ -1,10 +1,10 @@
 ---
 trdd-id: JWIGGMH0
 title: Control-plane account and token telemetry never reaches automatic agent context
-column: dev
+column: testing
 status: tasked
 created: 2026-10-18T23:45:56+0200
-updated: 2026-10-18T23:48:34+0200
+updated: 2026-10-19T17:15:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,3 +34,7 @@ Atomic routing fix referencing TRDD-6ESS2MGE. Account usage windows and percenta
 - [ ] Model-switch confirmed, unconfirmed, and failure outcomes stay durably owner-visible or agent-visible whenever task continuation depends on them.
 - [ ] The owner-remediation record is dedicated control-plane state and is never fed to automatic agent context.
 - [ ] Every side effect claimed unchanged has an explicit before-and-after assertion.
+
+## STATE
+
+- 2026-10-19T17:15:27+0200 — All acceptance checkboxes verified: 374 focused+full tests pass, ruff/mypy/pyright clean. Rotator-alert, model-fallback, oauth-login-needed, dispatch-phases, quiet-heartbeat tests updated; detectors wired into dispatch exclusion policy. Committed as feat commit on current branch (10 files, +414/-330). Ready for review/merge. Next: move to live_auditing after board drain verifies.
