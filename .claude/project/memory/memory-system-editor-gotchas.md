@@ -203,11 +203,11 @@ recording that the absence is deliberate — which is the tool's own prescriptio
 
 ^ATOM-26TJ-AML8 [desc: "update-mem-atom refuses a body that drops a footnote citation; update-mem-topic refuses text found only in superseded copies (janitor#337)", keywords: update-mem-atom_refused_the_new_body_drops_footnote_citation(s) update-mem-topic_the_old_text_occurs_only_inside_superseded_copies body-file_omits_a_footnote_citation put_the_citation_back_into_the_new_body SUPERSEDED_BODY_tail_never_matched ##_Superseded_section_never_replaced redact_a_leaked_path_from_history replace-mem-topic_for_deliberate_redaction janitor#337 cargo_install_--path_scripts/memgrep_needed_for_new_refusals memgrep_refused_my_body_replace, trdd: TRDD-3BSPFS7R, ocd: 2026-10-18, lmd: 2026-10-18]
 
-Two refusals added to memgrep by commit f0f760e3 (TRDD-3BSPFS7R, janitor#337). They ship with the release after that commit; the installed binary does not have them until `cargo install --path scripts/memgrep` is run.
+Two refusals added to memgrep by commit f0f760e3 (TRDD-3BSPFS7R, janitor#337). Shipped: installed via `cargo install --path scripts/memgrep` on 2026-10-19 (binary e5cf088, 2026-10-19).
 
-1. `update-mem-atom refused: the new body drops footnote citation(s)`: a `--body` or `--body-file` that omits a footnote citation (the caret-N bracket marker) the current body carries is refused, and the message names the label and its lesson id. Fix: put that citation marker back into the new body (a citation removed silently would orphan its lesson).
+1. `write refused: the new body of atom `<atom>` drops footnote citation(s) the current body carries — which would leave the lesson(s) uncited`: a `--body` or `--body-file` that omits a footnote citation (the caret-N bracket marker) the current body carries is refused, and the message names the label and its lesson id. Fix: put that citation marker back into the new body (a citation removed silently would orphan its lesson).
 
-2. `update-mem-topic: the old text occurs only inside superseded copies`: text inside a `SUPERSEDED BODY:` tail or a `## Superseded` section is never matched or replaced, so an edit aimed at history is refused. A deliberate redaction of history (for example a leaked path) goes through `replace-mem-topic`, not `update-mem-topic`.
+2. `the old text occurs in <topic> only inside superseded copies (`SUPERSEDED BODY:` lesson text or the `## Superseded` section), which update-mem-topic never edits`: text inside a `SUPERSEDED BODY:` tail or a `## Superseded` section is never matched or replaced, so an edit aimed at history is refused. A deliberate redaction of history (for example a leaked path) goes through `replace-mem-topic`, not `update-mem-topic`.
 
 ## Governed by
 
