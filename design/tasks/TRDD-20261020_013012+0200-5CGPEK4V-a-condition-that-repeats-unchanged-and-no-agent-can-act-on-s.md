@@ -1,10 +1,10 @@
 ---
 trdd-id: 5CGPEK4V
 title: A condition that repeats unchanged and no agent can act on should escalate once and stay quiet
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-20T01:30:12+0200
-updated: 2026-10-20T01:40:52+0200
+updated: 2026-10-20T01:41:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T01:30:12+0200
 blocked-by: [F3LVCQ39]
 pre-block-column: todo
+blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design show F3LVCQ39 --porcelain | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # A condition that repeats unchanged and no agent can act on should escalate once and stay quiet
@@ -44,3 +46,4 @@ NEXT ACTION: this card is blocked by TRDD-F3LVCQ39 (the census), and it unblocks
 ## Approval log
 
 - 2026-10-20T01:30:12+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-20T01:41:50+0200 — column → blocked. waits on TRDD-F3LVCQ39: the census of the drift conditions that can reach a model turn
