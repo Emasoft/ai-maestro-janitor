@@ -1,0 +1,43 @@
+---
+trdd-id: 03G3CSUU
+title: An unreleased fix is not a fix, and the gap must be escalated
+column: todo
+status: tasked
+created: 2026-10-20T01:44:30+0200
+updated: 2026-10-20T01:44:30+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: feature
+min-approval-requirement: none
+scope: project
+project-id: ai-maestro-janitor
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: manager
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-20T01:44:30+0200
+---
+
+# An unreleased fix is not a fix, and the gap must be escalated
+
+THE INCIDENT THIS CARD WOULD HAVE PREVENTED, and it is the reason the card exists. On 2026-10-20 the owner complained that janitor alerts repeat on every heartbeat fire. The fix was ALREADY WRITTEN and COMMITTED on 2026-10-19 (f795816c, TRDD-JWIGGMH0) and the machine still repeated the alert, because the fix was 599 commits behind the v3.8.11 release. For four days, and across at least three separate diagnosis cycles, the alert was the only signal anyone had — and the one detector that could have named the real cause, repo-state, reported it as a LOW ADVISORY that the quiet filter DROPS. So the janitor was, in effect, telling the owner "your repo is dirty" while the actual fact was "your installed artifact is 599 commits behind your own working tree, and the fix for the thing you are complaining about is in that gap". Every agent cycle re-diagnosed the symptom correctly and re-committed the fix, and the fix never reached the machine. A card about the RELEASE (TRDD-PWL9GD4E) fixes this instance; this card is the one that would have made the instance VISIBLE in time.
+
+THE GAP, MEASURED. 599 commits sat on main after the v3.8.11 release; the installed plugin was the newest CACHED version, and the fix was not an ancestor of that release. The two numbers a detector could have compared — commits on main since the last release tag, and the version of the code the heartbeat actually runs — were both available, and nothing compared them.
+
+THE MECHANISM, and it must be a detector not a rule, because the whole point is to be SEEN. The janitor already has the primitive: repo-state.py computes exactly the right number (commits on the branch since the last release tag that were not made through publish.py) and prints it — and the quiet filter records that line into the findings ledger at sev="LOW" (dispatch.py:857-858), where it does not reach a model turn. The change is not a new detector; it is a SEVERITY THAT SCALES WITH THE GAP, and a rule that an unreleased gap of a certain size is not an advisory but a condition. The threshold is the design question: a repo that is one commit ahead is dirty and should stay quiet; a repo whose SHIPPED ARTIFACT is hundreds of commits behind its own working tree is running code that does not contain the fixes its own tree holds, and every alert caused by that code is unfixable until a release happens. Somewhere between those is the line, and the line belongs to the owner, not to a default.
+
+WHY IT IS NOT THE SAME CARD AS THE RELEASE, and why it is not the same card as the prevention mechanism. TRDD-PWL9GD4E is about cutting one release. TRDD-5CGPEK4V is about a condition that repeats on every fire and no agent can act on. This card is the case that is BOTH: a condition that repeats on every fire, that no agent can act on (the agent cannot publish), and that is invisible because the detector that knows about it is an advisory. It is also the case where the "agent can act on it" answer is WRONG in an instructive way — the agent CAN act on it, by cutting a release, but only with the owner's authorisation, so it is exactly the boundary case the classification in TRDD-F3LVCQ39 must get right. That is why the census's actionability axis has to be able to say "actionable, but only by the owner, and only after an authorisation that is not a per-fire decision".
+
+THE COST OF GETTING IT WRONG, in both directions, because the failure is not one-sided. TOO QUIET (today's behaviour) and a machine runs stale code for days while its owner is told nothing, and every symptom of that staleness is misdiagnosed as a live defect. TOO LOUD and a repo that is legitimately mid-development — 599 commits is a plausible state for a working tree — raises a HIGH finding on every fire, which is the same noise problem TRDD-5CGPEK4V exists to fix, and it would teach the owner to dismiss it. The threshold therefore has to distinguish a repo that is ABOUT TO RELEASE from a repo that has ABANDONED the release, and the only signal that distinguishes them is the same one: age. A gap that has not moved for N days is not a repo about to release; it is a repo whose fixes are unreachable. So the escalation is age-based, not count-based, and the count is a secondary input.
+
+ACCEPTANCE. (1) A detector (or the existing repo-state, re-classified) raises a condition when the gap between the branch and the last release tag is both non-trivial in SIZE and non-trivial in AGE, and the severity of that condition is above LOW, so it REACHES a model turn rather than being dropped by the quiet filter. (2) The line names the concrete fact — how many commits, since which tag, how old — and names the consequence, that the running plugin is an OLDER build than the tree and cannot contain the tree's fixes. (3) A repository that is a few commits ahead and releasing this week does NOT raise it, and a test asserts that. (4) A repository whose gap has not moved for the threshold period DOES raise it, and a test asserts that. (5) The condition is classified in the actionability vocabulary of TRDD-F3LVCQ39 as one the agent may not resolve alone, so TRDD-5CGPEK4V's mechanism handles it correctly rather than treating it as a repeating actionable line. (6) The threshold is the owner's to set, and the default is documented rather than silently chosen.
+
+THE THRESHOLD, MEASURED ON THIS REPO'S OWN RELEASE HISTORY, and the measurement CHANGED THE DESIGN. A commit COUNT turns out to be the wrong signal for this repo: the inter-release commit counts are tiny and ordinary — v3.8.1 through v3.8.11 shipped 7, 34, 28, 30, 22, 19, 41, 17, 3, 29 and 18 commits apart — so a threshold of even 50 commits would never have fired, and 599 (the size of the present gap) is not a number this repo's own history produces. The RELEASE CADENCE is the signal. Measured over the 38 releases in the retained tag history (2026-07-16 to 2026-10-07, 37 intervals): the days between consecutive release dates have median 1, mean 2.24, p90 6, and MAX 8; only 6 of 37 intervals were 4 days or longer. THE CURRENT GAP IS 13 DAYS — longer than every one of those 37 intervals. So the honest threshold is stated in the repo's OWN units and is self-calibrating: a release gap that exceeds the repo's historical MAXIMUM release interval is not a repo about to release, it is a repo whose fixes are unreachable — and that is exactly the state this incident was in, and it was detectable from the tag history alone, with no new instrumentation. The 13-day figure is also why the alert was unfixable in the loop: each diagnosis cycle added commits, so the gap's SIZE grew while its AGE kept climbing, and neither moved the machine.
+
+NEXT ACTION: read scripts/detectors/repo-state.py in full and the quiet filter's severity path in scripts/dispatch.py, and design the detector on this measured cadence rather than on a commit count: a condition that compares the age of the current release gap against the repo's OWN historical maximum release interval — recomputed from the tag history at detection time, so a repo that legitimately slows down raises its own bar — and raises a severity above LOW when the gap exceeds it. Then put the proposed threshold to the owner with the measured distribution beside it: median 1, p90 6, max 8, current 13.
+
+
+## Approval log
+
+- 2026-10-20T01:44:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
