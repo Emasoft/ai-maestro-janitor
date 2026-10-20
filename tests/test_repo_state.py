@@ -35,6 +35,19 @@ def _load():
 rs = _load()
 
 
+def _load_dedupe():
+    """The dedupe module, loaded the same way the detector loads it."""
+    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
+    spec = importlib.util.spec_from_file_location("dedupe_under_test", lib / "dedupe.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+dedupe = _load_dedupe()
+
+
 # --------------------------------------------------------------------------- #
 # fixture helpers — a real repo with a real `origin` (a local bare clone)
 # --------------------------------------------------------------------------- #
@@ -889,14 +902,6 @@ def test_dedupe_emit_once_survives_a_corrupt_seen_file(tmp_path: Path) -> None:
     episode, so a raise here turns one corrupt file into an unbounded
     repeat-and-write-amplification loop.
     """
-    import importlib.util as _ilu  # noqa: PLC0415 — import kept local to the test
-
-    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
-    spec = _ilu.spec_from_file_location("dedupe_under_test", lib / "dedupe.py")
-    assert spec and spec.loader
-    dedupe = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(dedupe)
-
     seen = tmp_path / "corrupt.seen"
     seen.write_bytes(b"\xff\xfe garbage \x80 not utf8\n")
     # First call: the file is (wrongly) read as holding no keys, so the
@@ -904,6 +909,55 @@ def test_dedupe_emit_once_survives_a_corrupt_seen_file(tmp_path: Path) -> None:
     assert dedupe.emit_once(seen, "key-1", "the message") == "the message"
     # Second call: the key is now in the file, so the message is suppressed.
     assert dedupe.emit_once(seen, "key-1", "the message") is None
+
+def test_a_corrupt_seen_file_is_REWRITTEN_empty_not_kept_corrupt(
+    tmp_path: Path,
+) -> None:
+    """A corrupt seen-file must be REWRITTEN, not merely survived.
+
+    Reading a corrupt file with `errors="replace"` does not raise, but it
+    reads the file as a set of WRONG keys — the undecodable bytes become
+    one replacement character and the real keys stored as text are still
+    there. The consequence is that `emit_forget` finds its key ABSENT and
+    returns WITHOUT rewriting, so the corrupt file survives; and every
+    later `emit_once` reads the same wrong set, so the same findings
+    re-emit on every fire.
+
+    The honest response to a file whose stamps cannot be trusted is to
+    treat it as the empty key set AND REWRITE it, so the corruption does
+    not persist. This test pins the rewrite: without it the file still
+    holds its undecodable bytes after the first emit.
+    """
+    seen = tmp_path / "seen.txt"
+    seen.write_bytes(b"key-a\n\xff\xfe\x00binary\n")
+
+    dedupe.emit_once(seen, "key-a", "first")
+    # The corrupt bytes are GONE — the file was rewritten, not appended to.
+    assert b"\xff" not in seen.read_bytes(), seen.read_bytes()
+    # And it is a valid, clean seen-file now.
+    assert seen.read_text(encoding="utf-8") == "key-a\n", seen.read_text()
+
+    # The second emit of the same key is now correctly deduped, because the
+    # rewritten file really does hold the key.
+    assert dedupe.emit_once(seen, "key-a", "second") is None
+
+
+def test_emit_forget_cleans_a_corrupt_seen_file_instead_of_leaving_it(
+    tmp_path: Path,
+) -> None:
+    """`emit_forget` must not leave a corrupt file corrupt.
+
+    `emit_forget` on a corrupt file used to find its key absent (the
+    corrupt bytes are not the key) and return without rewriting, so the
+    corruption survived every call. The file is now rewritten empty, which
+    is the state a forget leaves behind anyway when the key is absent.
+    """
+    seen = tmp_path / "seen.txt"
+    seen.write_bytes(b"key-a\n\xff\xfe\x00binary\n")
+
+    dedupe.emit_forget(seen, "key-a")
+    assert b"\xff" not in seen.read_bytes(), seen.read_bytes()
+    assert seen.read_text(encoding="utf-8") == "", seen.read_text()
 
 
 def test_the_owner_override_rescues_a_repo_with_a_single_release(
@@ -938,3 +992,71 @@ def test_the_owner_override_rescues_a_repo_with_a_single_release(
     assert gap_days == 14, gap_days
     out = _run(repo, tmp_path / "homen2b")
     assert "GAP ESCALATION" in out, out
+
+def test_unreleased_subjects_returns_subjects_not_commit_headers(
+    repo: Path,
+) -> None:
+    """The helper must return SUBJECTS, never git's own plumbing.
+
+    Every other test in this file asserts on the COUNT, and a count is
+    blind to a shape error that adds a line per commit: the number would
+    simply be wrong, by a different amount on a different repo, and the
+    exact-count assertions would catch it only by luck of the fixture's
+    size. This test pins the SHAPE, which is the property whose failure
+    would inflate every count.
+
+    The helper used to run `git rev-list --no-commit-header --format=%s`,
+    and `--no-commit-header` is a git 2.33 (2021) addition that the plugin
+    declares no floor for. It now runs `git log --format=%s`, which has no
+    such dependency and accepts the same `--not` set. The assertion below
+    is what would have caught the old form on an old git: a rejected flag
+    makes `rev-list` exit non-zero, the helper returned an empty list, and
+    the count collapsed to ZERO — the rule going silent on exactly the
+    repos it exists to watch.
+    """
+    _tagged_commit(repo, "feat: one", _days_ago(12), "v1.0.0")
+    for i in range(3):
+        _commit(repo, f"feat: unreleased work {i}")
+
+    subjects = rs._unreleased_subjects(repo, "v1.0.0", "main")
+    assert subjects is not None, "the subtraction set is known, so a list is returned"
+    assert subjects == [
+        "feat: unreleased work 0",
+        "feat: unreleased work 1",
+        "feat: unreleased work 2",
+    ], subjects
+    # No git plumbing leaked into the list.
+    for line in subjects:
+        assert not line.startswith("commit "), line
+        assert not line.startswith(("diff ", "tree ", "author ", "Date:")), line
+
+
+def test_an_unknown_subtraction_set_measures_nothing_rather_than_the_raw_range(
+    repo: Path,
+) -> None:
+    """When the subtraction set is UNKNOWN, measure NOTHING.
+
+    `git tag --merged` fails on a bad branch name — it exits 128 with
+    "fatal: malformed object name". The helper used to return an EMPTY
+    LIST for that, which is not a fallback but a DIFFERENT MEASUREMENT:
+    with an empty `--not` set the subtraction removes nothing, so the
+    count becomes the raw size of `tag..branch` — the PRE-C1 behaviour,
+    counting commits a release already shipped. The count would then
+    OVERSTATE the backlog while the line states its consequence as fact.
+
+    The safe direction for this rule is to measure nothing when the
+    subtraction set cannot be determined.
+    """
+    _tagged_commit(repo, "feat: one", _days_ago(12), "v1.0.0")
+    for i in range(6):
+        _commit(repo, f"feat: unreleased work {i}")
+
+    # The branch does not exist, so `git tag --merged` cannot run.
+    unknown = rs._release_line_tags(repo, "no-such-branch")
+    assert unknown is None, "an unknown set must be None, not an empty list"
+    # And the helper must refuse rather than fall back to the raw range.
+    assert rs._unreleased_subjects(repo, "v1.0.0", "no-such-branch") is None
+
+    # The rule therefore does not fire: nothing was measured.
+    verdict = rs._release_gap(repo, datetime.date.today(), "no-such-branch")
+    assert verdict is None, "an unknown subtraction set must produce no finding"

@@ -82,10 +82,11 @@ def emit_once(seen_file: Path | str, key: str, message: str) -> Optional[str]:
         # episode, so one undecodable file turns a single finding into an
         # unbounded repeat-and-write-amplification loop: the finding re-fires
         # on every fire and the durable record grows without bound.
-        # errors="replace" decodes the undecodable bytes to a replacement
-        # character, so the file is read as the (wrong) key set it holds and
-        # the caller proceeds instead of looping forever.
-        existing = seen.read_text(encoding="utf-8", errors="replace").splitlines()
+        # `_read_seen_lines` handles the corrupt case by REWRITING the file
+        # empty, so the next read is clean — one re-emit, then a clean file.
+        existing = _read_seen_lines(seen)
+        if existing is None:
+            return None  # unreadable — fail open, pretend already-seen
         if key in existing:
             return None
         # Append the key. We open in append mode so concurrent readers see
@@ -95,6 +96,49 @@ def emit_once(seen_file: Path | str, key: str, message: str) -> Optional[str]:
         return message
     finally:
         _release_lock(lockdir)
+
+def _read_seen_lines(seen: Path) -> list[str] | None:
+    """The seen-file's key lines, or None when the file cannot be decoded.
+
+    A seen-file that is not valid UTF-8 is a CORRUPT seen-file, and the
+    honest response is to treat it as the EMPTY key set — every key is
+    treated as "never seen" — and to REWRITE IT so the corruption does not
+    persist.
+
+    WHY REWRITE, AND WHY NOT `errors="replace"`. Decoding with
+    errors="replace" does not raise, so the caller proceeds, but it reads
+    the file as a set of WRONG keys: the undecodable bytes become one
+    replacement character, the real keys that were stored as text are still
+    there, and the ones stored as undecodable bytes are gone. The
+    consequence is that `emit_forget` finds its key absent and returns
+    WITHOUT rewriting, so the corrupt file survives; and every later
+    `emit_once` reads the same wrong set, so the same findings re-emit on
+    every fire and the file keeps growing. Rewriting the file empty turns
+    that into ONE re-emit followed by a clean file — which is what the
+    caller actually wants, and what the comment claiming to prevent an
+    "unbounded repeat-and-write-amplification loop" describes.
+
+    Returns None only when the file cannot be READ at all (an OSError), so
+    the caller can distinguish "unreadable" from "corrupt".
+    """
+    try:
+        raw = seen.read_bytes()
+    except OSError:
+        return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Corrupt: rewrite it empty, atomically, so the next read is clean.
+        _rewrite_seen(seen, [])
+        return []
+    return text.splitlines()
+
+
+def _rewrite_seen(seen: Path, lines: list[str]) -> None:
+    """Replace the seen-file's contents with `lines`, atomically."""
+    tmp = seen.with_suffix(seen.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    os.replace(tmp, seen)
 
 
 def emit_forget(seen_file: Path | str, key: str) -> None:
@@ -117,13 +161,14 @@ def emit_forget(seen_file: Path | str, key: str) -> None:
         # caller that un-latches a failed write does so from an exception
         # handler, so a raise HERE would escape the handler that called it
         # and take the whole detector down instead of un-latching.
-        existing = seen.read_text(encoding="utf-8", errors="replace").splitlines()
+        # `_read_seen_lines` handles the corrupt case by rewriting the file
+        # empty, so the corruption does not survive to the next fire.
+        existing = _read_seen_lines(seen)
+        if existing is None:
+            return
         if key not in existing:
             return
         kept = [line for line in existing if line != key]
-        # Atomic rewrite via tmp + os.replace.
-        tmp = seen.with_suffix(seen.suffix + f".tmp.{os.getpid()}")
-        tmp.write_text("\n".join(kept) + ("\n" if kept else ""))
-        os.replace(tmp, seen)
+        _rewrite_seen(seen, kept)
     finally:
         _release_lock(lockdir)

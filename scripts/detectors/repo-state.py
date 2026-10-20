@@ -268,11 +268,13 @@ def _last_release_tag(repo: Path) -> str | None:
     return best[1] if best else None
 
 
-def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
+def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str] | None:
     """Subjects of the UNRELEASED commits on `branch` since `tag`, oldest-first.
 
     UNRELEASED = on `branch`, since the reported release, and contained in NO
     RELEASE that is merged into `branch`.
+
+    Returns None when the subtraction set cannot be determined — see (c).
 
     The last clause is what the tag subtraction buys. `git log A..B` is a SET
     DIFFERENCE over the DAG, so a commit that ANOTHER release already shipped
@@ -281,7 +283,7 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     would state a shipped commit as a backlog.
 
     THE SUBTRACTION IS LIMITED TO THE RELEASE TAGS MERGED INTO `branch`, and
-    both halves of that restriction are load-bearing.
+    every part of that restriction is load-bearing.
 
     (a) ONLY TAGS MERGED INTO `branch` MAY BE SUBTRACTED. `git log A..B
     --not --tags` subtracts the commits reachable from EVERY tag, and
@@ -293,9 +295,9 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     silently under-reporting the very quantity the escalated line states as
     a fact. The subtraction must therefore name the tags that are MERGED
     INTO the branch being measured (`git tag --merged <branch>`), which are
-    exactly the releases that shipped that branch's work. A tag on a side
-    branch is not a release of the branch, and the commits it happens to
-    contain are still unreleased ON IT.
+    the releases that shipped that branch's work. A tag on a side branch is
+    not a release of the branch, and the commits it happens to contain are
+    still unreleased ON IT.
 
     (b) ONLY RELEASE TAGS MAY BE SUBTRACTED — see `_release_line_tags`,
     which filters the merged set through the strict `_TAG_NAME` match. A
@@ -304,6 +306,19 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     shipped, so subtracting it removes genuine unreleased work: measured on
     a fixture with a nightly marker, the count came out 6 where the truth
     was 13.
+
+    (c) WHEN THE SUBTRACTION SET CANNOT BE DETERMINED, MEASURE NOTHING.
+    `git tag --merged` fails on a bad branch name (it exits 128 with
+    "fatal: malformed object name"), and an empty set is ALSO what a repo
+    with no tags returns. Those two cases are not the same, and treating
+    them alike is a defect in the SAFE direction: with an empty `--not` set
+    the subtraction removes nothing, so the count becomes the raw size of
+    `tag..branch` — the PRE-C1 behaviour, which counts commits a release
+    already shipped. The count would then overstate the backlog, and the
+    line's consequence ("the running build is older than the tree") is
+    still stated as fact. So the helper returns None for "the set is
+    unknown" and an EMPTY LIST for "the set is known and empty", and this
+    function refuses (returns None) in the first case.
 
     `branch` IS THE LINE BEING MEASURED, and the two call sites use it
     differently on purpose. The release-gap escalation passes the RELEASE
@@ -319,56 +334,99 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     and the count is unchanged; the difference appears exactly where the
     naive form was wrong.
 
+    THE COMMAND IS `git log`, NOT `git rev-list --no-commit-header`. Both
+    accept the same `--not` set and produce the same subjects, but
+    `--no-commit-header` is a git 2.33 (2021) addition and the plugin
+    declares no minimum git version. On an older git the flag is rejected,
+    `rev-list` exits non-zero, and the helper returned an empty list — the
+    count collapses to zero and the rule goes SILENT on exactly the repos it
+    exists to watch. `git log --format=%s` has no such dependency, and
+    `git log` accepts `--not` exactly as `rev-list` does, so the version
+    constraint buys nothing.
+
     The bump-subject exclusion is NOT applied here: the caller applies it, so
     the raw subject list and the "unreleased work" count stay separable.
     """
     release_tags = _release_line_tags(repo, branch)
+    if release_tags is None:
+        return None
     argv = [
-        "rev-list",
-        "--no-commit-header",
+        "log",
         "--format=%s",
         "--reverse",
         f"{tag}..{branch}",
     ]
     for release in release_tags:
-        argv.extend(["--not", release])
+        argv.append("--not")
+        argv.append(release)
     proc = _git(repo, *argv)
     if proc is None or proc.returncode != 0:
-        return []
+        return None
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
-def _release_line_tags(repo: Path, branch: str) -> list[str]:
-    """The RELEASE tags that were cut FROM the release line, oldest first.
+def _release_line_tags(repo: Path, branch: str) -> list[str] | None:
+    """The RELEASE tags that were cut FROM the release line, or None if unknown.
 
-    These are the release tags `git tag --merged <branch>` reports: the tags
-    whose commits are reachable from the branch a release would be cut from.
-    A tag cut on a side branch is NOT one of them, and that distinction is
-    load-bearing — see `_unreleased_subjects`, whose subtraction is limited to
-    these tags so that a side-branch tag cannot silently remove genuine
-    unreleased release-line work from the count.
+    These are the tags `git tag --merged <branch>` reports, FILTERED to the
+    strict-semver release tags the rest of this file calls a release
+    (`_TAG_NAME`). Every part of that filter is load-bearing.
 
-    ONLY STRICT-SEMVER RELEASE TAGS ARE SUBTRACTED, and that filter is
-    load-bearing too. `git tag --merged` returns EVERY tag whose commit is
-    reachable from the branch, including markers that are not releases at
-    all: a `nightly-2026-10-11` build marker, a `v1.2.3-rc1` candidate, a
-    calendar-versioned tag. Such a marker sits on the release line between
-    two releases and points AT a commit that was never shipped, so
-    subtracting it removes genuine unreleased work from the count: measured
-    on a fixture with a nightly marker, the count came out 6 where the
-    truth was 13. The rest of this file already insists on ONE definition
-    of "release tag" — the strict `_TAG_NAME` match, never a `v*` glob,
-    because a glob would admit `v1.2.3-rc1` — and the subtraction must use
-    the SAME definition, or the count is measured against a different set of
-    tags than the reported release is drawn from.
+    WHAT "MERGED INTO" MEANS, precisely: `git tag --merged <branch>` reports
+    the tags whose PEELED COMMIT is an ancestor of the branch tip in the
+    whole DAG — not a first-parent walk. So a tag cut on a hotfix branch
+    that was later merged back into the release line IS in this set (correct:
+    it did ship release-line work), and so is a tag on a commit that reached
+    the tip only through a merge that was later REVERTED (a release-line
+    commit that was in fact rolled back would be subtracted, removing it
+    from the count). The set is "releases REACHABLE FROM the release line",
+    which is not identical to "releases CUT FROM the release line" — the
+    phrase this file uses elsewhere. The difference is narrow and the
+    direction is safe: both the C1 and the non-release-marker fixes make the
+    subtraction NARROWER, so the reachable-from set over-subtracts only in
+    the revert case, and a reverted release is rare enough that the
+    docstring records the imprecision rather than the code compensating for
+    it.
 
-    Returns an empty list when the branch cannot be resolved or has no
-    merged release tags, which makes the caller fall back to counting the
-    range as-is rather than to counting nothing.
+    The merge half: a tag cut on a SIDE branch is NOT a release of the
+    release line, and that distinction is load-bearing — see
+    `_unreleased_subjects`, whose subtraction is limited to these tags so
+    that a side-branch tag cannot silently remove genuine unreleased
+    release-line work from the count.
+
+    The semver half: `git tag --merged` returns EVERY tag whose commit is
+    reachable from the branch, including NON-RELEASE markers — a nightly
+    build tag, a `v1.2.3-rc1` candidate, a calendar-versioned tag.
+    Subtracting one of those removes the commits it points at, and a nightly
+    marker sits on the release line between releases, so it removes GENUINE
+    unreleased work: measured on a fixture with a non-semver tag dated
+    between two releases, the count came out 6 where the truth was 13. The
+    detector already insists on ONE definition of "release tag" everywhere
+    else — the strict `_TAG_NAME` match, not a `v*` glob — because a glob
+    would admit `v1.2.3-rc1` and inflate the bar with a tag that is never
+    the reported one. The subtraction must use the SAME definition, or the
+    count states a number that means something else.
+
+    NONE MEANS "THE SET IS UNKNOWN", which is NOT the same as an empty list:
+      * an empty list means the branch genuinely has no merged release tags
+        (a repo with no tags at all) — the subtraction set is KNOWN to be
+        empty, so there is nothing to subtract;
+      * None means `git tag --merged` FAILED — a bad branch name (it exits
+        128 with "fatal: malformed object name"), a corrupt tag ref, a
+        git that errors. The set is UNKNOWN.
+
+    The distinction is load-bearing because the two cases must be measured
+    differently: with an unknown set, the caller must measure NOTHING
+    (return None), because counting the raw range instead would OVERSTATE
+    the backlog by including commits a release already shipped. Merging the
+    two into one empty list is what made the earlier version of this helper
+    over-report.
+
+    Returns None when the branch cannot be resolved or the git call fails.
     """
     proc = _git(repo, "tag", "--merged", branch)
     if proc is None or proc.returncode != 0:
-        return []
+        return None
     return [
         line.strip()
         for line in proc.stdout.splitlines()
@@ -480,7 +538,7 @@ def _newest_release_by_date(
 
 
 def _release_gap(
-    repo: Path, today: datetime.date
+    repo: Path, today: datetime.date, release_line: str | None = None
 ) -> tuple[int, int, str, int] | None:
     """Compute the release-gap finding for `repo`, or None if it does not fire.
 
@@ -517,7 +575,8 @@ def _release_gap(
     release line cannot be resolved the rule REFUSES (returns None) instead
     of measuring something else.
     """
-    release_line = _release_branch(repo)
+    if release_line is None:
+        release_line = _release_branch(repo)
     if release_line is None:
         return None
     dates = _release_dates(repo)
@@ -542,6 +601,12 @@ def _release_gap(
         # rather than report a count that means something else.
         return None
     subjects = _unreleased_subjects(repo, tag, release_line)
+    if subjects is None:
+        # The subtraction set could not be determined (see `_release_line_tags`
+        # clause (c)). Counting the raw range instead would OVERSTATE the
+        # backlog by including commits a release already shipped, and the
+        # line's consequence is stated as fact. Measure nothing.
+        return None
     outside = [s for s in subjects if not _BUMP_SUBJECT.match(s)]
     if len(outside) < floor:
         return None
@@ -578,8 +643,24 @@ def main() -> int:
                     lines.append(line)
 
         tag = _last_release_tag(repo)
-        if tag is not None:
+        if tag is not None and _is_ancestor(repo, tag, branch):
+            # THE SAME GUARD THE RELEASE-GAP RULE USES. The reported release
+            # must be ON the branch the count is measured from, or
+            # `tag..branch` is a set difference over a DIVERGENT history and
+            # the number the line states as fact is that difference's size,
+            # not the count of unreleased work. The release-gap rule has
+            # always refused to report in this case; this line was stating
+            # the count under exactly the condition its sibling rule
+            # refuses to state one under, and it ALSO named a release that
+            # is not on the branch ("N commit(s) on <branch> since release
+            # <tag>") — a release the branch does not contain. One rule in
+            # this file knew the condition makes a count meaningless; the
+            # other did not apply the knowledge. It applies it now.
             subjects = _unreleased_subjects(repo, tag, branch)
+            if subjects is None:
+                # The subtraction set is UNKNOWN, so the count is unknown.
+                # Stating the raw range size would over-report the backlog.
+                subjects = []
             outside = [s for s in subjects if not _BUMP_SUBJECT.match(s)]
             if outside:
                 key = f"outside@{tag}@{len(outside)}@{now // 86400}"
@@ -627,7 +708,13 @@ def main() -> int:
     else:
         dedupe.emit_forget(seen, "release-line-unresolved")
 
-    gap = _release_gap(repo, datetime.date.today())
+    # The release line is resolved ONCE, above, and passed in. Resolving
+    # it a second time inside `_release_gap` would run the same
+    # `git rev-parse` twice and could disagree with the advisory above
+    # if a concurrent `git fetch` moved origin/HEAD between the two
+    # calls — the advisory could say "resolved" while the escalation
+    # says "unresolved". One resolution, one answer.
+    gap = _release_gap(repo, datetime.date.today(), release_line)
     if gap is not None:
         gap_days, bar, gap_tag, gap_count = gap
         key = f"gap@{gap_tag}"
@@ -642,15 +729,21 @@ def main() -> int:
         # and the count is measured on the RELEASE branch (the remote's
         # default branch), so naming that branch would be a falsehood on
         # any other repo.
-        # The phrase "not made through publish.py" is an INFERENCE from
-        # publish.py's own behaviour (it makes exactly one commit, the
-        # version bump — publish.py's expected_subject), not something
-        # this detector verifies against the publish pipeline. It is
-        # stated as a fact because the number it qualifies is a fact, and
-        # a reader acting on it (cut a release) is right either way.
+        # THE PARENTHETICAL DESCRIBES THE MEASUREMENT, NOT AN INFERENCE
+        # ABOUT THE AUTHOR. An earlier version said "not made through
+        # publish.py", which is an INFERENCE from publish.py's own behaviour
+        # (it makes exactly one commit, the version bump) that this detector
+        # never verifies — and it read as an ACCUSATION ("you committed
+        # outside the pipeline") when the measurement is "these commits have
+        # not been released yet". It was also NARROWER than the measurement:
+        # the count excludes everything contained in ANY release merged into
+        # the release line, not merely "release-tagged" commits, so a commit
+        # shipped by v1.1.0 is absent from the count without being itself
+        # release-tagged. The wording now states what was measured.
         msg = (
             f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
-            f"are unreleased (not made through publish.py), and the release is {gap_days} day(s) old, "
+            f"are unreleased (not in any release on the release line, and not a version bump), "
+            f"and the release is {gap_days} day(s) old, "
             f"versus this repo's historical maximum release interval of {bar} day(s). "
             f"The running plugin build is OLDER than the working tree: it cannot contain them. "
             f"Cut a release (scripts/publish.py) so the update carries them."
