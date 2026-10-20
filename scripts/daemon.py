@@ -235,6 +235,14 @@ _INTERVAL_MEMORY_GUARD = _env_interval(
 )  # 2 min — the Tier-1 OOM guard beat (TRDD-7100178d Pillar 4, Decision 1).
 #  Steady state is one cheap free-memory read; the ps snapshot + kill logic only
 #  runs under real memory pressure, so the cadence costs nothing when healthy.
+_INTERVAL_RUNAWAY_GUARD = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_RUNAWAY_GUARD_INTERVAL", 60
+)  # 60 s — the runaway-kill beat (TRDD-5G66S0HK). Fast, because the
+#  condition it answers is a HOST PANIC with a ~90 s watchdog window: a
+#  slower beat would find the host already dead. The beat is cheap in the
+# healthy case (a few sysctl reads) and only snapshots the process table
+# under real pressure. DEFAULT-OFF: the chore is a no-op unless
+# CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED is set.
 _INTERVAL_CACHE_PRUNE = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_CACHE_PRUNE_INTERVAL", 21600
 )  # 6 h — plugin-cache prune (TRDD-a6d2fdaf, Fix A). The cache only bloats over
@@ -1126,6 +1134,187 @@ def task_memory_guard() -> None:
     )
 
 
+def task_runaway_guard() -> None:
+    """The runaway-kill beat (TRDD-5G66S0HK) — DEFAULT-OFF.
+
+    Each beat: read the host's pressure (free memory AND swap AND
+    compressor — the free-memory probe alone cannot see the condition
+    that panicked this box on 2026-10-20). Only under REAL pressure does
+    it snapshot the process table, select AT MOST ONE victim by the full
+    truth table (attribution by the Claude ENVIRONMENT signal, which
+    survives reparenting, PLUS a positive shape allowlist PLUS the age
+    gate PLUS the protected-pid set PLUS the never-kill-an-interactive-
+    session rule), and SIGTERM->SIGKILL it.
+
+    THE OPT-IN SWITCH IS ITS OWN, and it must be. This is a NEW kill
+    authority, and the janitor's Decision 1 reserved exactly this tier
+    for a fresh user sign-off. It cannot be a clause inside
+    `memory-guard`, which is default-ON and whose Tier-1 truth table is
+    unit-tested under a user-signed contract: two kill authorities with
+    disjoint protected-pid sets can race, and a brand-new authority
+    cannot be default-off inside a default-on chore. The owner's sign-off
+    is this card (2026-10-20); the SWITCH is how it is exercised.
+
+    EVERY KILL IS BROADCAST. The daemon writes ONE record into the
+    machine-wide global-state dir in the `rotator-alert.json` shape, and
+    `dispatch.py` surfaces ONE descriptive drift line per session on its
+    next heartbeat fire. The payload is HOST-LEVEL and identical for
+    every project — a pid, the process's BASE NAME, its RSS, its age and
+    the pressure readings — and never a project path, a project name or
+    a command line that carries one (TRDD-X92VBFNF).
+
+    THE FULL COMMAND LINE goes only to the daemon's own log and to the
+    affected project's findings ledger, and the log line is written with
+    the CONSEQUENCE first so the ledger's 120-char cap truncates the least
+    important tail.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED", False):
+        return
+    try:
+        import runaway_alert as ral  # noqa: PLC0415 - lazy: only this chore needs it
+        import runaway_guard as rg  # noqa: PLC0415 - lazy: only this chore needs it
+    except Exception:  # noqa: BLE001 - a missing module must not break the daemon
+        return
+
+    min_free_mb = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_MIN_FREE_MB"),
+        rg.DEFAULT_MIN_FREE_MB,
+    )
+    swap_used_mb = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAP_USED_MB"),
+        rg.DEFAULT_SWAP_USED_MB,
+    )
+    swapfiles = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAPFILES"),
+        rg.DEFAULT_SWAPFILES,
+    )
+    compressor_pct = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_COMPRESSOR_PCT"),
+        rg.DEFAULT_COMPRESSOR_PCT,
+    )
+    min_age = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_RUNAWAY_ETIME_S"),
+        rg.DEFAULT_RUNAWAY_ETIME_S,
+    )
+
+    pressure = rg.host_pressure(
+        min_free_mb=min_free_mb,
+        swap_used_mb=swap_used_mb,
+        swapfiles=swapfiles,
+        compressor_pct=compressor_pct,
+    )
+    if pressure.state != "critical":
+        # Healthy or merely elevated: log the elevated case once so a
+        # host that is trending toward the panic is visible, and do
+        # NOTHING else. Never kill on missing data, and never kill
+        # because the host is a bit busy.
+        if pressure.state == "elevated":
+            state.log_line(
+                "daemon",
+                f"runaway-guard: host ELEVATED ({pressure.readings()}) — "
+                "no kill; thresholds are "
+                f"free<{min_free_mb}MB swap>={swap_used_mb}MB "
+                f"swapfiles>={swapfiles} compressor>={compressor_pct}%",
+            )
+        return
+
+    state.log_line(
+        "daemon",
+        f"runaway-guard: host CRITICAL ({pressure.readings()}) — scanning "
+        "for a runaway attributable to Claude Code",
+    )
+    root = gs.global_state_dir()
+    snapshot = root / "runaway-guard.ps-snapshot.txt"
+    ancestry_snapshot = root / "runaway-guard.ps-ancestry.txt"
+    rows = rg.snapshot_processes(str(snapshot))
+    ancestry = rg.snapshot_ancestry(str(ancestry_snapshot))
+    protected = frozenset({os.getpid(), os.getppid()})
+
+    victim = rg.select_victim(
+        rows,
+        protected_pids=protected,
+        min_etime_s=min_age,
+        ancestry=ancestry,
+    )
+    if victim is None:
+        state.log_line(
+            "daemon",
+            "runaway-guard: pressure but NO candidate (nothing on the host is "
+            "both attributable to Claude Code and on the runaway-shape "
+            f"allowlist) — standing down; snapshot kept at {snapshot}",
+        )
+        # Standing down must not mean SILENCE about a giant the guard
+        # rightly will not kill — that is the 39-GB-fseventsd class.
+        alert_rss_kb = state.coerce_int(
+            state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ALERT_RSS_KB"),
+            rg.DEFAULT_ALERT_RSS_KB,
+        )
+        if alert_rss_kb > 0:
+            hog = rg.select_refused_alert(
+                rows, protected_pids=protected, min_etime_s=min_age,
+                min_rss_kb=alert_rss_kb,
+            )
+            if hog is not None:
+                state.log_line(
+                    "daemon",
+                    "runaway-guard ALERT: the host is under pressure and the "
+                    "largest process above the alert bar is one the guard will "
+                    f"not kill: pid={hog.pid} {rg.base_name(hog.command)} "
+                    f"rss={hog.rss_kb // 1024}MB age={hog.etime_s}s. The "
+                    "never-kill invariant holds (not attributable to Claude "
+                    f"Code); a human decides. Pressure was {pressure.readings()}.",
+                )
+        return
+
+    killed = rg.kill_process(victim.pid)
+    name = rg.base_name(victim.command)
+    reason = "host pressure critical"
+    # THE FULL COMMAND LINE goes here and NOWHERE ELSE that a session
+    # reads. The broadcast copy below carries the BASE NAME only.
+    state.log_line(
+        "daemon",
+        f"runaway-guard: {'KILLED' if killed else 'KILL FAILED for'} runaway "
+        f"pid={victim.pid} {name} rss={victim.rss_kb // 1024}MB "
+        f"age={victim.etime_s}s cmd={victim.command!r} "
+        f"(pressure was {pressure.readings()}; snapshot: {snapshot})",
+    )
+    if not killed:
+        return
+
+    # THE BROADCAST: one record, host-level, base name only.
+    try:
+        ral.record_kill(
+            root,
+            ral.kill_record(
+                pid=victim.pid,
+                name=name,
+                rss_mb=victim.rss_kb // 1024,
+                age_s=victim.etime_s,
+                reason=reason,
+                readings=pressure.readings(),
+            ),
+        )
+    except Exception:  # noqa: BLE001 - a broadcast failure must not undo the kill
+        state.log_line("daemon", "runaway-guard: could not write the kill broadcast")
+
+    # AND the affected project's own ledger, for the audit trail. The
+    # consequence leads so the 120-char cap truncates the least
+    # important tail.
+    try:
+        findings_ledger.record(
+            sev="HIGH",
+            code="RUNAWAY-KILLED",
+            src="runaway-guard",
+            msg=(
+                f"killed runaway pid {victim.pid} {name} "
+                f"(rss {victim.rss_kb // 1024}MB, age {victim.etime_s}s) "
+                f"— {reason} ({pressure.readings()})"
+            ),
+            ref=str(victim.pid),
+            actor="human",
+        )
+    except Exception:  # noqa: BLE001 - a ledger failure must never break the daemon
+        state.log_line("daemon", "runaway-guard: could not record the kill in the ledger")
 def _plugins_cache_root() -> Path:
     """Resolve `<config>/plugins/cache` — the parent of every marketplace's
     cached plugins. The daemon itself lives inside this tree
@@ -3114,6 +3303,15 @@ def _build_tasks() -> list[Task]:
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_beat,
              own_thread=True),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
+        Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
+        # The runaway-kill beat (TRDD-5G66S0HK) — DEFAULT-OFF, opt-in via
+        # CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED. NOT background: it must
+        # not queue behind the bulk lane, because the whole point is that it
+        # acts while the host is under pressure. It is also the ONE chore
+        # that is EXEMPT from the pressure-yield rule (TRDD-C8SALZOO) — it is
+        # the mechanism that ENDS the pressure, so a gate that deferred it
+        # when the host is busy would be a deadlock.
+        Task("runaway-guard", _INTERVAL_RUNAWAY_GUARD, task_runaway_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
         Task("github-config-audit", _INTERVAL_GITHUB_CONFIG_AUDIT, task_github_config_audit,

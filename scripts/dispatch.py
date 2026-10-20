@@ -2183,6 +2183,75 @@ def _phase_late_summary_drift() -> None:
         print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
 
 
+def _phase_runaway_alert() -> None:
+    """Surface the daemon's runaway-kill broadcast as drift lines (TRDD-5G66S0HK).
+
+    The daemon writes ONE file into the machine-wide global-state dir when
+    it kills a runaway; this phase prints ONE drift line per kill, so every
+    session learns what was killed and why. Called BEFORE the summary-hold
+    gate in main(), so a hold can never suppress it — a kill the owner
+    never hears about is a kill that gets repeated.
+
+    THE PAYLOAD IS HOST-LEVEL AND IDENTICAL FOR EVERY PROJECT. That is a
+    legal requirement, not a convenience: the per-project channeling
+    invariant (TRDD-X92VBFNF) forbids an automatic surface from carrying
+    another project's content, and a kill record built from a command line
+    like `pytest /Volumes/.../other-project/tests` WOULD carry one. So the
+    broadcast carries the pid, the process's BASE NAME, its RSS, its age
+    and the pressure readings — and never a path, a project name or a
+    command line. The full command line lives in the daemon's own log.
+
+    THE LINE IS DESCRIPTIVE, NEVER IMPERATIVE: "killed pid 1234 node
+    (rss 2100MB, age 7200s) — host pressure critical". It states what
+    happened; it does not tell the reader what to do. This codebase has
+    already been burned by imperative status lines being executed by
+    autonomous readers.
+
+    THE LINE IS PRINTED ONCE PER KILL, per session: a per-project stamp
+    holds the kill's signature, so a second heartbeat does not reprint a
+    kill the session has already seen.
+    """
+    import runaway_alert  # noqa: PLC0415 - lazy: only this phase needs it
+
+    root = gs.global_state_dir()
+    try:
+        pending = runaway_alert.pending_kills(root, time.time())
+    except Exception:  # noqa: BLE001 - a broadcast read must never break the heartbeat
+        return
+    if not pending:
+        return
+    stamp = state.state_dir() / "runaway-alert-printed.txt"
+    seen: set[str] = set()
+    try:
+        seen = {
+            line.strip()
+            for line in stamp.read_text(encoding="utf-8", errors="replace").splitlines()
+            if line.strip()
+        }
+    except OSError:
+        seen = set()
+
+    printed: list[str] = []
+    fresh_sigs: list[str] = []
+    for kill in pending:
+        sig = f"{kill.get('pid')}:{kill.get('name')}:{kill.get('reason')}"
+        if sig in seen:
+            continue
+        line = state.sanitize_for_drift_line(runaway_alert.format_line(kill))
+        printed.append(line)
+        fresh_sigs.append(sig)
+        _log_drift_printed("runaway-guard", line)
+    if not printed:
+        return
+    for line in printed:
+        print(line)
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(
+            "\n".join(sorted(seen | set(fresh_sigs))) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        pass
 def _phase_rotator_alert() -> None:
     """Surface the daemon's `rotator-alert.json` as one drift line (TRDD-3OS6AXV3 R4).
 
@@ -4905,6 +4974,10 @@ def main() -> int:
 
     # Phase 0.45: rotator alarm drift line (TRDD-3OS6AXV3 R4). MUST stay ahead of the summary
     # hold below: a hold returns from main(), and an alarm about a dead login must never wait for it.
+    # Phase 0.44: runaway-kill broadcast (TRDD-5G66S0HK). MUST stay ahead of the summary
+    # hold below, for the same reason the rotator alarm does: a kill the owner never hears
+    # about is a kill that gets repeated.
+    _phase_runaway_alert()
     _phase_rotator_alert()
 
     # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18; reordered AHEAD of the clear-resume phase by
