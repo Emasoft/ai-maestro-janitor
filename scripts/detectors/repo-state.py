@@ -443,11 +443,13 @@ def _release_line_tags(repo: Path, branch: str) -> list[str] | None:
 
     The semver half: `git tag --merged` returns EVERY tag whose commit is
     reachable from the branch, including NON-RELEASE markers — a nightly
-    build tag, a `v1.2.3-rc1` candidate, a calendar-versioned tag.
-    Subtracting one of those removes the commits it points at, and a nightly
-    marker sits on the release line between releases, so it removes GENUINE
-    unreleased work: measured on a fixture with a non-semver tag dated
-    between two releases, the count came out 6 where the truth was 13. The
+    build tag, a `v1.2.3-rc1` candidate. Subtracting one of those removes
+    the commits it points at, and a nightly marker sits on the release
+    line between releases, so it removes GENUINE unreleased work: measured
+    on a fixture with a non-semver tag dated between two releases, the
+    count came out 6 where the truth was 13. (A CALENDAR-versioned tag is
+    NOT in this class: `v2024.10.31` matches the strict semver match, so
+    it is treated as the release it is.) The
     detector already insists on ONE definition of "release tag" everywhere
     else — the strict `_TAG_NAME` match, not a `v*` glob — because a glob
     would admit `v1.2.3-rc1` and inflate the bar with a tag that is never
@@ -513,10 +515,19 @@ def _release_dates(repo: Path) -> list[str]:
     """Dates (YYYY-MM-DD, deduped, sorted) of all strict-semver release tags.
 
     The SAME tag set the reported tag is drawn from: a strict `v<semver>`
-    match, not a `v*` glob. A glob would admit `v1.2.3-rc1` or a
-    calendar-versioned `v2024.10.31`, and such a tag would inflate the bar
-    while never being the reported tag — two different definitions of
-    "release tag" in one file.
+    match, not a `v*` glob. A glob would admit `v1.2.3-rc1` or `v1.2` — a
+    release CANDIDATE and a two-component version — and such a tag would
+    inflate the bar while never being the reported tag: two different
+    definitions of "release tag" in one file.
+
+    NOTE WHAT THE STRICT MATCH DOES *NOT* REJECT. `v2024.10.31` — a
+    calendar-versioned tag — HAS three numeric components, so it MATCHES
+    `_TAG_NAME` and is counted as a release. That is CORRECT here: a
+    repository that versions its releases by calendar date really is
+    publishing releases, and the bar and the reported tag are drawn from
+    the same set, which is the property that matters here. A glob would
+    additionally admit the shapes the strict match rejects, and THOSE are
+    the ones that break the measurement.
     """
     return sorted({date for _ver, _name, date in _release_tags(repo)})
 
@@ -737,33 +748,62 @@ def main() -> int:
                 # always excluded subjects for this reason, and it has a
                 # test asserting it. This line now matches.
                 #
-                # The BRANCH name, by contrast, STAYS: it is not prose
-                # appended to a measurement, it is WHAT WAS MEASURED — the
-                # count is on that branch, and the escalated line's
-                # prohibition is about naming the RELEASE LINE, which is a
-                # different branch entirely.
-                msg = f"[repo-state] {len(outside)} commit(s) on {branch} since release {tag} were NOT made through publish.py (not in any release reachable from {branch}, and not a 'chore: bump version to x.y.z' bump). Run scripts/publish.py to cut a release."
+                # THE BRANCH NAME GOES TO THE LEDGER TOO. It is
+                # REPOSITORY-CONTROLLED text on a FILTERABLE surface, and
+                # the same reasoning that disqualified the subjects
+                # disqualifies it: MEASURED, a branch named
+                # `fix-error-handling` promotes this line past quiet mode,
+                # and so does `critical-hotfix` — the branch name appears
+                # in the message TWICE and either occurrence is enough. A
+                # repository could choose to promote its own LOW advisory
+                # into the owner's face, for a reason that has nothing to
+                # do with the measurement. THE BRANCH IS A MEASUREMENT, NOT
+                # A REASON TO TRUST IT: it is what the count was measured
+                # on, so it is NECESSARY information — but necessary is not
+                # safe, and the line's actionable content is the COUNT. The
+                # escalated line avoids the problem by carrying no branch
+                # name at all; this line now does the same, and the ledger
+                # keeps the branch.
+                msg = f"[repo-state] {len(outside)} commit(s) since release {tag} are NOT made through publish.py (not in any release, and not a version bump). Run scripts/publish.py to cut a release."
                 line = dedupe.emit_once(seen, key, msg)
                 if line:
                     lines.append(line)
-                    # THE SUBJECTS GO TO THE LEDGER, NOT TO STDOUT. The
-                    # "which commits" detail is what the owner needs to act,
-                    # and it must survive — but it must not be in the
-                    # FILTERABLE text, because a subject is arbitrary
-                    # repository-controlled prose and this line's fate is
-                    # decided by dispatch's quiet filter. The ledger's
-                    # `ref` field carries it: durable, and never part of a
-                    # line the urgency override can scan.
+                    # THE BRANCH AND THE SUBJECTS GO TO THE LEDGER, NOT TO
+                    # STDOUT. The "which commits, on which branch" detail is
+                    # what the owner needs to act, and it must survive — but
+                    # it must not be in the FILTERABLE text, because both are
+                    # repository-controlled and this line's fate is decided
+                    # by dispatch's quiet filter. THE LEDGER'S `msg` FIELD,
+                    # NOT `ref`: `ref` is capped at 24 characters and the
+                    # ledger truncates HARD, mid-word, so the subjects (77
+                    # characters here) would be reduced to a fragment. `msg`
+                    # is capped at 120 and holds them in full.
                     try:
                         findings_ledger.record(
                             sev="LOW",
                             code="REPO-OUTSIDE-PUBLISH",
                             src="repo-state",
-                            msg=(
-                                f"{len(outside)} commit(s) on {branch} since release "
-                                f"{tag} are not in any release reachable from {branch}"
-                            ),
-                            ref="; ".join(outside[-3:]),
+                            # The ledger's `msg` is capped at 120, and the
+                            # count and the tag are ALREADY in the stdout
+                            # line and in `ref` — so this field carries only
+                            # what the stdout line cannot: the branch and
+                            # the subjects. A full prefix plus three
+                            # subjects is 162 characters and would be cut
+                            # mid-subject; the branch plus the subjects
+                            # fits.
+                            msg=f"on {branch}: {'; '.join(outside[-3:])}",
+                            ref=tag,
+                            # `actor="human"` makes the ledger DEDUPE this
+                            # finding's DRIFT LINE on (code, content) — the
+                            # same mechanism the escalated line uses. Without
+                            # it the same finding is injected twice into the
+                            # session: once as the quiet filter's
+                            # ADVISORY-REPO-STATE record of the stdout line,
+                            # and once as this record. The ledger's
+                            # "unread" is CURSOR-based, not content-based, so
+                            # two different codes are two different injected
+                            # lines for ONE finding.
+                            actor="human",
                         )
                     except Exception:  # noqa: BLE001 — a ledger failure must never break the detector
                         state.log_line(

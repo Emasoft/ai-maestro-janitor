@@ -230,6 +230,75 @@ def test_a_commit_subject_cannot_promote_the_outside_line_past_quiet_mode(
         "a commit subject must not promote the line past quiet mode: " + line
     )
 
+    # THE BRANCH NAME IS REPOSITORY-CONTROLLED TOO, and it was in the line
+    # TWICE. MEASURED: a line naming the branch `fix-error-handling` is
+    # KEPT by the filter (the word "error" matches), and so is one naming
+    # `critical-hotfix`. So the emitted line carries the COUNT and the TAG
+    # only, and the branch lives in the ledger. The reasoning that once
+    # excused the branch — "it is a MEASUREMENT, not prose" — was a
+    # rationalization: the branch is NECESSARY information, but necessary
+    # is not SAFE, and the line's actionable content is the count.
+    branchy = (
+        "[repo-state] 5 commit(s) on fix-error-handling since release v1.0.0 "
+        "are NOT made through publish.py (not in any release, and not a version bump). "
+        "Run scripts/publish.py to cut a release."
+    )
+    assert dispatch._quiet_filter("repo-state", branchy) != "", (
+        "a branch name must be able to promote the line — that is the "
+        "defect this shape exists to prove, so if it stops promoting, "
+        "this assertion is no longer testing what it claims"
+    )
+    # And the EMITTED line carries no branch at all.
+    assert " on " not in line, line
+    assert "main" not in line, line
+
+def test_the_outside_publish_subjects_reach_the_owner_through_the_ledger(
+    repo: Path, tmp_path: Path
+) -> None:
+    """The subjects must SURVIVE — leaving stdout is not the same as losing them.
+
+    The commit subjects and the branch name were removed from the stdout
+    line because they are repository-controlled text on a surface the quiet
+    filter scans. But they are the detail the owner needs in order to act,
+    so they have to survive SOMEWHERE. They go to the findings LEDGER.
+
+    This test exists because the first attempt put them in the ledger's
+    `ref` field, which is capped at 24 characters and truncated HARD,
+    mid-word: three subjects totalling 77 characters came out as
+    'feat: sneaky direct comm' — one fragment, two subjects gone. The
+    ledger's `msg` field (cap 120) holds them in full. This test pins the
+    subjects' SURVIVAL, not their absence from stdout — a test that only
+    asserts the absence would pass while the information was being lost,
+    which is exactly what happened.
+    """
+    _commit(repo, "feat: sneaky direct commit")
+    _commit(repo, "fix: another thing entirely")
+    _commit(repo, "chore: yet more work")
+
+    home = tmp_path / "homesubjects"
+    home.mkdir(parents=True, exist_ok=True)
+    _run(repo, home)
+
+    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
+    sys.path.insert(0, str(lib))
+    import findings_ledger  # noqa: PLC0415 — import kept local to the test
+
+    ledger = Path(findings_ledger.ledger_path(str(repo)))
+    assert ledger.exists(), f"no ledger at {ledger}"
+    entries = [
+        __import__("json").loads(line)
+        for line in ledger.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    outside = [e for e in entries if e.get("code") == "REPO-OUTSIDE-PUBLISH"]
+    assert outside, "the outside-publish finding must be recorded in the ledger"
+    msg = outside[-1].get("msg", "")
+    # The subjects SURVIVE, in full, and so does the branch.
+    assert "feat: sneaky direct commit" in msg, msg
+    assert "fix: another thing entirely" in msg, msg
+    assert "chore: yet more work" in msg, msg
+    assert "main" in msg, msg
+
 
 def test_publish_bump_commit_is_silent(repo: Path, tmp_path: Path) -> None:
     """A commit whose subject is publish.py's exact bump signature is not flagged."""
