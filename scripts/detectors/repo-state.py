@@ -267,6 +267,57 @@ def _last_release_tag(repo: Path) -> str | None:
                 best = (ver, name)
     return best[1] if best else None
 
+def _last_release_tag_on(repo: Path, branch: str) -> str | None:
+    """Newest `v<semver>` tag whose commit is ON `branch`, or None.
+
+    The branch-scoped counterpart of `_last_release_tag`. The "outside@"
+    line names a release in its message ("N commit(s) on <branch> since
+    release <tag>"), so the tag it names must be ON that branch — a tag
+    from a divergent history makes the sentence a falsehood, and a set
+    difference over a divergent history is not a count of unreleased work.
+
+    Scoping the SEARCH to the branch, rather than guarding the whole line
+    against an off-branch tag, keeps the signal: a branch that was cut
+    before the newest release still has its OWN releases, and the count
+    against those is exactly the staleness the line exists to report. The
+    earlier guard — the newest tag ANYWHERE, and no report unless it is an
+    ancestor of the branch — silenced the line entirely in that case,
+    losing a true finding to satisfy an analogy with the release-gap rule,
+    whose consequence is a claim about the RELEASE LINE rather than about
+    the checked-out branch.
+
+    Order by PARSED semver, for the same reason as `_last_release_tag`:
+    two tags created within the same clock second tie on creatordate, and
+    git's refname tiebreak is ASCENDING, so the OLDER tag would win.
+    """
+    proc = _git(
+        repo,
+        "for-each-ref",
+        "--format=%(refname:short) %(objectname) %(*objectname)",
+        "refs/tags/",
+    )
+    if proc is None or proc.returncode != 0:
+        return None
+    best: tuple[tuple[int, int, int], str] | None = None
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name, obj = parts[0], parts[1]
+        peeled = parts[2] if len(parts) > 2 else ""
+        m = _TAG_NAME.match(name)
+        if not m:
+            continue
+        commit = peeled or obj
+        if not commit:
+            continue
+        if not _is_ancestor(repo, commit, branch):
+            continue
+        ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if best is None or ver > best[0]:
+            best = (ver, name)
+    return best[1] if best else None
+
 
 def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str] | None:
     """Subjects of the UNRELEASED commits on `branch` since `tag`, oldest-first.
@@ -538,7 +589,7 @@ def _newest_release_by_date(
 
 
 def _release_gap(
-    repo: Path, today: datetime.date, release_line: str | None = None
+    repo: Path, today: datetime.date, release_line: str
 ) -> tuple[int, int, str, int] | None:
     """Compute the release-gap finding for `repo`, or None if it does not fire.
 
@@ -575,10 +626,6 @@ def _release_gap(
     release line cannot be resolved the rule REFUSES (returns None) instead
     of measuring something else.
     """
-    if release_line is None:
-        release_line = _release_branch(repo)
-    if release_line is None:
-        return None
     dates = _release_dates(repo)
     bar = _release_gap_bar(repo)
     if bar is None:
@@ -642,20 +689,25 @@ def main() -> int:
                 if line:
                     lines.append(line)
 
-        tag = _last_release_tag(repo)
-        if tag is not None and _is_ancestor(repo, tag, branch):
-            # THE SAME GUARD THE RELEASE-GAP RULE USES. The reported release
-            # must be ON the branch the count is measured from, or
-            # `tag..branch` is a set difference over a DIVERGENT history and
-            # the number the line states as fact is that difference's size,
-            # not the count of unreleased work. The release-gap rule has
-            # always refused to report in this case; this line was stating
-            # the count under exactly the condition its sibling rule
-            # refuses to state one under, and it ALSO named a release that
-            # is not on the branch ("N commit(s) on <branch> since release
-            # <tag>") — a release the branch does not contain. One rule in
-            # this file knew the condition makes a count meaningless; the
-            # other did not apply the knowledge. It applies it now.
+        # The release named in this line's message must be ON the branch the
+        # count is measured from: "N commit(s) on <branch> since release
+        # <tag>" names a release the branch may not contain, and
+        # `tag..branch` over a divergent history is a set difference whose
+        # size is not a count of unreleased work.
+        #
+        # The tag is scoped to the BRANCH, not guarded against. An earlier
+        # version took the newest tag ANYWHERE in the repo and suppressed
+        # the line unless that tag happened to be an ancestor of the branch
+        # — which silenced it entirely on a branch cut before the newest
+        # release, losing a TRUE finding. The branch's OWN newest release
+        # is the right reference point, and the count against it is exactly
+        # the staleness this line exists to report. The release-gap rule
+        # refuses to report across a divergent history because its
+        # CONSEQUENCE is a claim about the RELEASE LINE; this line's claim
+        # is about the checked-out branch, and the two are not the same
+        # claim, so they do not need the same rule.
+        tag = _last_release_tag_on(repo, branch)
+        if tag is not None:
             subjects = _unreleased_subjects(repo, tag, branch)
             if subjects is None:
                 # The subtraction set is UNKNOWN, so the count is unknown.
@@ -714,7 +766,15 @@ def main() -> int:
     # if a concurrent `git fetch` moved origin/HEAD between the two
     # calls — the advisory could say "resolved" while the escalation
     # says "unresolved". One resolution, one answer.
-    gap = _release_gap(repo, datetime.date.today(), release_line)
+    #
+    # The parameter is REQUIRED, so a caller cannot re-enter the
+    # double-resolution path by forgetting it. When the line is unresolved
+    # the rule measures nothing — the advisory above has already said so.
+    gap = (
+        _release_gap(repo, datetime.date.today(), release_line)
+        if release_line is not None
+        else None
+    )
     if gap is not None:
         gap_days, bar, gap_tag, gap_count = gap
         key = f"gap@{gap_tag}"
@@ -742,7 +802,8 @@ def main() -> int:
         # release-tagged. The wording now states what was measured.
         msg = (
             f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
-            f"are unreleased (not in any release on the release line, and not a version bump), "
+            f"are unreleased (not in any release reachable from the release line, "
+            f"and not a version bump), "
             f"and the release is {gap_days} day(s) old, "
             f"versus this repo's historical maximum release interval of {bar} day(s). "
             f"The running plugin build is OLDER than the working tree: it cannot contain them. "

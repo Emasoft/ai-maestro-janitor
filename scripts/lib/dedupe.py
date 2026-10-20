@@ -114,9 +114,25 @@ def _read_seen_lines(seen: Path) -> list[str] | None:
     WITHOUT rewriting, so the corrupt file survives; and every later
     `emit_once` reads the same wrong set, so the same findings re-emit on
     every fire and the file keeps growing. Rewriting the file empty turns
-    that into ONE re-emit followed by a clean file — which is what the
-    caller actually wants, and what the comment claiming to prevent an
-    "unbounded repeat-and-write-amplification loop" describes.
+    that into a CLEAN FILE, which is what the caller actually wants, and
+    what the comment claiming to prevent an "unbounded
+    repeat-and-write-amplification loop" describes.
+
+    EVERY KEY RE-EMITS ONCE, NOT ONE. A wiped file holds no keys, so every
+    key is treated as "never seen" and re-emits on the next fire. That is
+    BROADER than the single corrupt episode, and it is the right behaviour:
+    the file's stamps were unreadable, so nothing can be claimed to have
+    been seen. The alternative — reading the corrupt file as a set of
+    partial keys — is what produced the unbounded repeat.
+
+    THIS DIFFERS FROM `findings_ledger`, DELIBERATELY. The ledger's
+    seen-file records "we told the human about this finding", and it is a
+    DURABLE record: it answers "never-reported" on a corrupt file but does
+    NOT rewrite it, because wiping it would discard the fact that the
+    human was notified. This file is an EPISODE LATCH — a transient
+    "already said this" marker whose only job is to stop a repeat — so a
+    corrupt one is discarded and rebuilt. The two are different kinds of
+    record and take different actions on corruption.
 
     Returns None only when the file cannot be READ at all (an OSError), so
     the caller can distinguish "unreadable" from "corrupt".

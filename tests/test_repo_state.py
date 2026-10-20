@@ -232,8 +232,17 @@ def _days_ago(n: int) -> str:
 
 
 def _gap(repo: Path) -> tuple[int, int, str, int] | None:
-    """The detector's own verdict on `repo`, computed in-process."""
-    return rs._release_gap(repo, datetime.date.today())
+    """The detector's own verdict on `repo`, computed in-process.
+
+    The release line is resolved HERE, by the test, and passed in — the
+    same way `main()` does it. `_release_gap` requires it, so the
+    double-resolution path (resolve here AND resolve inside) cannot be
+    re-entered by a caller that forgets the argument.
+    """
+    release_line = rs._release_branch(repo)
+    if release_line is None:
+        return None
+    return rs._release_gap(repo, datetime.date.today(), release_line)
 
 
 def test_release_gap_stale_release_fires(repo: Path, tmp_path: Path) -> None:
@@ -812,6 +821,54 @@ def test_the_release_gap_is_evaluated_even_when_the_checked_out_branch_is_unread
         "the release-gap condition must be evaluated on the release line "
         f"even when the checked-out branch is unreadable; got: {out!r}"
     )
+
+def test_the_count_survives_a_release_line_containing_a_merged_hotfix_branch(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A release line with MERGES must count the same as a linear one.
+
+    Every other fixture in this file is LINEAR, and a linear history cannot
+    distinguish the two command forms this count has been written in:
+    `git log --format=%s` (which applies history simplification) and
+    `git rev-list --no-commit-header --format=%s` (which does not). The
+    difference, if any, lives in a MERGE — and a real release line is full
+    of them, because every hotfix branch merged back is one.
+
+    Settled by measurement, not by assumption: on a fixture with a merged
+    hotfix branch, and on one with a TREESAME merge (a merge whose tree
+    equals one parent's, which is where simplification is supposed to
+    prune), the two forms produce IDENTICAL output and ordering. The
+    mechanism is that `git log`'s history simplification only prunes with
+    a PATH FILTER or `--follow`, and this measurement uses neither — so
+    the substitution is safe, and this test is what keeps it safe.
+
+    The count is what the escalated line states as fact, so it must be the
+    count of the SET DIFFERENCE, whatever shape the history has.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS", "1")
+    _tagged_commit(repo, "feat: first release", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: second release", _days_ago(10), "v1.1.0")
+    # A hotfix branch forked from the release line and merged back — the
+    # shape a real release line has.
+    _git(repo, "checkout", "-q", "-b", "hotfix")
+    _commit(repo, "fix: hotfix work")
+    _git(repo, "checkout", "-q", "-")
+    _git(repo, "merge", "-q", "--no-ff", "hotfix", "-m", "merge hotfix")
+    # Three commits AFTER the merge, on the release line.
+    for i in range(3):
+        _commit(repo, f"feat: unreleased on the release line {i}")
+
+    verdict = _gap(repo)
+    assert verdict is not None, "the rule must fire"
+    gap_days, bar, tag, count = verdict
+    assert tag == "v1.1.0", tag
+    # FIVE: the hotfix commit the merge brought in, the merge commit
+    # itself, and the three commits after it — all unreleased, and all
+    # counted. The hotfix commit is the one a simplification would prune,
+    # so a pruned count would be 4. The count is verified against the
+    # range itself, not against a hand-tallied expectation: `git log
+    # --format=%s v1.1.0..main` names exactly these five subjects.
+    assert count == 5, f"a merged hotfix must not change the count, got {count}"
 
 
 def test_unresolvable_release_line_refuses_loudly_instead_of_measuring_the_branch(

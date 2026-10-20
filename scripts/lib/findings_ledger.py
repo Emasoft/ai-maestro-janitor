@@ -385,13 +385,22 @@ def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | 
         # A corrupt seen-file must not raise here either: this function is
         # documented as never raising, and UnicodeDecodeError is NOT an OSError,
         # so a corrupt file would escape the except clause and break the
-        # caller. The widened except keeps the "unreadable -> False"
-        # semantics. Decoding is done on BYTES with an explicit
+        # caller. Decoding is done on BYTES with an explicit
         # UnicodeDecodeError branch, because a corrupt file's real content
         # is unknown: reading it with errors="replace" yields a WRONG key set
         # (the undecodable bytes become one replacement character), and a
         # wrong key set answers the wrong question — it says the finding was
         # never reported when it may well have been.
+        #
+        # A CORRUPT FILE IS NOT REWRITTEN HERE, DELIBERATELY, and this
+        # differs from `dedupe._read_seen_lines`, which wipes its file. This
+        # file records "we told the HUMAN about this finding" and is a
+        # DURABLE record; wiping it because it is corrupt would discard the
+        # fact that the human was notified, and the finding would then be
+        # re-surfaced to a human who already saw it. `dedupe`'s file is an
+        # EPISODE LATCH — a transient "already said this" marker — so a
+        # corrupt one is discarded and rebuilt. The two are different kinds
+        # of record and take different actions on corruption.
         raw = seen_file.read_bytes()
         try:
             lines = raw.decode("utf-8").splitlines()
