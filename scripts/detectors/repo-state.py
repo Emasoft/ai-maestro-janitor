@@ -6,7 +6,8 @@
 unreleased commits on the default branch.
 
 Nothing computed ahead/behind before this: main sat 157 commits past the last
-release on 2026-09-24 and no detector noticed. Two findings, both advisory:
+release on 2026-09-24 and no detector noticed. THREE findings — the first two
+advisory, the third severity-bearing:
 
 1. ahead/behind: the current branch vs its upstream. Behind means a stale
    checkout; ahead means unpublished work. Skipped entirely when no upstream
@@ -22,6 +23,68 @@ release on 2026-09-24 and no detector noticed. Two findings, both advisory:
    than an alarm, and dedupes on (tag, count) so the same state does not
    re-nag every hour.
 
+3. release-gap escalation (TRDD-03G3CSUU): the OUT gap itself is a third
+   finding, computed from this repo's OWN tag history rather than a fixed
+   number of days. The bar is the repo's historical maximum release interval,
+   recomputed from the tag history at detection time. It is the maximum over
+   COMPLETED intervals only — the currently-open gap has no successor release
+   date, contributes NO interval, and cannot enter the bar WITHIN the episode
+   it is open in (that is why a max-over-completed-intervals rule does not
+   self-contaminate WITHIN an episode; a ROLLING max over recent history
+   would, and must not be introduced here). ACROSS episodes the bar CAN
+   ratchet: when a gap that EXCEEDED the bar closes, that completed interval
+   becomes the new maximum, so a repo whose releases are getting slower
+   raises its own bar for the next cycle — and a repo that releases badly
+   becomes progressively harder to warn about. A gap that closed UNDER the bar
+   leaves the bar unchanged. That is the card's "the repo's historical
+   maximum" rule, and it is a property of the rule, not an accident. The bar
+   is a max over the FULL retained history, so
+   it never falls: a repo that slows down does NOT raise its own bar when it
+   slows, only once the slow interval has closed and entered the history.
+
+   Owner knobs (state.coerce_int, so a malformed value degrades to the
+   default instead of raising inside a detector):
+   - CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS — an ABSOLUTE override for the
+     computed bar; when set and valid it replaces the self-calibrating bar.
+     Unset or unparseable -> the computed bar is used.
+   - CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS — the size floor, default 5.
+     The floor is a FLOOR, not a conjunct for the rule's spirit: age is the
+     operative signal and the floor's only job is to keep a lightly-dirty
+     tree (1-4 unreleased commits) quiet, so 5 is low enough that "a handful
+     of commits" still clears it. The owner can raise it to be more
+     conservative.
+
+   No options-documentation file exists for CLAUDE_PLUGIN_OPTION_* vars in
+   this repo (checked: README.md, CHANGELOG.md, docs/ — none name
+   CLAUDE_PLUGIN_OPTION_REPO_STATE_INTERVAL either), so these are documented
+   here by spec instruction.
+
+   The escalated line is printed ONCE PER EPISODE, keyed on the release tag
+   alone (f"gap@{tag}") in a SEPARATE seen-file, repo-state-gap-seen.txt —
+   a day- or count-bearing key would re-fire daily, the exact shape the card
+   forbids. The stdout line carries measurement-derived facts — the severity
+   word, the unreleased commit COUNT (a number), the release TAG (matched by
+   _TAG_NAME, so it cannot carry prose), the gap in DAYS and the bar in DAYS —
+   plus ONE derived consequence (the running plugin cannot contain the counted
+   commits, because no release contains them). NO commit subjects and NO
+   branch name: commit subjects are arbitrary prose, and one containing
+   "ERROR" or "FAIL" would make the line survive dispatch's _URGENT_LINE_RE
+   quiet filter for a reason unrelated to the measurement (or a prose-free one
+   be dropped despite being genuinely urgent). A branch name is repo-controlled
+   prose too, and the count is measured on the RELEASE branch, so naming that
+   branch would be a falsehood on any other repo. The one file name the
+   stdout line carries, scripts/publish.py, is a FIXED LITERAL — not
+   repo-controlled text. The advisory outside-publish line keeps its subjects
+   — it is never severity-bearing, so it is unchanged.
+
+   The ledger entry is recorded under the same once-per-episode gate, with
+   actor="human": the agent can act (cut a release) only with the owner's
+   authorisation, so the correct runtime classification is owner-only. The
+   ledger is a NEXT-SESSION surface (severity-first, findings_ledger.
+   surface_block), not a pager; the stdout half is what reaches the current
+   session. Acceptance clause (5) — the TRDD-F3LVCQ39 actionability
+   vocabulary — is NOT discharged here; actor="human" is the closest existing
+   runtime marker, not that classification.
 Read-only on the repo: every git call runs with GIT_OPTIONAL_LOCKS=0 so it
 never takes .git/index.lock and cannot collide with a concurrent publish.py
 commit (janitor#245, the named repro site).
@@ -29,6 +92,7 @@ commit (janitor#245, the named repro site).
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import subprocess
@@ -41,6 +105,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import findings_ledger  # noqa: E402
 import state  # noqa: E402
 
 # publish.py's own version-bump subject (scripts/publish.py: expected_subject
@@ -107,6 +172,58 @@ def _current_branch(repo: Path) -> str | None:
     return branch or None  # "HEAD" when detached — still reportable
 
 
+def _release_branch(repo: Path) -> str | None:
+    """The branch releases are cut from — the remote's default branch.
+
+    The escalated line claims the RUNNING BUILD is older than the working
+    tree, and that claim is about what a release would contain. So the count
+    must be measured on the release line, not on whatever branch happens to
+    be checked out: on a feature branch, `git log tag..feature` counts work
+    nobody intends to release, and the line would attribute a stale-install
+    alarm to it.
+
+    Resolved from `origin/HEAD` (the remote's own pointer at its default
+    branch) but taken as the LOCAL branch of that name: `origin/main` is the
+    REMOTE's tip, which is typically the last release, so counting on it
+    would count the unreleased work as zero. The local `main` is where the
+    next release is cut from, and it is what the running build lags behind.
+
+    Falls back to the checked-out branch when the remote has no such pointer
+    (a local-only repo, or a clone without an origin).
+    """
+    proc = _git(repo, "rev-parse", "--abbrev-ref", "origin/HEAD")
+    if proc is not None and proc.returncode == 0:
+        name = proc.stdout.strip()
+        if name and name != "origin/HEAD":
+            local = name.split("/", 1)[1] if "/" in name else name
+            # `returncode == 0`, NOT `is not None`: _git returns None only when
+            # git itself is missing or timed out, so a MISSING branch comes
+            # back as a CompletedProcess with a non-zero code. Checking
+            # `is not None` accepted every branch name, and the rule then went
+            # SILENT on a repo whose origin/HEAD names a branch it does not
+            # have locally — "silent" being indistinguishable from "healthy".
+            probe = _git(repo, "rev-parse", "--verify", local)
+            if probe is not None and probe.returncode == 0:
+                return local
+    # No usable origin/HEAD: fall back to the checked-out branch. On a
+    # feature branch this counts work that will not be released, so the
+    # finding is then about the branch rather than about the release line.
+    return _current_branch(repo)
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    """True when `ancestor` is an ancestor of `descendant` in the commit DAG.
+
+    `git log A..B` is a SET DIFFERENCE over the DAG, not "the commits since
+    A": when A is not an ancestor of B the result includes A's own divergent
+    history. The unreleased count must therefore be measured only against a
+    release that IS on the branch — otherwise the number the escalated line
+    states as fact is the size of a symmetric difference.
+    """
+    proc = _git(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+    return proc is not None and proc.returncode == 0
+
+
 def _last_release_tag(repo: Path) -> str | None:
     """Newest `v<semver>` tag, or None.
 
@@ -155,6 +272,150 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
         return []
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
+_GAP_SEEN_NAME = "repo-state-gap-seen.txt"
+_GAP_FLOOR_DEFAULT = 5
+_GAP_SEV = "HIGH"
+
+
+def _release_tags(repo: Path) -> list[tuple[tuple[int, int, int], str, str]]:
+    """Every strict-semver release tag as (semver, name, YYYY-MM-DD), sorted by semver.
+
+    One git call, one pass, and the SEMVER and the DATE are both available for
+    every tag — so the rule can pick the release it reports by DATE (the
+    newest one) while keeping the tag's own identity, instead of picking by
+    semver and refusing to report when the two disagree.
+    """
+    proc = _git(repo, "for-each-ref", "--format=%(refname:short) %(creatordate:short)", "refs/tags/")
+    if proc is None:
+        return []
+    rows: list[tuple[tuple[int, int, int], str, str]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        name, date = parts
+        m = _TAG_NAME.match(name)
+        if m and date:
+            rows.append(((int(m.group(1)), int(m.group(2)), int(m.group(3))), name, date))
+    rows.sort()
+    return rows
+
+
+def _release_dates(repo: Path) -> list[str]:
+    """Dates (YYYY-MM-DD, deduped, sorted) of all strict-semver release tags.
+
+    The SAME tag set the reported tag is drawn from: a strict `v<semver>`
+    match, not a `v*` glob. A glob would admit `v1.2.3-rc1` or a
+    calendar-versioned `v2024.10.31`, and such a tag would inflate the bar
+    while never being the reported tag — two different definitions of
+    "release tag" in one file.
+    """
+    return sorted({date for _ver, _name, date in _release_tags(repo)})
+
+
+def _newest_release_by_date(
+    repo: Path, dates: list[str]
+) -> tuple[str, str] | None:
+    """The release tag with the NEWEST date, and that date — (name, YYYY-MM-DD).
+
+    Selected by DATE, not by semver: a backdated or cherry-picked release tag
+    carries an old creatordate, and picking by semver would measure the gap
+    from a release that is not the latest. Among the tags sharing the newest
+    date, the semver-highest wins — so two releases cut on the same day
+    resolve to the later version, and the reported tag, the measured gap and
+    the dedupe key are all the SAME identity.
+    """
+    if not dates:
+        return None
+    newest_date = dates[-1]
+    candidates = [
+        (ver, name)
+        for ver, name, date in _release_tags(repo)
+        if date == newest_date
+    ]
+    if not candidates:
+        return None
+    return max(candidates)[1], newest_date
+
+
+def _release_gap(
+    repo: Path, today: datetime.date
+) -> tuple[int, int, str, int] | None:
+    """Compute the release-gap finding for `repo`, or None if it does not fire.
+
+    Returns (gap_days, bar_days, tag, unreleased commit count outside
+    publish.py — the gate quantity, so the reported number and the floor are
+    the same measure).
+
+    The bar is the maximum over COMPLETED intervals — intervals between two
+    consecutive release dates that both exist. The currently-open gap has no
+    successor release date, contributes no interval, and cannot enter the bar,
+    so it never inflates the threshold it is measured against. A repo with
+    fewer than 2 release dates has no completed interval, so no bar exists and
+    the rule is silent.
+
+    The bar is a max over the FULL retained history, so it never falls: a repo
+    that slows down does NOT raise its own bar at the time it slows, only once
+    the slow interval has closed and entered the history. Do not "fix" this
+    into a rolling max over recent history — a rolling max fires on ordinary
+    gaps and is the shape the card warns about.
+
+    The gap is measured from the NEWEST RELEASE DATE (dates[-1]), and the
+    reported tag is the release carrying that date — the spec's rule. A
+    backdated or cherry-picked release tag carries an old creatordate, so
+    picking the reported release by SEMVER instead would measure the gap from
+    a release that is not the latest, and the dedupe key (the reported tag)
+    would then name a release the gap was never measured from. Selecting by
+    DATE keeps the measured gap, the reported tag and the dedupe key the SAME
+    identity, so a new release always opens a new episode.
+    """
+    dates = _release_dates(repo)
+    if len(dates) < 2:
+        return None
+    intervals = [
+        (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
+        for a, b in zip(dates, dates[1:])
+    ]
+    bar = max(intervals)
+    override = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS"), 0
+    )
+    if override:
+        bar = override
+    floor = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS"),
+        _GAP_FLOOR_DEFAULT,
+    )
+    newest_release = _newest_release_by_date(repo, dates)
+    if newest_release is None:
+        return None
+    tag, tag_date = newest_release
+    newest = datetime.date.fromisoformat(tag_date)
+    # The count is measured on the RELEASE line (the remote's default
+    # branch), not on whatever is checked out: the line claims the running
+    # build is older than what a release would contain, and on a feature
+    # branch `git log tag..feature` would count work nobody intends to
+    # release, attributing a stale-install alarm to it.
+    branch = _release_branch(repo)
+    if branch is None:
+        return None
+    if not _is_ancestor(repo, tag, branch):
+        # The reported release is NOT on the release branch (a release cut on
+        # a side branch, or a tag applied to a commit outside this history).
+        # `git log tag..branch` would then be a set difference over a divergent
+        # history, and the number the line states as fact would be that
+        # difference's size, not the count of unreleased work. Stay silent
+        # rather than report a count that means something else.
+        return None
+    subjects = _unreleased_subjects(repo, tag, branch)
+    outside = [s for s in subjects if not _BUMP_SUBJECT.match(s)]
+    if len(outside) < floor:
+        return None
+    gap = (today - newest).days
+    if gap <= bar:
+        return None
+    return gap, bar, tag, len(outside)
+
 
 def main() -> int:
     state.init_state()
@@ -167,6 +428,8 @@ def main() -> int:
     seen = state.state_dir() / "repo-state-seen.txt"
     now = int(time.time())
     lines: list[str] = []
+
+    gap_seen = state.state_dir() / _GAP_SEEN_NAME
 
     branch = _current_branch(repo)
     if branch is not None:
@@ -191,6 +454,63 @@ def main() -> int:
                 line = dedupe.emit_once(seen, key, msg)
                 if line:
                     lines.append(line)
+
+        gap = _release_gap(repo, datetime.date.today())
+        if gap is not None:
+            gap_days, bar, gap_tag, gap_count = gap
+            key = f"gap@{gap_tag}"
+            # The STDOUT line carries ONLY measurement-derived facts: the count
+            # (a number), the tag (matched by _TAG_NAME, so it cannot carry
+            # prose), the gap in days and the bar in days. NO branch name and
+            # NO commit subjects: commit subjects are arbitrary prose, and one
+            # containing "ERROR" or "FAIL" would make the line survive
+            # dispatch's _URGENT_LINE_RE quiet filter for a reason unrelated
+            # to the measurement (or a prose-free one be dropped despite being
+            # genuinely urgent). A branch name is repo-controlled prose too,
+            # and the count is measured on the RELEASE branch (the remote's
+            # default branch), so naming that branch would be a falsehood on
+            # any other repo.
+            msg = (
+                f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
+                f"are unreleased (not made through publish.py), and the release is {gap_days} day(s) old, "
+                f"versus this repo's historical maximum release interval of {bar} day(s). "
+                f"The running plugin build is OLDER than the working tree: it cannot contain them. "
+                f"Cut a release (scripts/publish.py) so the update carries them."
+            )
+            # The LEDGER message is a SEPARATE, shorter string: findings_ledger
+            # caps `msg` at MAX_MSG_CHARS (120) and truncates from the end, so
+            # the long stdout line would lose exactly its last sentence — the
+            # CONSEQUENCE, which acceptance clause (2) requires — in the durable
+            # record. The ledger is the next-session surface, so the content
+            # that must survive is the count, the tag, the ages and the
+            # consequence; the "cut a release" advice is already in the stdout
+            # line. The CONSEQUENCE LEADS the message, so that if a longer tag
+            # or count pushes it past the cap the truncation drops the least
+            # important tail (the ages), not the finding itself.
+            ledger_msg = (
+                f"Build OLDER than tree: {gap_count} unreleased since {gap_tag} "
+                f"({gap_days}d old, bar {bar}d). Unreleased commits unreachable"
+            )
+            line = dedupe.emit_once(gap_seen, key, msg)
+            if line:
+                lines.append(line)
+                try:
+                    findings_ledger.record(
+                        sev=_GAP_SEV,
+                        code="REPO-RELEASE-GAP",
+                        src="repo-state",
+                        msg=ledger_msg,
+                        ref=gap_tag,
+                        actor="human",
+                    )
+                except Exception:  # noqa: BLE001 -- the mailbox must never break the detector
+                    # The episode is already latched in the seen-file (emit_once
+                    # wrote the key before returning), so a failed ledger write
+                    # would lose this episode's durable record for good. Unlatch
+                    # it: the next fire retries the write. The stdout half of
+                    # the finding is already out, and the ledger half is the
+                    # only durable one.
+                    dedupe.emit_forget(gap_seen, key)
 
     for line in lines:
         print(line)
