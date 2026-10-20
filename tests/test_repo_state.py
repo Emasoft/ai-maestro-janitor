@@ -174,12 +174,61 @@ def test_no_upstream_is_silent(tmp_path: Path) -> None:
 
 
 def test_outside_publish_commit_is_flagged(repo: Path, tmp_path: Path) -> None:
+    """A commit not made through publish.py is flagged, with its subject.
+
+    The SUBJECT reaches the owner through the findings LEDGER's `ref`
+    field, not through stdout. A commit subject is arbitrary
+    repository-controlled prose, and this line's fate is decided by
+    dispatch's quiet filter, which promotes any line containing a severity
+    word. A subject reading "feat: FAIL unrelated prose" would therefore
+    push a plain LOW advisory past quiet mode for a reason unrelated to
+    the measurement — the same reason the escalated release-gap line
+    excludes subjects, and it has a test asserting it.
+    """
     _commit(repo, "feat: sneaky direct commit")
 
     out = _run(repo, tmp_path / "home5")
 
     assert "NOT" in out and "publish.py" in out
-    assert "feat: sneaky direct commit" in out
+    # The subject is NOT in the stdout line.
+    assert "feat: sneaky direct commit" not in out, out
+
+def test_a_commit_subject_cannot_promote_the_outside_line_past_quiet_mode(
+    repo: Path, tmp_path: Path
+) -> None:
+    """A severity word in a commit subject must not change the line's fate.
+
+    `repo-state` is an ADVISORY detector, and dispatch's quiet filter
+    promotes any advisory line whose text contains a severity word
+    (CRITICAL, HIGH, ERROR, FAIL…). A commit subject is arbitrary
+    repository-controlled text, so a subject reading "feat: FAIL unrelated
+    prose" would push a plain LOW advisory past quiet mode and into the
+    owner's face, for a reason that has nothing to do with the
+    measurement.
+
+    The escalated release-gap line has always excluded subjects for exactly
+    this reason, and it has a test asserting it. This line now matches —
+    and the difference is not stylistic: the quiet filter's behaviour is
+    the thing being pinned, so the test drives the REAL filter rather than
+    asserting on the absence of a string.
+    """
+    import importlib.util as _ilu  # noqa: PLC0415 — import kept local to the test
+
+    scripts = Path(__file__).resolve().parent.parent / "scripts"
+    spec = _ilu.spec_from_file_location("dispatch_under_test", scripts / "dispatch.py")
+    assert spec and spec.loader
+    dispatch = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(dispatch)
+
+    _commit(repo, "feat: FAIL unrelated prose")
+    out = _run(repo, tmp_path / "homequiet")
+    line = next(ln for ln in out.splitlines() if "NOT made through publish.py" in ln)
+    assert "FAIL" not in line, line
+
+    # The REAL filter, on the REAL line: it must be DROPPED, not promoted.
+    assert dispatch._quiet_filter("repo-state", line) == "", (
+        "a commit subject must not promote the line past quiet mode: " + line
+    )
 
 
 def test_publish_bump_commit_is_silent(repo: Path, tmp_path: Path) -> None:

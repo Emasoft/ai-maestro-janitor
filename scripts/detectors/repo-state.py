@@ -257,19 +257,43 @@ def _last_release_tag_on(repo: Path, branch: str) -> str | None:
     reachability needs no per-tag test at all. One call, then a semver
     max over the result.
 
-    THE EQUIVALENCE HAS TWO HALVES, AND BOTH ARE LOAD-BEARING. The git
-    command does the REACHABILITY: `git tag --merged` reports the tags
-    whose peeled commit is an ancestor of the branch. The `_TAG_NAME`
-    filter does the "RELEASE TAG" half: git permits a tag to point at a
-    TREE or a BLOB, and such a tag is not a release at all, so it must
-    never be selected as one. Both halves are needed, and the second is
-    easy to lose — this file's own history records a past version that
-    used a `v*` glob instead of the strict semver match, and a glob
-    admits `v1.2.3-rc1` and calendar-versioned tags, which would break
-    the guarantee silently. So a future change to the filter must keep
-    the semver match. (Measured: `git tag --merged` already omits a tree
-    tag, so the filter is belt-and-braces on that input — but the
-    guarantee does not rest on git's behaviour.)
+    THE EQUIVALENCE HAS TWO HALVES, AND THEY ARE NOT INTERCHANGEABLE.
+    The git command does the REACHABILITY, and it does it over COMMITS:
+    `git tag --merged` reports the tags whose peeled commit is an
+    ancestor of the branch, and it OMITS a tag that points at a tree or a
+    blob outright (measured: on a repo with an annotated commit tag
+    v1.0.0 and annotated TREE and BLOB tags v9.9.9 and v8.8.8, it
+    returned only v1.0.0). The `_TAG_NAME` filter does the "RELEASE
+    TAG" half, and it filters on the tag's NAME: it keeps `v1.2.3` and
+    rejects `nightly-x` and `v1.2.3-rc1`.
+
+    THE TWO MECHANISMS ARE ORTHOGONAL, AND NEITHER SUBSTITUTES FOR THE
+    OTHER. The name filter does NOT exclude a tree or blob tag: a tag
+    named `v9.9.9` that points at a tree passes `_TAG_NAME` perfectly
+    (measured). The git command does NOT exclude a non-release-named
+    tag: a `nightly-*` tag merged into the release line is reported by
+    `git tag --merged` perfectly well. So the sentence "the filter, not
+    the git command, is what makes the guarantee hold" is FALSE for one
+    of the two cases, and true for the other.
+
+    WHY THE NAME FILTER MUST STAY STRICT — and the consequence is
+    SPECIFIC TO THIS MECHANISM, not to the bar. A looser filter would not
+    merely inflate the bar; it would let `nightly-*` and rc tags be
+    SUBTRACTED from the count, re-introducing exactly the
+    non-release-marker defect that commit 82d16c3d fixed and that
+    `test_release_gap_does_not_subtract_a_non_release_tag_on_the_release_line`
+    pins. This file's own history records a past version that used a `v*`
+    glob instead of the strict semver match; a glob admits `v1.2.3-rc1`
+    and `v1.2.3-rc1`-shaped names, and that is precisely how the
+    non-release-marker bug would come back. So a future change to the
+    filter must keep the semver match.
+
+    (One caveat on the strict match, so nobody assumes more than it
+    gives: it does NOT reject every calendar-versioned tag. `v2024.10.31`
+    HAS three numeric components and therefore MATCHES `_TAG_NAME`. A
+    repository that versions its releases by calendar date would have
+    those tags counted as releases — which is CORRECT for this file's
+    purpose, since such a tag really is that repository's release.)
 
     Order by PARSED semver, for the same reason as `_last_release_tag`:
     two tags created within the same clock second tie on creatordate, and
@@ -700,11 +724,52 @@ def main() -> int:
             outside = [s for s in subjects if not _BUMP_SUBJECT.match(s)]
             if outside:
                 key = f"outside@{tag}@{len(outside)}@{now // 86400}"
-                preview = "; ".join(outside[-3:])
-                msg = f"[repo-state] {len(outside)} commit(s) on {branch} since release {tag} were NOT made through publish.py (not in any release reachable from {branch}, and not a 'chore: bump version to x.y.z' bump): {preview}. Run scripts/publish.py to cut a release."
+                # NO COMMIT SUBJECTS IN THIS LINE. A commit subject is
+                # arbitrary REPOSITORY-CONTROLLED text, and this line's fate
+                # is decided by dispatch's quiet filter, which promotes any
+                # line containing a severity word (CRITICAL, HIGH, ERROR,
+                # FAIL…). So a subject reading "feat: FAIL unrelated prose"
+                # would push a plain LOW advisory past quiet mode and into
+                # the owner's face, for a reason that has nothing to do with
+                # the measurement. MEASURED: with the subject in the line,
+                # `_quiet_filter("repo-state", line)` KEEPS it; with an
+                # ordinary subject it DROPS it. The escalated line has
+                # always excluded subjects for this reason, and it has a
+                # test asserting it. This line now matches.
+                #
+                # The BRANCH name, by contrast, STAYS: it is not prose
+                # appended to a measurement, it is WHAT WAS MEASURED — the
+                # count is on that branch, and the escalated line's
+                # prohibition is about naming the RELEASE LINE, which is a
+                # different branch entirely.
+                msg = f"[repo-state] {len(outside)} commit(s) on {branch} since release {tag} were NOT made through publish.py (not in any release reachable from {branch}, and not a 'chore: bump version to x.y.z' bump). Run scripts/publish.py to cut a release."
                 line = dedupe.emit_once(seen, key, msg)
                 if line:
                     lines.append(line)
+                    # THE SUBJECTS GO TO THE LEDGER, NOT TO STDOUT. The
+                    # "which commits" detail is what the owner needs to act,
+                    # and it must survive — but it must not be in the
+                    # FILTERABLE text, because a subject is arbitrary
+                    # repository-controlled prose and this line's fate is
+                    # decided by dispatch's quiet filter. The ledger's
+                    # `ref` field carries it: durable, and never part of a
+                    # line the urgency override can scan.
+                    try:
+                        findings_ledger.record(
+                            sev="LOW",
+                            code="REPO-OUTSIDE-PUBLISH",
+                            src="repo-state",
+                            msg=(
+                                f"{len(outside)} commit(s) on {branch} since release "
+                                f"{tag} are not in any release reachable from {branch}"
+                            ),
+                            ref="; ".join(outside[-3:]),
+                        )
+                    except Exception:  # noqa: BLE001 — a ledger failure must never break the detector
+                        state.log_line(
+                            "repo-state",
+                            "could not record the outside-publish commit subjects",
+                        )
 
     # THE RELEASE-GAP BLOCK IS NOT NESTED INSIDE `if branch is not None:`.
     # The release-gap condition is a fact about the RELEASE LINE, so its
