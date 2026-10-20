@@ -697,6 +697,110 @@ def test_release_gap_counts_work_a_side_branch_tag_happens_to_contain(
     assert count == 6, f"a side-branch tag must not shrink the count, got {count}"
 
 
+def test_release_gap_does_not_subtract_a_non_release_tag_on_the_release_line(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A NON-SEMVER tag on the release line must not shrink the count.
+
+    `git tag --merged <branch>` returns EVERY tag whose commit is reachable
+    from the branch, not just the release tags. A nightly build marker, a
+    `v1.2.3-rc1` candidate or a calendar-versioned tag sits on the release
+    line between two releases, so subtracting it removes the commits it
+    points at — and those commits are GENUINE unreleased work. Measured on
+    this fixture the count came out 6 where the truth was 13.
+
+    The detector already insists on ONE definition of "release tag" everywhere
+    else (the strict `_TAG_NAME` match, never a `v*` glob, because a glob
+    would admit `v1.2.3-rc1` and inflate the bar with a tag that is never
+    the reported one). The subtraction must use the SAME definition.
+
+    The size floor is lowered to 1 so the COUNT is the discriminator.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS", "1")
+    _tagged_commit(repo, "feat: first release", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: second release", _days_ago(10), "v1.1.0")
+    for i in range(6):
+        _commit(repo, f"feat: unreleased work {i}")
+    # A NON-RELEASE marker on the release line, dated between the two
+    # releases. It is not a release: nothing was shipped by it.
+    _commit(repo, "feat: nightly marked", date=_days_ago(9))
+    old = os.environ.get("GIT_COMMITTER_DATE")
+    os.environ["GIT_COMMITTER_DATE"] = _days_ago(9)
+    try:
+        _git(repo, "tag", "-a", "nightly-2026-10-11", "-m", "nightly build")
+    finally:
+        if old is None:
+            os.environ.pop("GIT_COMMITTER_DATE", None)
+        else:
+            os.environ["GIT_COMMITTER_DATE"] = old
+    for i in range(6):
+        _commit(repo, f"feat: more unreleased work {i}")
+
+    verdict = _gap(repo)
+    assert verdict is not None, "the rule must fire"
+    gap_days, bar, tag, count = verdict
+    # The reported release is the newest RELEASE BY DATE; the nightly marker
+    # is not a release at all, so it neither becomes the reported release nor
+    # removes the commits it points at.
+    assert tag == "v1.1.0", tag
+    # THIRTEEN: 6 + the nightly-marked commit + 6. The nightly tag points at
+    # exactly one commit, and that commit was never released.
+    assert count == 13, f"a non-release tag must not shrink the count, got {count}"
+
+
+def test_the_release_gap_is_evaluated_even_when_the_checked_out_branch_is_unreadable(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The release-gap condition must not depend on the CHECKED-OUT branch.
+
+    The whole release-gap block — the escalation AND its refusal — was
+    nested inside `if branch is not None:`, so it vanished whenever the
+    local HEAD was unreadable. The two are unrelated: `origin/HEAD` names
+    the remote's default branch (the release line), while `_current_branch`
+    reads the local HEAD. The gap condition is a fact about the RELEASE
+    LINE, so it must be evaluated whether or not the local branch resolves.
+
+    The detector is driven IN-PROCESS (`rs.main()`), not through the
+    `_run` subprocess helper: the condition is created by monkeypatching
+    `_current_branch`, and a subprocess would never see the patch — a
+    test that asserted a subprocess's behaviour while patching an
+    in-process function passes no matter what the code does.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS", "1")
+    _tagged_commit(repo, "feat: first release", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: second release", _days_ago(10), "v1.1.0")
+    for i in range(6):
+        _commit(repo, f"feat: unreleased work {i}")
+
+    # Make the local HEAD unreadable: `_current_branch` returns None only
+    # when `git rev-parse --abbrev-ref HEAD` fails. The RELEASE line
+    # (origin/HEAD) stays resolvable — that is the whole point of the
+    # separation the defect violated.
+    monkeypatch.setattr(rs, "_current_branch", lambda _repo: None)
+    assert rs._current_branch(repo) is None
+    assert rs._release_branch(repo) == "main", "the release line must still resolve"
+
+    home = tmp_path / "homenested"
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+
+    # `main()` prints to stdout; capture it. It is called ONCE: the
+    # escalation is latched in the seen-file, so a second call would be
+    # deduped and would print nothing.
+    import contextlib  # noqa: PLC0415 -- import kept local to the test
+    import io  # noqa: PLC0415 -- import kept local to the test
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert rs.main() == 0
+    out = buf.getvalue()
+    assert "GAP ESCALATION" in out, (
+        "the release-gap condition must be evaluated on the release line "
+        f"even when the checked-out branch is unreadable; got: {out!r}"
+    )
+
+
 def test_unresolvable_release_line_refuses_loudly_instead_of_measuring_the_branch(
     repo: Path, tmp_path: Path
 ) -> None:

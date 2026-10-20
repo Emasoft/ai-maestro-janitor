@@ -271,8 +271,8 @@ def _last_release_tag(repo: Path) -> str | None:
 def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     """Subjects of the UNRELEASED commits on `branch` since `tag`, oldest-first.
 
-    UNRELEASED = on the release line, since the reported release, and
-    contained in NO release that was cut FROM THE RELEASE LINE.
+    UNRELEASED = on `branch`, since the reported release, and contained in NO
+    RELEASE that is merged into `branch`.
 
     The last clause is what the tag subtraction buys. `git log A..B` is a SET
     DIFFERENCE over the DAG, so a commit that ANOTHER release already shipped
@@ -280,20 +280,38 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
     reported one — would be counted as unreleased work, and the escalated line
     would state a shipped commit as a backlog.
 
-    THE SUBTRACTION MUST BE LIMITED TO THE RELEASE LINE'S OWN TAGS, and this
-    is the part that is easy to get wrong. `git log A..B --not --tags`
-    subtracts the commits reachable from EVERY tag, and `--tags` includes a
-    tag cut on a SIDE branch. A side-branch tag's history usually CONTAINS
-    release-line commits (the side branch forked from the release line), so
-    subtracting it drops genuine unreleased release-line work: measured on a
-    fixture with a side-branch tag, `--not --tags` reported 1 unreleased
-    commit where the truth was 2, silently under-reporting the very quantity
-    the escalated line states as a fact. The subtraction must therefore name
-    the tags that are MERGED INTO the release line (`git tag --merged
-    <branch>`), which are exactly the releases that shipped release-line
-    work. A tag on a side branch is not a release of the release line, and
-    the commits it happens to contain are still unreleased ON THE RELEASE
-    LINE.
+    THE SUBTRACTION IS LIMITED TO THE RELEASE TAGS MERGED INTO `branch`, and
+    both halves of that restriction are load-bearing.
+
+    (a) ONLY TAGS MERGED INTO `branch` MAY BE SUBTRACTED. `git log A..B
+    --not --tags` subtracts the commits reachable from EVERY tag, and
+    `--tags` includes a tag cut on a SIDE branch. A side-branch tag's
+    history usually CONTAINS release-line commits (the side branch forked
+    from the release line), so subtracting it drops genuine unreleased
+    release-line work: measured on a fixture with a side-branch tag,
+    `--not --tags` reported 1 unreleased commit where the truth was 2,
+    silently under-reporting the very quantity the escalated line states as
+    a fact. The subtraction must therefore name the tags that are MERGED
+    INTO the branch being measured (`git tag --merged <branch>`), which are
+    exactly the releases that shipped that branch's work. A tag on a side
+    branch is not a release of the branch, and the commits it happens to
+    contain are still unreleased ON IT.
+
+    (b) ONLY RELEASE TAGS MAY BE SUBTRACTED — see `_release_line_tags`,
+    which filters the merged set through the strict `_TAG_NAME` match. A
+    non-release marker (a `nightly-*` tag, a `v1.2.3-rc1` candidate) sits
+    on the branch between two releases and points AT a commit that was never
+    shipped, so subtracting it removes genuine unreleased work: measured on
+    a fixture with a nightly marker, the count came out 6 where the truth
+    was 13.
+
+    `branch` IS THE LINE BEING MEASURED, and the two call sites use it
+    differently on purpose. The release-gap escalation passes the RELEASE
+    line, because its printed consequence is a claim about what a release
+    would contain. The older "outside@" line passes the CHECKED-OUT branch,
+    because its message names that branch explicitly ("N commit(s) on
+    <branch> since release <tag>"); for it, excluding release-tagged commits
+    is what its own text already claims ("neither release-tagged nor a bump").
 
     The `tag..branch` range keeps the "since TAG" anchoring; the tag
     subtraction removes the commits those releases already shipped. On a
@@ -321,23 +339,41 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
 
 
 def _release_line_tags(repo: Path, branch: str) -> list[str]:
-    """The release tags that were cut FROM the release line, oldest first.
+    """The RELEASE tags that were cut FROM the release line, oldest first.
 
-    These are the tags `git tag --merged <branch>` reports: the tags whose
-    commits are reachable from the branch a release would be cut from. A tag
-    cut on a side branch is NOT one of them, and that distinction is
+    These are the release tags `git tag --merged <branch>` reports: the tags
+    whose commits are reachable from the branch a release would be cut from.
+    A tag cut on a side branch is NOT one of them, and that distinction is
     load-bearing — see `_unreleased_subjects`, whose subtraction is limited to
     these tags so that a side-branch tag cannot silently remove genuine
     unreleased release-line work from the count.
 
+    ONLY STRICT-SEMVER RELEASE TAGS ARE SUBTRACTED, and that filter is
+    load-bearing too. `git tag --merged` returns EVERY tag whose commit is
+    reachable from the branch, including markers that are not releases at
+    all: a `nightly-2026-10-11` build marker, a `v1.2.3-rc1` candidate, a
+    calendar-versioned tag. Such a marker sits on the release line between
+    two releases and points AT a commit that was never shipped, so
+    subtracting it removes genuine unreleased work from the count: measured
+    on a fixture with a nightly marker, the count came out 6 where the
+    truth was 13. The rest of this file already insists on ONE definition
+    of "release tag" — the strict `_TAG_NAME` match, never a `v*` glob,
+    because a glob would admit `v1.2.3-rc1` — and the subtraction must use
+    the SAME definition, or the count is measured against a different set of
+    tags than the reported release is drawn from.
+
     Returns an empty list when the branch cannot be resolved or has no
-    merged tags, which makes the caller fall back to counting the range
-    as-is rather than to counting nothing.
+    merged release tags, which makes the caller fall back to counting the
+    range as-is rather than to counting nothing.
     """
     proc = _git(repo, "tag", "--merged", branch)
     if proc is None or proc.returncode != 0:
         return []
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    return [
+        line.strip()
+        for line in proc.stdout.splitlines()
+        if line.strip() and _TAG_NAME.match(line.strip())
+    ]
 
 _GAP_SEEN_NAME = "repo-state-gap-seen.txt"
 _GAP_FLOOR_DEFAULT = 5
@@ -553,96 +589,106 @@ def main() -> int:
                 if line:
                     lines.append(line)
 
-        # The release line is what the release-gap condition is measured on.
-        # When it cannot be resolved, the condition CANNOT BE EVALUATED — and
-        # a silent None is indistinguishable from a healthy repo, which is the
-        # exact failure mode this feature exists to end. So the refusal is
-        # stated, as a LOW advisory, never as the HIGH escalation: nothing
-        # was measured, so nothing escalates. The advisory is emitted only
-        # when the repo HAS releases (otherwise there is no release-gap
-        # condition to evaluate and nothing to refuse), and it is latched
-        # through the same dedupe.emit_once as every other line, so it does
-        # not repeat on every fire. It is forgotten as soon as the release
-        # line resolves again, so a later breakage is reported afresh.
-        release_line = _release_branch(repo)
-        if release_line is None:
-            if _release_dates(repo):
-                key = "release-line-unresolved"
-                msg = (
-                    "[repo-state] LOW: the release line could not be resolved "
-                    "(no origin/HEAD naming a local default branch), so the "
-                    "release-gap condition cannot be evaluated on this repo. "
-                    "Point origin/HEAD at the branch releases are cut from to "
-                    "restore the check."
-                )
-                line = dedupe.emit_once(seen, key, msg)
-                if line:
-                    lines.append(line)
-        else:
-            dedupe.emit_forget(seen, "release-line-unresolved")
-
-        gap = _release_gap(repo, datetime.date.today())
-        if gap is not None:
-            gap_days, bar, gap_tag, gap_count = gap
-            key = f"gap@{gap_tag}"
-            # The STDOUT line carries ONLY measurement-derived facts: the count
-            # (a number), the tag (matched by _TAG_NAME, so it cannot carry
-            # prose), the gap in days and the bar in days. NO branch name and
-            # NO commit subjects: commit subjects are arbitrary prose, and one
-            # containing "ERROR" or "FAIL" would make the line survive
-            # dispatch's _URGENT_LINE_RE quiet filter for a reason unrelated
-            # to the measurement (or a prose-free one be dropped despite being
-            # genuinely urgent). A branch name is repo-controlled prose too,
-            # and the count is measured on the RELEASE branch (the remote's
-            # default branch), so naming that branch would be a falsehood on
-            # any other repo.
-            # The phrase "not made through publish.py" is an INFERENCE from
-            # publish.py's own behaviour (it makes exactly one commit, the
-            # version bump — publish.py's expected_subject), not something
-            # this detector verifies against the publish pipeline. It is
-            # stated as a fact because the number it qualifies is a fact, and
-            # a reader acting on it (cut a release) is right either way.
+    # THE RELEASE-GAP BLOCK IS NOT NESTED INSIDE `if branch is not None:`.
+    # The release-gap condition is a fact about the RELEASE LINE, so its
+    # evaluation must not depend on whether the CHECKED-OUT branch could be
+    # resolved — the two are unrelated: `origin/HEAD` names the remote's
+    # default branch, while `_current_branch` reads the local HEAD. Nesting
+    # the block under the checked-out branch made the whole feature — the
+    # escalation AND its refusal — silently vanish whenever the local HEAD
+    # was unreadable, which is precisely the "silent is indistinguishable
+    # from healthy" failure this feature exists to end.
+    #
+    # The release line is what the release-gap condition is measured on.
+    # When it cannot be resolved, the condition CANNOT BE EVALUATED — and
+    # a silent None is indistinguishable from a healthy repo, which is the
+    # exact failure mode this feature exists to end. So the refusal is
+    # stated, as a LOW advisory, never as the HIGH escalation: nothing
+    # was measured, so nothing escalates. The advisory is emitted only
+    # when the repo HAS releases (otherwise there is no release-gap
+    # condition to evaluate and nothing to refuse), and it is latched
+    # through the same dedupe.emit_once as every other line, so it does
+    # not repeat on every fire. It is forgotten as soon as the release
+    # line resolves again, so a later breakage is reported afresh.
+    release_line = _release_branch(repo)
+    if release_line is None:
+        if _release_dates(repo):
+            key = "release-line-unresolved"
             msg = (
-                f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
-                f"are unreleased (not made through publish.py), and the release is {gap_days} day(s) old, "
-                f"versus this repo's historical maximum release interval of {bar} day(s). "
-                f"The running plugin build is OLDER than the working tree: it cannot contain them. "
-                f"Cut a release (scripts/publish.py) so the update carries them."
+                "[repo-state] LOW: the release line could not be resolved "
+                "(no origin/HEAD naming a local default branch), so the "
+                "release-gap condition cannot be evaluated on this repo. "
+                "Point origin/HEAD at the branch releases are cut from to "
+                "restore the check."
             )
-            # The LEDGER message is a SEPARATE, shorter string: findings_ledger
-            # caps `msg` at MAX_MSG_CHARS (120) and truncates from the end, so
-            # the long stdout line would lose exactly its last sentence — the
-            # CONSEQUENCE, which acceptance clause (2) requires — in the durable
-            # record. The ledger is the next-session surface, so the content
-            # that must survive is the count, the tag, the ages and the
-            # consequence; the "cut a release" advice is already in the stdout
-            # line. The CONSEQUENCE LEADS the message, so that if a longer tag
-            # or count pushes it past the cap the truncation drops the least
-            # important tail (the ages), not the finding itself.
-            ledger_msg = (
-                f"Build OLDER than tree: {gap_count} unreleased since {gap_tag} "
-                f"({gap_days}d old, bar {bar}d). Unreleased commits unreachable"
-            )
-            line = dedupe.emit_once(gap_seen, key, msg)
+            line = dedupe.emit_once(seen, key, msg)
             if line:
                 lines.append(line)
-                try:
-                    findings_ledger.record(
-                        sev=_GAP_SEV,
-                        code="REPO-RELEASE-GAP",
-                        src="repo-state",
-                        msg=ledger_msg,
-                        ref=gap_tag,
-                        actor="human",
-                    )
-                except Exception:  # noqa: BLE001 -- the mailbox must never break the detector
-                    # The episode is already latched in the seen-file (emit_once
-                    # wrote the key before returning), so a failed ledger write
-                    # would lose this episode's durable record for good. Unlatch
-                    # it: the next fire retries the write. The stdout half of
-                    # the finding is already out, and the ledger half is the
-                    # only durable one.
-                    dedupe.emit_forget(gap_seen, key)
+    else:
+        dedupe.emit_forget(seen, "release-line-unresolved")
+
+    gap = _release_gap(repo, datetime.date.today())
+    if gap is not None:
+        gap_days, bar, gap_tag, gap_count = gap
+        key = f"gap@{gap_tag}"
+        # The STDOUT line carries ONLY measurement-derived facts: the count
+        # (a number), the tag (matched by _TAG_NAME, so it cannot carry
+        # prose), the gap in days and the bar in days. NO branch name and
+        # NO commit subjects: commit subjects are arbitrary prose, and one
+        # containing "ERROR" or "FAIL" would make the line survive
+        # dispatch's _URGENT_LINE_RE quiet filter for a reason unrelated
+        # to the measurement (or a prose-free one be dropped despite being
+        # genuinely urgent). A branch name is repo-controlled prose too,
+        # and the count is measured on the RELEASE branch (the remote's
+        # default branch), so naming that branch would be a falsehood on
+        # any other repo.
+        # The phrase "not made through publish.py" is an INFERENCE from
+        # publish.py's own behaviour (it makes exactly one commit, the
+        # version bump — publish.py's expected_subject), not something
+        # this detector verifies against the publish pipeline. It is
+        # stated as a fact because the number it qualifies is a fact, and
+        # a reader acting on it (cut a release) is right either way.
+        msg = (
+            f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
+            f"are unreleased (not made through publish.py), and the release is {gap_days} day(s) old, "
+            f"versus this repo's historical maximum release interval of {bar} day(s). "
+            f"The running plugin build is OLDER than the working tree: it cannot contain them. "
+            f"Cut a release (scripts/publish.py) so the update carries them."
+        )
+        # The LEDGER message is a SEPARATE, shorter string: findings_ledger
+        # caps `msg` at MAX_MSG_CHARS (120) and truncates from the end, so
+        # the long stdout line would lose exactly its last sentence — the
+        # CONSEQUENCE, which acceptance clause (2) requires — in the durable
+        # record. The ledger is the next-session surface, so the content
+        # that must survive is the count, the tag, the ages and the
+        # consequence; the "cut a release" advice is already in the stdout
+        # line. The CONSEQUENCE LEADS the message, so that if a longer tag
+        # or count pushes it past the cap the truncation drops the least
+        # important tail (the ages), not the finding itself.
+        ledger_msg = (
+            f"Build OLDER than tree: {gap_count} unreleased since {gap_tag} "
+            f"({gap_days}d old, bar {bar}d). Unreleased commits unreachable"
+        )
+        line = dedupe.emit_once(gap_seen, key, msg)
+        if line:
+            lines.append(line)
+            try:
+                findings_ledger.record(
+                    sev=_GAP_SEV,
+                    code="REPO-RELEASE-GAP",
+                    src="repo-state",
+                    msg=ledger_msg,
+                    ref=gap_tag,
+                    actor="human",
+                )
+            except Exception:  # noqa: BLE001 -- the mailbox must never break the detector
+                # The episode is already latched in the seen-file (emit_once
+                # wrote the key before returning), so a failed ledger write
+                # would lose this episode's durable record for good. Unlatch
+                # it: the next fire retries the write. The stdout half of
+                # the finding is already out, and the ledger half is the
+                # only durable one.
+                dedupe.emit_forget(gap_seen, key)
 
     for line in lines:
         print(line)
