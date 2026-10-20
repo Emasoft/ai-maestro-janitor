@@ -4,7 +4,7 @@ title: The runaway guard still needs a second abandonment signal and a correct l
 column: todo
 status: tasked
 created: 2026-10-20T19:07:56+0200
-updated: 2026-10-20T19:07:56+0200
+updated: 2026-10-20T20:18:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,6 +45,17 @@ ACCEPTANCE: (1) a second independent abandonment signal ships, and a live-host m
 
 MUTATION-VERIFY every new assertion, and remember the three vacuous tests this card already found: a test must make the clause under test the ONLY thing that can refuse its subject.
 
+## A-7 RESOLVED BY MEASUREMENT — the swapfile count IS readable on macOS, just not through sysctl
+
+2026-10-20 20:30 — A-7 IS WRONG ON ITS FACTUAL PREMISE, and the fix is a one-line change plus a real reading. The count is not in `vm.swapusage` and `vm.swapinfo` does not exist — both of that card's claims are TRUE — but the count is READABLE, because macOS keeps the swapfiles as FILES on the VM volume and their names are enumerable by an UNPRIVILEGED user. MEASURED: `ls /System/Volumes/VM/swapfile*` lists 7 files (swapfile0..4, 6, 7 — note the gap at 5, which is why a count by NAME INDEX would be wrong and a count by FILE is right), each exactly 1073741824 bytes, matching `vm.compressor.swapper.swapfile_size_max` = 1073741824. The directory is `drwxr-xr-x root wheel` and the count was obtained as uid 501, so it needs no privilege. The cross-check against the swap total: 7 files x 1 GiB = 7168 MB, and `sysctl -n vm.swapusage` reports total = 7168.00M. EXACT MATCH. So the swapfile COUNT is 7 here, and the panic's "69 swapfiles" is a reading this host CAN produce.
+
+THE SECOND, BETTER SIGNAL, and it is the one the panic actually named. The panic log reads "Compressor Info: 32% of compressed pages limit (OK) and 100% of segments limit (BAD) with 69 swapfiles and OK swap space" — and the SEGMENTS limit is a sysctl, not a filesystem walk: `sysctl -n vm.compressor.segment.total` (647769 here) over `sysctl -n vm.compressor.segment.limit` (1677721 here) = 38.6% on this healthy host, and the panic's condition was 100%. So the compressor's SEGMENT POOL is directly readable, and the current code's RAM-percentage proxy (A-8) is not the only measurement available — the real quantity is one sysctl away. Both readings were verified stable across five samples three seconds apart.
+
+THE CONSEQUENCE FOR A-7 AND A-8. The SWAPFILES arm becomes REACHABLE (the count is 7 here, the bar is 32, and the panic's 69 would have crossed it), and the COMPRESSOR arm can be measured against the segment limit itself rather than a RAM proxy — which is exactly the condition the panic log named. The card's acceptance clause 7 ("the swapfile-count claim matches what the code can actually read, or the threshold is removed") is therefore answerable in the STRONGER direction: the code can read it, and the fix is to read it.
 ## Approval log
 
 - 2026-10-20T19:07:56+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## A-0 and A-1 — the discriminator, settled by measurement
+
+2026-10-20 20:20 — THE SECOND ABANDONMENT SIGNAL IS DESIGNED, and the card's stated candidate (reparented to launchd, ppid=1) is REFUTED by measurement as a SUFFICIENT condition. MEASURED on the live host: the janitor's OWN launchd keepalive (pid 11907, daemon_keepalive_entry.py --keepalive) and claude-health-monitor (pid 11883) are BOTH ppid=1 and 8.5 h old, and NEITHER is an orphan — launchd adopts the children of any exited session AND is the parent of birth for a deliberately installed launchd agent, so ppid=1 is a NECESSARY but NOT SUFFICIENT condition for abandonment. THE DISCRIMINATOR THAT WORKS IS THE ANCESTRY CHANNEL THE CODE ALREADY HAS, used as a NEGATIVE test: a candidate is ABANDONED iff its ancestor chain does NOT reach a live 'claude' session process. MEASURED on the live table with claude_ancestor: pid 29880 (the near-miss pytest, 453 MB, 5675 s) -> 29811 -> 29775 -> 91163, and 91163 is a live 'claude --continue --add-dir /tmp --dangerously-skip-permissions' — so it is NOT abandoned and must not be a victim. The reparented orphan is caught by the same rule from the other side: its session process is GONE, so its chain dead-ends (ppid=1) and claude_ancestor returns None. THE CRITICAL SAFETY PROPERTY, and the one that is easy to get backwards: an EMPTY or PARTIAL ancestry table must NOT be read as 'abandoned'. claude_ancestor returns None both for a genuine dead-end and for a missing table, so a naive implementation would make EVERY attributed process look abandoned whenever the ps snapshot fails — the exact opposite of the intent, and a failed snapshot would then be a kill trigger. The rule must distinguish 'the chain is present and dead-ends' from 'the table does not contain this pid', and an empty table must yield NO victims at all. A-0's FLOOR is also required: with the abandonment rule in place the age gate is no longer the only protection, but the knob must still not be settable to 0, so a minimum age (900 s) is clamped into the effective gate. THE IMPLEMENTATION IS IN FLIGHT in a worker, with the spec at docs_dev/a1-second-abandonment-signal.md.
