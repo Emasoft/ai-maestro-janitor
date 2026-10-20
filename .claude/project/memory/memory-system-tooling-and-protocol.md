@@ -2,7 +2,7 @@
 name: memory-system-tooling-and-protocol
 description: "how does the memgrep engine work / what are the memgrep subcommands / how do I recall / find / links / reindex / what do the three memory skills do / MEMORIZE RECALL UPDATE / what is the update invariant / how does a superseded memory get demoted to a lesson / what do the memory heartbeat detectors do / memory-scope-leak memory-librarian memorize-nudge why-in-commits / what is the wikimem layer / hub aspect component tiers / the link law every link is bidirectional / how do I install the memory system in a new project / memgrep binary is stale on this host / cargo install does not roll forward with the plugin update"
 ocd: 2026-06-13
-lmd: 2026-10-17
+lmd: 2026-10-20
 metadata:
   node_type: memory
   type: project
@@ -51,7 +51,7 @@ one call searches LOCAL + PROJECT + USER together (`$ROOTS`).
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
 | `fact [--cat/--comp/--session/--kind/--since/--until]` | query one-fact-per-line memory lines; `--with-notes` (OFF by default) appends lessons |
 
-^NCA05AI2 [desc:"recall/find share flags (--with-notes, --sort, --since/--until, --top, --use-index); the find DSL uses +term/-term/wildcard/quoted-phrase syntax; worked commands for recall, find, links, reindex.", keywords:"memgrep_recall_flags_reference find_dsl_grammar_plus_minus_wildcard how_do_i_search_memory_with_boolean_terms memgrep_command_examples recall_sort_score_ocd_lmd only_notes_searches_lessons", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^NCA05AI2 [desc: "recall flags: --with-notes default ON, --no-notes, --full-notes keeps lesson date prefix, --sort score|ocd|lmd, --since/--until, --top, --use-index; recall is symptom-ranked precision-first.", keywords: memgrep_recall_flags_reference memgrep_recall_flags_with_notes_sort_since_until_top memgrep_command_examples recall_sort_score_ocd_lmd how_do_i_search_memory_with_boolean_terms recall_symptom_ranked_precision_first recall_full_notes_keeps_date_prefix recall_use_index_sqlite_sidecar memgrep_recall_no_notes_body_only recall_top_n_default_ten, type: project, ocd: 2026-06-13, lmd: 2026-10-20]
 **`recall`** — symptom-ranked, precision-first (surface matches suppress
 body-only matches unless nothing matched the surface). Shared flags on
 `recall`/`find`: `--with-notes` (default ON — resolve+append `[^N]` lessons) ·
@@ -60,6 +60,8 @@ body-only matches unless nothing matched the surface). Shared flags on
 (default `score`=relevance) · `--order asc|desc` · `--since/--until` over
 `--date-field ocd|lmd` (default `lmd`) · `--top N` (default 10) · `--use-index`
 (force the SQLite sidecar; auto-used when fresh — results always correct).
+
+^ATOM-HCUS-82MD [desc: "The find DSL: one whitespace-quoted string, +term mandatory, -term exclude, wildcard, quoted phrases verbatim; --only-notes runs it over lessons; worked find/links/reindex commands.", keywords: find_dsl_grammar_plus_minus_wildcard how_do_i_search_memory_with_boolean_terms memgrep_find_plus_minus_exclude memgrep_find_quoted_phrase_verbatim memgrep_find_wildcard memgrep_find_only_notes_searches_lessons memgrep_command_examples memgrep_find_dsl_one_quoted_string memgrep_find_dsl_plus_prefix_phrase memgrep_find_literal_plus_inside_token, type: project, ocd: 2026-10-20, lmd: 2026-10-20]
 
 **`find` DSL** — ONE whitespace-quoted string: `+TERM` mandatory, `-TERM`
 exclude, bare `TERM` optional (ranks); `*` = wildcard; `"quoted phrase"` matches
