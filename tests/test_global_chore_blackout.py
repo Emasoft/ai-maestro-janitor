@@ -87,25 +87,60 @@ def test_absorbed_and_unabsorbed_partition_the_roster_without_overlap() -> None:
 def test_unabsorbed_chores_are_pinned_by_name() -> None:
     """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails.
 
+    WHAT THIS SET MEASURES, so every entry below is read correctly: the assertion is
+    `set(harness_backend.unabsorbed_chores()) == {...}`, and `unabsorbed_chores()` is
+    GLOBAL_CHORES minus `SERVER_ABSORBED_TASKS` — the janitor's own STATIC absorption
+    boundary. It is NOT the server's live CLAIM set, which is dynamic (read from the
+    liveness file's `capabilities` on every probe) and already contains names that appear
+    in this very set.
+
     `fleet-plugins-update` joined the roster on 2026-08-11 (TRDD-G4BCRUP7 R3) and is the
     SEVENTH member. It is listed here deliberately, not to make the assertion pass: the
-    tripwire fired correctly and the fact it exposed is that on a host running a live
-    ai-maestro server — which suppresses the daemon — fleet-wide plugin updates do not run
-    at ALL, because the server does not claim that chore and the daemon has yielded.
+    tripwire fired correctly and the fact it exposed is that the janitor's absorbed table
+    does not carry it, so the janitor yields the chore to the server instead of running
+    it. At the time of writing (2026-10-20) the server DID advertise it as a capability
+    and the daemon's own yield line named it — so the server owns it now, and whether the
+    server actually executes it is a server-side question this repo cannot answer from
+    here.
 
     `cold-cache-clear` joined on 2026-08-13 as the EIGHTH, and it is added here by the same
-    discipline: the tripwire fired, and the honest answer is that ai-maestro's server does not
-    claim it either. That matters more than the others, because this chore is the ONLY actor
-    that can shrink a cold-cache session before its next cron fire pays full price — so on a
-    server host, the exact expense the chore exists to prevent goes unprevented. The
-    SessionStart half still fires there (it is a hook, not a daemon task), so the blackout costs
-    the running-session window, not the whole feature.
+    discipline: the tripwire fired, and the honest answer is that ai-maestro's server does
+    not advertise it either. That matters more than the others, because this chore is the
+    ONLY actor that can shrink a cold-cache session before its next cron fire pays full
+    price — so if the server ever takes it over, the exact expense the chore exists to
+    prevent goes unprevented. The SessionStart half still fires there (it is a hook, not a
+    daemon task), so the blackout costs the running-session window, not the whole feature.
 
-    So R3 ("keep every project's plugins updated") is satisfied on a standalone host and
-    BLACKED OUT on a server host until ai-maestro claims it. That is a cross-repo ask, not
-    something this repo can close alone, and it is the same shape as ai-maestro#111 and
-    TRDD-6CRC9SQQ's open contract item. The `global-chore-blackout` detector is what makes
-    the blackout visible meanwhile — which is exactly why this set is pinned by name.
+    So R3 ("keep every project's plugins updated") is satisfied on a standalone host, and
+    on a server host it is the server's to run, not the janitor's. That is a cross-repo
+    ask, not something this repo can close alone, and it is the same shape as ai-maestro#111
+    and TRDD-6CRC9SQQ's open contract item. Note what the `global-chore-blackout` detector
+    does NOT do for these names: it reports ORPHANED chores — a claimed chore whose server
+    is gone, or an unclaimed chore with no daemon. A chore the server has simply never
+    claimed, while the daemon is alive, satisfies neither arm, so this pin is the ONLY
+    thing naming it — which is exactly why this set is pinned by name.
+
+    `runaway-guard` joined 2026-10-20 as the ELEVENTH (TRDD-5G66S0HK), and unlike most of
+    the others here its absence from the janitor's ABSORBED TABLE costs the mechanism that
+    RELIEVES HOST PRESSURE. The others cost an improvement this repo would have liked;
+    this one costs the pressure relief, so it is not benign: if the server ever claims it,
+    the janitor stops running it and the server must run it in exchange.
+
+    WHAT THIS PIN DOES NOT SAY, because the rule it used to state was wrong (TRDD-5G66S0HK,
+    "## CORRECTION to the blackout claim above", 2026-10-20 20:50): an unclaimed chore is
+    NOT suppressed. The yield predicate is PER-CHORE (`daemon._task_yielded_to_server` =
+    `server_runs_chores and task_name in claimed`), and `claimed_chores()` FAILS TOWARD
+    COVERAGE — an unrecognised or absent claim keeps the chore with the janitor. At the time
+    of writing (2026-10-20) the live server advertised six capabilities and this was not one
+    of them, so the daemon KEEPS and RUNS it with the server alive. The spawn gate agrees,
+    for claim-set reasons: the standalone daemon is refused only when the server claims EVERY
+    chore (`server_owns_every_chore`), which is false while this chore is unclaimed. (The
+    gate has other, orthogonal refusals — harness-agent thin mode, the kill switch, the
+    daemon-enabled knob — none of which are about the claim set.) So the honest statement is:
+    the pin names the CROSS-REPO ASK (the server must CLAIM the chore AND implement the
+    beat), and until it does, the janitor keeps the chore — the safe direction. Adding it to
+    SERVER_ABSORBED_TASKS would be a false statement AND would put a chore the server does
+    not implement inside the `family-a` capability set.
     """
     assert set(hb.unabsorbed_chores()) == {
         "memory-guard", "cache-prune", "rules-cleanup",
@@ -136,6 +171,25 @@ def test_unabsorbed_chores_are_pinned_by_name() -> None:
         # does not run it: the ai-maestro#111 hole, on the one path whose failure costs a
         # spent 7-day window. Absorb it if and when the server implements reactive recovery.
         "oauth-recovery",
+        # `runaway-guard` joined 2026-10-20 (TRDD-5G66S0HK) as the ELEVENTH — and unlike
+        # most of the others above this blackout is NOT BENIGN. The others cost an
+        # IMPROVEMENT (a sweep, an update, a notification); this one costs the MECHANISM
+        # THAT RELIEVES HOST PRESSURE. The janitor's ABSORBED TABLE does not include it, so
+        # the pin names it. It must NEVER be moved into SERVER_ABSORBED_TASKS to "tidy" the
+        # roster: that would drop the name from this tripwire AND put a chore the server
+        # does not implement inside the `family-a` capability set, which a server
+        # advertising that coarse token would then claim. WHAT AN UNCLAIMED CHORE MEANS
+        # HERE: the yield is PER-CHORE (`server_runs_chores and task_name in claimed`) and
+        # `claimed_chores()` fails toward coverage, so a chore the server has not CLAIMED
+        # is never suppressed — at the time of writing (2026-10-20) the server advertised
+        # six capabilities and this was not one of them, so the janitor KEEPS and RUNS it.
+        # The cross-repo ask is therefore a TAKEOVER ask: the server must claim the chore
+        # AND implement the beat, or the pressure relief stops. This is the ai-maestro#111
+        # hole and TRDD-6CRC9SQQ's open contract item, and the `global-chore-blackout`
+        # detector does NOT cover it — that detector reports ORPHANED chores (claimed and
+        # gone, or unclaimed with no daemon), and this chore satisfies neither arm, so the
+        # pin is the only thing making the gap visible.
+        "runaway-guard",
         # user-plugins-update briefly returned here 2026-08-19 (TRDD-TIZHEPNC) and was
         # then RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the
         # harness self-updates installed plugins, so no sweep exists to be absorbed OR
