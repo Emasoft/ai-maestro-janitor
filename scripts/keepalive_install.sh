@@ -353,7 +353,10 @@ EOF
   if lerr="$(systemctl --user enable --now "$LABEL.service" 2>&1)"; then
     n=0
     while [ "$n" -lt 10 ]; do
-      systemctl --user is-active --quiet "$LABEL.service" && { ok=1; break; }
+      systemctl --user is-active --quiet "$LABEL.service" && {
+        ok=1
+        break
+      }
       n=$((n + 1))
       sleep 0.5
     done
