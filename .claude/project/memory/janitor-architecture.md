@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub / a session stayed dead after a compaction / resume-after-compact flag never consumed / why does CLAUDE_PLUGIN_ROOT get wiped on every update / where should persistent state be written / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / why must user/global-scope operations go through the daemon only / what is the runtime installed tree layout / how does the janitor decide project-scope vs user-scope for a given operation / the kill-switch came back after janitor-global-arm / the janitor disarmed itself again for no reason / a cleared STOP was resurrected by the migration / which code still touches the legacy janitor-global-state dir / is the legacy janitor-global-state dir safe to delete / arm did not stick on an un-migrated host"
 ocd: 2026-06-13
-lmd: 2026-09-01
+lmd: 2026-10-20
 metadata:
   node_type: memory
   type: project
@@ -109,6 +109,7 @@ its own lessons-learned section and links back here.
   threads this project opened, on any repo).
 - [[janitor-skills-and-agents-roster]] — the full skills control-surface +
   the two single-curator agents.
+- [[host-resource-pressure]]
 
 
 ## Notes and lessons learned

@@ -77,7 +77,15 @@ def emit_once(seen_file: Path | str, key: str, message: str) -> Optional[str]:
         return None  # fail open — pretend already-seen
 
     try:
-        existing = seen.read_text().splitlines()
+        # A corrupt seen-file must NOT raise out of emit_once. Every caller
+        # treats an exception as "the write failed" and un-latches its
+        # episode, so one undecodable file turns a single finding into an
+        # unbounded repeat-and-write-amplification loop: the finding re-fires
+        # on every fire and the durable record grows without bound.
+        # errors="replace" decodes the undecodable bytes to a replacement
+        # character, so the file is read as the (wrong) key set it holds and
+        # the caller proceeds instead of looping forever.
+        existing = seen.read_text(encoding="utf-8", errors="replace").splitlines()
         if key in existing:
             return None
         # Append the key. We open in append mode so concurrent readers see
@@ -105,7 +113,11 @@ def emit_forget(seen_file: Path | str, key: str) -> None:
         return
 
     try:
-        existing = seen.read_text().splitlines()
+        # Same reason as emit_once: a corrupt seen-file must not raise. A
+        # caller that un-latches a failed write does so from an exception
+        # handler, so a raise HERE would escape the handler that called it
+        # and take the whole detector down instead of un-latching.
+        existing = seen.read_text(encoding="utf-8", errors="replace").splitlines()
         if key not in existing:
             return
         kept = [line for line in existing if line != key]

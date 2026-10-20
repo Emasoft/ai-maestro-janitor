@@ -256,10 +256,13 @@ def test_release_gap_bar_is_the_computed_maximum_not_zero(repo: Path) -> None:
     gap_days, bar, tag, count = verdict
     assert bar == 6, f"the bar must be the completed-interval maximum, got {bar}"
     assert gap_days == 14, gap_days
-    # 7, not 6: the v1.0.0 commit is a DESCENDANT of the fixture's v1.2.3
-    # commit (it was made later, with an older date), so it is itself
-    # unreleased relative to the newest tag, plus the 6 work commits.
-    assert count == 7, count
+    # 6, not 7: the v1.0.0 commit is a DESCENDANT of the fixture's v1.2.3
+    # commit (it was made later, with an older date), so it is inside the
+    # range — but v1.0.0 SHIPPED it, so it is not unreleased work. The
+    # count excludes every commit contained in ANY release tag, which is
+    # what makes the number "unreleased" rather than "newer than the
+    # reported release".
+    assert count == 6, count
     # gap_days (14) > bar (6) => the verdict is a FIRE, which is what makes
     # the companion case below discriminating.
     assert gap_days > bar
@@ -569,7 +572,12 @@ def test_release_gap_line_states_the_consequence_and_the_bar(repo: Path, tmp_pat
     line = next(ln for ln in out.splitlines() if "GAP ESCALATION" in ln)
 
     # The BAR: the repo's own historical maximum release interval, in days.
-    gap_days, bar, tag, count = _gap(repo)
+    # The verdict is narrowed BEFORE it is unpacked, because _gap returns
+    # None when the rule does not fire and unpacking that would be a type
+    # error rather than a readable assertion failure.
+    verdict = _gap(repo)
+    assert verdict is not None, "the rule must fire on this repo"
+    gap_days, bar, tag, count = verdict
     # The bar's VALUE, hard-coded: without this the assertion below would
     # compare the line against the detector's own verdict and could not catch
     # a wrong-but-consistent bar.
@@ -581,3 +589,248 @@ def test_release_gap_line_states_the_consequence_and_the_bar(repo: Path, tmp_pat
     assert "OLDER than the working tree" in line, line
     # The remedy the owner is asked to take.
     assert "scripts/publish.py" in line, line
+
+
+
+# --------------------------------------------------------------------------- #
+# the four surgical fixes: C1 (backdated tag), C2 (release line refusal),
+# C3 (corrupt seen-file), N2 (the owner override reaches a young repo)
+# --------------------------------------------------------------------------- #
+
+
+def test_unreleased_count_excludes_commits_a_backdated_tag_already_shipped(
+    repo: Path, tmp_path: Path
+) -> None:
+    """C1: a commit another release tag SHIPPED is not unreleased work.
+
+    `git log tag..branch` is a SET DIFFERENCE, so a backdated semver-newer
+    tag pointing at a NEWER commit than the reported one made the shipped
+    commit look like a backlog. The count must be "since the reported
+    release, and contained in NO release tag".
+    """
+    # The fixture's v1.2.3 (14d ago) is the oldest date here. v1.3.0 (10d
+    # ago) is the NEWEST date, so it is the REPORTED release. v1.4.0 is
+    # BACKDATED (20d ago — an earlier calendar date) but its commit is a
+    # DESCENDANT of v1.3.0's, so it shipped a commit the reported release
+    # does not contain.
+    _tagged_commit(repo, "feat: reported release", _days_ago(10), "v1.3.0")
+    _tagged_commit(repo, "feat: shipped by the backdated tag", _days_ago(20), "v1.4.0")
+    for i in range(5):
+        _commit(repo, f"feat: unreleased work {i}")
+
+    verdict = _gap(repo)
+    assert verdict is not None, "the rule must still fire"
+    gap_days, bar, tag, count = verdict
+    # The reported release is the newest BY DATE (v1.3.0), not the
+    # semver-newest (v1.4.0).
+    assert tag == "v1.3.0", tag
+    # 5, not 6: the commit v1.4.0 shipped is inside the range but is
+    # contained in a release tag, so it is not unreleased work. The EXACT
+    # number is asserted — "smaller than 6" would also pass a count of 0.
+    assert count == 5, count
+    out = _run(repo, tmp_path / "homec1")
+    line = next(ln for ln in out.splitlines() if "GAP ESCALATION" in ln)
+    assert "5 commit(s)" in line, line
+
+def test_release_gap_counts_work_a_side_branch_tag_happens_to_contain(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C1 (the hard half): a tag on a SIDE branch must not shrink the count.
+
+    The subtraction that removes "commits a release already shipped" must be
+    limited to the tags that were cut FROM THE RELEASE LINE. `git log A..B
+    --not --tags` subtracts every tag, and a side-branch tag's history
+    CONTAINS release-line commits (the side branch forked from the release
+    line), so the naive form silently dropped genuine unreleased release-line
+    work: on this fixture it reported 1 where the truth is 6.
+
+    This is the test that distinguishes the two forms. The backdated-tag
+    fixture cannot: on a repo whose only tags are release-line tags, both
+    forms agree.
+
+    The size floor is lowered to 1 so the COUNT is the discriminator: with
+    the floor at its default 5 the naive form's count of 1 would make the
+    rule silent, and the test would fail on "the rule must fire" rather than
+    on the number the escalated line states as fact.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS", "1")
+    # The release line: TWO releases (so the bar exists). v1.0.0 (12d ago) ->
+    # v1.1.0 (10d ago) gives a bar of 2 completed-interval days; the open gap
+    # is measured from the newest release date, 10 days ago, so 10 > 2 fires.
+    # (The fixture's own v1.2.3 is dated 14d ago, so it is not the newest.)
+    _tagged_commit(repo, "feat: first release", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: second release", _days_ago(10), "v1.1.0")
+    # FIVE unreleased commits on the release line, made BEFORE the side branch
+    # forks — so the side branch's history CONTAINS them.
+    for i in range(5):
+        _commit(repo, f"feat: unreleased on the release line {i}")
+    # A SIDE branch forked from the release line, with its own tag. The tag is
+    # DATED 11d ago: older than the newest release-line release, so it is not
+    # the "newest release by date" the rule reports, and the rule still
+    # measures the gap from v1.1.0.
+    _git(repo, "checkout", "-q", "-b", "side")
+    _commit(repo, "feat: side branch work")
+    old = os.environ.get("GIT_COMMITTER_DATE")
+    os.environ["GIT_COMMITTER_DATE"] = _days_ago(11)
+    try:
+        _git(repo, "tag", "-a", "v9.9.9", "-m", "side hotfix")
+    finally:
+        if old is None:
+            os.environ.pop("GIT_COMMITTER_DATE", None)
+        else:
+            os.environ["GIT_COMMITTER_DATE"] = old
+    _git(repo, "checkout", "-q", "-")
+    # One MORE unreleased commit on the release line, made AFTER the fork.
+    _commit(repo, "feat: unreleased on the release line after the fork")
+
+    verdict = _gap(repo)
+    assert verdict is not None, "the rule must fire"
+    gap_days, bar, tag, count = verdict
+    # The reported release is the newest BY DATE on the release line. The
+    # side-branch tag is semver-higher (v9.9.9) but it is not a release OF
+    # THE RELEASE LINE, so it does not become the reported release either.
+    assert tag == "v1.1.0", tag
+    # SIX, not one: a tag cut on a side branch is not a release of the
+    # release line, so the commits it happens to contain are still unreleased
+    # on the line a release would be cut from. The naive `--not --tags` form
+    # subtracts the side tag's whole history and reports 1.
+    assert count == 6, f"a side-branch tag must not shrink the count, got {count}"
+
+
+def test_unresolvable_release_line_refuses_loudly_instead_of_measuring_the_branch(
+    repo: Path, tmp_path: Path
+) -> None:
+    """C2: no origin/HEAD + a feature branch ⇒ no escalation, but a refusal.
+
+    The checked-out-branch fallback made the printed consequence a
+    falsehood with no marker in the output: the count measured work nobody
+    intends to release. The fallback is gone, so the rule must SAY it cannot
+    evaluate the condition rather than measure something else.
+    """
+    _tagged_commit(repo, "feat: one", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: two", _days_ago(10), "v2.0.0")
+    for i in range(5):
+        _commit(repo, f"feat: unreleased work {i}")
+    # A feature branch with its own commits — the shape the fallback used
+    # to measure, and the shape that made the consequence sentence false.
+    _git(repo, "checkout", "-q", "-b", "feature")
+    for i in range(3):
+        _commit(repo, f"feat: branch-only work {i}")
+    # No origin/HEAD: the release line cannot be resolved.
+    _git(repo, "remote", "set-head", "origin", "--delete")
+    assert rs._release_branch(repo) is None, "the release line must not resolve here"
+
+    out = _run(repo, tmp_path / "homec2")
+    # No escalation: nothing was measured, so nothing escalates.
+    assert "GAP ESCALATION" not in out, out
+    assert "HIGH" not in out, out
+    # But the refusal is VISIBLE — a silent None is indistinguishable from a
+    # healthy repo, which is the failure mode this feature exists to end.
+    assert "release line could not be resolved" in out, out
+
+
+def test_a_corrupt_surfaced_to_human_seen_file_does_not_repeat_the_finding(
+    repo: Path, tmp_path: Path
+) -> None:
+    """C3: a corrupt seen-file must not un-latch the episode and repeat forever.
+
+    `read_text()` raised UnicodeDecodeError on the non-UTF-8 seen-file, and
+    the detector's `except Exception` un-latched the episode — so the finding
+    re-fired on every fire and the ledger grew without bound.
+    """
+    _tagged_commit(repo, "feat: one", _days_ago(12), "v1.0.0")
+    _tagged_commit(repo, "feat: two", _days_ago(10), "v2.0.0")
+    for i in range(5):
+        _commit(repo, f"feat: unreleased work {i}")
+
+    # The detector's own state dir (CLAUDE_PROJECT_DIR is the repo itself).
+    state_dir = repo / ".janitor" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    seen = state_dir / "surfaced-to-human.seen"
+    seen.write_bytes(b"\xff\xfe garbage \x80 not utf8\n")
+
+    home = tmp_path / "homec3"
+    # The first fire must not raise, and must emit the escalation.
+    first = _run(repo, home)
+    assert "GAP ESCALATION" in first, first
+    # The corrupt file was READ (as the wrong key set it holds) rather than
+    # raising, so the episode is latched: the key was appended to it.
+    assert "REPO-RELEASE-GAP" in seen.read_text(encoding="utf-8", errors="replace"), (
+        seen.read_text(encoding="utf-8", errors="replace")
+    )
+
+    # The second fire must NOT re-emit. Without the fix, the first fire's
+    # UnicodeDecodeError made the detector un-latch its episode, so the
+    # second fire re-emitted the line and re-wrote the ledger entry — the
+    # unbounded repeat + write-amplification loop.
+    second = _run(repo, home)
+    assert "GAP ESCALATION" not in second, second
+
+    # And the ledger must hold exactly ONE entry for this finding, not one
+    # per fire. (The ledger entry is written BEFORE the human-only marking
+    # that used to raise, so the raise landed after the durable write.)
+    ledger = state_dir / "findings-ledger.ndjsonl"
+    gap_entries = [
+        line
+        for line in ledger.read_text(encoding="utf-8").splitlines()
+        if "REPO-RELEASE-GAP" in line
+    ]
+    assert len(gap_entries) == 1, gap_entries
+
+
+def test_dedupe_emit_once_survives_a_corrupt_seen_file(tmp_path: Path) -> None:
+    """C3 (unit): `dedupe.emit_once` must not raise on a corrupt seen-file.
+
+    Every caller treats an exception as "the write failed" and un-latches its
+    episode, so a raise here turns one corrupt file into an unbounded
+    repeat-and-write-amplification loop.
+    """
+    import importlib.util as _ilu  # noqa: PLC0415 — import kept local to the test
+
+    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
+    spec = _ilu.spec_from_file_location("dedupe_under_test", lib / "dedupe.py")
+    assert spec and spec.loader
+    dedupe = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(dedupe)
+
+    seen = tmp_path / "corrupt.seen"
+    seen.write_bytes(b"\xff\xfe garbage \x80 not utf8\n")
+    # First call: the file is (wrongly) read as holding no keys, so the
+    # message comes back as if the file were empty.
+    assert dedupe.emit_once(seen, "key-1", "the message") == "the message"
+    # Second call: the key is now in the file, so the message is suppressed.
+    assert dedupe.emit_once(seen, "key-1", "the message") is None
+
+
+def test_the_owner_override_rescues_a_repo_with_a_single_release(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N2: the env override must be reachable when there is no measured bar.
+
+    The override was read AFTER the "fewer than two releases" early return,
+    so it could never rescue a repo with fewer than two release dates.
+    """
+    # The fixture has exactly ONE release tag (v1.2.3, 14d ago), so there is
+    # no completed interval and no measured bar. The gap is 14 days.
+    for i in range(5):
+        _commit(repo, f"feat: unreleased work {i}")
+    assert len(rs._release_dates(repo)) == 1, "this test needs exactly one release date"
+
+    # Without the override there is NO bar, so the rule stays SILENT: nothing
+    # is invented, because there is no evidence such a repo releases slowly.
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS", raising=False)
+    assert rs._release_gap_bar(repo) is None
+    out = _run(repo, tmp_path / "homen2a")
+    assert "GAP ESCALATION" not in out, out
+
+    # WITH the override the bar is the owner's value, and the gap (14d)
+    # exceeds it, so the rule fires.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS", "10")
+    assert rs._release_gap_bar(repo) == 10
+    verdict = _gap(repo)
+    assert verdict is not None, "the owner-set bar must make the rule fire"
+    gap_days, bar, tag, count = verdict
+    assert bar == 10, bar
+    assert gap_days == 14, gap_days
+    out = _run(repo, tmp_path / "homen2b")
+    assert "GAP ESCALATION" in out, out

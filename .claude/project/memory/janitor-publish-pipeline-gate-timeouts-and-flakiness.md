@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline-gate-timeouts-and-flakiness
 description: "publish exited 3 but every test passed / rc=3 with nothing failing / the gate timed out but the test passes on its own / TimeoutExpired on an xdist worker / is this flaky or a real regression / the test gate blocks a publish at random / tests fail only in the full suite and pass alone / a detector exits 0 with empty stdout / assert something in an empty string / which load-flake category is this / should I scale every timeout call site or enumerate them / enumerating call sites keeps missing some / scale timeouts at a seam not per site / my timeout scaling looks applied but does nothing / a module-level constant reads the env before the fixture sets it / timeout_scale frozen at 1.0 / a vacuous fix that looks scaled / gh-reply-watch floor test flaked under load / two projects reported the same reply / the deferred project polled again / a wall-clock floor spanning sequential spawns / publish hangs at gate 4 validating plugin remote CPV / CPV ABORTED validate exceeded its 1800s budget / the tree is frozen for the whole publish run / I edited a file while the publish was running"
 ocd: 2026-07-22
-lmd: 2026-09-05
+lmd: 2026-10-20
 metadata:
   node_type: memory
   type: project
@@ -26,9 +26,6 @@ TELL THEM APART BY THE FAILURE TEXT, not by which file failed: empty stdout ⇒ 
 
 
 
-
-^ATOM-YPAN-OCVC [desc: "publish blocked — CPV ABORTED validate exceeded its 1800s budget, exit 124, stuck in a phase: CPV walks a nested-ignored build tree (cargo target) because it loads only the root .gitignore", keywords: CPV_ABORTED_validate_exceeded_budget exit_124_publish cpv_stuck_phase_validate_submodule_containment gitignore_filter_rglob_slow nested_.gitignore_not_honoured_by_CPV cargo_target_walked scripts/memgrep/target_huge publish_hangs_in_CPV is_dir_ignored_False_for_ignored_dir cpv-version_pin_stale, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-02]
-publish.py exited 124 with 'CPV ABORTED: validate exceeded its 1800s wall-clock budget … Phase in flight: validate_submodule_containment, stuck for 1301s' and a thread dump ending in gitignore_filter.rglob → cpv_lint_engine.detect_languages. That is not a plugin verdict; it is CPV walking a huge tree, and the 'phase in flight' name is only the batch's last START line — the thread dump names the real one. CPV's GitignoreFilter loads ONLY the root .gitignore (gitignore_filter.py:183, still so on CPV master at v5.16.0), so scripts/memgrep/target — 98,730 files / 5.1 GB, ignored only by the NESTED scripts/memgrep/.gitignore — was descended on every rglob: 32.7 s per rglob('*.py') measured with CPV's own filter, 0.2 s after adding /scripts/memgrep/target/ to the ROOT .gitignore (45d9410a). That baseline cost had been there all along (the passing 3.4.10 runs spent 297–452 s in the same batch); what tipped it over the budget on 2026-09-02 was CONCURRENT LOAD — a second session's CPV self-validation (its own .venv workers, the ones a ps grep for 'claude-plugins-validation' shows; ours runs from ~/.cache/uv/archive-v0/…/cpv-remote-validate) ran through the whole window and every phase was 1.5–13× slower. Diagnose from the thread dump, probe with GitignoreFilter(root).is_dir_ignored(<dir>), and check the machine's load before blaming the plugin; the budget cannot be raised. Upstream: claude-plugins-validation issue 226. Also noticed: .cpv-version pins v5.4.0 while CPV's latest is v5.16.0.
 
 
 
@@ -100,6 +97,16 @@ vs `[plugin-data]` prefix to tell which one you are looking at. [^8]
 
 
 
+
+^ATOM-9SLJ-EHRD [desc: "the CPV publish hang is CPV walking a huge tree: GitignoreFilter loads only the ROOT .gitignore, so a nested-ignored cargo target is descended on every rglob (32.7 s per scan)", keywords: publish_hangs_in_CPV CPV_ABORTED_validate_exceeded_budget exit_124_publish cpv_stuck_phase_validate_submodule_containment gitignore_filter_rglob_slow nested_.gitignore_not_honoured_by_CPV cargo_target_walked scripts/memgrep/target_huge is_dir_ignored_False_for_ignored_dir 32.7s_per_rglob 0.2s_after_root_gitignore_fix TRDD-X6I04SAO CPV_walks_a_huge_tree phase_in_flight_is_only_the_last_START_line, trdd: TRDD-X6I04SAO, ocd: 2026-10-20, lmd: 2026-10-20]
+
+publish.py exited 124 with 'CPV ABORTED: validate exceeded its 1800s wall-clock budget … Phase in flight: validate_submodule_containment, stuck for 1301s' and a thread dump ending in gitignore_filter.rglob → cpv_lint_engine.detect_languages. That is not a plugin verdict; it is CPV walking a huge tree, and the 'phase in flight' name is only the batch's last START line — the thread dump names the real one. CPV's GitignoreFilter loads ONLY the root .gitignore (gitignore_filter.py:183, still so on CPV master at v5.16.0), so scripts/memgrep/target — 98,730 files / 5.1 GB, ignored only by the NESTED scripts/memgrep/.gitignore — was descended on every rglob: 32.7 s per rglob('*.py') measured with CPV's own filter, 0.2 s after adding /scripts/memgrep/target/ to the ROOT .gitignore (45d9410a).
+
+
+^ATOM-XZW0-HQN2 [desc: "the CPV timeout was concurrent load, not the tree walk alone: a second session's CPV self-validation made every phase 1.5-13x slower — the budget cannot be raised", keywords: concurrent_CPV_self_validation machine_load_tipped_the_budget every_phase_1.5_to_13x_slower baseline_297_to_452s_in_passing_runs diagnose_from_the_thread_dump probe_with_GitignoreFilter_is_dir_ignored check_the_machines_load_before_blaming_the_plugin the_budget_cannot_be_raised claude-plugins-validation_issue_226 cpv-version_pin_stale_v5.4.0_vs_v5.16.0 publish_hangs_in_CPV exit_124_publish CPV_ABORTED_validate_exceeded_budget was_the_plugin_slow_or_the_machine_busy, trdd: TRDD-X6I04SAO, ocd: 2026-10-20, lmd: 2026-10-20]
+
+That baseline cost had been there all along (the passing 3.4.10 runs spent 297–452 s in the same batch); what tipped it over the budget on 2026-09-02 was CONCURRENT LOAD — a second session's CPV self-validation (its own .venv workers, the ones a ps grep for 'claude-plugins-validation' shows; ours runs from ~/.cache/uv/archive-v0/…/cpv-remote-validate) ran through the whole window and every phase was 1.5–13× slower. Diagnose from the thread dump, probe with GitignoreFilter(root).is_dir_ignored(<dir>), and check the machine's load before blaming the plugin; the budget cannot be raised. Upstream: claude-plugins-validation issue 226. Also noticed: .cpv-version pins v5.4.0 while CPV's latest is v5.16.0.
+
 ## Governed by
 
 - [[janitor-publish-pipeline]] — the publish-pipeline overview hub this page details.
@@ -112,6 +119,12 @@ vs `[plugin-data]` prefix to tell which one you are looking at. [^8]
   the transferable technique belongs there, so it is findable from a hang that has
   nothing to do with publishing.
 
+
+## Superseded
+
+
+^ATOM-YPAN-OCVC [desc: "publish blocked — CPV ABORTED validate exceeded its 1800s budget, exit 124, stuck in a phase: CPV walks a nested-ignored build tree (cargo target) because it loads only the root .gitignore", keywords: CPV_ABORTED_validate_exceeded_budget exit_124_publish cpv_stuck_phase_validate_submodule_containment gitignore_filter_rglob_slow nested_.gitignore_not_honoured_by_CPV cargo_target_walked scripts/memgrep/target_huge publish_hangs_in_CPV is_dir_ignored_False_for_ignored_dir cpv-version_pin_stale, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-02, status: superseded, superseded-by: ATOM-9SLJ-EHRD]
+publish.py exited 124 with 'CPV ABORTED: validate exceeded its 1800s wall-clock budget … Phase in flight: validate_submodule_containment, stuck for 1301s' and a thread dump ending in gitignore_filter.rglob → cpv_lint_engine.detect_languages. That is not a plugin verdict; it is CPV walking a huge tree, and the 'phase in flight' name is only the batch's last START line — the thread dump names the real one. CPV's GitignoreFilter loads ONLY the root .gitignore (gitignore_filter.py:183, still so on CPV master at v5.16.0), so scripts/memgrep/target — 98,730 files / 5.1 GB, ignored only by the NESTED scripts/memgrep/.gitignore — was descended on every rglob: 32.7 s per rglob('*.py') measured with CPV's own filter, 0.2 s after adding /scripts/memgrep/target/ to the ROOT .gitignore (45d9410a). That baseline cost had been there all along (the passing 3.4.10 runs spent 297–452 s in the same batch); what tipped it over the budget on 2026-09-02 was CONCURRENT LOAD — a second session's CPV self-validation (its own .venv workers, the ones a ps grep for 'claude-plugins-validation' shows; ours runs from ~/.cache/uv/archive-v0/…/cpv-remote-validate) ran through the whole window and every phase was 1.5–13× slower. Diagnose from the thread dump, probe with GitignoreFilter(root).is_dir_ignored(<dir>), and check the machine's load before blaming the plugin; the budget cannot be raised. Upstream: claude-plugins-validation issue 226. Also noticed: .cpv-version pins v5.4.0 while CPV's latest is v5.16.0.
 ## Notes and lessons learned
 [^4]: [id:ATOM-MG22-0002, status:valid, keywords:"guard_assumes_it_is_the_only_writer live_daemon_and_sessions_write_too silent_probe_failure_blames_the_suite", ocd:2026-07-22, lmd:2026-07-22]
   DO NOT write a "did the suite touch anything outside its boundary" guard that assumes the

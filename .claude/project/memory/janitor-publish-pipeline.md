@@ -53,7 +53,7 @@ ancestor of the release, absent from the installed build.
 
 
 
-^ATOM-N44N-KU9B [desc: "at least THREE blockers stop a release on this tree — MEASURED 2026-10-20 03:56 the gate ran all 11 steps to exit 0, NIT=0 PARITY-CLEAN; only the board-drain rule still stands", keywords: publish_blocked what_stops_the_release CPV_integrity_manifest_mismatch 3451_mismatching_files PLUGIN_SKIP_GITHUB_INTEGRITY No_publish_until_the_board_is_drained board_drain_rule carve-out_for_live_owner_complaint publish.py_step_4_of_11 TRDD-S6GX1DHN TRDD-CWKM5218 TRDD-U0VLVJVT how_do_I_release_the_janitor publish_exited_4 NIT_blocked_by_strict exemption_is_not_sufficient three_blockers gate_completed_2026_10_20 step_5_to_11_ran_no_blocker publish_failed_on_NIT NIT_blocks_publish markdownlint_MD011 exit_4 step_4_NIT repo-state_LOW_advisory_never_escalates the_NIT_fix_is_one_line, ocd: 2026-10-19, lmd: 2026-10-20]
+^ATOM-N44N-KU9B [desc: "TWO release blockers on this tree: the CPV integrity check (bypassable) and a step-4 NIT (NOT bypassable) — the exemption is NECESSARY BUT NOT SUFFICIENT", keywords: publish_blocked what_stops_the_release CPV_integrity_manifest_mismatch 3451_mismatching_files PLUGIN_SKIP_GITHUB_INTEGRITY publish.py_step_4_of_11 publish_exited_4 NIT_blocked_by_strict exemption_is_not_sufficient a_NIT_is_not_bypassable markdownlint_MD011 the_NIT_fix_is_one_line TRDD-CWKM5218 how_do_I_release_the_janitor, ocd: 2026-10-19, lmd: 2026-10-20]
 1. THE CPV VALIDATOR'S OWN INTEGRITY CHECK aborts at publish step 4 of 11 with
    "[CPV integrity] CRITICAL: integrity manifest mismatch" and 3451
    mismatching files. Cause is upstream (TRDD-CWKM5218). `publish.py` exempts it
@@ -71,6 +71,9 @@ ancestor of the release, absent from the installed build.
    reached step 4's end with NIT=0 (SUMMARY: CRITICAL=0 MAJOR=0 MINOR=0 NIT=0
    WARNING=42), so the NIT DID clear on the next run — the fix worked, and that
    blocker is closed.
+
+
+^ATOM-T48Q-11C6 [desc: "the gate now completes on this tree (11 steps to exit 0, NIT=0) and the only standing blocker is the owner-side board-drain rule", keywords: gate_completed_2026_10_20 all_11_steps_exit_0 step_5_to_11_ran_no_blocker publish_exited_0 No_publish_until_the_board_is_drained board_drain_rule carve-out_for_live_owner_complaint TRDD-S6GX1DHN TRDD-U0VLVJVT the_board_is_344_cards who_decides_the_board_drain_rule a_dry_run_publishes_nothing only_the_board_drain_rule_still_blocks repo-state_LOW_advisory_never_escalates, ocd: 2026-10-20, lmd: 2026-10-20]
 
    AND THE GATE HAS NOW BEEN OBSERVED TO COMPLETE ON THIS TREE: the 2026-10-20
    03:56 exempted dry-run ran ALL 11 steps to exit 0, with NIT=0 and

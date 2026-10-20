@@ -2,7 +2,7 @@
 name: janitor-architecture-detectors-and-resilience
 description: "which detector finds X / where are the pattern libs / full detector roster by function / what skills does the janitor ship / what are the resilience pillars / how does the janitor survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / why did the fleet sit idle overnight with keep-going off / why did the self-trigger refuse while the user was judged present in another pane / does a machine-global presence signal wrongly gate a per-session action / is marketplace-refresh still a detector / why is marketplace-refresh missing"
 ocd: 2026-06-13
-lmd: 2026-10-18
+lmd: 2026-10-20
 metadata:
   node_type: memory
   type: project
@@ -225,6 +225,11 @@ number works as a trigger without a pedigree.
 **DO NOT reopen 5EHBPH6G if a post-fix wait exceeds that bound — it is terminal and frozen.
 DO file a NEW card, BECAUSE the bound it closed against was met by the evidence available,
 and new contradicting evidence is new work rather than a defect in that closure.**
+
+
+## See also
+
+- [[host-resource-pressure]]
 
 ## Governed by
 

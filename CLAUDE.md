@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7b78eae87065 generated=2026-10-12T20:44:51+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=8c8d2aeb2a80 generated=2026-10-20T15:04:17+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -155,6 +155,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [git-index-lock-orphan-recovery](.claude/project/memory/git-index-lock-orphan-recovery.md) — git hangs forever on .git/index.lock
   - [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
   - [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
+  - [host-resource-pressure](.claude/project/memory/host-resource-pressure.md) — the mac crashed
 
 **janitor-compaction-floor-gate** — the janitor compacted my context over and over
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over

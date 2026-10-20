@@ -188,8 +188,14 @@ def _release_branch(repo: Path) -> str | None:
     would count the unreleased work as zero. The local `main` is where the
     next release is cut from, and it is what the running build lags behind.
 
-    Falls back to the checked-out branch when the remote has no such pointer
-    (a local-only repo, or a clone without an origin).
+    Returns None when the release line cannot be resolved. There is NO
+    fallback to the checked-out branch: the fallback silently undid the
+    round-4 fix that the count be measured on the release line — on a
+    feature branch it measured work nobody intends to release, and the
+    printed consequence ("the running plugin build is OLDER than the working
+    tree") became a falsehood with no marker in the output, because the line
+    deliberately carries no branch name. A caller that cannot resolve the
+    release line must say so (an advisory), not measure something else.
     """
     proc = _git(repo, "rev-parse", "--abbrev-ref", "origin/HEAD")
     if proc is not None and proc.returncode == 0:
@@ -205,10 +211,7 @@ def _release_branch(repo: Path) -> str | None:
             probe = _git(repo, "rev-parse", "--verify", local)
             if probe is not None and probe.returncode == 0:
                 return local
-    # No usable origin/HEAD: fall back to the checked-out branch. On a
-    # feature branch this counts work that will not be released, so the
-    # finding is then about the branch rather than about the release line.
-    return _current_branch(repo)
+    return None
 
 
 def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
@@ -266,11 +269,75 @@ def _last_release_tag(repo: Path) -> str | None:
 
 
 def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str]:
-    """Subjects on `branch` newer than `tag`, in oldest-first order."""
-    proc = _git(repo, "log", "--format=%s", "--reverse", f"{tag}..{branch}")
+    """Subjects of the UNRELEASED commits on `branch` since `tag`, oldest-first.
+
+    UNRELEASED = on the release line, since the reported release, and
+    contained in NO release that was cut FROM THE RELEASE LINE.
+
+    The last clause is what the tag subtraction buys. `git log A..B` is a SET
+    DIFFERENCE over the DAG, so a commit that ANOTHER release already shipped
+    — a backdated semver-newer tag pointing at a NEWER commit than the
+    reported one — would be counted as unreleased work, and the escalated line
+    would state a shipped commit as a backlog.
+
+    THE SUBTRACTION MUST BE LIMITED TO THE RELEASE LINE'S OWN TAGS, and this
+    is the part that is easy to get wrong. `git log A..B --not --tags`
+    subtracts the commits reachable from EVERY tag, and `--tags` includes a
+    tag cut on a SIDE branch. A side-branch tag's history usually CONTAINS
+    release-line commits (the side branch forked from the release line), so
+    subtracting it drops genuine unreleased release-line work: measured on a
+    fixture with a side-branch tag, `--not --tags` reported 1 unreleased
+    commit where the truth was 2, silently under-reporting the very quantity
+    the escalated line states as a fact. The subtraction must therefore name
+    the tags that are MERGED INTO the release line (`git tag --merged
+    <branch>`), which are exactly the releases that shipped release-line
+    work. A tag on a side branch is not a release of the release line, and
+    the commits it happens to contain are still unreleased ON THE RELEASE
+    LINE.
+
+    The `tag..branch` range keeps the "since TAG" anchoring; the tag
+    subtraction removes the commits those releases already shipped. On a
+    healthy repo — one whose newest tag is the reported one — the two agree
+    and the count is unchanged; the difference appears exactly where the
+    naive form was wrong.
+
+    The bump-subject exclusion is NOT applied here: the caller applies it, so
+    the raw subject list and the "unreleased work" count stay separable.
+    """
+    release_tags = _release_line_tags(repo, branch)
+    argv = [
+        "rev-list",
+        "--no-commit-header",
+        "--format=%s",
+        "--reverse",
+        f"{tag}..{branch}",
+    ]
+    for release in release_tags:
+        argv.extend(["--not", release])
+    proc = _git(repo, *argv)
     if proc is None or proc.returncode != 0:
         return []
     return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _release_line_tags(repo: Path, branch: str) -> list[str]:
+    """The release tags that were cut FROM the release line, oldest first.
+
+    These are the tags `git tag --merged <branch>` reports: the tags whose
+    commits are reachable from the branch a release would be cut from. A tag
+    cut on a side branch is NOT one of them, and that distinction is
+    load-bearing — see `_unreleased_subjects`, whose subtraction is limited to
+    these tags so that a side-branch tag cannot silently remove genuine
+    unreleased release-line work from the count.
+
+    Returns an empty list when the branch cannot be resolved or has no
+    merged tags, which makes the caller fall back to counting the range
+    as-is rather than to counting nothing.
+    """
+    proc = _git(repo, "tag", "--merged", branch)
+    if proc is None or proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 _GAP_SEEN_NAME = "repo-state-gap-seen.txt"
 _GAP_FLOOR_DEFAULT = 5
@@ -313,6 +380,44 @@ def _release_dates(repo: Path) -> list[str]:
     return sorted({date for _ver, _name, date in _release_tags(repo)})
 
 
+
+def _release_gap_bar(repo: Path) -> int | None:
+    """The bar the release gap is measured against, or None when there is none.
+
+    Two cases, read in this order:
+      * the owner set CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS to a positive
+        integer: that value IS the bar, measured or not. With no measured bar
+        to replace it is an OWNER-SET bar — it has no measured provenance,
+        because the default bar is the repo's own historical maximum and this
+        repo has no completed interval to take a maximum of.
+      * the owner set nothing and the repo has fewer than two release dates:
+        there is NO bar, so the rule stays SILENT. Nothing is invented — there
+        is no evidence such a repo releases slowly, and a fabricated default
+        would either nag a young repo or mask a genuinely slow one.
+
+    The override is read BEFORE the "not enough releases" early return, so the
+    owner can rescue a repo that has fewer than two releases. Reading it
+    afterwards made the knob unreachable for exactly the repos that had no
+    other way to set a bar.
+    """
+    dates = _release_dates(repo)
+    override = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS"), 0
+    )
+    if len(dates) < 2:
+        # No completed interval, so no measured maximum to take. The owner's
+        # absolute value is the only bar that can exist here.
+        return override if override > 0 else None
+    intervals = [
+        (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
+        for a, b in zip(dates, dates[1:])
+    ]
+    bar = max(intervals)
+    if override:
+        bar = override
+    return bar
+
+
 def _newest_release_by_date(
     repo: Path, dates: list[str]
 ) -> tuple[str, str] | None:
@@ -350,9 +455,8 @@ def _release_gap(
     The bar is the maximum over COMPLETED intervals — intervals between two
     consecutive release dates that both exist. The currently-open gap has no
     successor release date, contributes no interval, and cannot enter the bar,
-    so it never inflates the threshold it is measured against. A repo with
-    fewer than 2 release dates has no completed interval, so no bar exists and
-    the rule is silent.
+    so it never inflates the threshold it is measured against. See
+    `_release_gap_bar` for the two cases (owner override, or no bar at all).
 
     The bar is a max over the FULL retained history, so it never falls: a repo
     that slows down does NOT raise its own bar at the time it slows, only once
@@ -368,20 +472,22 @@ def _release_gap(
     would then name a release the gap was never measured from. Selecting by
     DATE keeps the measured gap, the reported tag and the dedupe key the SAME
     identity, so a new release always opens a new episode.
+
+    The count is measured on the RELEASE line (the remote's default branch),
+    resolved HERE from origin/HEAD. It must never be measured on the
+    checked-out branch: the printed consequence is a claim about what a
+    release would contain, and on a feature branch the count would include
+    work nobody intends to release, making that claim a falsehood. When the
+    release line cannot be resolved the rule REFUSES (returns None) instead
+    of measuring something else.
     """
-    dates = _release_dates(repo)
-    if len(dates) < 2:
+    release_line = _release_branch(repo)
+    if release_line is None:
         return None
-    intervals = [
-        (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
-        for a, b in zip(dates, dates[1:])
-    ]
-    bar = max(intervals)
-    override = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MAX_DAYS"), 0
-    )
-    if override:
-        bar = override
+    dates = _release_dates(repo)
+    bar = _release_gap_bar(repo)
+    if bar is None:
+        return None
     floor = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_RELEASE_GAP_MIN_COMMITS"),
         _GAP_FLOOR_DEFAULT,
@@ -391,15 +497,7 @@ def _release_gap(
         return None
     tag, tag_date = newest_release
     newest = datetime.date.fromisoformat(tag_date)
-    # The count is measured on the RELEASE line (the remote's default
-    # branch), not on whatever is checked out: the line claims the running
-    # build is older than what a release would contain, and on a feature
-    # branch `git log tag..feature` would count work nobody intends to
-    # release, attributing a stale-install alarm to it.
-    branch = _release_branch(repo)
-    if branch is None:
-        return None
-    if not _is_ancestor(repo, tag, branch):
+    if not _is_ancestor(repo, tag, release_line):
         # The reported release is NOT on the release branch (a release cut on
         # a side branch, or a tag applied to a commit outside this history).
         # `git log tag..branch` would then be a set difference over a divergent
@@ -407,7 +505,7 @@ def _release_gap(
         # difference's size, not the count of unreleased work. Stay silent
         # rather than report a count that means something else.
         return None
-    subjects = _unreleased_subjects(repo, tag, branch)
+    subjects = _unreleased_subjects(repo, tag, release_line)
     outside = [s for s in subjects if not _BUMP_SUBJECT.match(s)]
     if len(outside) < floor:
         return None
@@ -455,6 +553,34 @@ def main() -> int:
                 if line:
                     lines.append(line)
 
+        # The release line is what the release-gap condition is measured on.
+        # When it cannot be resolved, the condition CANNOT BE EVALUATED — and
+        # a silent None is indistinguishable from a healthy repo, which is the
+        # exact failure mode this feature exists to end. So the refusal is
+        # stated, as a LOW advisory, never as the HIGH escalation: nothing
+        # was measured, so nothing escalates. The advisory is emitted only
+        # when the repo HAS releases (otherwise there is no release-gap
+        # condition to evaluate and nothing to refuse), and it is latched
+        # through the same dedupe.emit_once as every other line, so it does
+        # not repeat on every fire. It is forgotten as soon as the release
+        # line resolves again, so a later breakage is reported afresh.
+        release_line = _release_branch(repo)
+        if release_line is None:
+            if _release_dates(repo):
+                key = "release-line-unresolved"
+                msg = (
+                    "[repo-state] LOW: the release line could not be resolved "
+                    "(no origin/HEAD naming a local default branch), so the "
+                    "release-gap condition cannot be evaluated on this repo. "
+                    "Point origin/HEAD at the branch releases are cut from to "
+                    "restore the check."
+                )
+                line = dedupe.emit_once(seen, key, msg)
+                if line:
+                    lines.append(line)
+        else:
+            dedupe.emit_forget(seen, "release-line-unresolved")
+
         gap = _release_gap(repo, datetime.date.today())
         if gap is not None:
             gap_days, bar, gap_tag, gap_count = gap
@@ -470,6 +596,12 @@ def main() -> int:
             # and the count is measured on the RELEASE branch (the remote's
             # default branch), so naming that branch would be a falsehood on
             # any other repo.
+            # The phrase "not made through publish.py" is an INFERENCE from
+            # publish.py's own behaviour (it makes exactly one commit, the
+            # version bump — publish.py's expected_subject), not something
+            # this detector verifies against the publish pipeline. It is
+            # stated as a fact because the number it qualifies is a fact, and
+            # a reader acting on it (cut a release) is right either way.
             msg = (
                 f"[repo-state] HIGH: RELEASE GAP ESCALATION — {gap_count} commit(s) since release {gap_tag} "
                 f"are unreleased (not made through publish.py), and the release is {gap_days} day(s) old, "

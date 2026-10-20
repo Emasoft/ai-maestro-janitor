@@ -2,7 +2,7 @@
 name: janitor-per-project-channeling
 description: "can a session/agent see or be told about another project's findings — fleet summary line leaked other repos' drift into every session / where do findings about a repo with no open session go / cross-project notification data exfiltration / an automatic surface leaked another project's data / agents keep turning global maintenance back on by themselves / why did I see a finding for a repo I have no session in / can a heartbeat drift line mention another repo / does window-burn-rate alarm outside its own project / fleet-wide aggregates in a per-session line are forbidden / what commands are allowed to be machine-wide / why is the context-advisory default 80 percent not 85 / token telemetry per-project channeling invariant / a fleet aggregate leaked cross-project counts into a session / agents must never act on another project's workdir or git / the daemon may gather fleet-wide but never broadcast fleet-wide / can other agents' repo problems leak into my session"
 ocd: 2026-07-17
-lmd: 2026-07-17
+lmd: 2026-10-20
 metadata:
   node_type: memory
   type: project
@@ -37,6 +37,11 @@ was communicated to ai-maestro (janitor#100) as binding on the server's daemon-f
   TELEMETRY included: `window-burn-rate` alarms only inside the CULPRIT project's own
   sessions (unattributable trips silent everywhere); the context-advisory default is 80%
   (one runway band below the 85% enforcement — the CC harness covers the mid band).
+
+
+## See also
+
+- [[host-resource-pressure]]
 
 ## Applies to
 

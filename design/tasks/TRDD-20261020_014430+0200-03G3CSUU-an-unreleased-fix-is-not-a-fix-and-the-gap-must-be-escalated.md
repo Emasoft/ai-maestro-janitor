@@ -4,7 +4,7 @@ title: An unreleased fix is not a fix, and the gap must be escalated
 column: todo
 status: tasked
 created: 2026-10-20T01:44:30+0200
-updated: 2026-10-20T03:10:52+0200
+updated: 2026-10-20T14:16:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -41,3 +41,7 @@ NEXT ACTION: read scripts/detectors/repo-state.py in full and the quiet filter's
 ## Approval log
 
 - 2026-10-20T01:44:30+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes and lessons learned
+
+2026-10-20 14:20 — THE MEASURED COUNT IN COMMIT 800bc036's MESSAGE IS WRONG, and it is corrected here. The message states "_release_gap() returns (13, 8, 'v3.8.11', 637) — 637 unreleased commits" three times. The code returns (13, 8, 'v3.8.11', 639): `git log v3.8.11..main --format=%s | wc -l` = 639 with ZERO bump-subject commits among them, so the exclusion changes nothing. WHY IT WAS 637 WHEN MEASURED: the count was taken BEFORE the two commits that this very work produced — the detector's own commit and the memory-split agent's — landed on main. It is a live number, not a constant, and it grows as the work does. THE CORRECTION IS IN THE FOLLOW-UP COMMIT, not an amend: the fix commit's message carries the corrected figure, and the earlier message is left alone because rewriting it would rewrite history under an uncommitted tree. The figure to quote is ALWAYS re-measured after the count semantics change (the C1 fix changed what "unreleased" MEANS), never copied forward from either 637 or 639.

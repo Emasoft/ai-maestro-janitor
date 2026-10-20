@@ -382,8 +382,13 @@ def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | 
     """
     seen_file = _surfaced_seen_path(project_dir)
     try:
-        lines = seen_file.read_text(encoding="utf-8").splitlines()
-    except OSError:
+        # A corrupt seen-file must not raise here either: this function is
+        # documented as never raising, and UnicodeDecodeError is NOT an OSError,
+        # so a corrupt file would escape the except clause and break the
+        # caller. errors="replace" decodes the undecodable bytes, and the
+        # widened except keeps the "unreadable -> False" semantics.
+        lines = seen_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, UnicodeDecodeError):
         return False
     prefix = f"{code}:"
     keys = [line for line in lines if line.startswith(prefix)]
@@ -401,8 +406,12 @@ def surfaced_to_human_status(
     "never told anyone at all". Read-only — never mutates the stamp."""
     key = surfaced_to_human_key(code, content_hash)
     try:
-        seen = _surfaced_seen_path(project_dir).read_text(encoding="utf-8").splitlines()
-    except OSError:
+        # Same reason as clear_surfaced_to_human: a corrupt seen-file must not
+        # raise out of a read-only status query — the caller asks this to
+        # decide whether to surface a finding, and an exception there would
+        # suppress the finding instead of answering the question.
+        seen = _surfaced_seen_path(project_dir).read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, UnicodeDecodeError):
         seen = []
     return "reported-pending" if key in seen else "never-reported"
 
