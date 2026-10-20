@@ -253,8 +253,23 @@ def _last_release_tag_on(repo: Path, branch: str) -> str | None:
     deliberately-cured regression (TRDD-GXXKAGY6 review cure 4: "a
     2000-tag repo would pay 2000 subprocess spawns per heartbeat"). The
     fix is that `git tag --merged <branch>` ALREADY returns exactly the
-    tags whose commit is reachable from the branch, so reachability needs
-    no per-tag test at all. One call, then a semver max over the result.
+    RELEASE TAGS whose commit is reachable from the branch, so
+    reachability needs no per-tag test at all. One call, then a semver
+    max over the result.
+
+    THE EQUIVALENCE HAS TWO HALVES, AND BOTH ARE LOAD-BEARING. The git
+    command does the REACHABILITY: `git tag --merged` reports the tags
+    whose peeled commit is an ancestor of the branch. The `_TAG_NAME`
+    filter does the "RELEASE TAG" half: git permits a tag to point at a
+    TREE or a BLOB, and such a tag is not a release at all, so it must
+    never be selected as one. Both halves are needed, and the second is
+    easy to lose — this file's own history records a past version that
+    used a `v*` glob instead of the strict semver match, and a glob
+    admits `v1.2.3-rc1` and calendar-versioned tags, which would break
+    the guarantee silently. So a future change to the filter must keep
+    the semver match. (Measured: `git tag --merged` already omits a tree
+    tag, so the filter is belt-and-braces on that input — but the
+    guarantee does not rest on git's behaviour.)
 
     Order by PARSED semver, for the same reason as `_last_release_tag`:
     two tags created within the same clock second tie on creatordate, and
@@ -663,6 +678,18 @@ def main() -> int:
         # CONSEQUENCE is a claim about the RELEASE LINE; this line's claim
         # is about the checked-out branch, and the two are not the same
         # claim, so they do not need the same rule.
+        # THIS LINE NAMES THE BRANCH, AND THE ESCALATED LINE MUST NOT —
+        # the asymmetry is deliberate, and the reason belongs here. The
+        # escalated line's consequence is a claim about the RELEASE LINE
+        # ("a release would contain N commits"), so naming any branch
+        # would be a falsehood on a repo whose release line is named
+        # something else; it carries no branch name for that reason. THIS
+        # line's claim is about the CHECKED-OUT branch, and it has always
+        # said so in its first clause ("N commit(s) on <branch> since
+        # release <tag>") — the branch here is not repo-controlled prose
+        # appended to a measurement, it is WHAT WAS MEASURED. The
+        # parenthetical repeats it because the subtraction is over the
+        # releases reachable from that same branch.
         tag = _last_release_tag_on(repo, branch)
         if tag is not None:
             subjects = _unreleased_subjects(repo, tag, branch)
