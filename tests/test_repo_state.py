@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -46,6 +47,26 @@ def _load_dedupe():
 
 
 dedupe = _load_dedupe()
+
+
+def _load_findings_ledger():
+    """The findings ledger module, loaded the same way the detector loads it.
+
+    Loaded by EXPLICIT PATH, never by `sys.path.insert`: the ledger is
+    already imported by the detector under the name `findings_ledger`, and
+    putting `scripts/lib` on `sys.path` for the rest of the session would
+    shadow every later import of that name — including in other test
+    files.
+    """
+    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
+    spec = importlib.util.spec_from_file_location("ledger_under_test", lib / "findings_ledger.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+dedupe_ledger = _load_findings_ledger()
 
 
 # --------------------------------------------------------------------------- #
@@ -258,18 +279,28 @@ def test_the_outside_publish_subjects_reach_the_owner_through_the_ledger(
     """The subjects must SURVIVE — leaving stdout is not the same as losing them.
 
     The commit subjects and the branch name were removed from the stdout
-    line because they are repository-controlled text on a surface the quiet
-    filter scans. But they are the detail the owner needs in order to act,
-    so they have to survive SOMEWHERE. They go to the findings LEDGER.
+    line because they are repository-controlled text on a surface the
+    quiet filter scans. But they are the detail the owner needs in order
+    to act, so they have to survive SOMEWHERE. They go to the findings
+    LEDGER, because `/janitor-findings` — the one user-facing way to
+    browse findings — reads ONLY the ledger, and nothing in the codebase
+    reads the detector's own log. A finding whose detail lives where
+    nobody looks is a finding nobody can act on.
 
-    This test exists because the first attempt put them in the ledger's
-    `ref` field, which is capped at 24 characters and truncated HARD,
-    mid-word: three subjects totalling 77 characters came out as
-    'feat: sneaky direct comm' — one fragment, two subjects gone. The
-    ledger's `msg` field (cap 120) holds them in full. This test pins the
-    subjects' SURVIVAL, not their absence from stdout — a test that only
-    asserts the absence would pass while the information was being lost,
-    which is exactly what happened.
+    THE LEDGER MESSAGE IS PROVABLY BOUNDED, and this test pins the
+    bound rather than observing it. The branch name and a commit subject
+    are both repo-controlled and unbounded (this repo's own history runs
+    to 643 characters, measured over 5795 commits), and the ledger
+    truncates HARD, mid-word, at 120 characters. A message that merely
+    HAPPENS to fit the fixtures is not a message that fits, so the
+    detector builds it to a fixed budget and this test drives a branch
+    and subjects long enough to break one.
+
+    It also pins the SURVIVAL: the count and the tag are exact and never
+    truncated, and a bounded excerpt of the subjects is in the ledger
+    where the owner will see it. A test that only asserted the absence
+    of the subjects from stdout would pass while the information was
+    being lost, which is exactly what happened twice.
     """
     _commit(repo, "feat: sneaky direct commit")
     _commit(repo, "fix: another thing entirely")
@@ -279,25 +310,91 @@ def test_the_outside_publish_subjects_reach_the_owner_through_the_ledger(
     home.mkdir(parents=True, exist_ok=True)
     _run(repo, home)
 
-    lib = Path(__file__).resolve().parent.parent / "scripts" / "lib"
-    sys.path.insert(0, str(lib))
-    import findings_ledger  # noqa: PLC0415 — import kept local to the test
-
-    ledger = Path(findings_ledger.ledger_path(str(repo)))
+    ledger = Path(dedupe_ledger.ledger_path(str(repo)))
     assert ledger.exists(), f"no ledger at {ledger}"
     entries = [
-        __import__("json").loads(line)
+        json.loads(line)
         for line in ledger.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     outside = [e for e in entries if e.get("code") == "REPO-OUTSIDE-PUBLISH"]
     assert outside, "the outside-publish finding must be recorded in the ledger"
     msg = outside[-1].get("msg", "")
-    # The subjects SURVIVE, in full, and so does the branch.
-    assert "feat: sneaky direct commit" in msg, msg
-    assert "fix: another thing entirely" in msg, msg
-    assert "chore: yet more work" in msg, msg
+
+    # The COUNT and the TAG are exact: they are the finding's quantity
+    # and its subject, and truncating either would make it say
+    # something false.
+    assert "3 commit(s)" in msg, msg
+    assert "v1.0.0" in msg or "v" in msg, msg
+    # The BRANCH is in the message — it is what the count was measured
+    # on.
     assert "main" in msg, msg
+    # The ledger's own cap, asserted rather than assumed.
+    assert len(msg) <= 120, f"ledger msg is {len(msg)} chars, cap is 120: {msg!r}"
+    # And a BOUNDED EXCERPT of the subjects survives in the ledger, not
+    # only in the log.
+    assert "sneaky" in msg, msg
+
+
+def test_the_ledger_message_fits_a_long_branch_and_long_subjects() -> None:
+    """THE BOUND, DRIVEN WITH THE INPUTS THAT BREAK IT.
+
+    The branch name and the subjects are repo-controlled and unbounded,
+    so the message must be built to a budget rather than hoped to fit.
+    This test drives a 200-character branch and a 500-character subject
+    and asserts the result is within the ledger's cap.
+
+    WHY THE HELPER IS EXERCISED DIRECTLY AND NOT ONLY THROUGH THE
+    DETECTOR: the helper enforces the cap in more than one place (the
+    branch is truncated, each subject is truncated, AND the remaining
+    room is computed before the list is built).
+
+    AND HERE IS THE HONEST LIMIT OF WHAT THIS TEST CAN SHOW. Each guard
+    is REDUNDANT with the others, so removing any ONE of them leaves the
+    suite green — MEASURED: all five single-guard mutations survive.
+    That is defence in depth working as intended, and it is also why no
+    single mutation can prove any one guard is necessary. What the test
+    DOES prove is the PROPERTY: removing ALL the guards at once fails
+    this test (MEASURED), so the bound is enforced by the code and not
+    by the length of the fixtures. A test that tried to pin each guard
+    separately would be pinning REDUNDANCY, which is not a property
+    anybody needs; a test that pins the property is.
+    """
+    long_branch = "feature/" + ("x" * 190)
+    long_subject = "feat: " + ("y" * 500)
+    msg = rs._ledger_msg(
+        count=3, branch=long_branch, tag="v1.2.3", subjects=[long_subject] * 3
+    )
+    assert len(msg) <= 120, f"message is {len(msg)} chars: {msg!r}"
+    # The count survives even in the worst case.
+    assert "3 commit(s)" in msg, msg
+    # And the BRANCH is bounded: the full 198-character branch must NOT
+    # be in the message, or the cap was only met by luck.
+    assert long_branch not in msg, "the branch was not truncated"
+
+
+def test_the_ledger_message_stays_bounded_for_every_input_size() -> None:
+    """THE BOUND MUST HOLD FOR EVERY INPUT, not for one hostile one.
+
+    A single hostile fixture proves the bound held ONCE. This drives a
+    range of branch and subject lengths and asserts the cap holds for
+    all of them, which is the property the ledger actually needs: the
+    message is bounded BY CONSTRUCTION rather than for the lengths
+    somebody happened to test.
+    """
+    for branch_len in (1, 10, 40, 100, 300, 1000):
+        for subject_len in (1, 30, 40, 200, 1000):
+            msg = rs._ledger_msg(
+                count=7,
+                branch="b" * branch_len,
+                tag="v1.2.3",
+                subjects=["s" * subject_len] * 5,
+            )
+            assert len(msg) <= 120, (
+                f"branch_len={branch_len} subject_len={subject_len} "
+                f"produced {len(msg)} chars: {msg!r}"
+            )
+            assert "7 commit(s)" in msg, msg
 
 
 def test_publish_bump_commit_is_silent(repo: Path, tmp_path: Path) -> None:

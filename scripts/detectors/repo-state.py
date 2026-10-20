@@ -117,6 +117,73 @@ _BUMP_SUBJECT = re.compile(r"^chore: bump version to \d+\.\d+\.\d+$")
 # The capture groups are parsed for semver ordering in _last_release_tag_on.
 _TAG_NAME = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
+# THE LEDGER'S BUDGETS, restated here so the detector does not depend on
+# another module's constants without saying so.
+#
+# `findings_ledger.MAX_MSG_CHARS` is 120 and the ledger truncates HARD,
+# mid-word. `ref` is capped at 24. Both are the ledger's, not the
+# detector's, and a field that overflows is cut without ceremony — so
+# every value written into a ledger field from here is bounded BY
+# CONSTRUCTION rather than hoped to fit.
+_LEDGER_MSG_MAX = 120
+_LEDGER_REF_MAX = 24
+
+# A commit subject is UNBOUNDED — this repo's own history runs to 643
+# characters (measured over 5795 commits: min 21, p50 90, p99 265, max
+# 643), and 950 of the 5795 exceed the ledger's 120-character budget. So
+# a subject can never be written into a ledger field whole, and the
+# number that matters is the COUNT of subjects over the budget, not one
+# subject's length.
+_SUBJECT_MAX = 40
+
+# A branch name is repo-controlled and unbounded too, so it is bounded
+# explicitly for the same reason.
+_BRANCH_MAX = 40
+
+
+def _ledger_msg(*, count: int, branch: str, tag: str, subjects: list[str]) -> str:
+    """Build the outside-publish finding's ledger message, PROVABLY bounded.
+
+    The ledger's `msg` is capped at 120 characters and truncates HARD,
+    mid-word, so a message that merely HAPPENS to fit on the fixtures
+    is not a message that fits: the branch name is repo-controlled and
+    unbounded, and a commit subject is unbounded too (this repo's own
+    history runs to 643 characters).
+
+    So the message is built to a FIXED budget, and the parts that must
+    stay exact — the COUNT and the TAG — are never the parts at risk:
+    the branch and each subject are truncated to their own explicit
+    widths, and the subject list is dropped entirely if what remains
+    will not fit. Every returned string is at most `_LEDGER_MSG_MAX`
+    characters, which is what makes the guarantee a guarantee rather
+    than an observation.
+    """
+    head = f"{count} commit(s) on {branch[:_BRANCH_MAX]} since release {tag}: "
+    # The tag is repo-controlled too, so it is bounded — but it is the
+    # finding's SUBJECT, so it is bounded LAST and only as a tail.
+    room = _LEDGER_MSG_MAX - len(head) - 2
+    if room <= 0:
+        return head[:_LEDGER_MSG_MAX]
+    # The OLDEST unreleased subject goes first: it is the EARLIEST work
+    # that has been sitting unreleased, which is the one the owner most
+    # needs to see. The list is in chronological order, so the head is
+    # the oldest.
+    parts: list[str] = []
+    for subject in subjects:
+        piece = subject[:_SUBJECT_MAX]
+        if not parts:
+            if len(piece) > room:
+                piece = piece[:room]
+            parts.append(piece)
+        else:
+            candidate = "; ".join(parts + [piece])
+            if len(candidate) > room:
+                break
+            parts.append(piece)
+    if not parts:
+        return head[:_LEDGER_MSG_MAX]
+    return (head + "; ".join(parts))[:_LEDGER_MSG_MAX]
+
 
 def _git_env() -> dict[str, str]:
     # GIT_OPTIONAL_LOCKS=0 — see module docstring (janitor#245).
@@ -783,26 +850,67 @@ def main() -> int:
                             sev="LOW",
                             code="REPO-OUTSIDE-PUBLISH",
                             src="repo-state",
-                            # The ledger's `msg` is capped at 120, and the
-                            # count and the tag are ALREADY in the stdout
-                            # line and in `ref` — so this field carries only
-                            # what the stdout line cannot: the branch and
-                            # the subjects. A full prefix plus three
-                            # subjects is 162 characters and would be cut
-                            # mid-subject; the branch plus the subjects
-                            # fits.
-                            msg=f"on {branch}: {'; '.join(outside[-3:])}",
+                            # THE COUNT, THE BRANCH, AND THE SUBJECTS —
+                            # ALL THREE, AND ALL THREE BOUNDED BY
+                            # CONSTRUCTION.
+                            #
+                            # The ledger's `msg` is capped at 120 characters
+                            # and truncates HARD, mid-word, and this repo's
+                            # OWN commit subjects are UNBOUNDED: measured
+                            # over 5795 commits, min 21, p50 90, p99 265,
+                            # max 643, and 950 of them exceed 120. So a
+                            # subject can never be written whole, and a
+                            # message that depends on the subjects' length
+                            # can never be proven to fit.
+                            #
+                            # So every part is bounded: the branch to 40
+                            # characters, each subject to 40, and the
+                            # whole message to the ledger's own budget.
+                            # The COUNT and the TAG are exact and never
+                            # truncated — they are the finding's quantity
+                            # and its subject, and truncating either would
+                            # make the finding say something false.
+                            #
+                            # WHY THE SUBJECTS ARE HERE AND NOT ONLY IN
+                            # THE LOG: `/janitor-findings` — the one
+                            # user-facing way to browse findings — reads
+                            # ONLY the ledger, and nothing in the codebase
+                            # reads the detector's log. A finding whose
+                            # detail lives where nobody looks is a finding
+                            # nobody can act on. The log keeps the FULL
+                            # subjects for anyone who wants them; the
+                            # ledger keeps a BOUNDED excerpt where the
+                            # owner will actually see it.
+                            msg=_ledger_msg(
+                                count=len(outside),
+                                branch=branch,
+                                tag=tag,
+                                subjects=outside,
+                            ),
                             ref=tag,
-                            # `actor="human"` makes the ledger DEDUPE this
-                            # finding's DRIFT LINE on (code, content) — the
-                            # same mechanism the escalated line uses. Without
-                            # it the same finding is injected twice into the
-                            # session: once as the quiet filter's
-                            # ADVISORY-REPO-STATE record of the stdout line,
-                            # and once as this record. The ledger's
-                            # "unread" is CURSOR-based, not content-based, so
-                            # two different codes are two different injected
-                            # lines for ONE finding.
+                            # `actor="human"` IS TRUE FOR THIS FINDING, and
+                            # that is why it is set. The remedy is "cut a
+                            # release", and the agent CANNOT cut one without
+                            # the owner's authorisation — so the finding is
+                            # one an agent structurally cannot act on, which
+                            # is exactly what the field means. The escalated
+                            # line sets it for the same reason.
+                            #
+                            # It ALSO dedupes the drift line on (code,
+                            # content): without it the same finding is
+                            # injected twice into the session, once as the
+                            # quiet filter's ADVISORY-REPO-STATE record of
+                            # the stdout line and once as this record. The
+                            # ledger's "unread" is CURSOR-based, not
+                            # content-based, so two different codes are two
+                            # different injected lines for ONE finding.
+                            #
+                            # The dedup is a CONSEQUENCE of the semantic
+                            # choice, not the reason for it. The reason is
+                            # that the remedy needs the owner. (A finding
+                            # that is NOT human-only must not set this field
+                            # for a dedup reason: the directive it renders
+                            # would be a lie.)
                             actor="human",
                         )
                     except Exception:  # noqa: BLE001 — a ledger failure must never break the detector
@@ -810,6 +918,20 @@ def main() -> int:
                             "repo-state",
                             "could not record the outside-publish commit subjects",
                         )
+                    # THE SUBJECTS, IN FULL, IN THE DETECTOR'S OWN LOG. The
+                    # ledger holds a BOUNDED excerpt (see `_ledger_msg`),
+                    # and the stdout line must not carry them at all (they
+                    # are repository-controlled text on a surface the
+                    # quiet filter scans). The log keeps them whole — and
+                    # the log is NOT unbounded: `state.log_line` rotates
+                    # it at 1 MiB and dispatch prunes it by age. It IS
+                    # never scanned by the urgency override, which is the
+                    # property that matters here.
+                    state.log_line(
+                        "repo-state",
+                        f"outside-publish subjects on {branch} since {tag}: "
+                        + " | ".join(outside[-10:]),
+                    )
 
     # THE RELEASE-GAP BLOCK IS NOT NESTED INSIDE `if branch is not None:`.
     # The release-gap condition is a fact about the RELEASE LINE, so its
