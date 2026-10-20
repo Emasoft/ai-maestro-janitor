@@ -1180,9 +1180,17 @@ def task_runaway_guard() -> None:
         state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_MIN_FREE_MB"),
         rg.DEFAULT_MIN_FREE_MB,
     )
-    swap_used_mb = state.coerce_int(
-        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAP_USED_MB"),
-        rg.DEFAULT_SWAP_USED_MB,
+    # The swap bar is a RATIO of the swapfile's own total, not an
+    # absolute number of megabytes. MEASURED on the owner's host: the
+    # swapfile is 8192 MB with 6715 MB used — 82% — and that figure was
+    # STABLE across a minute of sampling on a day the host was entirely
+    # healthy, because macOS keeps a swapfile full once it has grown.
+    # An absolute bar is crossed by this host's NORMAL operating point,
+    # which would leave the guard permanently critical and killing a
+    # process every minute. The ratio is the honest unit.
+    swap_pct_bar = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAP_PCT"),
+        rg.DEFAULT_SWAP_PCT,
     )
     swapfiles = state.coerce_int(
         state.plugin_option("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAPFILES"),
@@ -1199,7 +1207,7 @@ def task_runaway_guard() -> None:
 
     pressure = rg.host_pressure(
         min_free_mb=min_free_mb,
-        swap_used_mb=swap_used_mb,
+        swap_pct_bar=swap_pct_bar,
         swapfiles=swapfiles,
         compressor_pct=compressor_pct,
     )
@@ -1213,7 +1221,7 @@ def task_runaway_guard() -> None:
                 "daemon",
                 f"runaway-guard: host ELEVATED ({pressure.readings()}) — "
                 "no kill; thresholds are "
-                f"free<{min_free_mb}MB swap>={swap_used_mb}MB "
+                f"free<{min_free_mb}MB swap>={swap_pct_bar}% of file "
                 f"swapfiles>={swapfiles} compressor>={compressor_pct}%",
             )
         return

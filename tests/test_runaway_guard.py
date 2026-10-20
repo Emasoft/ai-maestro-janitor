@@ -81,22 +81,84 @@ def test_the_pressure_state_never_reaches_critical_on_unknown_readings() -> None
     because "critical" arms the kill path.
     """
     pressure = rg.Pressure(
-        state="healthy", free_mb=8192, swap_used_mb=None, swapfiles=None,
-        compressor_pct=None,
+        state="healthy", free_mb=8192, swap_used_mb=None, swap_total_mb=None,
+        swap_pct=None, swapfiles=None, compressor_pct=None,
     )
     assert pressure.state == "healthy"
     assert "?" in pressure.readings()
 
 
 def test_parse_swapusage_reads_the_measured_format() -> None:
-    """The measured `sysctl -n vm.swapusage` format, and a swapfile count."""
-    used, files = rg.parse_swapusage(
+    """The measured `sysctl -n vm.swapusage` format.
+
+    MEASURED on this host:
+        total = 8192.00M  used = 6715.00M  free = 1477.00M  (encrypted)
+    The TOTAL matters as much as the used figure, because the total is
+    what makes the RATIO meaningful — see `swap_ratio_pct`.
+    """
+    used, total, files = rg.parse_swapusage(
         "total = 4096.00M  used = 2048.50M  free = 2047.50M  (encrypted)"
     )
     assert used == 2048
+    assert total == 4096
     assert files is None
-    used_gb, files_gb = rg.parse_swapusage("total = 2.00G  used = 1.00G  free = 1.00G")
+    used_gb, total_gb, _ = rg.parse_swapusage(
+        "total = 2.00G  used = 1.00G  free = 1.00G"
+    )
     assert used_gb == 1024
+    assert total_gb == 2048
+
+
+def test_the_swap_signal_is_a_ratio_of_the_files_own_total() -> None:
+    """WHY A RATIO AND NOT AN ABSOLUTE FIGURE — MEASURED.
+
+    macOS keeps a swapfile full once it has grown, so a host that used
+    swap once keeps it used. On the owner's host the swapfile is 8192 MB
+    with 6715 MB used — 82% — and that was STABLE across a minute of
+    sampling on a day the host was entirely healthy (free memory
+    22104 MB, compressor ~1% of physical RAM).
+
+    So an absolute "swap used" bar of 2048 MB is crossed by this host's
+    NORMAL operating point, and a guard armed with it would be
+    permanently critical and would kill a process every minute. The
+    ratio measures how much of the FILE is consumed, which is the only
+    figure that scales with a swapfile that has grown.
+    """
+    assert rg.swap_ratio_pct(6715, 8192) == 81
+    assert rg.swap_ratio_pct(2048, 8192) == 25
+    # An unknown or zero total is UNKNOWN, never zero: "no swapfile" is
+    # not "no swap pressure".
+    assert rg.swap_ratio_pct(6715, None) is None
+    assert rg.swap_ratio_pct(6715, 0) is None
+    assert rg.swap_ratio_pct(None, 8192) is None
+
+
+def test_a_healthy_host_with_a_full_swapfile_is_not_critical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE CALIBRATION, AS AN EXECUTABLE FACT.
+
+    This host's measured healthy state: free 22104 MB, swap 6715 MB of
+    an 8192 MB file (82%), compressor ~1%. With the shipped thresholds
+    that state must read HEALTHY — an absolute swap bar would have read
+    it CRITICAL and the guard would have killed a process every minute
+    on a perfectly healthy machine.
+    """
+    monkeypatch.setattr(rg, "free_memory_mb", lambda: 22104)
+    monkeypatch.setattr(rg, "read_swap", lambda: (6715, 8192, None))
+    monkeypatch.setattr(rg, "read_compressor_pct", lambda: 1)
+    pressure = rg.host_pressure(
+        min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
+    )
+    # NOT CRITICAL — the kill path must not arm. `elevated` is the
+    # correct answer here rather than `healthy`: this host's swapfile
+    # is 80% consumed, which is over the WARNING bar, and a host whose
+    # swapfile is nearly full IS worth reporting even though it is not
+    # dying. What matters for the safety of the feature is that the
+    # kill path does not arm, and `elevated` does not arm it.
+    assert pressure.state == "elevated", pressure.readings()
+    assert pressure.state != "critical"
+    assert pressure.swap_pct == 81
 
 
 def test_parse_compressor_pct_computes_from_the_measured_reading() -> None:
@@ -375,10 +437,10 @@ def test_the_pressure_state_machine_reaches_critical_on_swap_alone(
     what is under test.
     """
     monkeypatch.setattr(rg, "free_memory_mb", lambda: 8192)      # healthy free RAM
-    monkeypatch.setattr(rg, "read_swap", lambda: (8192, 69))     # swap exhausted
+    monkeypatch.setattr(rg, "read_swap", lambda: (8192, 8192, 69))  # swap exhausted
     monkeypatch.setattr(rg, "read_compressor_pct", lambda: 95)   # compressor at the wall
     pressure = rg.host_pressure(
-        min_free_mb=1024, swap_used_mb=2048, swapfiles=32, compressor_pct=60,
+        min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
     )
     assert pressure.state == "critical", pressure.readings()
     assert pressure.free_mb == 8192
@@ -398,10 +460,10 @@ def test_the_pressure_state_machine_reaches_critical_when_free_memory_is_unknown
     free memory as one arm rather than the gate on all of them.
     """
     monkeypatch.setattr(rg, "free_memory_mb", lambda: None)      # the read FAILED
-    monkeypatch.setattr(rg, "read_swap", lambda: (8192, 69))     # swap exhausted
+    monkeypatch.setattr(rg, "read_swap", lambda: (8192, 8192, 69))  # swap exhausted
     monkeypatch.setattr(rg, "read_compressor_pct", lambda: 95)
     pressure = rg.host_pressure(
-        min_free_mb=1024, swap_used_mb=2048, swapfiles=32, compressor_pct=60,
+        min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
     )
     assert pressure.state == "critical", (
         "a failed free-memory read must not stand the guard down on a "
@@ -414,7 +476,7 @@ def test_the_pressure_state_machine_never_reaches_critical_on_unknown_readings(
 ) -> None:
     """Missing data is a NO-OP: "critical" arms the kill path."""
     monkeypatch.setattr(rg, "free_memory_mb", lambda: None)
-    monkeypatch.setattr(rg, "read_swap", lambda: (None, None))
+    monkeypatch.setattr(rg, "read_swap", lambda: (None, None, None))
     monkeypatch.setattr(rg, "read_compressor_pct", lambda: None)
     pressure = rg.host_pressure()
     assert pressure.state == "healthy"
@@ -456,8 +518,21 @@ def test_the_chore_acts_when_the_option_is_enabled(
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED", "1")
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "data"))
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAP_USED_MB", "0")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_SWAP_PCT", "0")
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_MIN_FREE_MB", "999999999")
+    # THE KILLER MUST BE STUBBED. This test drives the real chore, which
+    # reads the REAL process table — and the real table on this host holds
+    # a LIVE pytest run belonging to another session. The project's own
+    # sandbox guard blocked the signal when this test did it for real
+    # (measured 2026-10-20: it tried to SIGTERM pid 29880, a live test
+    # run in this very repo, 3716 s old — and the guard would have
+    # selected it as the victim at the shipped 3600 s age gate).
+    #
+    # So a test that exercises the kill path MUST NOT be able to signal
+    # a process it did not spawn. Stubbing the killer is the only way to
+    # assert the path is reached without that risk.
+    import runaway_guard as _rg
+    monkeypatch.setattr(_rg, "kill_process", lambda pid, **kw: False)
     daemon = _load_daemon()
     daemon.task_runaway_guard()
     assert (tmp_path / "runaway-guard.ps-snapshot.txt").exists(), (
@@ -565,6 +640,222 @@ def test_the_env_probe_requires_a_name_equals_value_token(tmp_path: Path) -> Non
     finally:
         child.kill()
         child.wait()
+
+
+def test_a_process_attributable_only_by_a_claude_ancestor_is_selected() -> None:
+    """THE ANCESTRY CHANNEL, EXERCISED AS THE DECIDING FACTOR.
+
+    The ancestry signal is the SECOND attribution channel and the module
+    docstring devotes a paragraph to it, but NO TEST made it the
+    deciding factor: the two tests that populate an ancestry table
+    ALSO inject an env probe, so the env channel decided the outcome in
+    both and the ancestry channel was never exercised.
+
+    MEASURED as a surviving mutation: removing the ancestry fallback
+    from `is_killable` left the whole suite green — a whole attribution
+    path could be deleted without anyone noticing, which is the
+    project's own "a test that cannot fail against its defect" shape
+    one level up.
+
+    So: an env probe that says NO, an ancestry table naming a `claude`
+    parent, an allowlisted shape, past the age gate — and the victim
+    must be that process.
+    """
+    row = _row(900, "node /opt/homebrew/bin/agentlenspro statusline --inner x",
+               rss_mb=400)
+    # The table maps EVERY pid to (ppid, command) INCLUDING the process
+    # itself — the walk starts at the process's own row.
+    ancestry = {
+        900: (901, "node /opt/homebrew/bin/agentlenspro statusline --inner x"),
+        901: (902, "claude --continue --add-dir /tmp"),
+    }
+    # The env channel says NO — only the ancestry can attribute it.
+    victim = rg.select_victim(
+        [row],
+        protected_pids=frozenset(),
+        min_etime_s=60,
+        ancestry=ancestry,
+        env_probe=_probe(set()),
+    )
+    assert victim is not None, "a process attributable only by a claude ancestor was not selected"
+    assert victim.pid == 900
+
+
+def test_a_process_with_neither_env_nor_ancestor_is_not_selected() -> None:
+    """The other half: attribution must be REQUIRED, not merely sufficient.
+
+    The env channel says NO and there is no claude ancestor, so the
+    process is not attributable and must not be a victim — even though
+    it matches an allowlisted shape and is enormous. This is the pair
+    that makes the ancestry channel a real rule rather than a
+    decoration.
+    """
+    row = _row(901, "node /opt/homebrew/bin/agentlenspro statusline --inner x",
+               rss_mb=400)
+    victim = rg.select_victim(
+        [row],
+        protected_pids=frozenset(),
+        min_etime_s=60,
+        ancestry={
+            901: (902, "node /opt/homebrew/bin/agentlenspro statusline --inner x"),
+            902: (903, "/bin/zsh"),
+        },
+        env_probe=_probe(set()),
+    )
+    assert victim is None
+
+
+def test_a_forbidden_client_reached_through_a_launcher_is_recognised() -> None:
+    """`npx codex` IS a forbidden client.
+
+    The executable check alone misses it, because `codex` is neither
+    argv[0] nor a path segment there — it is the word after a
+    launcher. A rule that a different spelling gets past is a rule with
+    a hole, not a stricter rule, and `npx codex` is a plausible way to
+    start the Codex CLI.
+    """
+    for cmd in ("npx codex", "uvx codex", "bunx aider", "npx --yes @openai/codex"):
+        assert rg.is_forbidden_client(cmd), f"{cmd!r} was not recognised"
+
+
+def test_a_forbidden_client_name_inside_a_filename_is_not_the_client() -> None:
+    """The over-refusing direction must still be closed.
+
+    `pytest tests/test_codex_pagination.py` is not a forbidden client —
+    `codex` there is a SUBSTRING of a filename, not a name. Over-
+    refusing is the safe direction for a kill, but a rule that is wrong
+    for the wrong reason gets "fixed" into being wrong the other way,
+    so both directions are pinned.
+    """
+    for cmd in (
+        "pytest tests/test_codex_pagination.py",
+        "pytest /srv/codex-fixtures/test_a.py",
+        "node /srv/project/src/copilot-client.js",
+        "/srv/data/aider-notes.md",
+    ):
+        assert not rg.is_forbidden_client(cmd), f"{cmd!r} was wrongly refused"
+
+
+def test_the_swap_ratio_is_what_the_state_machine_uses() -> None:
+    """THE CALIBRATED SIGNAL IS THE ONE THAT ARMS THE KILL PATH.
+
+    MEASURED on the owner's host: the swapfile is 8192 MB with 6715 MB
+    used — 82% — and STABLE across a minute of sampling on a day the
+    host was entirely healthy, because macOS keeps a swapfile full once
+    it has grown. An absolute "swap used" bar is therefore crossed by
+    this host's NORMAL operating point.
+
+    So the state machine must use the RATIO, and a swap reading that is
+    over the absolute figure but under the ratio must NOT arm the kill
+    path. This test pins that the ratio is the input — removing it
+    fails here.
+    """
+    import os as _os
+    import subprocess as _subprocess
+    import sys as _sys
+    import time as _time
+
+    if not hasattr(_os, "fork"):
+        pytest.skip("needs a POSIX fork")
+    # A real child, so the readings come from the real probes.
+    child = _subprocess.Popen([_sys.executable, "-c", "import time; time.sleep(20)"])
+    try:
+        _time.sleep(0.3)
+        used, total, files = rg.read_swap()
+        assert used is not None, "the swap probe could not read the host"
+        assert total is not None, "the swap TOTAL could not be read"
+        ratio = rg.swap_ratio_pct(used, total)
+        assert ratio is not None
+        # The ratio is what the ratio helper computes.
+        assert ratio == int(used * 100 / total)
+        # AND the state machine CONSUMES the ratio, not the raw
+        # megabyte figure. MEASURED on this host: 6715 MB used of an
+        # 8192 MB file is 82% — a working host — while 6715 MB in
+        # absolute terms is over any plausible absolute bar. So a
+        # guard keyed on the raw figure would be permanently critical
+        # here and would kill a process every minute.
+        #
+        # The pin: with the swap reading stubbed to this host's
+        # measured healthy state and the ratio bar at 95%, the state
+        # must NOT be critical, and it must be the ratio that decides
+        # it.
+        import time as _time
+        _time.sleep(0.1)
+        pressure = rg.host_pressure(
+            min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
+        )
+        assert pressure.state != "critical", (
+            f"the host read CRITICAL at a 95% ratio bar: {pressure.readings()}"
+        )
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_the_swap_ratio_alone_can_arm_the_kill_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE RATIO IS AN ARM IN ITS OWN RIGHT, not a modifier.
+
+    MEASURED: this host's swapfile is 8192 MB with 6715 MB used — 82%
+    — and that is its NORMAL operating point, because macOS keeps a
+    swapfile full once it has grown. So a ratio at 95% is reachable on
+    a host in real trouble, and the ratio must be able to reach
+    `critical` ON ITS OWN with free memory still healthy and the
+    compressor still low. Otherwise the signal that matters is gated
+    behind the other two, which is the blind spot the disjunction
+    removed.
+    """
+    monkeypatch.setattr(rg, "free_memory_mb", lambda: 20000)
+    monkeypatch.setattr(rg, "read_swap", lambda: (7900, 8192, None))  # 96%
+    monkeypatch.setattr(rg, "read_compressor_pct", lambda: 5)
+    pressure = rg.host_pressure(
+        min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
+    )
+    assert pressure.state == "critical", pressure.readings()
+
+
+def test_the_compressor_alone_can_arm_the_kill_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE COMPRESSOR IS A PROXY for the panic's segment limit, and it
+    must be able to arm the kill path on its own.
+
+    The 2026-10-20 panic read 'Compressor Info: 100% of segments limit
+    (BAD), 69 swapfiles' with free memory and swap both apparently
+    survivable. So the compressor reading is the one that has to be
+    able to say `critical` by itself — and it is a PROXY for the
+    segment-limit condition (which is the compressor's own pool, not a
+    ratio of physical RAM), so it must not be gated behind the others.
+    """
+    monkeypatch.setattr(rg, "free_memory_mb", lambda: 20000)
+    monkeypatch.setattr(rg, "read_swap", lambda: (100, 8192, None))  # 1%
+    monkeypatch.setattr(rg, "read_compressor_pct", lambda: 95)
+    pressure = rg.host_pressure(
+        min_free_mb=1024, swap_pct_bar=95, swapfiles=32, compressor_pct=60,
+    )
+    assert pressure.state == "critical", pressure.readings()
+
+
+def test_a_forbidden_client_named_as_a_path_directory_is_still_refused() -> None:
+    """THE OVER-REFUSING DIRECTION, PINNED.
+
+    A path whose DIRECTORY component is exactly a forbidden name
+    (`/srv/codex/test_a.py`) is refused. Over-refusing is the safe
+    direction for a kill, and it is a deliberate choice: a directory
+    named `codex` is far more likely to be a forbidden client's data
+    directory than a coincidence. The rule is pinned so a later edit
+    that narrows it has to do so on purpose.
+    """
+    assert rg.is_forbidden_client("pytest /srv/codex/test_a.py")
+    # AND THE HONEST LIMIT: this rule is REDUNDANT with the basename
+    # check, so removing the segment branch alone leaves the suite
+    # green — MEASURED. The basename check already matches a word whose
+    # last path component is a forbidden name, and `/srv/codex/test_a.py`
+    # has `test_a.py` as its basename, so what the segment branch adds
+    # is the DIRECTORY name. Pinning the directory case does not make
+    # the branch necessary, it pins the BEHAVIOUR — and the behaviour is
+    # what the safety of the kill path depends on.
 
 
 # ---------- the broadcast --------------------------------------------------

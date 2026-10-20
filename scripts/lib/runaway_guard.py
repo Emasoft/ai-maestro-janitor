@@ -25,12 +25,19 @@ ENVIRONMENT SIGNAL, and it is exact:
 
     A process whose OWN environment carries CLAUDECODE, CLAUDE_PROJECT_DIR,
     CLAUDE_PLUGIN_DATA, CLAUDE_CODE_SESSION_ID or CLAUDE_CODE_CHILD_SESSION
-    was started BY AN AGENT.
+    DESCENDS FROM A CLAUDE CODE SESSION.
 
-The user's own foreground work does not carry those variables — the user
-typed the command at a plain shell prompt, so it inherits their shell's
-environment, which has none of them. An agent's child inherits the
-agent's environment, which has them.
+Note what that proves, because the narrower claim is FALSE and this
+header said so until a review caught it. The environment is INHERITED,
+so the signal marks a DESCENDANT, not a direct spawn. A command the user
+typed at a plain shell prompt inherits a shell environment with none of
+the markers, so it is not attributed. But a terminal the user opened
+FROM INSIDE a session — and everything they run in it — DOES carry them,
+one generation further down. So "was started by an agent" is too strong
+a claim, and the honest one is "descends from a session". The shape
+allowlist and the age gate are what turn relatedness into
+kill-worthiness, and the age gate is currently the ONLY thing turning
+it into safety.
 
 The signal SURVIVES REPARENTING, which is why it and not ancestry alone is
 the primary channel. Measured: `alcore serve` had ppid=1 (reparented to
@@ -61,7 +68,7 @@ from typing import NamedTuple, Optional
 # ---------- tunables -------------------------------------------------------
 
 DEFAULT_MIN_FREE_MB = 1024
-DEFAULT_SWAP_USED_MB = 2048
+DEFAULT_SWAP_PCT = 95
 DEFAULT_SWAPFILES = 32
 DEFAULT_COMPRESSOR_PCT = 60
 DEFAULT_RUNAWAY_ETIME_S = 3600
@@ -83,8 +90,14 @@ CLAUDE_ENV_MARKERS = (
 # enough — without this the rule is "biggest process wins". Keep the list
 # tight: every pattern here widens the kill surface.
 #
-# The first three are the janitor's OWN workload shapes, reused from
-# memory_guard.JANITOR_WORKLOAD_SIGNATURES rather than re-typed.
+# The first three are the janitor's OWN workload shapes. THEY ARE
+# RE-TYPED LITERALS, not imported from memory_guard.JANITOR_WORKLOAD_
+# SIGNATURES — `memory_guard` is not imported here, and a re-typed
+# pattern can DRIFT from its original silently. (A previous version of
+# this comment claimed they were reused rather than re-typed; that was
+# FALSE, and `re.compile` caching made two independent tuples compare
+# equal, which is what hid it.) If they are ever changed, BOTH files
+# must change.
 RUNAWAY_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bclaude\s+plugin\s+marketplace\s+update\b"),
     re.compile(r"\bclaude\s+plugin\s+update\b"),
@@ -134,9 +147,13 @@ _FORBIDDEN_EXECUTABLES: tuple[str, ...] = (
 def is_forbidden_client(command: str) -> bool:
     """True iff the command's EXECUTABLE is another AI client.
 
-    Matches argv[0]'s basename, or a path segment anywhere in the
-    command (so `/usr/local/bin/codex` and `node .../codex/bin/codex.js`
-    are both caught), but NOT a bare word inside an argument.
+    Matches the BASENAME of any word, or a path SEGMENT anywhere in the
+    command — so `/usr/local/bin/codex`, `node .../codex/bin/codex.js`
+    and `npx codex` are all caught, because a forbidden client's NAME
+    appears as a word or as a path component wherever the user put it.
+
+    NOT a bare substring inside a longer word: `test_codex.py` is a
+    filename, not a client.
 
     "lm studio" is matched too, because the product is spelled both ways
     and a forbidden client must not be reachable by a different spelling.
@@ -148,10 +165,20 @@ def is_forbidden_client(command: str) -> bool:
         base = os.path.basename(word).lower()
         if base in _FORBIDDEN_EXECUTABLES:
             return True
-        # A PATH SEGMENT: /opt/homebrew/bin/codex, .../codex/bin/codex.js
-        for segment in word.lower().split("/"):
-            if segment in _FORBIDDEN_EXECUTABLES:
-                return True
+        # A PATH SEGMENT: /opt/homebrew/bin/codex, .../codex/bin/codex.js.
+        #
+        # A SEGMENT IS A SEGMENT — a word that CONTAINS a slash. A
+        # BARE word is not a path segment, and treating it as one made
+        # `npx codex` match here as well as in the launcher check below,
+        # which is why the launcher check looked redundant and why its
+        # mutation survived. The distinction matters for the OTHER
+        # direction too: `pytest tests/test_codex_pagination.py` has a
+        # segment `test_codex_pagination.py`, which is not the name, so
+        # it is not refused.
+        if "/" in word:
+            for segment in word.lower().split("/"):
+                if segment in _FORBIDDEN_EXECUTABLES:
+                    return True
         if segment_has_lm_studio(word):
             return True
     return False
@@ -183,6 +210,8 @@ class Pressure(NamedTuple):
     state: str            # "healthy" | "elevated" | "critical"
     free_mb: Optional[int]
     swap_used_mb: Optional[int]
+    swap_total_mb: Optional[int]
+    swap_pct: Optional[int]
     swapfiles: Optional[int]
     compressor_pct: Optional[int]
 
@@ -192,7 +221,10 @@ class Pressure(NamedTuple):
             return "?" if value is None else f"{value}{unit}"
         return (
             f"free {part(self.free_mb, 'MB')}, "
-            f"swap {part(self.swap_used_mb, 'MB')}, "
+            f"swap {part(self.swap_used_mb, 'MB')}"
+            + (f"/{part(self.swap_total_mb, 'MB')}" if self.swap_total_mb else "")
+            + (f" ({part(self.swap_pct, '%')})" if self.swap_pct is not None else "")
+            + ", "
             f"swapfiles {part(self.swapfiles, '')}, "
             f"compressor {part(self.compressor_pct, '%')}"
         )
@@ -240,23 +272,64 @@ def parse_ps_snapshot(text: str) -> list[ProcRow]:
     return rows
 
 
-def parse_swapusage(text: str) -> tuple[Optional[int], Optional[int]]:
-    """(used_mb, swapfile_count) from `sysctl -n vm.swapusage` output.
+def parse_swapusage(text: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(used_mb, total_mb, swapfile_count) from `sysctl -n vm.swapusage`.
 
     MEASURED FORMAT on this host:
-        total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
-    The swapfile COUNT is not in vm.swapusage on every host, so it is
-    read from `sysctl -n vm.swapinfo` where available and is None
-    otherwise — None means UNKNOWN, never zero.
+        total = 8192.00M  used = 6715.00M  free = 1477.00M  (encrypted)
+
+    The TOTAL is read as well as the used figure, and it is the total
+    that makes the ratio meaningful. See `swap_ratio_pct`.
+
+    The swapfile COUNT is not in vm.swapusage on any macOS this was
+    measured on, and `vm.swapinfo` does not exist on macOS at all
+    ('sysctl: unknown oid vm.swapinfo'), so the count is None on this
+    host — UNKNOWN, never zero. The count was the signal the 2026-10-20
+    panic named ('69 swapfiles'), so it is still LOOKED FOR on hosts that
+    do report it, but on macOS the arm is unreachable and the card
+    records that rather than pretending otherwise.
     """
-    used = re.search(r"used\s*=\s*([\d.]+)\s*([MG])", text)
-    used_mb: Optional[int] = None
-    if used:
-        value = float(used.group(1))
-        used_mb = int(value) if used.group(2) == "M" else int(value * 1024)
+    def _mb(field: str) -> Optional[int]:
+        m = re.search(field + r"\s*=\s*([\d.]+)\s*([MG])", text)
+        if not m:
+            return None
+        value = float(m.group(1))
+        return int(value) if m.group(2) == "M" else int(value * 1024)
+
+    used_mb = _mb("used")
+    total_mb = _mb("total")
     count = re.search(r"(\d+)\s+files", text)
     files: Optional[int] = int(count.group(1)) if count else None
-    return used_mb, files
+    return used_mb, total_mb, files
+
+
+def swap_ratio_pct(used_mb: Optional[int], total_mb: Optional[int]) -> Optional[int]:
+    """Swap usage as a PERCENTAGE of the swapfile's own total.
+
+    WHY A RATIO AND NOT AN ABSOLUTE FIGURE — MEASURED, and this is the
+    calibration that decided the thresholds. macOS preallocates and KEEPS
+    a swapfile full once it has grown, so a host that used swap once
+    keeps it used. On the owner's host the swapfile is 8192 MB with
+    6715 MB used — 82% of the file — and that figure was STABLE across
+    a minute of sampling on a day the host was entirely healthy (free
+    memory 22104 MB, compressor ~1% of physical RAM).
+
+    So an absolute "swap used" bar of 2048 MB is crossed by this host's
+    NORMAL operating point, and a guard armed with it would be
+    permanently critical and would kill a process every minute. The
+    ratio has the same problem on this host (82% used is not pressure),
+    which is why the ratio alone is not sufficient either — but it is
+    the honest unit, because it measures how much of the FILE is
+    consumed rather than how much memory has ever been paged, and on a
+    host whose swapfile has grown to 64 GB the ratio is the only
+    figure that scales.
+
+    None when either figure is unknown. A ratio of a total of zero is
+    None too, never 0: "no swapfile" is not "no swap pressure".
+    """
+    if used_mb is None or total_mb is None or total_mb <= 0:
+        return None
+    return int(used_mb * 100 / total_mb)
 
 
 def parse_compressor_pct(text: str, total_mb: int, page_size: int) -> Optional[int]:
@@ -283,7 +356,7 @@ def parse_compressor_pct(text: str, total_mb: int, page_size: int) -> Optional[i
 def host_pressure(
     *,
     min_free_mb: int = DEFAULT_MIN_FREE_MB,
-    swap_used_mb: int = DEFAULT_SWAP_USED_MB,
+    swap_pct_bar: int = DEFAULT_SWAP_PCT,
     swapfiles: int = DEFAULT_SWAPFILES,
     compressor_pct: int = DEFAULT_COMPRESSOR_PCT,
 ) -> Pressure:
@@ -317,21 +390,53 @@ def host_pressure(
     the kill path. Never kill on missing data.
     """
     free_mb = free_memory_mb()
-    swap_used, files = read_swap()
+    swap_used, swap_total, files = read_swap()
     compressor = read_compressor_pct()
 
     free_bad = free_mb is not None and free_mb < min_free_mb
-    swap_bad = swap_used is not None and swap_used >= swap_used_mb
+    # The swap bar is a RATIO of the swapfile's own total, not an
+    # absolute number of megabytes. MEASURED on the owner's host: the
+    # swapfile is 8192 MB with 6715 MB used — 82% — and that was STABLE
+    # across a minute of sampling on a day the host was entirely
+    # healthy, because macOS keeps a swapfile full once it has grown.
+    # An absolute bar is therefore crossed by this host's NORMAL
+    # operating point, which would leave the guard permanently critical.
+    swap_pct = swap_ratio_pct(swap_used, swap_total)
+    swap_bad = swap_pct is not None and swap_pct >= swap_pct_bar
     files_bad = files is not None and files >= swapfiles
     comp_bad = compressor is not None and compressor >= compressor_pct
 
     exhausted = swap_bad or files_bad or comp_bad
 
+    # THREE STATES, and the middle one is reachable. The first version
+    # had only two — `critical` or `healthy` — and the daemon's "the
+    # host is trending toward the panic" branch was then DEAD CODE,
+    # because a branch that can never run is a branch whose comment
+    # lies about what the owner will see.
+    #
+    # `elevated` is the WARNING tier: a reading is over half its
+    # critical bar. It is the early warning that makes a rising trend
+    # visible before the host is in trouble, and it is what the daemon
+    # logs when the kill path does NOT arm.
+    #
+    # `critical` is any reading over its FULL bar — one signal past its
+    # bar is enough, because the 2026-10-20 panic named one signal
+    # ('100% of segments limit', '69 swapfiles') and a conjunction
+    # re-introduced the blind spot the probe was extended to remove.
+    free_warn = free_mb is not None and free_mb < min_free_mb * 2
+    swap_warn = swap_pct is not None and swap_pct >= swap_pct_bar // 2
+    files_warn = files is not None and files >= swapfiles // 2
+    comp_warn = compressor is not None and compressor >= compressor_pct // 2
+
     if exhausted or free_bad:
         state = "critical"
+    elif free_warn or swap_warn or files_warn or comp_warn:
+        state = "elevated"
     else:
         state = "healthy"
-    return Pressure(state, free_mb, swap_used, files, compressor)
+    return Pressure(
+        state, free_mb, swap_used, swap_total, swap_pct, files, compressor
+    )
 
 
 def free_memory_mb() -> Optional[int]:
@@ -357,9 +462,17 @@ def free_memory_mb() -> Optional[int]:
         return None
 
 
-def read_swap() -> tuple[Optional[int], Optional[int]]:
-    """(used_mb, swapfile_count). Either may be None = unknown."""
+def read_swap() -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(used_mb, total_mb, swapfile_count). Any may be None = unknown.
+
+    `vm.swapinfo` does not exist on macOS, so the swapfile COUNT is
+    None on this host — the signal the 2026-10-20 panic named ('69
+    swapfiles') is not readable here. It is still looked for on hosts
+    that report it, and the card records that the arm is unreachable on
+    macOS rather than pretending it is read.
+    """
     used: Optional[int] = None
+    total: Optional[int] = None
     files: Optional[int] = None
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
@@ -367,7 +480,7 @@ def read_swap() -> tuple[Optional[int], Optional[int]]:
             capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode == 0:
-            used, files = parse_swapusage(out.stdout)
+            used, total, files = parse_swapusage(out.stdout)
     except (OSError, subprocess.SubprocessError):
         pass
     try:
@@ -376,10 +489,12 @@ def read_swap() -> tuple[Optional[int], Optional[int]]:
             capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode == 0:
-            _, files = parse_swapusage(out.stdout)
+            _, _, info_files = parse_swapusage(out.stdout)
+            if info_files is not None:
+                files = info_files
     except (OSError, subprocess.SubprocessError):
         pass
-    return used, files
+    return used, total, files
 
 
 def read_compressor_pct() -> Optional[int]:

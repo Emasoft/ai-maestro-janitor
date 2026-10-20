@@ -140,6 +140,12 @@ _SUBJECT_MAX = 40
 # explicitly for the same reason.
 _BRANCH_MAX = 40
 
+# The release TAG is the finding's subject, so it is bounded as well —
+# but a tag cut mid-string names a release that does not exist. A
+# release tag is `v<semver>` (three numeric components), so 40
+# characters covers any real one with room to spare.
+_TAG_MAX = 40
+
 
 def _ledger_msg(*, count: int, branch: str, tag: str, subjects: list[str]) -> str:
     """Build the outside-publish finding's ledger message, PROVABLY bounded.
@@ -158,9 +164,13 @@ def _ledger_msg(*, count: int, branch: str, tag: str, subjects: list[str]) -> st
     characters, which is what makes the guarantee a guarantee rather
     than an observation.
     """
-    head = f"{count} commit(s) on {branch[:_BRANCH_MAX]} since release {tag}: "
-    # The tag is repo-controlled too, so it is bounded — but it is the
-    # finding's SUBJECT, so it is bounded LAST and only as a tail.
+    # The tag is the finding's SUBJECT, so it is bounded too — but a
+    # tag that is cut mid-string names a release that does not exist,
+    # which is the finding saying something false about itself. So the
+    # tag is bounded to a whole number of characters AND the head is
+    # only built once the tag is known to fit.
+    tag_text = tag[:_TAG_MAX]
+    head = f"{count} commit(s) on {branch[:_BRANCH_MAX]} since release {tag_text}: "
     room = _LEDGER_MSG_MAX - len(head) - 2
     if room <= 0:
         return head[:_LEDGER_MSG_MAX]
