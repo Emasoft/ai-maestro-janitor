@@ -365,7 +365,6 @@ def test_release_gap_reports_the_newest_by_date_not_the_backdated_tag(repo: Path
     _tagged_commit(repo, "feat: two", _days_ago(30), "v1.3.0")
     for i in range(6):
         _commit(repo, f"feat: unreleased work {i}")
-    assert rs._last_release_tag(repo) == "v1.3.0", "the semver-newest tag must be v1.3.0 here"
     verdict = _gap(repo)
     assert verdict is not None, "the rule must still fire on the newest-by-date release"
     gap_days, bar, tag, count = verdict
@@ -864,10 +863,22 @@ def test_the_count_survives_a_release_line_containing_a_merged_hotfix_branch(
     assert tag == "v1.1.0", tag
     # FIVE: the hotfix commit the merge brought in, the merge commit
     # itself, and the three commits after it — all unreleased, and all
-    # counted. The hotfix commit is the one a simplification would prune,
-    # so a pruned count would be 4. The count is verified against the
-    # range itself, not against a hand-tallied expectation: `git log
-    # --format=%s v1.1.0..main` names exactly these five subjects.
+    # counted.
+    #
+    # WHAT THIS FIXTURE IS WORTH, precisely, because a previous version of
+    # this comment claimed more. It does NOT catch "history simplification
+    # prunes the hotfix commit", because `git log` prunes NOTHING here:
+    # simplification only prunes with a path filter, `--follow` or
+    # `--simplify-by-decoration`, and the code's argv uses none of them
+    # (measured: `--simplify-by-decoration` on this same fixture DOES
+    # prune it to 2 commits, so the mechanism is real and simply not
+    # active). It is worth having because it exercises a MERGE-SHAPED
+    # history — the shape every real release line has, and one every
+    # other fixture in this file lacked — and pins the count against a
+    # merge topology. It was verified to produce the same count with BOTH
+    # command forms (`git log` and `git rev-list --no-commit-header`),
+    # which is what makes it a statement about the MEASUREMENT rather than
+    # about one implementation of it.
     assert count == 5, f"a merged hotfix must not change the count, got {count}"
 
 
@@ -1065,11 +1076,18 @@ def test_unreleased_subjects_returns_subjects_not_commit_headers(
     The helper used to run `git rev-list --no-commit-header --format=%s`,
     and `--no-commit-header` is a git 2.33 (2021) addition that the plugin
     declares no floor for. It now runs `git log --format=%s`, which has no
-    such dependency and accepts the same `--not` set. The assertion below
-    is what would have caught the old form on an old git: a rejected flag
-    makes `rev-list` exit non-zero, the helper returned an empty list, and
-    the count collapsed to ZERO — the rule going silent on exactly the
-    repos it exists to watch.
+    such dependency and accepts the same `--not` set.
+
+    WHAT THIS TEST IS WORTH, precisely: it is a REGRESSION test that pins
+    the CURRENT output shape, so a future change to the command form that
+    alters the output is caught. It is NOT a mutation-verified one: on a
+    modern git both command forms produce the same output, so the test
+    passes with either, and this suite cannot simulate an old git. On an
+    old git the old form would have failed it — a rejected flag makes
+    `rev-list` exit non-zero, the helper returned an empty list, and the
+    count collapsed to ZERO, the rule going silent on exactly the repos it
+    exists to watch — but that is a fact about the old git, not something
+    this suite proves.
     """
     _tagged_commit(repo, "feat: one", _days_ago(12), "v1.0.0")
     for i in range(3):

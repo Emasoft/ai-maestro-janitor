@@ -114,7 +114,7 @@ import state  # noqa: E402
 _BUMP_SUBJECT = re.compile(r"^chore: bump version to \d+\.\d+\.\d+$")
 
 # A release tag: publish.py creates exactly `v<semver>` (tag = f"v{new_ver}").
-# The capture groups are parsed for semver ordering in _last_release_tag.
+# The capture groups are parsed for semver ordering in _last_release_tag_on.
 _TAG_NAME = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 
@@ -227,46 +227,6 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return proc is not None and proc.returncode == 0
 
 
-def _last_release_tag(repo: Path) -> str | None:
-    """Newest `v<semver>` tag, or None.
-
-    Order by PARSED semver, never by `--sort=-creatordate`: two tags created
-    within the same clock second (a fast publish, or a test fixture) tie on
-    creatordate and git's refname tiebreak is ASCENDING, so the OLDER tag
-    wins and the detector reports already-released commits as unreleased.
-
-    One for-each-ref pass, never a per-tag `rev-parse` peel (TRDD-GXXKAGY6
-    review cure 4): a 2000-tag repo would pay 2000 subprocess spawns per
-    heartbeat. `%(*objectname)` carries the peeled commit for an annotated
-    tag, `%(objectname)` the commit for a lightweight one.
-    """
-    proc = _git(
-        repo,
-        "for-each-ref",
-        "--format=%(refname:short) %(objectname) %(*objectname)",
-        "refs/tags/",
-    )
-    if proc is None or proc.returncode != 0:
-        return None
-    best: tuple[tuple[int, int, int], str] | None = None
-    for line in proc.stdout.splitlines():
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        name, obj = parts[0], parts[1]
-        # %(*objectname) is EMPTY for a lightweight tag — the line then has two
-        # fields, and the peel falls back to %(objectname), which IS the commit.
-        peeled = parts[2] if len(parts) > 2 else ""
-        m = _TAG_NAME.match(name)
-        if not m:
-            continue
-        commit = peeled or obj
-        if commit:
-            ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-            if best is None or ver > best[0]:
-                best = (ver, name)
-    return best[1] if best else None
-
 def _last_release_tag_on(repo: Path, branch: str) -> str | None:
     """Newest `v<semver>` tag whose commit is ON `branch`, or None.
 
@@ -286,32 +246,28 @@ def _last_release_tag_on(repo: Path, branch: str) -> str | None:
     whose consequence is a claim about the RELEASE LINE rather than about
     the checked-out branch.
 
+    ONE SUBPROCESS, NOT ONE PER TAG. The first version of this helper
+    listed every tag with `for-each-ref` and then ran
+    `git merge-base --is-ancestor` for EACH ONE — re-introducing exactly
+    the cost that `_last_release_tag`'s own docstring records as a
+    deliberately-cured regression (TRDD-GXXKAGY6 review cure 4: "a
+    2000-tag repo would pay 2000 subprocess spawns per heartbeat"). The
+    fix is that `git tag --merged <branch>` ALREADY returns exactly the
+    tags whose commit is reachable from the branch, so reachability needs
+    no per-tag test at all. One call, then a semver max over the result.
+
     Order by PARSED semver, for the same reason as `_last_release_tag`:
     two tags created within the same clock second tie on creatordate, and
     git's refname tiebreak is ASCENDING, so the OLDER tag would win.
     """
-    proc = _git(
-        repo,
-        "for-each-ref",
-        "--format=%(refname:short) %(objectname) %(*objectname)",
-        "refs/tags/",
-    )
+    proc = _git(repo, "tag", "--merged", branch)
     if proc is None or proc.returncode != 0:
         return None
     best: tuple[tuple[int, int, int], str] | None = None
     for line in proc.stdout.splitlines():
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        name, obj = parts[0], parts[1]
-        peeled = parts[2] if len(parts) > 2 else ""
+        name = line.strip()
         m = _TAG_NAME.match(name)
         if not m:
-            continue
-        commit = peeled or obj
-        if not commit:
-            continue
-        if not _is_ancestor(repo, commit, branch):
             continue
         ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
         if best is None or ver > best[0]:
@@ -377,7 +333,8 @@ def _unreleased_subjects(repo: Path, tag: str, branch: str) -> list[str] | None:
     would contain. The older "outside@" line passes the CHECKED-OUT branch,
     because its message names that branch explicitly ("N commit(s) on
     <branch> since release <tag>"); for it, excluding release-tagged commits
-    is what its own text already claims ("neither release-tagged nor a bump").
+    is what its own text already claims ("not in any release reachable from
+    the branch, and not a version bump").
 
     The `tag..branch` range keeps the "since TAG" anchoring; the tag
     subtraction removes the commits those releases already shipped. On a
@@ -717,7 +674,7 @@ def main() -> int:
             if outside:
                 key = f"outside@{tag}@{len(outside)}@{now // 86400}"
                 preview = "; ".join(outside[-3:])
-                msg = f"[repo-state] {len(outside)} commit(s) on {branch} since release {tag} were NOT made through publish.py (neither release-tagged nor a 'chore: bump version to x.y.z' bump): {preview}. Run scripts/publish.py to cut a release."
+                msg = f"[repo-state] {len(outside)} commit(s) on {branch} since release {tag} were NOT made through publish.py (not in any release reachable from {branch}, and not a 'chore: bump version to x.y.z' bump): {preview}. Run scripts/publish.py to cut a release."
                 line = dedupe.emit_once(seen, key, msg)
                 if line:
                     lines.append(line)
