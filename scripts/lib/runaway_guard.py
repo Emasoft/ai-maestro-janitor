@@ -96,17 +96,71 @@ RUNAWAY_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?:^|/)pytest\b"),
 )
 
+
 # The owner's other AI clients. EXPLICITLY FORBIDDEN by the owner
 # directive of 2026-10-20: "do not touch processes executed by other ai
-# clients like codex or copilot". These are excluded by shape even when
-# they are attributed to Claude Code and even when they are enormous.
-FORBIDDEN_CLIENTS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bcodex\b", re.IGNORECASE),
-    re.compile(r"\bcopilot\b", re.IGNORECASE),
-    re.compile(r"\blm[\s_-]?studio\b", re.IGNORECASE),
-    re.compile(r"\b aider\b", re.IGNORECASE),
-    re.compile(r"\bcursor\b", re.IGNORECASE),
+# clients like codex or copilot".
+#
+# EACH PATTERN MATCHES THE EXECUTABLE (argv[0]'s basename) OR A PATH
+# SEGMENT, not a bare substring anywhere on the command line. The
+# distinction is load-bearing and the first version got it wrong in
+# BOTH directions:
+#
+#   * `\b aider\b` (with a LEADING SPACE inside the word boundary) never
+#     matched the executable form `aider --model x` — it only matched
+#     `aider` mid-string — so aider was NOT protected at all. MEASURED:
+#     'aider --model x' -> not forbidden; 'x aider y' -> forbidden.
+#   * A bare `\bcodex\b` matches a FILENAME too, so
+#     `pytest tests/test_codex_pagination.py` was refused as a "forbidden
+#     client". Over-refusing is the safe direction for a kill, but it
+#     makes the rule wrong, and a rule that is wrong for the wrong reason
+#     is a rule that will be "fixed" into being wrong the other way.
+#
+# So the patterns below anchor on an EXECUTABLE POSITION: the start of
+# the command, or a path segment boundary.
+_FORBIDDEN_EXECUTABLES: tuple[str, ...] = (
+    "codex",
+    "codex-app-server",
+    "copilot",
+    "copilot-agent",
+    "aider",
+    "cursor",
+    "cursor-agent",
+    "lm-studio",
+    "lmstudio",
 )
+
+
+def is_forbidden_client(command: str) -> bool:
+    """True iff the command's EXECUTABLE is another AI client.
+
+    Matches argv[0]'s basename, or a path segment anywhere in the
+    command (so `/usr/local/bin/codex` and `node .../codex/bin/codex.js`
+    are both caught), but NOT a bare word inside an argument.
+
+    "lm studio" is matched too, because the product is spelled both ways
+    and a forbidden client must not be reachable by a different spelling.
+    """
+    if not command:
+        return False
+    words = command.split()
+    for word in words:
+        base = os.path.basename(word).lower()
+        if base in _FORBIDDEN_EXECUTABLES:
+            return True
+        # A PATH SEGMENT: /opt/homebrew/bin/codex, .../codex/bin/codex.js
+        for segment in word.lower().split("/"):
+            if segment in _FORBIDDEN_EXECUTABLES:
+                return True
+        if segment_has_lm_studio(word):
+            return True
+    return False
+
+
+def segment_has_lm_studio(word: str) -> bool:
+    """True for `lm-studio`, `lm_studio` and `lm studio`."""
+    lowered = word.lower()
+    return "lm-studio" in lowered or "lm_studio" in lowered or "lm studio" in lowered
 
 # An interactive `claude` session — the thing the user is typing into.
 # NEVER killable, even when it is the largest process on the host.
@@ -235,10 +289,32 @@ def host_pressure(
 ) -> Pressure:
     """Read the host's pressure state. Every probe failure degrades to None.
 
-    The state is a function of the READINGS, and an UNKNOWN reading never
-    pushes the state up: a host with unknown swap is `elevated` at worst,
-    and only a KNOWN swap/compressor/free-memory reading can reach
-    `critical`. Never kill on missing data.
+    THE STATE IS A DISJUNCTION OVER THE KNOWN-BAD READINGS, and this is
+    the load-bearing correction. The first version required the free
+    memory to be bad BEFORE it would call the host critical:
+
+        if free_bad and (swap_bad or files_bad or comp_bad):
+
+    which meant a swap-exhausted host with healthy free memory read as
+    merely `elevated` — and the kill path NEVER ARMED in exactly the
+    scenario the feature was built for. MEASURED on the 2026-10-20
+    panic's shape: free 30000 MB, swap 8192 MB, 64 swapfiles, compressor
+    90% gave `elevated`, not `critical`. The panic log named the
+    condition itself ('Compressor Info: 100% of segments limit (BAD), 69
+    swapfiles'), and the `and` re-introduced the very blind spot the
+    probe was extended to remove.
+
+    The `and` was also backwards in the OTHER direction: on a host under
+    memory pressure `vm_stat` is the call most likely to be slow or to
+    fail, so a FAILED free-memory read meant a swap-exhausted host read
+    as `elevated` and the guard stood down on a dying machine.
+
+    So: `critical` when ANY known reading is past its bar. Free memory
+    is one arm of the disjunction, not the gate on all of them.
+
+    An UNKNOWN reading still never pushes the state up: a reading that
+    could not be taken is not a reading that is bad, and "critical" arms
+    the kill path. Never kill on missing data.
     """
     free_mb = free_memory_mb()
     swap_used, files = read_swap()
@@ -249,10 +325,10 @@ def host_pressure(
     files_bad = files is not None and files >= swapfiles
     comp_bad = compressor is not None and compressor >= compressor_pct
 
-    if free_bad and (swap_bad or files_bad or comp_bad):
+    exhausted = swap_bad or files_bad or comp_bad
+
+    if exhausted or free_bad:
         state = "critical"
-    elif free_bad or swap_bad or files_bad or comp_bad:
-        state = "elevated"
     else:
         state = "healthy"
     return Pressure(state, free_mb, swap_used, files, compressor)
@@ -333,26 +409,45 @@ def read_compressor_pct() -> Optional[int]:
 
 # ---------- attribution ----------------------------------------------------
 
+# THE `claude` PLUGIN-SUBCOMMAND FORMS — the ONLY `claude` invocations that
+# are NOT an interactive session. They are stated HERE, explicitly, rather
+# than read as a positional slice of RUNAWAY_SHAPES.
+#
+# WHY NOT A SLICE: the interactive-session check is the rule that stands
+# between the user and the killing of the session they are typing into, and
+# a positional slice makes that rule depend on the ORDER OF A LITERAL. A
+# future edit that inserts a pattern before index 3 would silently change
+# what "interactive" means, with no comment saying the order mattered and
+# no test able to see it. MEASURED as a surviving mutation: changing
+# `RUNAWAY_SHAPES[:3]` to `RUNAWAY_SHAPES[:1]` left the whole suite green.
+# The rule must not be able to change by accident, so it names its own
+# patterns.
+CLAUDE_PLUGIN_SUBCOMMAND = re.compile(
+    r"\bclaude\s+plugin\s+(?:marketplace\s+update|update|list)\b"
+)
+
+
 def is_interactive_claude(command: str) -> bool:
     """True iff this command line is an interactive `claude` session.
 
     NEVER killable. The user is typing into it; killing it is the single
-    most likely harm of the whole feature. The `claude` plugin
-    subcommands are NOT interactive sessions and are separately killable
-    by shape.
+    most likely harm of the whole feature.
+
+    THE TEST IS A NEGATIVE: a command that mentions `claude` and is NOT
+    one of the explicit plugin subcommand forms is an interactive session.
+    The plugin subcommands are the ONLY exception, and they are named
+    here rather than sliced out of the runaway-shape allowlist — see
+    `CLAUDE_PLUGIN_SUBCOMMAND` for why.
+
+    Note what this does and does not claim. A `claude` command with the
+    plugin subcommand is a janitor workload; anything else that mentions
+    `claude` is treated as the user's session. That is deliberately
+    conservative: an unrecognised `claude` invocation is spared rather
+    than killed.
     """
     if not _CLAUDE_ANYTHING.search(command):
         return False
-    return not any(
-        sig.search(command)
-        for sig in RUNAWAY_SHAPES[:3]
-    )
-
-
-def is_forbidden_client(command: str) -> bool:
-    """True iff the command names another AI client the owner forbade."""
-    return any(pat.search(command) for pat in FORBIDDEN_CLIENTS)
-
+    return not CLAUDE_PLUGIN_SUBCOMMAND.search(command)
 
 def has_claude_env(pid: int) -> bool:
     """True iff the process's OWN environment carries a Claude marker.
@@ -364,6 +459,34 @@ def has_claude_env(pid: int) -> bool:
     Only the CANDIDATES are probed: on a host with 1400 processes, asking
     every process for its environment would cost 1400 subprocess spawns
     per beat.
+
+    ONLY A `NAME=value` TOKEN COUNTS, and that restriction is
+    load-bearing. `ps eww` returns the ARGV and the ENVIRONMENT
+    concatenated with no separator between them, so a naive scan for the
+    marker as a bare word credits any process whose COMMAND LINE merely
+    mentions the string — a filename, a URL, a git branch, a grep
+    pattern. MEASURED on this host: this very session's `ps eww` output
+    contains the token `"CLAUDECODE\\|CLAUDE_PROJECT_DIR"` — and that
+    token came from the COMMAND LINE of the `grep` that was asking the
+    question, not from any environment variable at all. A probe that
+    matched bare words would have classified that grep as agent-started.
+
+    The real environment variables appear as `NAME=value` tokens
+    appended AFTER the argv — MEASURED: `CLAUDECODE=1`,
+    `MY_MARKER_VAR=hello`. So the rule is: a token whose NAME (the part
+    before the first `=`) is a marker. A bare `CLAUDECODE` with no `=` is
+    part of the argv and is ignored.
+
+    WHAT THE SIGNAL PROVES, precisely — and this is narrower than
+    "started by an agent". The environment is INHERITED, so a marker
+    means the process DESCENDS FROM a Claude Code session. A command the
+    user typed at a plain shell prompt inherits a shell environment with
+    no markers, so it is not attributed. But a terminal the user opened
+    FROM INSIDE a session, and everything they run in it, DOES carry the
+    markers — that is the same inheritance, one generation further down.
+    So the honest claim is "descends from a Claude Code session", and
+    the shape allowlist plus the age gate are what turn that into
+    "kill-worthy".
     """
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
@@ -375,16 +498,10 @@ def has_claude_env(pid: int) -> bool:
     if out.returncode != 0:
         return False
     for token in out.stdout.split():
-        if token in CLAUDE_ENV_MARKERS:
-            return True
-        # An exported variable appears as NAME=value; the marker may be a
-        # PREFIX of the value (CLAUDE_PROJECT_DIR=/path).
-        name = token.split("=", 1)[0]
-        if name in CLAUDE_ENV_MARKERS:
+        name, sep, _value = token.partition("=")
+        if sep and name in CLAUDE_ENV_MARKERS:
             return True
     return False
-
-
 def claude_ancestor(pid: int, table: dict[int, tuple[int, str]]) -> Optional[int]:
     """Pid of the nearest ancestor whose executable basename is `claude`.
 
