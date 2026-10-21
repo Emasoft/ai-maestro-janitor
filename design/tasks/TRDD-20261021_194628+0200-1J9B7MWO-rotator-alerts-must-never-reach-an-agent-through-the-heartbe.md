@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T20:59:44+0200
+updated: 2026-10-21T21:04:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,14 +17,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-21T19:46:28+0200
-npt: [79728HXT]
+npt: []
 eht: [V5FP4506]
 ---
 
 # Rotator alerts must never reach an agent through the heartbeat
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-21
-NEXT ACTION: the plan is the section "USER ruling 2 (2026-10-21) and the implementation plan" AS AMENDED by "Plan corrections before any dispatch" (a)-(i) and then "Review of 6f3dd945"; later sections win. The opening "Work:" line below (record to the findings ledger) is SUPERSEDED: no ledger, the daemon's single desktop notification only. Derived cards are FILED: TRDD-79728HXT (suspected test leak, npt, work it first), TRDD-V5FP4506 (Windows backend, eht, parked in backburner, so this card cannot complete until someone pulls it), TRDD-RVX4DRJC (false all-accounts-maxed, related, not a blocker). Order: 79728HXT, then consult the Fable advisor, then brief lean-workers. No code written yet.
+NEXT ACTION: the plan is the section "USER ruling 2 (2026-10-21) and the implementation plan" AS AMENDED by "Plan corrections before any dispatch" (a)-(i) and then "Review of 6f3dd945"; later sections win. The opening "Work:" line below (record to the findings ledger) is SUPERSEDED: no ledger, the daemon's single desktop notification only. Derived cards are FILED: TRDD-79728HXT (suspected test leak; CANCELLED 2026-10-21, the suite is isolated and only the daemon writes notify-sent.txt), TRDD-V5FP4506 (Windows backend, eht, parked in backburner, so this card cannot complete until someone pulls it), TRDD-RVX4DRJC (false all-accounts-maxed, related, not a blocker). Order: consult the Fable advisor, then brief lean-workers. Tests may use the isolated JANITOR_GLOBAL_STATE_DIR from tests/conftest.py as the sent-record location. No code written yet.
 
 USER, 2026-10-21, verbatim: "why you are still printing the warning about the accounts exhaustion? not only it is false, but it should not be surfaced to the agents."
 
