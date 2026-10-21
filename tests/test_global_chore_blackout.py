@@ -132,7 +132,7 @@ def test_unabsorbed_chores_are_pinned_by_name() -> None:
     `server_runs_chores and task_name in claimed`), and `claimed_chores()` FAILS TOWARD
     COVERAGE — an unrecognised or absent claim keeps the chore with the janitor. At the time
     of writing (2026-10-20) the live server advertised six capabilities and this was not one
-    of them, so the daemon KEEPS and RUNS it with the server alive. The spawn gate agrees,
+    of them, so the daemon KEEPS it with the server alive. The spawn gate agrees,
     for claim-set reasons: the standalone daemon is refused only when the server claims EVERY
     chore (`server_owns_every_chore`), which is false while this chore is unclaimed. (The
     gate has other, orthogonal refusals — harness-agent thin mode, the kill switch, the
@@ -182,7 +182,16 @@ def test_unabsorbed_chores_are_pinned_by_name() -> None:
         # HERE: the yield is PER-CHORE (`server_runs_chores and task_name in claimed`) and
         # `claimed_chores()` fails toward coverage, so a chore the server has not CLAIMED
         # is never suppressed — at the time of writing (2026-10-20) the server advertised
-        # six capabilities and this was not one of them, so the janitor KEEPS and RUNS it.
+        # six capabilities and this was not one of them, so the janitor KEEPS it.
+        # IT DOES NOT RUN IT, though, and that is a SEPARATE fact from the claim set: the
+        # chore's own body returns immediately unless CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED
+        # is truthy (scripts/daemon.py:1171), and that variable is set NOWHERE on this host
+        # (measured 2026-10-20: not in the environment, not in any settings file, not in the
+        # installed plugin data dir). So today the janitor neither yields this chore to the
+        # server nor executes it at all — the kill daemon is DEFAULT-OFF, awaiting the
+        # owner's opt-in. The claim set decides WHO would own it; the opt-in decides
+        # WHETHER it runs. Conflating the two made the blackout look like a live failure
+        # when the feature is in fact not switched on.
         # The cross-repo ask is therefore a TAKEOVER ask: the server must claim the chore
         # AND implement the beat, or the pressure relief stops. This is the ai-maestro#111
         # hole and TRDD-6CRC9SQQ's open contract item, and the `global-chore-blackout`

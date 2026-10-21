@@ -36,18 +36,6 @@ from typing import Optional
 
 ALERT_NAME = "runaway-alert.json"
 
-# The kill is broadcast at most once per this interval for an UNCHANGED
-# (pid, name, reason) signature. A standing condition must not reprint
-# on every fire — the model re-reads it every heartbeat and the cost is
-# real.
-REPEAT_S = 3600
-
-# The ledger's `msg` cap (findings_ledger.MAX_MSG_CHARS). The kill
-# record's own message is written to the affected project's ledger, so
-# it must fit the same budget. The CONSEQUENCE leads, because the cap
-# truncates the tail.
-MAX_MSG_CHARS = 120
-
 
 def _read_json(path: Path) -> dict:
     try:
@@ -91,9 +79,25 @@ def kill_record(
 def record_kill(root: Path, record: dict) -> None:
     """Write ONE kill record into the global-state dir.
 
-    The file holds the kills since the last time the sessions read them;
-    `ack` clears it. A kill that nobody reads is still on disk, so the
-    record is durable until a session surfaces it.
+    THE REAL LIFECYCLE, which the previous docstring got wrong: it
+    claimed the file is cleared by a mechanism that DOES NOT EXIST —
+    there is no clearing function anywhere in this module or in the
+    dispatch phase that reads it. The truth is:
+
+      * the file is APPEND-ONLY from the daemon's side — the daemon
+        writes kills and NEVER clears the file;
+      * `record_kill` TRIMS it to the last 50 kills, so it is bounded
+        by count, not by age;
+      * the suppression of a RE-PRINT is done PER SESSION, by
+        `scripts/dispatch.py::_phase_runaway_alert`, which keeps its own
+        per-project stamp file (`state_dir()/runaway-alert-printed.txt`)
+        of kill signatures it has already printed.
+
+    So a kill stays on disk until it is pushed out of the last 50, and
+    a NEW session — which has a NEW per-project stamp — re-prints the
+    retained kills. That re-print behaviour is A-4 on TRDD-ZIKYQQY0 and
+    is NOT fixed here; this docstring only stops claiming a clearing
+    mechanism that does not exist.
     """
     root = Path(root)
     path = root / ALERT_NAME
@@ -123,6 +127,14 @@ def pending_kills(root: Path, now: float) -> list[dict]:
     """The kills a session should surface now, and the file is left alone.
 
     The session-side caller decides what to print; this only reads.
+
+    THE `now` ARGUMENT IS CURRENTLY UNUSED, and the signature keeps it
+    only so the caller in `scripts/dispatch.py::_phase_runaway_alert`
+    does not have to change. It is NOT an expiry window: there is no
+    time-based filter here, and a reader must not assume one. A kill
+    stays "pending" until it is pushed out of the last 50 by
+    `record_kill`. The de-duplication of a re-print is the CALLER's job
+    (it keeps its own per-project stamp of printed signatures).
     """
     data = _read_json(Path(root) / ALERT_NAME)
     kills = data.get("kills")
@@ -155,19 +167,3 @@ def format_line(kill: dict) -> str:
     if readings:
         line += f" [{readings}]"
     return line
-
-
-def drift_parts(root: Path, now: float) -> list[str]:
-    """The kill lines a session should print, one per kill.
-
-    A kill is printed ONCE: the daemon's file is cleared by `ack` after
-    the sessions have had a chance to read it, and the per-session stamp
-    below stops a second session printing the same kill twice in its own
-    turn.
-    """
-    kills = pending_kills(root, now)
-    lines: list[str] = []
-    for kill in kills:
-        sig = f"{kill.get('pid')}:{kill.get('name')}:{kill.get('reason')}"
-        lines.append(f"{sig}\t{format_line(kill)}")
-    return lines

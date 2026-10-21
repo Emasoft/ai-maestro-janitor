@@ -22,7 +22,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 # same shape as the private `_DEADLINE_SLACK` in test_daemon_integration).
 # The full raise history and WHY each module legitimately joined lives on
 # `test_closure_is_bounded_and_excludes_pattern_libs` — the one place it is explained.
-_CLOSURE_MAX = 65
+_CLOSURE_MAX = 70
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import keepalive_stage  # type: ignore[import-not-found]  # noqa: E402
@@ -92,6 +92,20 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
 
     Headroom to 65 rather than a nudge to 56, per the convention set at 45. The sharp
     assertion is still the pattern-lib check below and is unaffected — 0 leaked at 56.
+
+    65 -> 70 when the runaway-kill beat landed (TRDD-5G66S0HK, 2026-10-20): TWO modules —
+    `runaway_guard.py` (the kill decision) and `runaway_alert.py` (its alert path). The
+    closure stands at 67 today, and those two files are exactly its new members; everything
+    else in it is unchanged. Same shape as the `gh_notify_inbox` lesson above: the daemon
+    imports both function-locally, on the kill path only, but `daemon_closure` follows those
+    too and it is RIGHT to — under launchd the daemon runs from the staged copy, so a lazy
+    import of an unstaged module would raise at the exact moment the kill is supposed to
+    fire. These are REAL daemon dependencies, so the bound is raised rather than defended,
+    and the closure is NOT made smaller to fit under the old number.
+
+    Headroom to 70 rather than a nudge to 67, per the convention set at 45. The sharp
+    assertions — the pattern-lib leak check and the detector/wake-reuse check — are untouched
+    and still fail the build when the closure creeps in the wrong direction; 0 leaked at 67.
     """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
     assert 0 < len(closure) <= _CLOSURE_MAX, f"closure unexpectedly large: {len(closure)}"

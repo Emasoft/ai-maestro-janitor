@@ -559,6 +559,162 @@ def _detector_runs_in_harness(name: str) -> bool:
     return name not in _NON_HARNESS_DETECTORS
 
 
+# ---------- THE HOST-PRESSURE GATE ON THE DETECTOR PATH (TRDD-C8SALZOO) ----------
+#
+# THE OWNER DIRECTIVE, verbatim: "never execute them when the system is under
+# pressure. wait a moment when the system activity is low to launch them, and
+# pause them as soon as the system becomes too busy again."
+#
+# THE CARD'S ACCEPTANCE (5) asks that the gate apply in BOTH the daemon's Task
+# registry AND the per-project heartbeat detectors (`scripts/dispatch.py`) — or
+# that the card state which path it covers and why the other is exempt. This
+# section is that statement, in the code where the decision is made.
+#
+# WHY THE DETECTOR PATH IS NOT GATED AS A WHOLE: the heartbeat IS the
+# mechanism that would NOTICE a pressure problem. Gating it would mean the
+# janitor stops watching exactly when the host is in trouble — the 2026-10-20
+# incident inverted into its own cause. So the gate is applied ONLY to the
+# detectors heavy enough to be worth deferring.
+#
+# WHICH DETECTORS ARE HEAVY — MEASURED, not guessed. Timed on the owner's host
+# on 2026-10-20 with `python3 scripts/detectors/<name>.py --one-shot`, two
+# runs each, a 25 s cap:
+#
+#   trdd-state-reconciliation  25.1 s   (capped — the real cost is higher)
+#   trdd-drift                 25.1 s   (capped — the real cost is higher)
+#   trdd-cross-card-blindspot  22.4 s
+#   trdd-reminder              20.8 s
+#   memory-librarian           10.9 s
+#   worktree-janitor            7.3 s
+#   memory-maintenance          6.7 s
+#   memgrep-index-health        4.3 s
+#   everything else             < 2 s
+#
+# The bar for membership is 5 s: a detector under it costs less than the
+# heartbeat's own tick, so deferring it would cost the janitor a whole
+# heartbeat interval to save a few seconds of CPU — a bad trade. A detector
+# over it is worth deferring: it is the work the owner is complaining about
+# when they say "the system is too busy".
+#
+# THE `host-load` DETECTOR IS EXEMPT BY THE SAME REASONING THAT EXEMPTS THE
+# WHOLE HEARTBEAT: it is the detector that MEASURES the pressure, so gating it
+# would blind the janitor to the very condition the gate reacts to. It is also
+# cheap (0.32 s measured).
+#
+# THE GATE IS FAIL-OPEN, exactly like the daemon's: an unreadable reading
+# never blocks a detector. A janitor that silently stops working because one
+# `ps` call failed is worse than one that runs a detector during a busy
+# minute.
+#
+# A DEFERRED DETECTOR STAYS DUE: the gate does not stamp `last-run-<name>.ts`,
+# so the detector runs at the next calm beat instead of being skipped for its
+# whole interval.
+
+_PRESSURE_HEAVY_DETECTORS = frozenset({
+    "trdd-state-reconciliation",
+    "trdd-drift",
+    "trdd-cross-card-blindspot",
+    "trdd-reminder",
+    "memory-librarian",
+    "worktree-janitor",
+    "memory-maintenance",
+    "memgrep-index-health",
+})
+
+
+# THE SENTINEL for "no reading was taken". It is NOT None: None is a
+# LEGITIMATE reading — the fail-open "unreadable" one — and conflating the
+# two would make a roster with no heavy detector probe the host anyway.
+_PRESSURE_NOT_TAKEN = object()
+
+
+# THE EPISODE STAMP — the ONCE-PER-EPISODE log for the detector path (finding 11).
+#
+# THE DEFECT THIS FIXES. The gate logged "host-pressure: deferring detector
+# '<name>' under host pressure" on EVERY fire for EVERY heavy detector. The
+# daemon path has a whole documented discipline against exactly this — "a
+# per-beat line would drown the log in the exact situation the log is for" —
+# and the heartbeat runs from a FRESH PROCESS each fire, so the daemon's
+# process-local latch does not help here.
+#
+# WHY A FILE AND NOT A PROCESS-LOCAL SET. The daemon uses a process-local set
+# because the daemon is a singleton and a file would outlive it. The heartbeat
+# is the OPPOSITE: it is a fresh process every fire, so a process-local set
+# would be empty on every fire and the line would repeat every fire. A file
+# in the PROJECT's state dir is the mechanism that survives the process —
+# which is exactly what an episode needs.
+#
+# THE PRECEDENT IS THE DAEMON'S OWN `runaway-alert-printed.txt`, a file-based
+# stamp in the state dir, for the same reason.
+#
+# THE STAMP IS A FILE THAT RECORDS THE EPISODE, NOT A BOOLEAN: it holds the
+# reading that opened the episode, so the summary line can name it. The file
+# is REMOVED when the episode ends, so the next episode is announced again.
+_PRESSURE_EPISODE_STAMP = "host-pressure-episode.txt"
+
+
+def _pressure_episode_stamp_path() -> Path:
+    """The file-based episode stamp for the detector path."""
+    return state.state_dir() / _PRESSURE_EPISODE_STAMP
+
+
+def _pressure_episode_open() -> bool:
+    """True iff an episode is already open (a stamp file exists)."""
+    return _pressure_episode_stamp_path().is_file()
+
+
+def _pressure_open_episode(reading: str) -> None:
+    """Open an episode: write the stamp, or leave an open one alone.
+
+    An episode that is already open is NOT re-opened: that is what makes the
+    line once-per-episode rather than once-per-fire.
+    """
+    if _pressure_episode_open():
+        return
+    stamp = _pressure_episode_stamp_path()
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        state.atomic_write(stamp, reading)
+    except OSError:
+        pass  # a stamp that cannot be written must not break the heartbeat
+
+
+def _pressure_close_episode() -> None:
+    """Close the episode: remove the stamp, so the next one is announced."""
+    try:
+        _pressure_episode_stamp_path().unlink()
+    except OSError:
+        pass
+
+
+def _pressure_gate_blocks_detector(name: str, pressure: Any = _PRESSURE_NOT_TAKEN) -> bool:
+    """Must this detector be DEFERRED because the host is over the bar?
+
+    THE CLAUSE UNDER TEST MUST BE THE ONLY ONE THAT CAN REFUSE THE SUBJECT.
+    The roster check comes FIRST and the reading SECOND: a detector that is
+    not in the heavy set can never be refused here, so a test of the
+    heavy-set membership is a test of the membership, and a test of the
+    reading is a test of the reading. (This repo has produced three VACUOUS
+    tests in this area — a test whose subject was refused by an earlier
+    clause, so the clause under test never ran.)
+
+    `pressure` is an INJECTION POINT for the tests: a caller that supplies a
+    reading supplies it and no probe happens at all. A caller that passes the
+    `_PRESSURE_NOT_TAKEN` sentinel gets the real reading (the heartbeat's own
+    path). The test seam for the real reading is the `JANITOR_RUNNABLE_COUNT`
+    env var inside `host_pressure`.
+
+    FAIL-OPEN: an unreadable reading never blocks a detector.
+    """
+    if name not in _PRESSURE_HEAVY_DETECTORS:
+        return False
+    if pressure is _PRESSURE_NOT_TAKEN:
+        import host_pressure  # noqa: PLC0415 - lazy: only a heavy detector needs it
+
+        pressure = host_pressure.read_pressure()
+    return bool(pressure.over)
+
+
 def _detector_is_due(name: str, interval: int) -> bool:
     last_file = state.state_dir() / f"last-run-{name}.ts"
     if not last_file.exists():
@@ -1362,7 +1518,20 @@ def _record_default_outcome(name: str, outcome: str, started: int) -> None:
 
 
 def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) -> None:
-    """Run one due detector and route its output according to source identity."""
+    """Run one due detector and route its output according to source identity.
+
+    THE DUE CHECK STAYS HERE. The caller's own due-check (the pressure
+    gate's PRECONDITION) does not replace it: that one decides only whether
+    the GATE applies, and this one owns the run itself. A detector that is
+    not due does NOT run and does NOT stamp last-run — the two checks read
+    the same stamp and agree.
+
+    THE SIGNATURE IS UNCHANGED from before the pressure gate existed. A
+    caller that REPLACES this function — the tests do, with a stand-in of
+    the historical signature — must not have to learn a new keyword
+    argument to keep working, so the gate's verdict is injected nowhere
+    into this function's contract.
+    """
     script = _HERE / "detectors" / f"{name}.py"
     if not script.is_file():
         state.log_line("dispatch", f"detector {name!r} missing at {script}")
@@ -2183,6 +2352,102 @@ def _phase_late_summary_drift() -> None:
         print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
 
 
+# The cap on the per-project stamp of PRINTED kill signatures. The daemon's own
+# broadcast file keeps the last 50 kills (`runaway_alert.record_kill`), so a
+# stamp that grows past that can never match a live kill again — it is dead
+# weight on a machine that is already under pressure. 50 is the same bound, so
+# the stamp can never be the larger of the two.
+RUNAWAY_ALERT_STAMP_MAX = 50
+
+# How far back a kill is still "news" to a session that has never seen it.
+#
+# THE RECENCY WINDOW IS THE DISCRIMINATOR between "the host killed something
+# while the machine was busy" (news — print it) and "the host killed something
+# at some point in the past" (history — do not present it as a current event).
+#
+# WHY A WINDOW AND NOT "NEWER THAN THE SESSION START": the session's start is
+# not knowable here. dispatch.py runs from the cron stub with no hook payload,
+# so the only session identity it has is `CLAUDE_CODE_SESSION_ID` — and a
+# long-lived session open for hours would then never learn of a kill that
+# happened an hour ago, even though that session has NEVER seen the line and
+# the killed process may be one it was about to depend on. The window is about
+# RECENCY, not about identity.
+#
+# WHY IT IS NOT "NEVER PRINT": the broadcast is HOST-level, and a session that
+# has never seen the kill DOES need to know the host killed something — the
+# silence would read as "nothing happened". So a kill inside the window is
+# printed ONCE, as a fact; a kill outside it is not printed at all, because
+# re-printing the whole kill history to every new project is exactly the
+# defect A-4 fixes.
+#
+# 24 h: long enough to cover an overnight window (a session started in the
+# evening must still learn about a morning kill), short enough that the
+# retained 50-kill history cannot accumulate into a wall of lines.
+RUNAWAY_ALERT_RECENCY_S = 24 * 3600
+
+
+def _read_runaway_alert_stamp(stamp: Path) -> list[str]:
+    """The kill signatures this project has ALREADY printed, in FILE ORDER.
+
+    The file format is unchanged: one signature per line. A missing or
+    unreadable file means "nothing printed yet" — the pre-A-4 behaviour, and
+    the correct starting state for a fresh project.
+
+    THE ORDER IS THE FILE'S, and it is what makes the trim meaningful: the
+    stamp carries no timestamp, so the only order available is the order the
+    signatures were WRITTEN. The writer keeps that order (oldest first), so
+    the reader's order is the print order and the writer's trim — which drops
+    from the FRONT — drops the oldest.
+
+    A file written by the PRE-A-4 code is SORTED alphabetically (that is what
+    the old writer produced), so its order is not a print order. The
+    consequence is that the FIRST trim after the upgrade may drop an
+    arbitrary member rather than the oldest — a one-time effect on a file
+    whose entries are already stale, and the alternative (re-parsing and
+    re-deriving an order the file does not carry) would be worse.
+    """
+    try:
+        raw = stamp.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    seen: list[str] = []
+    for line in raw.splitlines():
+        sig = line.strip()
+        if sig and sig not in seen:
+            seen.append(sig)
+    return seen
+
+
+def _write_runaway_alert_stamp(
+    stamp: Path, sigs: Iterable[str], limit: int = RUNAWAY_ALERT_STAMP_MAX
+) -> None:
+    """Write the stamp, BOUNDED to at most `limit` signatures.
+
+    THE BOUND IS THE POINT (A-4). The old code wrote
+    `sorted(seen | set(fresh_sigs))` — the union of every signature ever
+    printed, never trimmed. The union is still what is written (so nothing
+    already printed is re-printed), but the result is TRIMMED: the OLDEST
+    entries go first, because they are the ones a future kill is least likely
+    to match — the daemon's own broadcast file keeps only the last 50 kills,
+    so a signature older than those can never match a live kill again.
+
+    THE ORDER IS PRESERVED, not sorted: the caller passes the already-printed
+    signatures first and the fresh ones after, so the file's line order is
+    the print order and the trim (which drops from the front) drops the
+    oldest. The old writer SORTED the union, which destroyed exactly the
+    order the trim needs — sorting is what made the file's own order
+    meaningless.
+    """
+    ordered = list(dict.fromkeys(sigs))
+    if len(ordered) > limit:
+        ordered = ordered[-limit:]
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        state.atomic_write(stamp, "\n".join(ordered) + "\n")
+    except OSError:
+        pass
+
+
 def _phase_runaway_alert() -> None:
     """Surface the daemon's runaway-kill broadcast as drift lines (TRDD-5G66S0HK).
 
@@ -2207,9 +2472,47 @@ def _phase_runaway_alert() -> None:
     already been burned by imperative status lines being executed by
     autonomous readers.
 
-    THE LINE IS PRINTED ONCE PER KILL, per session: a per-project stamp
-    holds the kill's signature, so a second heartbeat does not reprint a
-    kill the session has already seen.
+    A-4 (TRDD-ZIKYQQY0): TWO DEFECTS IN THE PRINTED-KILL STAMP, both real.
+
+    DEFECT 1 — THE STAMP WAS UNBOUNDED. The old writer kept
+    `sorted(seen | set(fresh_sigs))`: the union of every signature ever
+    printed, never trimmed. On a host that kills regularly the file grows
+    without limit, and past the daemon's own 50-kill retention no entry can
+    ever match a live kill again — it is dead weight on a machine that is
+    already under pressure. The stamp is now bounded to
+    `RUNAWAY_ALERT_STAMP_MAX` (the same 50 the daemon's broadcast keeps).
+
+    DEFECT 2 — A NEW SESSION RE-PRINTED THE WHOLE HISTORICAL KILL LIST. The
+    stamp lives in the PROJECT's state dir, so a session that has never seen
+    the kills (a fresh project, or a project whose state dir was reset)
+    starts with an EMPTY stamp, finds every retained kill "unseen", and
+    prints all of them as if they had just happened. The daemon's file is
+    never cleared (there is no ack), so the history is permanent and every
+    new project re-plays it.
+
+    THE DISCRIMINATOR IS THE KILL'S OWN TIMESTAMP, not the session's
+    identity. `kill_record` stamps every kill with `at` (a float epoch), so
+    a kill can be told apart from another without any session bookkeeping:
+
+      * a kill NEWER than the recency window (`RUNAWAY_ALERT_RECENCY_S`) is
+        NEWS — it happened while the host was busy and the reader may still
+        be living with it. It is printed, once, as a fact.
+      * a kill OLDER than the window is HISTORY. It is NOT printed, and it
+        is NOT presented as a current event.
+
+    WHY NOT "NEWER THAN THE SESSION START": the session's start is not
+    knowable here — dispatch.py runs from the cron stub with no hook
+    payload, and the only identity it has is `CLAUDE_CODE_SESSION_ID`. A
+    long-lived session open for hours would then never learn of a kill
+    that happened an hour ago, even though the session has NEVER seen the
+    line and the kill may be a process it was about to depend on. The
+    window is about RECENCY, not identity.
+
+    WHY NOT "NEVER PRINT": the broadcast is HOST-level, and a session that
+    has never seen the kill DOES need to know the host killed something.
+    Silence would read as "nothing happened". So a recent kill is printed
+    ONCE, as a fact; an old one is not printed at all, because re-printing
+    the whole kill history to every new project is exactly the defect.
     """
     import runaway_alert  # noqa: PLC0415 - lazy: only this phase needs it
 
@@ -2221,15 +2524,8 @@ def _phase_runaway_alert() -> None:
     if not pending:
         return
     stamp = state.state_dir() / "runaway-alert-printed.txt"
-    seen: set[str] = set()
-    try:
-        seen = {
-            line.strip()
-            for line in stamp.read_text(encoding="utf-8", errors="replace").splitlines()
-            if line.strip()
-        }
-    except OSError:
-        seen = set()
+    seen = _read_runaway_alert_stamp(stamp)
+    now = time.time()
 
     printed: list[str] = []
     fresh_sigs: list[str] = []
@@ -2237,6 +2533,27 @@ def _phase_runaway_alert() -> None:
         sig = f"{kill.get('pid')}:{kill.get('name')}:{kill.get('reason')}"
         if sig in seen:
             continue
+        # A-4: THE RECENCY DISCRIMINATOR. A kill with no `at` (a hand-written
+        # or truncated record) is treated as UNREADABLE and NOT printed: a
+        # timestamp we cannot read is not evidence that the kill is recent,
+        # and printing it would re-introduce the "history replayed as current"
+        # defect through the back door.
+        at = kill.get("at")
+        # THE `at is None` GUARD IS A TYPE NARROWING, NOT A SECOND RULE. The
+        # `except (TypeError, ValueError)` below already refuses an
+        # unreadable timestamp, so this line changes no runtime outcome — it
+        # is here because pyright cannot narrow `Unknown | None` through the
+        # `try` alone, and `float(at)` on a `None` is a reportArgumentType
+        # error. DO NOT "simplify" it away: the project gate runs pyright, and
+        # the replacement (float(at) directly) fails the build.
+        if at is None:
+            continue
+        try:
+            at_f = float(at)
+        except (TypeError, ValueError):
+            continue
+        if now - at_f > RUNAWAY_ALERT_RECENCY_S:
+            continue  # HISTORY, not news — never presented as a current event
         line = state.sanitize_for_drift_line(runaway_alert.format_line(kill))
         printed.append(line)
         fresh_sigs.append(sig)
@@ -2245,13 +2562,11 @@ def _phase_runaway_alert() -> None:
         return
     for line in printed:
         print(line)
-    try:
-        stamp.parent.mkdir(parents=True, exist_ok=True)
-        stamp.write_text(
-            "\n".join(sorted(seen | set(fresh_sigs))) + "\n", encoding="utf-8"
-        )
-    except OSError:
-        pass
+    # A-4: THE STAMP IS WRITTEN BOUNDED. The union keeps every signature the
+    # session has already seen (so nothing is re-printed) but is TRIMMED to
+    # the newest `RUNAWAY_ALERT_STAMP_MAX` — the oldest go first, because
+    # they are the ones a future kill is least likely to match.
+    _write_runaway_alert_stamp(stamp, list(seen) + fresh_sigs)
 def _phase_rotator_alert() -> None:
     """Surface the daemon's `rotator-alert.json` as one drift line (TRDD-3OS6AXV3 R4).
 
@@ -4894,6 +5209,131 @@ def _stamp_resume(sd: Path, now: int) -> None:
         state.log_line("dispatch", f"last-resume stamp failed: {exc}")
 
 
+# THE VERDICTS one detector of a fire's roster can get. They are CONSTANTS,
+# not bare strings, so a typo in a comparison is a NameError at import time
+# rather than a silent "always False" branch.
+_VERDICT_RUN = "run"
+_VERDICT_DEFERRED = "deferred"
+_VERDICT_NOT_DUE = "not-due"
+_VERDICT_SKIPPED = "skipped"
+
+
+def _fire_pressure_reading(
+    roster: list[tuple[str, int, str]],
+    in_harness: bool,
+) -> Any:
+    """This fire's pressure reading — taken ONCE, and only when it is needed.
+
+    FINDING 19: the probe used to be taken when the roster held ANY heavy
+    detector, but the loop then SKIPS the detectors that do not run in the
+    harness (`_detector_runs_in_harness`). If the only heavy detector in the
+    roster is one the harness skips, the fire still paid a `ps` spawn for a
+    reading it never consults. So the reading is taken only for a heavy
+    detector that WOULD ACTUALLY RUN in this fire.
+
+    ONE reading per fire, handed down to the gate: a per-detector probe
+    would spawn a `ps` per heavy detector, which is exactly the cost class
+    the card forbade.
+
+    THE SENTINEL, not None: None is the LEGITIMATE "unreadable" reading and
+    the fail-open one, so it cannot double as "no reading was taken".
+    """
+    runnable_heavy = [
+        name for name, _i, _e in roster
+        if name in _PRESSURE_HEAVY_DETECTORS
+        and not (in_harness and not _detector_runs_in_harness(name))
+    ]
+    if not runnable_heavy:
+        return _PRESSURE_NOT_TAKEN
+    import host_pressure  # noqa: PLC0415 - lazy: only a fire that needs it probes
+
+    return host_pressure.read_pressure()
+
+
+def _run_one_detector(
+    name: str,
+    default_interval: int,
+    env_var: str,
+    *,
+    in_harness: bool,
+    fire_pressure: Any,
+    cooldown_active: bool = False,
+) -> str:
+    """Run ONE detector of this fire's roster, under the host-pressure gate.
+
+    THE ORDER IS LOAD-BEARING (finding 11a): the DUE CHECK COMES FIRST, and
+    only then the gate. The gate used to be evaluated BEFORE the detector's
+    own due-check, so on a busy host the log claimed a detector was
+    "deferred" when it may not have been DUE AT ALL — a false statement in
+    the log a human reads when asking "why did this not run?". A detector
+    that was never going to run is not deferred; it simply was not due.
+
+    RETURN VALUE: the verdict — one of the `_VERDICT_*` constants. The
+    caller (`main`) uses it to build the once-per-episode line's COUNT, so
+    the count is the number of detectors the gate ACTUALLY deferred, not the
+    number the loop happened to walk past.
+
+    WHY THE DECISION LIVES HERE AND NOT IN `main()`'s LOOP: this function IS
+    the loop's body, so a test that exercises it exercises what a fire does.
+    The loop in `main()` keeps only the iteration and the counting, which is
+    where the source-order guard expects to find it.
+
+    THE SPEC'S OWN OPTIONS, both taken (ITEM 8a): the due-check is a helper
+    the caller consults before the gate (`_detector_is_due`), and the gate
+    is consulted only for a detector that IS due.
+    """
+    if in_harness and not _detector_runs_in_harness(name):
+        return _VERDICT_SKIPPED
+    interval = state.coerce_int(os.environ.get(env_var), default_interval)
+    # THE DUE CHECK COMES FIRST (finding 11a) — see the docstring.
+    if not _detector_is_due(name, interval):
+        return _VERDICT_NOT_DUE
+    if _pressure_gate_blocks_detector(name, fire_pressure):
+        # THE GATE NEVER STAMPS last-run, so a deferred detector STAYS DUE
+        # and runs at the next calm beat instead of being skipped for its
+        # whole interval.
+        return _VERDICT_DEFERRED
+    _run_detector(name, interval, cooldown_active=cooldown_active)
+    return _VERDICT_RUN
+
+
+def _pressure_announce_episode(deferred: list[str], pressure: Any) -> None:
+    """The ONCE-PER-EPISODE line (finding 11b) — and the episode's close.
+
+    THE LINE NAMES HOW MANY detectors were deferred and the READING — not one
+    line per detector, and not one line per fire. The episode stamp is a FILE
+    in the project's state dir, because the heartbeat is a FRESH PROCESS on
+    every fire: a process-local latch would be empty on every fire and the
+    line would repeat every fire, which is the repetition the daemon path has
+    a whole documented discipline against.
+
+    THE CLOSE IS A SEPARATE CLAUSE, and it reads the READING, not "nothing
+    was deferred": a fire in which no heavy detector happened to be due is
+    NOT evidence that the host recovered, and closing the episode on it would
+    re-announce the same episode on the next fire.
+    """
+    if deferred:
+        reading = (
+            pressure.describe() if pressure is not _PRESSURE_NOT_TAKEN else "unreadable"
+        )
+        if not _pressure_episode_open():
+            _pressure_open_episode(reading)
+            state.log_line(
+                "dispatch",
+                f"host-pressure: deferring {len(deferred)} heavy detector(s) "
+                f"under host pressure — {reading}",
+            )
+        return
+    if (
+        pressure is not _PRESSURE_NOT_TAKEN
+        and pressure.calm_enough_to_clear()
+        and _pressure_episode_open()
+    ):
+        # The host is CALM again: close the episode, so the NEXT one is
+        # announced again.
+        _pressure_close_episode()
+
+
 def main() -> int:
     # SERVER-LANE ENTRY (TRDD-9ZPU69UC): `dispatcher-stub.py --run-cold-cache-clear`
     # reaches here through the stub's auto-roll + C2/C3 verify walk (the stub execs the
@@ -5179,11 +5619,31 @@ def main() -> int:
     # Phase 2: drift detectors. Inside a harness agent (#J thin mode) the roster is
     # filtered to the workdir-scoped subset — see _NON_HARNESS_DETECTORS.
     in_harness = state.in_ai_maestro_agent_env()
+    # THE HOST-PRESSURE GATE (TRDD-C8SALZOO). The ORDER is load-bearing
+    # (finding 11a): the DUE CHECK COMES FIRST, and only then the gate — a
+    # detector that was never going to run is not "deferred", it simply was
+    # not due. The gate's own decision lives in `_run_one_detector`, which is
+    # the loop's body.
+    #
+    # The reading is taken ONCE for this fire, and only when a heavy detector
+    # that WOULD ACTUALLY RUN in it exists (finding 19).
+    fire_pressure = _fire_pressure_reading(_DETECTORS, in_harness)
+    deferred_this_fire: list[str] = []
     for name, default_interval, env_var in _DETECTORS:
-        if in_harness and not _detector_runs_in_harness(name):
-            continue
-        interval = state.coerce_int(os.environ.get(env_var), default_interval)
-        _run_detector(name, interval, cooldown_active=cooldown_active)
+        if (
+            _run_one_detector(
+                name,
+                default_interval,
+                env_var,
+                in_harness=in_harness,
+                fire_pressure=fire_pressure,
+                cooldown_active=cooldown_active,
+            )
+            == _VERDICT_DEFERRED
+        ):
+            deferred_this_fire.append(name)
+    # THE ONCE-PER-EPISODE LINE (finding 11b) — and the episode's close.
+    _pressure_announce_episode(deferred_this_fire, fire_pressure)
 
     # D5 (TRDD-82JRK0CY): the terminal full-mode no-action exit. Emit [janitor-quiet]
     # iff no action marker fired this fire (detector drift lines do NOT count as an

@@ -82,6 +82,7 @@ import gh_notify_inbox  # noqa: E402  # the fleet-wide GH notification inbox (TR
 import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TRDD-157OH2D7)
 import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
+import host_pressure  # noqa: E402  # the runnable-count pressure bar (TRDD-C8SALZOO)
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import notify  # noqa: E402  # human-notification channel — daemon-only (TRDD-4649ZLE0)
@@ -1259,7 +1260,12 @@ def task_runaway_guard() -> None:
         )
         if alert_rss_kb > 0:
             hog = rg.select_refused_alert(
-                rows, protected_pids=protected, min_etime_s=min_age,
+                # NO `min_etime_s` HERE: the alert path is REPORT-ONLY — it
+                # has no kill surface, so the age floor that bounds the kill
+                # surface has nothing to bound on this path (TRDD-ZIKYQQY0
+                # A-1, item 12). The floor used to silence the alert about a
+                # 9 GB process that was TEN SECONDS old.
+                rows, protected_pids=protected,
                 min_rss_kb=alert_rss_kb,
             )
             if hog is not None:
@@ -1306,8 +1312,26 @@ def task_runaway_guard() -> None:
         state.log_line("daemon", "runaway-guard: could not write the kill broadcast")
 
     # AND the affected project's own ledger, for the audit trail. The
-    # consequence leads so the 120-char cap truncates the least
-    # important tail.
+    # AND the janitor's own ledger, for the audit trail. The consequence leads
+    # so the 120-char cap truncates the least important tail.
+    #
+    # A-2 (TRDD-ZIKYQQY0) IS GONE, AND IT IS NOT DROPPED — IT IS REWORKED
+    # LATER. The adversarial review's strongest objection was correct: the
+    # victim's project directory was read from the KILLED PROCESS's OWN
+    # environment, AFTER the process was killed. A terminated pid is gone from
+    # the process table, or is an unreaped zombie with an empty argv, so the
+    # read ALWAYS returned None in production — the feature was a no-op that
+    # its own test mocked into working (the test stubbed the environment
+    # reader for a pid that was never killed, so it asserted the plumbing and
+    # not the behaviour).
+    #
+    # So there is NO `project_dir` here: the call goes back to the pre-A-2
+    # shape and the entry lands in the janitor's own ledger — the guaranteed
+    # writable one. The daemon's own log line still carries the full command
+    # line, so the audit trail exists either way.
+    #
+    # A-2 STAYS AN OPEN FINDING on TRDD-ZIKYQQY0, to be reworked on its own
+    # with the environment captured BEFORE the kill. It is not dropped.
     try:
         findings_ledger.record(
             sev="HIGH",
@@ -1319,10 +1343,24 @@ def task_runaway_guard() -> None:
                 f"— {reason} ({pressure.readings()})"
             ),
             ref=str(victim.pid),
-            actor="human",
+            # A-3 (TRDD-ZIKYQQY0): NOT `actor="human"`. That marker means "a
+            # remedy an agent structurally cannot perform — surface it to your
+            # human and move on" (TRDD-KU3ERYFX, janitor#234), and it makes the
+            # delivery line read "HUMAN-ONLY — surface this to your human and
+            # move on; do not re-evaluate or attempt this yourself". A kill the
+            # janitor ALREADY performed is neither human-only nor a directive:
+            # there is nothing to attempt and nothing to re-evaluate, so the
+            # directive is a lie about a finding whose content is "I did it".
+            # The field is DROPPED, which leaves the ledger's default actor
+            # ("agent") — the accurate reading: the janitor acted, and this is
+            # the record that it did. The severity stays HIGH, which is in
+            # NEVER_SUPPRESSED_SEVERITIES, so a project's own .janitor.toml
+            # cannot silence the entry either way.
         )
     except Exception:  # noqa: BLE001 - a ledger failure must never break the daemon
         state.log_line("daemon", "runaway-guard: could not record the kill in the ledger")
+
+
 def _plugins_cache_root() -> Path:
     """Resolve `<config>/plugins/cache` — the parent of every marketplace's
     cached plugins. The daemon itself lives inside this tree
@@ -3085,6 +3123,7 @@ class Task:
     def __init__(
         self, name: str, interval_s: int, fn: Callable[[], None], *,
         background: bool = False, own_thread: bool = False,
+        pressure_exempt: bool = False,
     ) -> None:
         self.name = name
         self.interval_s = interval_s
@@ -3111,6 +3150,28 @@ class Task:
         # daemon state — no second owner acts on it — and the scope rule is AUDIENCE, not
         # kind. Moving it would widen the control plane for nothing.
         self.failcount_path = gs.global_state_dir() / f"{name}.failcount"
+        # PRESSURE-EXEMPT (TRDD-C8SALZOO). A chore marked here is NEVER deferred by the
+        # host-pressure gate in `_run_due_tasks`, however busy the host is.
+        #
+        # WHY IT IS A FLAG AND NOT A NAME COMPARISON. The exemption exists because a gate
+        # that deferred the pressure-RELIEF chore would be a DEADLOCK: the runaway-kill
+        # beat is the mechanism that ENDS the pressure, so the one chore that must always
+        # run is the one a busy host would suppress — and the 2026-10-20 incident is
+        # exactly when it is needed most. A name comparison (`task.name == "runaway-guard"`)
+        # would work today and would be INVISIBLE in the registry: a reader of
+        # `_build_tasks` would see an ordinary Task and could not tell that it is exempt.
+        # The flag puts the exemption WHERE the registration is, so the registry shows it.
+        #
+        # WHY IT IS A DEFAULT-OFF FLAG AND NOT A DEFAULT-ON EXEMPT SET. An exempt SET
+        # ("a new chore cannot be added to the exempt set by accident") would make the
+        # exempt class a LIST someone edits, and a list is where a wrong entry hides. A
+        # per-Task opt-in flag means the DEFAULT is "gated" — the safe side — and a chore
+        # becomes exempt only by saying so at its own registration site, where the reason
+        # can be written next to it. The exempt chores are `runaway-guard` (the
+        # pressure-RELIEF beat) and the OAuth survival chain
+        # (`oauth-rotator-supervisor`, `oauth-recovery`), and each one's reason is
+        # written at its own registration.
+        self.pressure_exempt = pressure_exempt
 
     def _last_run(self) -> int:
         # Dual-read (NEWEST wins), not a plain read of `last_run_path`: during the upgrade
@@ -3300,17 +3361,72 @@ def _build_tasks() -> list[Task]:
     # themselves; the cross-process file locks stay as the backstop.
     # marketplace-refresh chore retired 2026-09-17 (fseventsd 27 GB churn) — the
     # Task() entry that ran it is deleted here, not just yielded above.
+    #
+    # PRESSURE-EXEMPT REGISTRATION (TRDD-C8SALZOO). THREE chores carry
+    # `pressure_exempt=True`, and each one is exempt for the SAME kind of
+    # reason: it is the mechanism that keeps a session ALIVE, so deferring it
+    # under pressure would starve the very thing the pressure is supposed to
+    # protect.
+    #
+    # (1) `runaway-guard` — the runaway-KILL beat. The reason is the
+    # anti-deadlock: that beat is the mechanism that ENDS host pressure, so a
+    # gate that deferred it whenever the host is busy would suppress the one
+    # chore that exists to relieve the busy. The 2026-10-20 incident is exactly
+    # the situation where the kill daemon is needed most, and it is exactly the
+    # situation a naive "defer every chore under pressure" rule would have
+    # silenced.
+    #
+    # (2) `oauth-rotator-supervisor` and (3) `oauth-recovery` — the OAuth
+    # survival chain. The rotator is what rotates a paid account before its
+    # 5 h wall hits, and `oauth-recovery` is the lane that services a request
+    # the hook could not clear. A BUSY HOST IS EXACTLY WHEN a session is most
+    # likely to run out of usable accounts, so the anti-starvation argument
+    # that exempts the kill beat applies here verbatim. The owner directive's
+    # concern is the OTHER MAIN AGENTS struggling for CPU time; the rotator is
+    # not one of them — it is the thing that keeps them alive.
+    #
+    # `oauth-rotator-tick` is NOT marked, and deliberately so: it is
+    # `own_thread=True`, so the main loop NEVER dispatches it and the gate is
+    # never reached for it. Marking it would be a false claim about a path that
+    # does not exist.
+    #
+    # The exemption is a REGISTRATION-SITE flag, not a name comparison, so a
+    # reader of this registry can SEE which chores are exempt and why; a chore
+    # that is not exempt is gated, which is the safe default.
+    #
+    # EVERY OTHER CHORE IS GATED. The owner directive (2026-10-20) is explicit that
+    # a chore slipping to the night is BETTER than a chore competing with the other
+    # main agents for CPU time, and "every other chore" is the literal reading: a
+    # chore that is heavy in one deployment and cheap in another is still deferred
+    # when the host is over the bar, and the deferral is free — the chore stays DUE
+    # and runs at the next calm beat.
     return [
         Task("fleet-plugins-update", _INTERVAL_FLEET_PLUGINS_UPDATE, task_fleet_plugins_update,
              background=True),
         Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update,
              background=True),
+        # PRESSURE-EXEMPT (TRDD-C8SALZOO). The OAuth rotator is the mechanism that
+        # keeps a SESSION ALIVE — it is what rotates a paid account before the
+        # 5 h wall hits. The same anti-starvation argument that exempts the
+        # runaway-KILL beat applies to it: a BUSY HOST IS EXACTLY WHEN a session
+        # is most likely to run out of usable accounts, so deferring the rotator
+        # under pressure starves the very sessions the pressure is supposed to
+        # protect. The owner directive says the OTHER MAIN AGENTS are the ones
+        # struggling for CPU time; the rotator is not one of them — it is the
+        # thing that keeps them alive.
         Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
-             task_oauth_rotator_supervisor),
+             task_oauth_rotator_supervisor, pressure_exempt=True),
         # Run by its own thread (see _RotatorTickThread), never by the main loop.
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_beat,
              own_thread=True),
-        Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
+        # ONE task per name. A second `memory-guard` line was shipped in e67f9b0c (the
+        # runaway-kill commit) by mistake and removed on 2026-10-21. It was LATENT:
+        # the cadence stamp is keyed by NAME, so the two instances shared one
+        # `memory-guard.last-run.ts` and the second was skipped after the first
+        # stamped it — invisible in the logs, and a real double-run the moment any
+        # task grows per-instance state. Pinned by
+        # tests/test_daemon_task_registry_unique.py, which asserts the registry
+        # holds no duplicate name AND that deleting a chore cannot satisfy it.
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         # The runaway-kill beat (TRDD-5G66S0HK) — DEFAULT-OFF, opt-in via
         # CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED. NOT background: it must
@@ -3318,8 +3434,10 @@ def _build_tasks() -> list[Task]:
         # acts while the host is under pressure. It is also the ONE chore
         # that is EXEMPT from the pressure-yield rule (TRDD-C8SALZOO) — it is
         # the mechanism that ENDS the pressure, so a gate that deferred it
-        # when the host is busy would be a deadlock.
-        Task("runaway-guard", _INTERVAL_RUNAWAY_GUARD, task_runaway_guard),
+        # when the host is busy would be a deadlock. `pressure_exempt=True` is
+        # that exemption, declared HERE so the registry shows it.
+        Task("runaway-guard", _INTERVAL_RUNAWAY_GUARD, task_runaway_guard,
+             pressure_exempt=True),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
         Task("github-config-audit", _INTERVAL_GITHUB_CONFIG_AUDIT, task_github_config_audit,
@@ -3332,7 +3450,14 @@ def _build_tasks() -> list[Task]:
         # behind a 20-minute marketplace refresh in the bulk lane — the whole point is that
         # this chore keeps running when the others are taken away.
         Task("integrity-repin", _INTERVAL_INTEGRITY_REPIN, task_integrity_repin),
-        Task("oauth-recovery", _INTERVAL_OAUTH_RECOVERY, task_oauth_recovery),
+        # PRESSURE-EXEMPT (TRDD-C8SALZOO). Same reason as
+        # `oauth-rotator-supervisor` above: this is the OAuth RECOVERY lane — the
+        # path that services a rotation request the hook could not clear, and
+        # the one that rescues a session whose token has already failed. A busy
+        # host is exactly when a session is most likely to need it, so it is
+        # never deferred by the pressure gate.
+        Task("oauth-recovery", _INTERVAL_OAUTH_RECOVERY, task_oauth_recovery,
+             pressure_exempt=True),
     ]
 
 
@@ -3523,7 +3648,292 @@ def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
     return min(due, key=lambda t: t._last_run()) if due else None
 
 
-def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
+
+# ---------- THE HOST-PRESSURE GATE (TRDD-C8SALZOO) --------------------------
+#
+# The owner directive (2026-10-20), verbatim: "make this rule for the janitor
+# chores: never execute them when the system is under pressure. wait a moment
+# when the system activity is low to launch them, and pause them as soon as the
+# system becomes too busy again. even if they will slip to the night, it is
+# better than having those chores executed while the other main agents are
+# struggling for cpu time and resources!"
+#
+# THE GATE LIVES HERE, AT THE DISPATCH POINT, and not in each chore's body. One
+# place covers every chore in the Task registry, and a chore added tomorrow is
+# covered by construction. Putting the rule in each chore would be a rule that
+# every future chore has to remember to honour — and the one chore that must
+# NOT honour it (the runaway-kill beat) is the one most likely to be copied
+# from a neighbour.
+#
+# THE SIGNAL IS THE RUNNABLE COUNT, not the load average. See
+# `scripts/lib/host_pressure.py` for the measurement that settled it: on this
+# host the load average sits permanently at 13x the core count and does not
+# move with the condition the owner described, while the runnable count moved
+# 427 vs 118-169 between the incident and a healthy busy host.
+#
+# FAIL-OPEN. An UNREADABLE reading NEVER blocks a chore. A janitor that
+# silently stops working because one `ps` call failed is worse than one that
+# runs a chore during a busy minute, so `HostPressure.over` is False for a None
+# count and the gate is inert on a host whose reading cannot be taken.
+#
+# WHAT THIS GATE DOES NOT DO — THE "PAUSE" HALF OF THE DIRECTIVE (finding 8).
+# The directive asks for two things: never START a chore under pressure, and
+# PAUSE a running one when the host becomes too busy again. ONLY THE FIRST IS
+# IMPLEMENTED, and the gap is stated here because a silent gap between the
+# directive and the change is exactly what the next reader mistakes for a
+# complete implementation.
+#
+# THE GATE GOVERNS LAUNCH, NOT INTERRUPTION. A chore already RUNNING is never
+# paused, and no reading is taken while it runs. The reason is that pausing a
+# running detector means KILLING A CHILD PROCESS MID-WRITE — a partially
+# written ledger line, a half-updated index, a lock held by a corpse — and
+# that is its own decision with its own risks, not something to smuggle in
+# under a rule about when to start work. Mid-chore cancellation is a SEPARATE
+# change and is OUT OF SCOPE here.
+
+# THE EPISODE LATCH. The deferral must be VISIBLE (the card's acceptance (6):
+# "a chore that slips to the night is VISIBLE and not silently starved") but it
+# must NOT repeat on every beat — a per-beat line would drown the log in the
+# exact situation the log is for. So the first deferral of an episode is
+# logged, and the rest of the episode is silent.
+#
+# It is a PROCESS-LOCAL set, not a file, for one reason: the episode is a
+# property of THIS daemon's own passes, and the daemon is a singleton. A file
+# would outlive the daemon and make a NEW daemon's first deferral look like a
+# repeat — which is exactly the "silently starved" failure the requirement
+# forbids. A new daemon process therefore always logs the first deferral of
+# its own episode, which is right: a reader who has not seen it yet should.
+_pressure_deferral_logged: set[str] = set()
+
+# THE RELEASE QUEUE (finding 9, "no thundering herd").
+#
+# The gate NEVER stamps last-run: a chore deferred for twelve hours stays DUE
+# and would run at the FIRST moment the host dips under the bar — all the
+# deferred chores at once, in one pass. A brief dip during an incident would
+# therefore release the whole backlog simultaneously, which is the opposite of
+# what the owner asked for.
+#
+# So the release is METERED. On a CALM pass, at most `_PRESSURE_RELEASES_PER_PASS`
+# queued chores are released; the rest stay in the queue and are released on
+# subsequent calm passes. The queue is the single source of truth for "who is
+# still waiting its turn"; a chore that is NOT in the queue is never gated, so
+# the ordinary path is unaffected.
+#
+# WHY ONE PER PASS AND NOT "ALL THE ONES WHOSE INTERVAL ELAPSED". A brief dip
+# during an incident is exactly the situation that produces a backlog, and
+# releasing the whole backlog at once re-creates the load spike the gate
+# existed to prevent. One per pass turns the spike into a trickle the host can
+# absorb, at the cost of a backlog of N draining over N calm passes.
+#
+# WHY IT IS A SEPARATE LIST AND NOT THE LATCH SET. The latch set answers
+# "has this chore been ANNOUNCED?"; the queue answers "is this chore still
+# WAITING FOR ITS TURN?". Merging them would make the hysteresis clear (which
+# empties the latch) and the metered release (which empties the queue) the
+# same operation — and the hysteresis clear would then release the whole
+# backlog at once, which is the defect the meter exists to prevent.
+_pressure_release_queue: list[str] = []
+
+# THE RELEASE CAP. ONE chore per calm pass. A constant, not a literal buried in
+# the loop, so the rule is visible and so the herd test can pin it.
+_PRESSURE_RELEASES_PER_PASS = 1
+
+# THE EPISODE SUMMARY (finding 12, "a mis-set bar must not be invisible").
+#
+# The fail-open contract covers an UNREADABLE reading. It does nothing for a
+# MIS-SET BAR, which is the more likely failure: 300 is one measurement of one
+# instantaneous quantity on one host. If a host's healthy baseline is above
+# 300, the gate is permanently on, every chore is starved, and the ONLY
+# symptom is one log line per episode in a log nobody reads.
+#
+# So the FIRST calm beat after an episode logs a SUMMARY carrying how long the
+# episode lasted, how many chores were deferred during it, and how many are
+# still queued. That gives a reader the signal — "the gate was closed for 6
+# hours" — without building a supervisor subsystem.
+#
+# The full supervisor (a finding of its own: the host pressure is high for an
+# unusually long time) is a SEPARATE change and is NOT in scope.
+#
+# KNOWN LIMIT, stated rather than hidden: a host whose baseline sits ABOVE the
+# bar never produces a calm beat, so it never produces this summary either.
+# That case — the purest mis-set bar — is what the supervisor would cover.
+_pressure_episode_started_at: Optional[float] = None
+_pressure_episode_deferred: list[str] = []
+_pressure_episode_summarised = False
+
+
+def _pressure_deferral_message(pressure: host_pressure.HostPressure) -> str:
+    """The log line for a deferral episode. Names the chore and the reading."""
+    return (
+        f"host-pressure: deferring chore under host pressure — "
+        f"{pressure.describe()}"
+    )
+
+
+def _log_pressure_deferral_once(
+    task_name: str, pressure: host_pressure.HostPressure
+) -> None:
+    """Log the FIRST deferral of an episode for `task_name`, then stay silent.
+
+    Once per episode, not once per beat: the daemon's loop runs every 60 s and a
+    chore that is deferred for hours would otherwise write hundreds of identical
+    lines — the same repetition the repo's `dedupe.emit_once` and the
+    `host-load.py` "first fire of an episode" pattern exist to prevent.
+
+    The latch is cleared when the host goes back genuinely calm AND the release
+    backlog has drained, so a SECOND episode (a busy afternoon, then a busy
+    evening) is announced again.
+    """
+    global _pressure_episode_started_at, _pressure_episode_deferred
+    if task_name in _pressure_deferral_logged:
+        return
+    _pressure_deferral_logged.add(task_name)
+    if task_name not in _pressure_episode_deferred:
+        _pressure_episode_deferred.append(task_name)
+    if _pressure_episode_started_at is None:
+        _pressure_episode_started_at = time.time()
+    state.log_line("daemon", f"{_pressure_deferral_message(pressure)} (chore '{task_name}')")
+
+
+def _clear_pressure_deferrals(pressure: host_pressure.HostPressure) -> None:
+    """End the deferral episode now that the host is GENUINELY calm.
+
+    Called once per pass.
+
+    THE LATCH IS CLEARED ONLY BELOW THE CLEAR THRESHOLD
+    (`HostPressure.clear_at` — the bar's `DEFAULT_PRESSURE_CLEAR_FRACTION`),
+    NOT merely below the bar. A host hovering at 299/300 would otherwise
+    alternate busy -> announce -> clear -> busy -> announce, and the
+    once-per-episode discipline would fail exactly in the band where it
+    matters.
+
+    AN UNREADABLE READING DOES NOT CLEAR THE LATCH. An unreadable reading is
+    not evidence of a calm host — it is evidence of a failed `ps` — and
+    clearing on it would announce a fresh episode on the next busy beat. Here
+    the fail-open direction is INVERTED on purpose: fail-open means "do not
+    change the latch", not "clear the latch".
+
+    THE WHOLE LATCH IS CLEARED, AND THAT IS ACCEPTABLE. The previous
+    docstring claimed a PER-CHORE clear ("the latch is cleared only for the
+    chores that are no longer deferred, so a chore that stays deferred keeps
+    its 'already said it' state") that the code never had — a docstring must
+    never describe behaviour the code does not have, so the claim and the
+    code are made to agree here, in the direction the code already went.
+
+    WHY THE WHOLE-LATCH CLEAR IS ACCEPTABLE. The latch answers ONE question:
+    "has this chore's deferral been ANNOUNCED in this episode?". An episode
+    is a stretch of time the host was over the bar; it ENDS when the host
+    goes genuinely calm. At that point every deferral that episode produced
+    is over, and a later deferral of the same chore is a NEW deferral that
+    deserves a new announcement — otherwise a chore starved by a host that is
+    busy once a day would go silent forever after its first deferral.
+
+    The chores that are still WAITING FOR THEIR RELEASE TURN are a separate
+    fact, and they live in `_pressure_release_queue`, which this function
+    does NOT touch. The queue is drained one chore per calm pass, so clearing
+    the announcement latch does not release the backlog: the two duties are
+    independent, and that is exactly why the whole-latch clear is safe.
+
+    THE SUMMARY (finding 12) is logged ONCE per episode, on the first calm
+    beat, and carries how long the episode lasted, how many chores were
+    deferred and how many are still queued. It is the visible signal for a
+    MIS-SET BAR, which the per-episode deferral line cannot show.
+    """
+    global _pressure_episode_started_at, _pressure_episode_deferred, _pressure_episode_summarised
+    if not pressure.calm_enough_to_clear():
+        return
+    # The SUMMARY, once per episode (finding 12).
+    if _pressure_episode_started_at is not None and not _pressure_episode_summarised:
+        _pressure_episode_summarised = True
+        duration = int(time.time() - _pressure_episode_started_at)
+        hours, rest = divmod(duration, 3600)
+        mins, secs = divmod(rest, 60)
+        state.log_line(
+            "daemon",
+            f"host-pressure: episode over after {hours}h{mins}m{secs}s — "
+            f"{len(_pressure_episode_deferred)} chore(s) deferred "
+            f"({', '.join(_pressure_episode_deferred)}); "
+            f"{len(_pressure_release_queue)} still queued for release",
+        )
+    # THE EPISODE IS OVER: the whole latch clears, and the episode bookkeeping
+    # resets so the next episode is announced afresh.
+    _pressure_deferral_logged.clear()
+    _pressure_episode_started_at = None
+    _pressure_episode_deferred = []
+    _pressure_episode_summarised = False
+
+
+def _pressure_queue_for_release(task_name: str) -> None:
+    """Put a deferred chore on the release queue, once.
+
+    The queue is the list of chores waiting for their turn to run. A chore
+    already on it is not added twice, so a chore deferred on every beat of a
+    long episode occupies ONE slot, not one per beat.
+    """
+    if task_name not in _pressure_release_queue:
+        _pressure_release_queue.append(task_name)
+
+
+def _pressure_next_release(tasks: list[Task], limit: int = _PRESSURE_RELEASES_PER_PASS) -> list[str]:
+    """The queued chores allowed to run on THIS calm pass, in queue order.
+
+    The queue's own order is the release order — a chore deferred first is
+    released first, so the backlog drains in the order it was built.
+
+    A queued chore that is NOT DUE does not consume the pass's turn: it is
+    skipped and the next DUE queued chore takes the slot. Otherwise a chore
+    with a long interval could hold the queue for hours while the chores
+    behind it — which are due RIGHT NOW — waited with it.
+
+    `limit` is `_PRESSURE_RELEASES_PER_PASS` (ONE). It is a parameter so the
+    rule is testable as a rule, not as an accident of the loop.
+    """
+    if limit <= 0:
+        return []
+    due = {t.name for t in tasks if t.is_due()}
+    chosen: list[str] = []
+    for name in _pressure_release_queue:
+        if name in due and len(chosen) < limit:
+            chosen.append(name)
+    return chosen
+
+
+def _pressure_released(task_name: str) -> None:
+    """A queued chore has run: take it off the queue.
+
+    The "already announced" state is NOT touched here: the announcement
+    belongs to the EPISODE, and the episode ends on a calm beat (see
+    `_clear_pressure_deferrals`), not on this chore's release.
+    """
+    if task_name in _pressure_release_queue:
+        _pressure_release_queue.remove(task_name)
+
+
+def _pressure_gated(task: Task, pressure: host_pressure.HostPressure) -> bool:
+    """Must this task be DEFERRED because the host is over the pressure bar?
+
+    THE CLAUSE UNDER TEST IS THE ONLY ONE THAT CAN REFUSE THE SUBJECT. The
+    exemption is checked FIRST and the reading SECOND, so a test of the gate
+    cannot be satisfied by an earlier clause refusing the subject — the
+    vacuous-test failure this repo has already produced three times.
+
+    The exemption is the `Task.pressure_exempt` FLAG, not a name comparison:
+    the runaway-kill beat is the mechanism that ENDS host pressure, so a gate
+    that deferred it whenever the host is busy would suppress the one chore
+    that exists to relieve the busy — a deadlock, and the 2026-10-20 incident
+    is exactly the situation where it is needed most.
+    """
+    if task.pressure_exempt:
+        return False
+    if not pressure.over:
+        return False
+    return True
+
+
+def _run_due_tasks(
+    tasks: list[Task],
+    yielded: set[str],
+    pressure: Optional[host_pressure.HostPressure] = None,
+) -> bool:
     """One due-pass over `tasks` (extracted from main() for testability after the
     2026-07-17 oauth-rotation starvation incident).
 
@@ -3538,7 +3948,24 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     old single-loop serialization between the bulk chores themselves. A due
     background task deferred by a busy lane stays due and is retried on the next
     pass. Returns whether the bulk lane is busy AFTER the pass, for the sleep
-    computation."""
+    computation.
+
+    THE HOST-PRESSURE GATE (TRDD-C8SALZOO). A task whose `_pressure_gated` verdict
+    is True does NOT run: it stays DUE (its last-run stamp is untouched) and runs at
+    the next calm beat.
+
+    THE PROBE IS TAKEN ONCE PER PASS, HERE, and not once per chore — the card's
+    requirement (b): "the gate must not add a per-chore probe that costs a
+    subprocess spawn each". `_run_due_tasks` IS the per-pass structure, so this is
+    the single place the reading is taken and the single place it is consulted.
+
+    `pressure` is an INJECTION POINT for the tests: a caller that passes a reading
+    supplies it and no probe happens at all. A caller that passes None gets the
+    real reading (the daemon's own path). The test seam for the real reading is
+    the `JANITOR_RUNNABLE_COUNT` env var inside `host_pressure`.
+    """
+    if pressure is None:
+        pressure = host_pressure.read_pressure()
     for task in tasks:
         if task.background:
             task.poll_background()  # reap even while yielded/paused — bookkeeping only
@@ -3562,6 +3989,18 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     )
     budget_used = 0.0
     budget_exceeded_logged = False
+    # The pressure latch is cleared when the host is GENUINELY calm (below the
+    # hysteresis threshold), so a SECOND episode is announced again — a busy
+    # afternoon and a busy evening are two episodes. A host hovering in the
+    # hysteresis band keeps its latch, so the once-per-episode discipline holds.
+    _clear_pressure_deferrals(pressure)
+    # THE METERED RELEASE (finding 9, "no thundering herd"). On a calm pass, at
+    # most ONE queued chore is released; the rest stay queued for later calm
+    # passes. On a BUSY pass nothing is released at all, and every due chore is
+    # deferred as usual.
+    release_slot: list[str] = []
+    if not pressure.over:
+        release_slot = _pressure_next_release(tasks)
     for task in dispatch_order:
         # A kill-switch set mid-loop skips the REMAINING tasks NOW, not after the current
         # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause and maintenance
@@ -3575,11 +4014,30 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
             continue  # its own thread runs it — never the main loop (2026-10-03 stall)
         if not task.is_due():  # a task with a live child is never due (time_until_due)
             continue
+        # THE PRESSURE GATE. Checked AFTER the ownership/due checks (so a task that
+        # is not due is not "deferred" — it was never going to run) and BEFORE the
+        # dispatch. The gate NEVER stamps last-run: the chore stays DUE and runs at
+        # the next calm beat, which is the card's acceptance (1).
+        #
+        # A QUEUED CHORE IS RELEASED, NOT GATED, ON A CALM PASS — but only the
+        # ones that hold this pass's release slot. Every other queued chore stays
+        # queued, so a backlog drains one chore per calm pass instead of all at
+        # once (finding 9). A chore that was never deferred is not in the queue
+        # and is dispatched normally.
+        if task.name in _pressure_release_queue:
+            if task.name not in release_slot:
+                continue  # still waiting its turn — stays due, stays queued
+            # It holds a slot: it runs, and it leaves the queue below.
+        elif _pressure_gated(task, pressure):
+            _log_pressure_deferral_once(task.name, pressure)
+            _pressure_queue_for_release(task.name)
+            continue
         if task.background:
             if bulk_busy or task is not bulk_next:
                 continue  # one bulk lane: defer; the task stays due for the next pass
             task.spawn_background()
             bulk_busy = True
+            _pressure_released(task.name)
             continue
         if task.name not in _FOREGROUND_FLOOR and budget_used >= _FOREGROUND_BUDGET_SEC:
             if not budget_exceeded_logged:
@@ -3592,6 +4050,7 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
                 budget_exceeded_logged = True
             continue  # stays due; last-run untouched, retried next pass
         budget_used += task.run()
+        _pressure_released(task.name)
     return any(t.child_alive() for t in tasks if t.background)
 
 
