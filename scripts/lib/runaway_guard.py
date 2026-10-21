@@ -1323,9 +1323,17 @@ def claude_owner_pid(
         return pointed
     return claude_ancestor(row.pid, ancestry)
 
+class OwnerProbeError(RuntimeError):
+    """The owner-liveness probe could not READ the process table.
+
+    Distinct from ABSENT (`read_owner_comm` returning None): a probe that
+    cannot answer must never be read as "the owner is dead" -- see
+    `owner_state` and TRDD-ZIKYQQY0 A-1.
+    """
+
 
 def read_owner_comm(pid: int) -> Optional[str]:
-    """The owner pid's `comm` NAME if the pid is PRESENT, or None if ABSENT.
+    """The owner pid's `comm` NAME if PRESENT, None if ABSENT; may raise OwnerProbeError.
 
     THE REAL LIVENESS PROBE: `ps -p <pid> -o comm=` -- a SINGLE pid, so
     there is no subprocess storm.
@@ -1336,29 +1344,43 @@ def read_owner_comm(pid: int) -> Optional[str]:
     own, because "the pid exists" is not the same claim as "the owner is
     alive" -- see `owner_state`.
 
-    A failed call, a non-zero return code, or empty output all mean
-    ABSENT. A pid that cannot be read is not a pid that is alive.
+    None (ABSENT) is returned ONLY for the one measured absent-pid shape:
+    rc 1 with empty stdout AND empty stderr. Every other outcome -- a pid
+    <= 0, a failed spawn, a timeout, any other rc, any stderr, or rc 0 with
+    empty stdout -- raises OwnerProbeError.
     """
+    # WHY (TRDD-ZIKYQQY0 A-1): a probe that cannot read the table must never
+    # read as a dead owner, because "dead" authorizes a kill. Previously every
+    # failure returned None (== ABSENT == dead), so a ps outage or timeout made
+    # live sessions' children killable. pid 0 is indistinguishable from an
+    # absent pid in ps output (MEASURED), so it is refused up front.
+    if pid <= 0:
+        raise OwnerProbeError(f"invalid owner pid {pid}")
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
             ["ps", "-p", str(pid), "-o", "comm="],
             capture_output=True, text=True, timeout=5, check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OwnerProbeError(f"ps probe for pid {pid} failed: {exc}") from exc
     name = out.stdout.strip()
-    if not name:
+    stderr = out.stderr.strip()
+    if out.returncode == 0 and name:
+        # `ps -o comm=` prints the executable path on macOS for some binaries
+        # (MEASURED: /sbin/launchd, .../bin/esbuild), so the BASENAME is what
+        # the family test needs.
+        return os.path.basename(name)
+    # ABSENT shape: MEASURED on macOS (rc 1, nothing on stdout or stderr);
+    # Linux procps is believed to behave identically but is not measured here.
+    if out.returncode == 1 and not name and not stderr:
         return None
-    # `ps -o comm=` prints the executable path on macOS for some binaries
-    # (MEASURED: /sbin/launchd, .../bin/esbuild), so the BASENAME is what
-    # the family test needs.
-    return os.path.basename(name)
+    raise OwnerProbeError(
+        f"ps probe for pid {pid} unreadable: rc={out.returncode} stderr={stderr!r}"
+    )
 
 
 def owner_state(owner_pid: int, liveness_probe=None) -> str:
-    """One of "dead", "alive", "unknown" -- the THREE-CASE liveness test.
+    """One of "dead", "alive", "unknown", "probe-failed" -- the liveness test.
 
     THE THREE CASES, and why a two-case test is a bug:
 
@@ -1369,6 +1391,11 @@ def owner_state(owner_pid: int, liveness_probe=None) -> str:
       (c) the owner pid is PRESENT but its name is NOT Claude-family ->
           "unknown" -> the pid was RECYCLED, so the real owner is gone,
           but the pointer can no longer PROVE it -> the kill is REFUSED.
+
+    THE FOURTH STATE, "probe-failed": the probe raised OwnerProbeError
+    (the process table could not be read). Liveness is UNPROVEN, so the
+    kill is REFUSED. It is deliberately not "unknown": a persistent ps
+    failure must not be reported as pid reuse.
 
     Case (c) is a SAFETY requirement, not a nicety. `kern.maxproc` is
     16000 on the owner host, so pids ARE recycled: a dead owner's pid is
@@ -1381,11 +1408,17 @@ def owner_state(owner_pid: int, liveness_probe=None) -> str:
     UNKNOWN always fails SAFE.
 
     `liveness_probe` is the INJECTION SEAM: it returns the owner pid's
-    `comm` NAME if the pid is PRESENT, or None if the pid is ABSENT. Its
-    default is the real `read_owner_comm`.
+    `comm` NAME if the pid is PRESENT, or None if the pid is ABSENT, or
+    raises OwnerProbeError if it cannot tell. Its default is the real
+    `read_owner_comm`.
     """
     probe = liveness_probe if liveness_probe is not None else read_owner_comm
-    name = probe(owner_pid)
+    # WHY (TRDD-ZIKYQQY0 A-1): an unreadable process table must fail SAFE,
+    # never fall through to the None -> "dead" branch below.
+    try:
+        name = probe(owner_pid)
+    except OwnerProbeError:
+        return "probe-failed"
     if name is None:
         return "dead"
     if is_claude_family_executable(name):
@@ -1583,6 +1616,8 @@ def refusal_reason(
      10. "owner-recycled"    — the owner pid is present but its name is not
          Claude-family, so the pid was RECYCLED and the pointer can no
          longer prove anything.
+     11. "owner-probe-failed" — the liveness probe could not read the
+         process table, so the owner's state is UNPROVEN.
 
     Clause 3 is the "PROVEN Claude-owned" half of the owner directive and
     it stays a HARD GATE, before the shape and age gates. The ENV PROBE is
@@ -1631,6 +1666,8 @@ def refusal_reason(
         return "owner-alive"
     if state == "unknown":
         return "owner-recycled"
+    if state == "probe-failed":
+        return "owner-probe-failed"
     return None  # the owner is PROVABLY DEAD -> the row is killable
 
 

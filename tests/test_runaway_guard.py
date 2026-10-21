@@ -19,7 +19,9 @@ narrow, documented seam.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1985,6 +1987,75 @@ def test_a_recycled_owner_pid_never_reads_as_dead() -> None:
         "a RECYCLED owner pid read as DEAD; the pointer can no longer prove "
         "the real owner is gone, and the kill must be refused"
     )
+
+
+
+def _raising_probe(pid: int):
+    """A liveness_probe that cannot read the process table."""
+    raise rg.OwnerProbeError("ps unreadable")
+
+
+def test_an_unreadable_probe_reads_probe_failed_and_is_never_abandoned() -> None:
+    """A raising liveness probe yields "probe-failed", never "dead", never abandoned."""
+    pid = 13033
+    owner = 20716
+    row = _row(pid, "node /x/node_modules/.bin/tsx server.mjs", rss_mb=27, age_s=39_388, ppid=1)
+    ancestry = {pid: (1, "launchd")}
+    assert rg.owner_state(owner, _raising_probe) == "probe-failed"
+    assert not rg.is_abandoned(
+        row,
+        ancestry,
+        owner_probe=_owner_probe({pid: owner}),
+        liveness_probe=_raising_probe,
+    )
+
+
+def test_the_selection_gate_refuses_with_owner_probe_failed_when_the_probe_raises() -> None:
+    """refusal_reason returns "owner-probe-failed" for a raising liveness probe."""
+    pid = 13033
+    owner = 20716
+    command = "node /Users/User/ai-maestro/node_modules/.bin/tsx server.mjs"
+    row = _row(pid, command, rss_mb=27, age_s=39_388, ppid=1)
+    ancestry = {pid: (1, "launchd")}
+    reason = rg.refusal_reason(
+        row,
+        protected_pids=frozenset(),
+        min_etime_s=0,
+        ancestry=ancestry,
+        env_probe=_probe({pid}),
+        owner_probe=_owner_probe({pid: owner}),
+        liveness_probe=_raising_probe,
+    )
+    assert reason == "owner-probe-failed"
+
+
+def test_read_owner_comm_returns_none_for_a_reaped_child() -> None:
+    """The real ps probe reports a reaped child's pid ABSENT (None)."""
+    child = subprocess.Popen(["true"])
+    child.wait()
+    result = rg.read_owner_comm(child.pid)
+    if result is not None:
+        pytest.skip("pid reused")
+    assert result is None
+
+
+def test_read_owner_comm_names_the_current_process() -> None:
+    """The real ps probe returns a non-empty name for a live pid."""
+    name = rg.read_owner_comm(os.getpid())
+    assert isinstance(name, str) and name
+
+
+def test_read_owner_comm_refuses_non_positive_pids() -> None:
+    """pid 0 and negative pids raise OwnerProbeError instead of reading ABSENT."""
+    for bad in (0, -5):
+        with pytest.raises(rg.OwnerProbeError):
+            rg.read_owner_comm(bad)
+
+
+def test_read_owner_comm_raises_for_an_out_of_range_pid() -> None:
+    """A pid beyond the platform range makes ps fail, which raises OwnerProbeError."""
+    with pytest.raises(rg.OwnerProbeError):
+        rg.read_owner_comm(2**31)
 
 
 def test_the_template_artefact_is_not_an_owner_pointer() -> None:
