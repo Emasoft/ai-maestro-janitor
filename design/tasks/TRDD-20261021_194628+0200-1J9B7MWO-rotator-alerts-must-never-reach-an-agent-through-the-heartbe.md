@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T22:31:34+0200
+updated: 2026-10-21T22:33:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -74,3 +74,4 @@ AMENDMENT to the CORRECTION above (review of 503e5b21): add to the search list _
 ## Review of 73d7f8f1 (unit 3) — unit 4 fix list (2026-10-21)
 
 UNIT 3 landed in 73d7f8f1. Review verified against code by main session: (1) supervisor._slot_facts skips a slot whose blob is unreadable (supervisor.py per-slot loop 'if not isinstance(inner, dict): continue'), so the detector's clear_owner_remediations(keep_slots=needing) ends the episode of an account that was NOT READ - clear on non-observation, a repeat popup later. Fix: clear only emails present in facts and absent from needing (resp. stalled); test with a partial facts list + mutation. (2) _clear_observed_gone treats a marker that is PRESENT but aged past its TTL (auth-failed 6 h, capture-refused 6 h cooldown) as observed gone. Only an absent marker (clear_auth_failed on a successful Stop, clear_capture_refused) or, for auth-failed, the live account/expiry having moved is an observation. Fix: for these two, clear only when the marker file is absent or (auth-failed) live_email/live_exp differ; tests + mutation. (3) daemon.py _RotatorAlertThread.run_once comment at column 0: re-indent. (4) detector evaluates supervisor._server_owns_chores() before the opt-in check: check opt-in first so the probe never runs with the rotator off. Open for the USER (not code): (g) three expired accounts give three popups (one per account episode); option: daemon batches episodes that become due in the same pass into one popup naming N accounts. (h) notify_episode bypasses the user's severity floor and daily cap - needs ratification.
+Added by the review of 9041e743 (sent to the unit-4 worker): (5) the 7-day record prune also clears the record's episode, so an unobservable condition repeats at most once a week instead of going silent forever (the user must be informed; silence breaks ruling 2 as surely as a repeat breaks ruling 3). (4) uses supervisor.opt_in_present, not a hard-coded opt-in.flag path. (1) must check that a readable blob with degraded fields (expires_days None, no refresh token) cannot classify as observed fine. (2) needs a positive control: an absent marker clears, and a failure after the flap window notifies once.
