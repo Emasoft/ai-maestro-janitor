@@ -4,7 +4,7 @@ title: Remove the janitor copies of the three 3-pillars rules when 3-pillars-tas
 column: backburner
 status: tasked
 created: 2026-10-21T19:35:24+0200
-updated: 2026-10-21T19:42:15+0200
+updated: 2026-10-21T20:58:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -19,6 +19,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-21T19:35:24+0200
 release-via: publish
 
+eht: [WBDGJS2Y]
 ---
 
 # Remove the janitor copies of the three 3-pillars rules when 3-pillars-tasks-management ships them

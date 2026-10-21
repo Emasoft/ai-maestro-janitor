@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T20:56:02+0200
+updated: 2026-10-21T20:59:44+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,9 +17,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-21T19:46:28+0200
+npt: [79728HXT]
+eht: [V5FP4506]
 ---
 
 # Rotator alerts must never reach an agent through the heartbeat
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-21
+NEXT ACTION: the plan is the section "USER ruling 2 (2026-10-21) and the implementation plan" AS AMENDED by "Plan corrections before any dispatch" (a)-(i) and then "Review of 6f3dd945"; later sections win. The opening "Work:" line below (record to the findings ledger) is SUPERSEDED: no ledger, the daemon's single desktop notification only. Order: file and fix the notify-sent.txt test leak (npt), file the Windows-backend card (eht) and the rotator part A/B card, consult the Fable advisor, then brief lean-workers. No code written yet.
 
 USER, 2026-10-21, verbatim: "why you are still printing the warning about the accounts exhaustion? not only it is false, but it should not be surfaced to the agents."
 
@@ -48,3 +53,8 @@ USER, verbatim: "yes, but be sure to not repeat a notification already sent. and
 ## Plan corrections before any dispatch (advisor + review, 2026-10-21)
 
 Supersedes the plan section above where they differ. (a) Windows backend: split to its own card, not in this bugfix. (b) rotator_alert.py ~296: record_owner_remediation for EVERY condition (drop the _AGENT_VISIBLE_CONDITIONS gate), not only delete the name. (c) login-needed: the daemon's evaluate scans the owner-remediation store the detector already writes and notifies each NEW record once; do NOT move supervisor._slot_facts (keychain reads) into the daemon's 60 s loop (keychain prompt-storm risk). Verify all four prints in oauth-login-needed.py are account issues before removing them. (d) sweep every notify.push / notify._deliver caller in scripts/detectors and scripts/hooks: none may notify per session. (e) run the alert evaluation on a small dedicated thread, separate from the tick thread and the main loop (daemon.py ~3176 records a 31-min main-loop stall on 2026-10-03). (f) episode key = condition + kind; re-notify only after the condition was absent longer than the flap window; test a flapping verdict. (g) log every notification send to daemon.log with condition and kind. (h) check the chore-coordination yield list: if the ai-maestro server absorbs oauth-rotator-tick or an alert lane, it must not notify too. (i) before writing the new tests, file and fix the test-isolation leak: the full suite wrote the real plugin-data global-state/notify-sent.txt.
+
+## Review of 6f3dd945 (2026-10-21) — refinements that win over (a)-(i)
+
+(b) owner-remediation.json has no reader besides its two writers (rotator_alert.py, oauth-login-needed.py), grep of scripts/skills/commands/rules 2026-10-21; its comment calls it control-plane state, not a finding source. Before dropping the gate, re-grep readers: no findings ledger, SessionStart, heartbeat or agent-visible surface may read it. (c) REMOVE the four drift prints and the detector's own notify.push (it runs in every session and breaks ruling 2 by itself); the detector only records. (f) DELETE the REPEAT_S daily repeat within an episode. Episode key = condition + kind + slot where the condition is per-slot, so a second account is still notified. The sent-record lives on disk in global-state, written atomically under a lock shared by the alert thread, tick thread and main loop, so a daemon restart or handover never resends. (e) Reason for the dedicated thread: today evaluation runs on the tick thread, so a hung tick suppresses its own tick-stalled alarm. (h) Both directions: if the ai-maestro server absorbs the rotator tick, the user must still get exactly one notification, not two and not zero. (a)/(i) the Windows-backend card goes in eht:, the test-leak card in npt:, once filed.
+Filed 2026-10-21: TRDD-79728HXT (test leak, npt), TRDD-V5FP4506 (Windows backend, eht), TRDD-RVX4DRJC (rotator false all-accounts-maxed, parts A and B; related, not a blocker of this card).
