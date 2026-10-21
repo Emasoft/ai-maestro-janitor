@@ -47,7 +47,7 @@ ROT="${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator"
 
 ## When to use
 
-- A desktop notification from the janitor daemon about a needed login (`oauth-login-needed`), or an `oauth-cookie-reminder` heartbeat nudge fired (a cookie is
+- A desktop notification from the janitor daemon about a needed login (`oauth-login-needed`) or a login that needs refreshing (`oauth-cookie-refresh`, recorded by the `oauth-cookie-reminder` detector: a cookie is
   expiring, or an account needs a fresh human login).
 - The user says "refresh my claude logins" / "reauth my accounts" / "I had to log in manually".
 - ~Monthly proactive refresh, to stagger cookie-vs-OAuth lifetimes so they never coincide.
@@ -127,7 +127,7 @@ ROT="${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator"
 
 - Each account has its OWN Chrome profile (separate cookie jar) — you never log out, you just
   log into each account's profile once. Re-run only when a session nears expiry (the monitor /
-  the `oauth-cookie-reminder` heartbeat tells you when).
+  the janitor daemon's `oauth-cookie-refresh` desktop notification tells you when).
 - The opener is a clean, normal Chrome (no automation flags) so Cloudflare + Google-2FA treat
   it as a human browser; it never logs in itself. The passkey / 2FA prompt is OS-level — that
   is WHY the login needs a human and cannot be automated.

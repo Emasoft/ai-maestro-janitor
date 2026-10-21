@@ -9,13 +9,13 @@ emit/silent behaviour. Read-only detector; no network, no real keychain.
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import os
 import sqlite3
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -110,83 +110,331 @@ def _run(
     return r.stdout, r.returncode
 
 
+def _records(tmp_path: Path) -> dict[str, dict]:
+    """The owner remediations the detector recorded (key -> record), {} when none."""
+    f = tmp_path / "rotator" / "owner-remediation.json"
+    if not f.is_file():
+        return {}
+    return json.loads(f.read_text()).get("conditions", {})
+
+
+def _by_condition(tmp_path: Path, condition: str) -> dict[str, dict]:
+    return {k: r for k, r in _records(tmp_path).items() if r["condition"] == condition}
+
+
 def test_silent_when_cookies_healthy(tmp_path: Path) -> None:
-    """Cookie 28d (> 7d default) + healthy OAuth → no reminder."""
-    out, rc = _run(tmp_path, {"a@x.com": True}, {"a@x.com": 28.0})
+    """Cookie 28d (> 7d default) + healthy OAuth: prints nothing and records nothing."""
+    out, rc = _run(tmp_path, {"a@example.com": True}, {"a@example.com": 28.0})
     assert rc == 0
-    assert "oauth-cookie-refresh" not in out
+    assert out == ""
+    assert _records(tmp_path) == {}
 
 
-def test_reminds_when_cookie_near_expiry(tmp_path: Path) -> None:
-    """Cookie 3d (< 7d) + healthy OAuth → reminder with safe-window note."""
-    out, rc = _run(tmp_path, {"a@x.com": True}, {"a@x.com": 3.0})
+def test_near_expiry_records_one_cookie_remediation_and_prints_nothing(tmp_path: Path) -> None:
+    """Cookie 3d (< 7d): stdout stays empty (rotator issues never reach an agent, TRDD-1J9B7MWO);
+    one owner remediation, condition oauth-cookie-refresh, kind cookie, slot = the email."""
+    out, rc = _run(tmp_path, {"a@example.com": True}, {"a@example.com": 3.0})
     assert rc == 0
-    assert "[oauth-cookie-refresh]" in out
-    assert "a@x.com" in out
-    assert "safe window" in out
+    assert out == ""
+    recs = _by_condition(tmp_path, "oauth-cookie-refresh")
+    assert len(recs) == 1
+    rec = next(iter(recs.values()))
+    assert (rec["kind"], rec["slot"]) == ("cookie", "a@example.com")
+    assert "a@example.com" in rec["action"] and "/janitor-refresh-cc-logins" in rec["action"]
+    assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}  # OAuth is healthy
 
 
-def test_reminds_when_no_session(tmp_path: Path) -> None:
-    """No Cookies file at all → 'login needed' reminder."""
-    out, _ = _run(tmp_path, {"a@x.com": True}, {"a@x.com": None})
-    assert "[oauth-cookie-refresh]" in out
-    assert "login needed" in out
-
-
-def test_setup_token_near_expiry_reminds(tmp_path: Path) -> None:
-    """Cookie healthy (28d) but a no-refresh setup-token expiring in 10d (< 30d)
-    → RE-CAPTURE reminder, even though the cookie itself is fine."""
-    out, _ = _run(
-        tmp_path,
-        {"s@x.com": 10.0},  # no-refresh setup-token, 10d to expiry
-        {"s@x.com": 28.0},
-        env_extra={"CLAUDE_ROTATOR_SETUP_REMIND_DAYS": "30"},
-    )
-    assert "[oauth-cookie-refresh]" in out
-    assert "setup-token" in out
-
-
-def test_keychain_backed_refresh_slot_is_seen_healthy_no_plaintext(
+def test_per_account_action_text_says_no_healthy_oauth_when_none_is_healthy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """P2 (audit §3.2): the detector reads slot OAuth facts KEYCHAIN-FIRST via
-    supervisor._slot_facts, NOT the deleted plaintext slots/<email>.json. A
-    refresh-capable slot that lives ONLY in the keychain (no plaintext file on disk)
-    must classify as healthy → the near-expiry cookie reminder carries the SAFE-window
-    tail, never the URGENT 'no account has healthy OAuth' tail."""
+    """Cookie at risk and the only read slot has no healthy OAuth: the per-account action must not
+    claim a safe window."""
+    _pass(tmp_path, monkeypatch, {"a@example.com": (False, 0.5)}, {"a@example.com": 3.0})
+    rec = next(iter(_by_condition(tmp_path, "oauth-cookie-refresh").values()))
+    assert "(no account has healthy OAuth)" in rec["action"]
+    assert "safe window" not in rec["action"]
+
+
+def test_no_session_is_left_to_oauth_login_needed(tmp_path: Path) -> None:
+    """No Cookies file at all: that is oauth-login-needed's message, so no cookie record (no
+    second popup for the same account)."""
+    out, _ = _run(tmp_path, {"a@example.com": True}, {"a@example.com": None})
+    assert out == ""
+    assert _records(tmp_path) == {}
+
+
+def test_setup_token_near_expiry_records_setup_token_kind(tmp_path: Path) -> None:
+    """Cookie healthy (28d) but a no-refresh setup-token expiring in 10d (< 30d): a setup-token
+    record. No account has healthy OAuth, so the machine-wide urgent record exists too."""
+    out, _ = _run(
+        tmp_path,
+        {"s@example.com": 10.0},
+        {"s@example.com": 28.0},
+        env_extra={"CLAUDE_ROTATOR_SETUP_REMIND_DAYS": "30"},
+    )
+    assert out == ""
+    recs = _by_condition(tmp_path, "oauth-cookie-refresh")
+    assert [(r["kind"], r["slot"]) for r in recs.values()] == [("setup-token", "s@example.com")]
+
+
+def _pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    facts: Mapping[str, tuple[bool, float | None]],
+    cookies: Mapping[str, float | str | None],
+    *,
+    state_emails: list[str] | None = None,
+):
+    """One in-process detector pass. `facts` is what the keychain-aware reader returns (the input
+    boundary; an email missing from it is an UNREADABLE slot); `cookies` builds real Cookies
+    sqlite files. Returns the loaded detector module."""
     mod = _load_detector()
     home = tmp_path / "rotator"
-    (home / "slots").mkdir(parents=True, exist_ok=True)
-    (home / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}}))
-    # NO plaintext slot file — the slot lives only in the (faked) keychain.
-    assert not (home / "slots" / "a@x.com.json").exists()
+    home.mkdir(exist_ok=True)
+    emails = state_emails if state_emails is not None else list(cookies)
+    (home / "state.json").write_text(json.dumps({"slots": {e: {} for e in emails}}))
+    (home / "opt-in.flag").touch()
     prof_root = tmp_path / "profiles"
-    _make_cookies(prof_root / "chrome-profile-a@x.com", 3.0)  # cookie near expiry → reminder fires
-
-    # The keychain-aware reader the detector now delegates to. Returns a
-    # refresh-capable slot for a@x.com — the exact thing the old plaintext reader
-    # could never see (the files were deleted post-migration).
-    fact = mod.supervisor.SlotFact(email="a@x.com", has_refresh=True, expires_days=None)
-    monkeypatch.setattr(mod.supervisor, "_slot_facts", lambda _home, _now: (fact,))
-
+    for email, days in cookies.items():
+        db_dir = prof_root / f"chrome-profile-{email}" / "Default"
+        if (db_dir / "Cookies").exists():
+            (db_dir / "Cookies").unlink()
+        if days == "corrupt":  # an existing profile whose DB cannot be read
+            (prof_root / f"chrome-profile-{email}" / "Default").mkdir(parents=True, exist_ok=True)
+            (prof_root / f"chrome-profile-{email}" / "Default" / "Cookies").write_bytes(b"not sqlite" * 50)
+        else:
+            assert not isinstance(days, str)
+            _make_cookies(prof_root / f"chrome-profile-{email}", days)
+    slot_facts = tuple(
+        mod.supervisor.SlotFact(email=e, has_refresh=r, expires_days=d) for e, (r, d) in facts.items()
+    )
+    monkeypatch.setattr(mod.supervisor, "_slot_facts", lambda _home, _now: slot_facts)
     monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(prof_root))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     (tmp_path / "proj").mkdir(exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
+    assert mod.main() == 0
+    return mod
 
-    buf = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", buf)
-    rc = mod.main()
-    out = buf.getvalue()
-    assert rc == 0
-    assert "[oauth-cookie-refresh]" in out          # cookie 3d < 7d → reminder fired
-    assert "a@x.com" in out
-    assert "safe window" in out                      # healthy OAuth seen via the keychain reader
-    assert "no account has healthy OAuth" not in out  # NOT the urgent/unhealthy tail
 
+def test_keychain_backed_refresh_slot_is_seen_healthy_no_plaintext(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """P2 (audit §3.2): OAuth facts come KEYCHAIN-FIRST via supervisor._slot_facts, not the deleted
+    plaintext slot file. A refresh-capable keychain-only slot is healthy, so a near-expiry cookie
+    records the per-account remediation but NOT the machine-wide urgent one."""
+    _pass(tmp_path, monkeypatch, {"a@example.com": (True, None)}, {"a@example.com": 3.0})
+    assert capsys.readouterr().out == ""
+    slot_email = "a@example.com"
+    assert not (tmp_path / "rotator" / "slots" / f"{slot_email}.json").exists()
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 1
+    assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}
+
+
+def test_account_observed_fine_is_cleared_and_unreadable_one_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """a and b both at risk; next pass a is fine (cookie 28d, observed) and b's slot facts are
+    unreadable (absent from the reader): a's record and episode end, b's survive."""
+    healthy = (True, None)
+    mod = _pass(
+        tmp_path, monkeypatch,
+        {"a@example.com": healthy, "b@example.com": healthy},
+        {"a@example.com": 3.0, "b@example.com": 3.0},
+    )
+    assert {r["slot"] for r in _by_condition(tmp_path, "oauth-cookie-refresh").values()} == {
+        "a@example.com", "b@example.com"}
+    sent: list[list[str]] = []
+    mod.rotator_alert.notify_new_remediations(tmp_path / "rotator", time.time(), runner=sent.append)
+    assert len(sent) == 2
+    _pass(
+        tmp_path, monkeypatch,
+        {"a@example.com": healthy},  # b unreadable this pass
+        {"a@example.com": 28.0, "b@example.com": 28.0},
+    )
+    assert {r["slot"] for r in _by_condition(tmp_path, "oauth-cookie-refresh").values()} == {
+        "b@example.com"}
+
+
+def test_unreadable_cookie_db_is_neither_recorded_nor_cleared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slot whose existing cookie DB cannot be read (sqlite error) is not observed: its
+    existing record and episode survive the pass."""
+    healthy = (True, None)
+    _pass(tmp_path, monkeypatch, {"a@example.com": healthy}, {"a@example.com": 3.0})
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 1
+    _pass(tmp_path, monkeypatch, {"a@example.com": healthy}, {"a@example.com": "corrupt"})
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 1
+
+
+def test_losing_all_healthy_oauth_adds_exactly_one_urgent_record_and_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three at-risk accounts, then every account's OAuth goes unhealthy: ONE new machine-wide
+    record (condition oauth-cookie-refresh-now, no slot, no kind) and one new notification; the
+    three per-account records and episodes are untouched (no N popups for one event). Recovery
+    of healthy OAuth clears the one record."""
+    emails = ["a@example.com", "b@example.com", "c@example.com"]
+    cookies: dict[str, float | None] = {e: 3.0 for e in emails}
+    mod = _pass(tmp_path, monkeypatch, {e: (True, None) for e in emails}, cookies)
+    sent: list[list[str]] = []
+    root = tmp_path / "rotator"
+    mod.rotator_alert.notify_new_remediations(root, time.time(), runner=sent.append)
+    assert len(sent) == 3
+    before = _by_condition(tmp_path, "oauth-cookie-refresh")
+
+    mod = _pass(tmp_path, monkeypatch, {e: (False, 0.5) for e in emails}, cookies)
+    now_recs = _by_condition(tmp_path, "oauth-cookie-refresh-now")
+    assert len(now_recs) == 1
+    rec = next(iter(now_recs.values()))
+    assert (rec["slot"], rec["kind"]) == ("", "")
+    assert "NOW" in rec["action"]
+    after = _by_condition(tmp_path, "oauth-cookie-refresh")
+    assert set(after) == set(before)
+    assert {k: (r["kind"], r["slot"]) for k, r in after.items()} == {
+        k: (r["kind"], r["slot"]) for k, r in before.items()}
+    mod.rotator_alert.notify_new_remediations(root, time.time(), runner=sent.append)
+    assert len(sent) == 4  # exactly one new notification
+
+    _pass(tmp_path, monkeypatch, {e: (True, None) for e in emails}, cookies)
+    assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 3
+
+
+def test_all_unread_pass_neither_records_nor_clears_the_urgent_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pass where no slot's OAuth facts could be read (locked keychain) says nothing about OAuth
+    health: it must not record the urgent record, and must not clear an existing one."""
+    cookies: dict[str, float | None] = {"a@example.com": 3.0}
+    _pass(tmp_path, monkeypatch, {}, cookies)  # nothing readable, nothing recorded before
+    assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}
+    _pass(tmp_path, monkeypatch, {"a@example.com": (False, 0.5)}, cookies)
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh-now")) == 1
+    _pass(tmp_path, monkeypatch, {}, cookies)  # locked keychain: unread
+    assert len(_by_condition(tmp_path, "oauth-cookie-refresh-now")) == 1
+
+
+def test_paused_rotator_records_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the opt-in flag the detector is a no-op, like oauth-login-needed."""
+    mod = _load_detector()
+    home = tmp_path / "rotator"
+    home.mkdir()
+    (home / "state.json").write_text(json.dumps({"slots": {"a@example.com": {}}}))
+    _make_cookies(tmp_path / "profiles" / "chrome-profile-a@example.com", 3.0)
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "home").mkdir()
+    assert mod.main() == 0
+    assert _records(tmp_path) == {}
+
+def _now_records(tmp_path: Path) -> dict[str, dict]:
+    return _by_condition(tmp_path, "oauth-cookie-refresh-now")
+
+
+def test_partial_credential_read_with_no_healthy_slot_records_and_names_unreadable_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One credential slot read (unhealthy), one unreadable: an unreadable slot is unusable to the
+    rotator too, so the urgent record is made, and its text says how many could not be read."""
+    cookies: dict[str, float | None] = {"a@example.com": 3.0, "b@example.com": 28.0}
+    _pass(tmp_path, monkeypatch, {"a@example.com": (False, 0.5)}, cookies)
+    recs = _now_records(tmp_path)
+    assert len(recs) == 1
+    assert "1 account(s) could not be read" in next(iter(recs.values()))["action"]
+
+
+def test_unreadable_count_change_is_the_same_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unreadable count lives only in the text: kind and slot stay empty, so a later pass with
+    a different N sends no second notification."""
+    cookies: dict[str, float | None] = {"a@example.com": 3.0, "b@example.com": 28.0, "c@example.com": 28.0}
+    mod = _pass(tmp_path, monkeypatch, {"a@example.com": (False, 0.5)}, cookies)
+    sent: list[list[str]] = []
+    root = tmp_path / "rotator"
+    mod.rotator_alert.notify_new_remediations(root, time.time(), runner=sent.append)
+    now_sent = len(sent)
+    mod = _pass(
+        tmp_path, monkeypatch,
+        {"a@example.com": (False, 0.5), "b@example.com": (False, None)}, cookies,
+    )
+    assert "1 account(s) could not be read" in next(iter(_now_records(tmp_path).values()))["action"]
+    mod.rotator_alert.notify_new_remediations(root, time.time(), runner=sent.append)
+    assert len(sent) == now_sent  # only per-account 'a' (already sent) and the same urgent episode
+
+
+def test_unreadable_only_at_risk_profile_does_not_clear_the_urgent_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing at risk is visible only because the at-risk profile became unreadable: the urgent
+    record must survive (partial-read flap)."""
+    facts = {"a@example.com": (False, None)}
+    _pass(tmp_path, monkeypatch, facts, {"a@example.com": 3.0})
+    assert len(_now_records(tmp_path)) == 1
+    _pass(tmp_path, monkeypatch, facts, {"a@example.com": "corrupt"})
+    assert len(_now_records(tmp_path)) == 1
+
+
+def test_healthy_read_slot_in_a_partial_read_clears_the_urgent_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read slot with healthy OAuth clears the urgent record even when another slot is unread."""
+    cookies: dict[str, float | None] = {"a@example.com": 3.0, "b@example.com": 3.0}
+    _pass(tmp_path, monkeypatch, {"a@example.com": (False, 0.5), "b@example.com": (False, 0.5)}, cookies)
+    assert len(_now_records(tmp_path)) == 1
+    _pass(tmp_path, monkeypatch, {"a@example.com": (True, None)}, cookies)  # b unreadable
+    assert _now_records(tmp_path) == {}
+
+
+def test_account_without_a_profile_does_not_block_the_nothing_at_risk_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An account with no profile at all (never captured) is observed with nothing to read."""
+    facts = {"a@example.com": (False, None), "b@example.com": (False, None)}
+    _pass(tmp_path, monkeypatch, facts, {"a@example.com": 3.0, "b@example.com": None})
+    assert len(_now_records(tmp_path)) == 1
+    _pass(tmp_path, monkeypatch, facts, {"a@example.com": 28.0, "b@example.com": None})
+    assert _now_records(tmp_path) == {}
+
+
+def test_readable_profile_with_no_claude_cookie_does_not_block_the_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful read that finds no claude.ai cookie is observed, not unreadable."""
+    facts = {"a@example.com": (False, None), "b@example.com": (False, None)}
+    _pass(tmp_path, monkeypatch, facts, {"a@example.com": 3.0, "b@example.com": 28.0})
+    assert len(_now_records(tmp_path)) == 1
+    other = tmp_path / "profiles" / "chrome-profile-b@example.com" / "Default" / "Cookies"
+    con = sqlite3.connect(other)  # readable DB with only an unrelated host's cookie
+    con.execute("DELETE FROM cookies")
+    con.execute("INSERT INTO cookies VALUES ('example.org', 'x', 1)")
+    con.commit()
+    con.close()
+    mod = _load_detector()
+    # Re-run without _pass rebuilding the profiles: a is fine now, b has a readable empty DB.
+    _make_fine = tmp_path / "profiles" / "chrome-profile-a@example.com" / "Default" / "Cookies"
+    con = sqlite3.connect(_make_fine)
+    con.execute("DELETE FROM cookies")
+    exp = int((time.time() + 28 * 86400 + _EPOCH_OFFSET) * 1_000_000)
+    con.execute("INSERT INTO cookies VALUES ('claude.ai', 'sessionKey', ?)", (exp,))
+    con.commit()
+    con.close()
+    slot_facts = tuple(
+        mod.supervisor.SlotFact(email=e, has_refresh=False, expires_days=None) for e in facts
+    )
+    monkeypatch.setattr(mod.supervisor, "_slot_facts", lambda _home, _now: slot_facts)
+    assert mod.main() == 0
+    assert _now_records(tmp_path) == {}
 
 def test_oauth_map_delegates_to_slot_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

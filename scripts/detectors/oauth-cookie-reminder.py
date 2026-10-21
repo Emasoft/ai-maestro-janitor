@@ -18,13 +18,12 @@ installs without the rotator. Read-only: reads cookie + slot metadata, never
 secret values.
 
 Logic mirrors ~/.claude/account-rotator/lifetime-status.sh (the on-demand
-companion). Machine-scoped daily dedupe keeps it to ~one reminder/day while a
-refresh is due, even though the per-session heartbeat fires it in every project.
+companion). It prints NOTHING (TRDD-1J9B7MWO): each at-risk account is recorded as an owner
+remediation and the janitor daemon sends the user ONE desktop notification per episode.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sqlite3
@@ -36,8 +35,8 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
-import dedupe  # noqa: E402
 import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (shared profiles-root resolver)
+import rotator_alert  # noqa: E402  # records owner remediations; the daemon notifies (TRDD-1J9B7MWO)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
 
@@ -54,19 +53,20 @@ def _rotator_home() -> Path | None:
 
 
 def _cookie_days(profiles_root: Path, email: str, now: float) -> float | None:
-    """Days until the persistent claude.ai session cookie expires, or None."""
+    """Days until the persistent claude.ai session cookie expires, or None when the profile is
+    absent or readable with no live session cookie. An existing profile that cannot be READ raises
+    sqlite3.Error (not None): the caller must tell "no cookie" from "could not look" (TRDD-1J9B7MWO)."""
     db = profiles_root / f"chrome-profile-{email}" / "Default" / "Cookies"
     if not db.is_file():
         return None
     chrome_now = int((now + _EPOCH_OFFSET_SEC) * 1_000_000)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         rows = con.execute(
             "SELECT name, expires_utc FROM cookies WHERE host_key LIKE '%claude.ai'"
         ).fetchall()
+    finally:
         con.close()
-    except sqlite3.Error:
-        return None
     sk = [exp for (n, exp) in rows if n == "sessionKey" and exp > chrome_now]
     if sk:
         return (sk[0] / 1_000_000 - _EPOCH_OFFSET_SEC - now) / 86400.0
@@ -116,51 +116,91 @@ def main() -> int:
     if not isinstance(slots, dict) or not slots:
         return 0
 
-    now = time.time()
-    # Read every slot's OAuth facts ONCE, keychain-first (audit §3.2). The map is
-    # keyed by email; an account with no resolvable slot blob (neither keychain nor
-    # legacy file) defaults to (False, None) — same "unhealthy/login-needed" signal
-    # the old per-file reader produced for a missing file.
-    oauth = _oauth_map(home, now)
-    at_risk: list[str] = []
-    any_healthy_oauth = False
-    for email in slots:
-        has_refresh, oauth_days = oauth.get(email, (False, None))
-        if has_refresh or (oauth_days is not None and oauth_days > 1):
-            any_healthy_oauth = True
-        cd = _cookie_days(profiles_root, email, now)
-        if cd is None:
-            at_risk.append(f"{email} (login needed)")
-        elif cd < remind_days:
-            at_risk.append(f"{email} (cookie {cd:.0f}d)")
-        elif (not has_refresh) and oauth_days is not None and oauth_days < setup_remind_days:
-            at_risk.append(f"{email} (setup-token {oauth_days:.0f}d)")
-
-    if not at_risk:
-        state.rotate_log_if_big("oauth-cookie-reminder")
+    # Same opt-in gate as oauth-login-needed: a paused rotator records nothing. (_slot_facts also
+    # returns () without it, but the per-account loop below would still record on defaults.)
+    if not supervisor.opt_in_present(home):
         return 0
 
-    # Machine-scoped daily dedupe — the rotator is machine-wide, not per-project,
-    # so one reminder/day regardless of how many projects/sessions fire heartbeats.
-    seen = home / ".oauth-cookie-reminder-seen.txt"
-    sig = hashlib.sha1(
-        ",".join(sorted(a.split(" ", 1)[0] for a in at_risk)).encode("utf-8"),
-        usedforsecurity=False,
-    ).hexdigest()[:8]
-    key = f"due-{int(now // 86400)}-{sig}"
-    tail = (
-        " — run /janitor-refresh-cc-logins while OAuth is healthy (safe window)."
-        if any_healthy_oauth
-        else " — run /janitor-refresh-cc-logins NOW (no account has healthy OAuth; the login is a "
-        "fresh human sign-in, so the command still works)."
+    now = time.time()
+    oauth = _oauth_map(home, now)
+    # Credential slots READ this pass (the keychain-aware reader skips an unreadable blob). Only a
+    # read slot can show healthy OAuth.
+    read_slots = [e for e in slots if e in oauth]
+    unreadable_creds = len(slots) - len(read_slots)
+    any_healthy_oauth = any(
+        has_refresh or (days is not None and days > 1) for has_refresh, days in map(oauth.__getitem__, read_slots)
     )
-    msg = (
-        f"[oauth-cookie-refresh] {len(at_risk)} claude.ai login(s) need refresh: "
-        f"{', '.join(at_risk)}{tail}"
+    at_risk: list[tuple[str, str, str]] = []  # (email, kind, human detail)
+    examined: set[str] = set()  # accounts whose credential AND cookie were read: observed
+    profile_unreadable = False
+    for email in slots:
+        has_refresh, oauth_days = oauth.get(email, (False, None))
+        try:
+            cd = _cookie_days(profiles_root, email, now)
+        except sqlite3.Error:
+            # An I/O failure reading an existing profile = NOT observed: its record and episode
+            # survive, and it blocks the machine-wide "nothing at risk" clear.
+            profile_unreadable = True
+            continue
+        # Deliberate: an account whose credential slot is unreadable but whose cookie is at risk is still recorded, and is cleared only by an observed fine pass or the 7-day prune (rotator_alert.REMEDIATION_MAX_AGE_S).
+        if email in oauth:
+            examined.add(email)
+        if cd is None:
+            # Readable (or absent) profile with no live session cookie: observed, nothing for THIS
+            # detector. "This account needs a human login" is oauth-login-needed's message, and
+            # recording it here too would pop a second notification for the same account.
+            continue
+        if cd < remind_days:
+            at_risk.append((email, "cookie", f"cookie {cd:.0f}d"))
+        elif (not has_refresh) and oauth_days is not None and oauth_days < setup_remind_days:
+            at_risk.append((email, "setup-token", f"setup-token {oauth_days:.0f}d"))
+
+    # USER ruling 2026-10-21 (TRDD-1J9B7MWO): rotator and account issues NEVER reach an agent, so
+    # this detector prints nothing (it used to print a daily "[oauth-cookie-refresh]" line into
+    # every session). It only RECORDS one owner remediation per at-risk account; the janitor DAEMON
+    # notifies the user once per episode (rotator_alert.notify_new_remediations).
+    # The kind is the reason bucket and stays constant per account, so one event never flips every
+    # account into a new episode (N popups). A finer day bucket (7d / 2d) is deliberately NOT
+    # used: one episode per reason; urgency is the single machine-wide record below.
+    for email, kind, detail in at_risk:
+        rotator_alert.record_owner_remediation(
+            home,
+            "oauth-cookie-refresh",
+            f"account {email} claude.ai login needs refresh ({detail}) - "
+            "run /janitor-refresh-cc-logins "
+            + ("(safe window while OAuth is healthy)" if any_healthy_oauth else "(no account has healthy OAuth)"),
+            now,
+            kind=kind,
+            slot=email,
+        )
+    # OBSERVED CLEARS: only an account whose credential slot AND cookie were actually read this
+    # pass and that is not at risk is observed fine; an unread one keeps its record and episode.
+    rotator_alert.clear_owner_remediations(
+        home, "oauth-cookie-refresh", now,
+        keep_slots=frozenset(e for e, _, _ in at_risk),
+        observed_slots=frozenset(examined),
     )
-    line = dedupe.emit_once(seen, key, msg)
-    if line is not None:
-        print(line)
+
+    # ONE machine-wide urgent record (slot "", kind "": the episode key never changes with the
+    # unreadable count, which lives in the message text only).
+    #  - read no credential slot at all (e.g. locked keychain): says nothing, neither records nor clears.
+    #  - some account at risk and no READ slot healthy: record. An unreadable credential slot is
+    #    unusable to the rotator too, so it must not block the alarm.
+    #  - a read slot healthy: clear. Nothing at risk: clear only when every existing profile was
+    #    read, else the at-risk account may be the unreadable one (partial-read flap).
+    if read_slots:
+        if at_risk and not any_healthy_oauth:
+            tail = f" ({unreadable_creds} account(s) could not be read)" if unreadable_creds else ""
+            rotator_alert.record_owner_remediation(
+                home,
+                "oauth-cookie-refresh-now",
+                "claude.ai logins need refresh and no account has healthy OAuth"
+                f"{tail} - run /janitor-refresh-cc-logins NOW (the login is a fresh human "
+                "sign-in, so the command still works)",
+                now,
+            )
+        elif any_healthy_oauth or not profile_unreadable:
+            rotator_alert.clear_owner_remediations(home, "oauth-cookie-refresh-now", now)
 
     state.rotate_log_if_big("oauth-cookie-reminder")
     return 0

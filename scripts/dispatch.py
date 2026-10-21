@@ -298,7 +298,8 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # or $CLAUDE_PLUGIN_DATA/oauth-rotator). When present, it reminds the user to
     # run /janitor-refresh-cc-logins BEFORE a per-account claude.ai session cookie
     # expires AND while OAuth is still healthy, so the two expiries never coincide
-    # (TRDD-32acd15f). 6h cadence; machine-scoped daily dedupe keeps it gentle.
+    # (TRDD-32acd15f). 6h cadence; prints nothing, only records owner remediations that the
+    # daemon notifies once per episode (TRDD-1J9B7MWO).
     ("oauth-cookie-reminder", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_COOKIE_REMINDER_INTERVAL"),
     # oauth-beacon-refresh keeps the live-identity beacon fresh (TRDD-6AABK2BG). The beacon
     # can ONLY be stamped from a context that can read the primary credential, and the daemon
