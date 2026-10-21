@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T21:06:52+0200
+updated: 2026-10-21T21:11:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -62,3 +62,4 @@ Filed 2026-10-21: TRDD-79728HXT (test leak, npt), TRDD-V5FP4506 (Windows backend
 ## Advisor consult and code facts (2026-10-21)
 
 Two units, SERIAL (both touch rotator_alert.py; one writer). UNIT 1 = scripts/dispatch.py only: delete _phase_rotator_alert, its call, and the tests asserting the rotator drift line; drift_parts stays until unit 2. UNIT 2 = rotator_alert.py + daemon.py + oauth-login-needed.py per the amended plan. Code facts read: notify.push already dedupes by content hash in global_state_dir()/notify-sent.txt (notify.py:55,110-138), but notify._deliver, which rotator_alert.evaluate calls, bypasses it; item (f) EXTENDS that store with episode semantics (condition+kind+slot key, flap window, no daily repeat), never a parallel sent-file. The detector's home is rotator.configured_rotator_home() (documented as the daemon's SSOT) and the daemon passes oauth_supervisor._rotator_root(); unit 2 must confirm both return the same path before relying on item (c). Residual: a real_state-marked test could still reach evaluate; none mentions notify.
+UNIT 1 DONE in c5eaf06d: _phase_rotator_alert, its call and the advisory stamp are gone from dispatch.py; two dispatch tests assert no rotator text, and a mutation check (old dispatch.py restored temporarily) turned both red. Report: docs_dev/20261021-1J9B7MWO-unit1-report.md. UNIT 2 inherits: (1) the deleted phase had NO desktop-notify path, so a hung or dead daemon now gives the user no signal at all; unit 2 must add the session-side tick-stalled desktop notification through notify.push, whose machine-wide content-hash store collapses every session to one copy, after locking _record_sent's unlocked append. (2) rotator_alert.drift_parts and _AGENT_VISIBLE_CONDITIONS now have no caller (delete them). (3) scripts/detectors/oauth-login-needed.py:402 builds a remedy from stuck_text that may reach the findings ledger or drift: check and remove. (4) scripts/lib/runaway_alert.py:5 docstring still names _phase_rotator_alert. (5) confirm oauth_supervisor._rotator_root() == rotator.configured_rotator_home().
