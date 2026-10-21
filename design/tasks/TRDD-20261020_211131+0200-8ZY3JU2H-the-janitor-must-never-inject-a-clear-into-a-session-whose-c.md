@@ -4,7 +4,7 @@ title: The janitor must never inject a /clear into a session whose context is fa
 column: todo
 status: tasked
 created: 2026-10-20T21:11:31+0200
-updated: 2026-10-21T05:12:04+0200
+updated: 2026-10-21T04:55:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
