@@ -436,7 +436,7 @@ def test_dispatch_watchdog_reports_a_hung_daemon_without_an_alert_file(
     env_isolation: dict,  # noqa: F811 -- the imported fixture
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No alert file, but the last completed tick is 11 min old: the session still prints it."""
+    """A stale tick and no alert file still print no rotator text (TRDD-1J9B7MWO)."""
     import time
 
     home = tmp_path / "rot-home"
@@ -449,7 +449,7 @@ def test_dispatch_watchdog_reports_a_hung_daemon_without_an_alert_file(
 
     state.state_dir().mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(state.state_dir(), expires_in_s=900)
-    assert "rotator alert: the account rotator has stopped ticking" in _run_main(dispatch)
+    assert "rotator" not in _run_main(dispatch).lower()
 
 
 def test_dispatch_watchdog_is_quiet_after_a_fresh_completed_tick(
@@ -676,12 +676,12 @@ def test_corrupt_advisory_stamp_cannot_leak_owner_text(
     assert _run_main(dispatch) == ""
 
 
-def test_tick_stalled_alert_file_and_stale_tick_watchdog_print_the_text_once(
+def test_tick_stalled_alert_file_and_stale_tick_watchdog_print_nothing(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """The daemon's tick-stalled entry and the session watchdog collapse into one stopped-ticking text."""
+    """A present rotator-alert.json plus a stale tick put NO rotator text in the heartbeat (TRDD-1J9B7MWO)."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"tick-stalled": (100, _STALL_TEXT)})
     _stamp(home, time.time() - 660)
     out = _run_main(dispatch)
-    assert out.count("the account rotator has stopped ticking") == 1, out
+    assert "rotator" not in out.lower() and "janitor-doctor" not in out, out

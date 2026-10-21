@@ -2581,66 +2581,6 @@ def _phase_runaway_alert() -> None:
     _write_runaway_alert_stamp(stamp, list(seen) + fresh_sigs)
 
 
-def _phase_rotator_alert() -> None:
-    """Surface the daemon's `rotator-alert.json` as one drift line (TRDD-3OS6AXV3 R4).
-
-    Second channel behind the daemon's desktop notification: it shows the alarm as soon as a
-    model turn can run. Called BEFORE the summary-hold gate in main(), so a hold can never
-    suppress it. The alert file is only ever written/cleared by the daemon; `drift_parts` also
-    runs the session-side tick-stalled watchdog (one stat), because a fully hung daemon writes
-    no file at all.
-
-    WHY (janitor#342, TRDD-MMWDSFB4): the daemon backs the notification off (first / 1 h /
-    daily) but this line printed on EVERY fire, so a standing advisory (spare-stale,
-    capture-refused:*) was re-read by the model every ~20 minutes. Urgent texts still print on
-    every fire; an advisory prints only when its signature (cond, last_notified, action hash)
-    differs from the one last printed, kept per project in a stamp. The stamp is never deleted
-    when the advisory clears, so a flap back with an unchanged signature stays silent. Known
-    trade-offs: a 2nd session, or a fresh one after /clear, sees an unchanged advisory only at
-    the next backoff step; a print the model turn never reads is lost until then; an older
-    daemon file without last_notified degrades to print-once.
-    """
-    import rotator_alert  # noqa: PLC0415 - lazy: only this phase needs it
-
-    sys.path.insert(0, str(_HERE / "oauth_rotator"))
-    import rotator  # noqa: PLC0415 - lazy: the one rotator-home resolver the detectors use
-
-    root = rotator.configured_rotator_home()
-    if root is None:
-        return
-    urgent, advisory = rotator_alert.drift_parts(root, time.time())
-    included = set(urgent)
-    stamp = state.state_dir() / "rotator-alert-advisory-printed.txt"
-    digest = ""
-    if advisory:
-        # Only the hex digest is stored, so no e-mail from an action text lands in the stamp.
-        sig = "\n".join(
-            sorted(
-                f"{cond}:{last}:{hashlib.sha256(action.encode('utf-8')).hexdigest()[:12]}"
-                for cond, (last, action) in advisory.items()
-            )
-        )
-        digest = hashlib.sha256(sig.encode("utf-8")).hexdigest()
-        try:
-            printed = stamp.read_text(encoding="utf-8", errors="replace").strip()
-        except OSError:
-            printed = ""  # unreadable stamp means "never printed"
-        if printed != digest:
-            included.update(action for _, action in advisory.values())
-        else:
-            digest = ""
-    if not included:
-        return
-    line = state.sanitize_for_drift_line("rotator alert: " + "; ".join(sorted(included)))
-    print(line)
-    _log_drift_printed("rotator-alert", line)
-    if digest:
-        try:
-            state.atomic_write(stamp, digest)
-        except OSError as exc:
-            state.log_line("dispatch", f"rotator-alert advisory stamp not written: {exc}")
-
-
 def _resume_flag_expired(
     flag: Path, since_file: Path, now: int, default_max_age: int, env_var: str
 ) -> tuple[bool, int, int]:
@@ -5433,13 +5373,12 @@ def main() -> int:
     # Phase 0.5: log retention.
     _phase_log_retention()
 
-    # Phase 0.45: rotator alarm drift line (TRDD-3OS6AXV3 R4). MUST stay ahead of the summary
-    # hold below: a hold returns from main(), and an alarm about a dead login must never wait for it.
     # Phase 0.44: runaway-kill broadcast (TRDD-5G66S0HK). MUST stay ahead of the summary
     # hold below, for the same reason the rotator alarm does: a kill the owner never hears
     # about is a kill that gets repeated.
     _phase_runaway_alert()
-    _phase_rotator_alert()
+    # Rotator and account alerts are owner-only and reach the user only through the daemon's
+    # desktop notification (TRDD-1J9B7MWO), so the heartbeat must never print them.
 
     # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18; reordered AHEAD of the clear-resume phase by
     # TRDD-QZVAEWQH). A session that was just cleared is waiting for the cleared session's own
