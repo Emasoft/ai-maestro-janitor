@@ -1,10 +1,10 @@
 ---
 trdd-id: C8SALZOO
 title: Janitor chores must yield to host pressure and never compete for CPU
-column: todo
+column: dev
 status: tasked
 created: 2026-10-20T18:19:36+0200
-updated: 2026-10-21T19:08:48+0200
+updated: 2026-10-21T19:16:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -21,6 +21,10 @@ implementation-commits: [b15c9d5d]
 ---
 
 # Janitor chores must yield to host pressure and never compete for CPU
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-21
+
+LANDED in b15c9d5d (shared with TRDD-ZIKYQQY0): scripts/lib/host_pressure.py defers daemon chores and the heavy detectors while the runnable-process count is at or above 300 (the bar measured in the Measurements section; fail-open when unreadable), releases the deferred queue one chore per calm pass with 0.7 hysteresis, and logs once per pressure episode; tests/test_host_pressure_gate.py. That covers acceptance (1), (5) and the visibility half of (6). Acceptance (4) is REFUTED by measurement (the bar is a runnable count, not a core-relative load). STILL OPEN: (2) pausing a chore that is already running is deliberately NOT implemented (stated in the daemon.py comment); (3) the runaway-kill exemption must be confirmed by a test that the runaway chore RUNS under simulated pressure; (7) reaping the janitor's own abandoned work belongs to TRDD-ZIKYQQY0 and TRDD-5G66S0HK. NEXT: verify (3) in tests/test_host_pressure_gate.py, then decide (2).
 
 OWNER DIRECTIVE (2026-10-20), verbatim: 'make this rule for the janitor chores: never execute them when the system is under pressure. wait a moment when the system activity is low to launch them, and pause them as soon as the system becomes too busy again. even if they will slip to the night, it is better than having those chores executed while the other main agents are struggling for cpu time and resources!'
 
@@ -45,6 +49,7 @@ DO NOT make the bar a load-average constant copied from another host. MEASURE th
 ## Approval log
 
 - 2026-10-20T18:19:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-21T19:16:16+0200 — column → dev by main-agent@ai-maestro-janitor. gate landed in b15c9d5d; acceptance (2) and the (3) test check remain
 
 ## Measurements
 

@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-10-21T19:08:48+0200
+updated: 2026-10-21T19:15:31+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -12,7 +12,7 @@ severity: major
 min-approval-requirement: none
 labels: [version-update, absorbed-chores, ai-maestro, rollout]
 npt: []
-eht: [R8DRK3DG, EKZ44CDZ]
+eht: [R8DRK3DG]
 implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
 pre-block-column: 
@@ -186,6 +186,7 @@ undoing). Tests now 9: 6 on the pure predicate, 2 on the stamp round-trips (`las
 
 2026-10-19 — box-2 third condition FAILED for v3.8.11 (checked by main session). publish 2026-10-07T21:02:13Z → user-scope lastUpdated 2026-10-07T21:04:21Z = 2m08s, but ~/.aimaestro/plugin-update-trail.jsonl (509 entries) has NO fleet-plugins-update entry within ±15 min of publish, so the installer was not the server's absorbed tick; and version-update-last-raised.ts (1791401753 = 21:35:53 local Oct 7) predates the install by ~90 min and belongs to the 3.8.10 window. The trigger is unattributed — consistent with Claude Code's own marketplace autoUpdate. Box 2 stays open; a future release needs the last-raised stamp to bracket the install time.
 2026-10-21 — TIMING LIMIT OF THE JANITOR'S OWN UPDATE PATH. Detection by the per-session detector takes up to 300 s, and claude plugin update up to about 120 s, so the janitor path needs about 7 minutes in the worst case, against the 128 s publish-to-install interval observed on 2026-10-07. Since R8DRK3DG (now in testing) every daemon run writes one closing line to daemon-version-update.log recording what it attempted, so future windows are attributable; whether the path can beat a two-minute window is TRDD-EKZ44CDZ, added to eht.
+2026-10-21 (correction to the note above) — TRDD-EKZ44CDZ is CANCELLED and removed from eht. The note's claim that a silent log is uninformative was wrong: every daemon version-update run now writes one closing line, so no line over a window means no janitor run, which excludes the janitor as the installer. The ~7 min worst case (300 s detector poll plus claude plugin update, the 120 s being an estimate, not a measured or configured figure) stays as context only. Box 2 is now observable after the next release by reading daemon-version-update.log and the detector's version-update.log for its window.
 
 ## The two paths are not equivalent  ⛔ SUPERSEDED
 

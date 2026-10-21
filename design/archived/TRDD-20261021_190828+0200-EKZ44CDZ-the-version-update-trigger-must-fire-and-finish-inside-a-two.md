@@ -1,10 +1,10 @@
 ---
 trdd-id: EKZ44CDZ
 title: The version-update trigger must fire and finish inside a two-minute publish-to-install window
-column: todo
-status: tasked
+column: cancelled
+status: archived
 created: 2026-10-21T19:08:28+0200
-updated: 2026-10-21T19:08:28+0200
+updated: 2026-10-21T19:15:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -26,3 +26,4 @@ Split out of TRDD-R8DRK3DG, whose retention half landed in 5b6d64ef, d324613d an
 ## Approval log
 
 - 2026-10-21T19:08:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-21T19:15:30+0200 — CANCELLED by main-agent@ai-maestro-janitor. premise false (review of 7982ec00, finding B1): since 5b6d64ef and d324613d every daemon version-update run writes one closing line, so a janitor log with no line over an install window means no janitor run happened, which EXCLUDES the janitor as the installer. Box 2 of A70YJLXN needs that attribution, not a publish-to-install latency under 128 s, which nobody asked for (A70YJLXN's goal is updating as soon as a version is DETECTED)..

@@ -1,10 +1,10 @@
 ---
 trdd-id: ZIKYQQY0
 title: The runaway guard still needs a second abandonment signal and a correct ledger destination
-column: todo
+column: dev
 status: tasked
 created: 2026-10-20T19:07:56+0200
-updated: 2026-10-21T19:08:48+0200
+updated: 2026-10-21T19:16:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,6 +31,7 @@ WHAT IS MEASURED, so it is not re-measured: at the SHIPPED age gate (3600 s) the
 WHAT IS ON DISK AND UNCOMMITTED: scripts/lib/runaway_guard.py, scripts/lib/runaway_alert.py and tests/test_runaway_guard.py carry the A-1 implementation and A-0/A-5/A-6/A-7/A-8. They are HELD, not committed, because A-1 is refuted as above. The A-0 age floor (900 s), A-5 dead-code removal, A-6 janitor-self exclusion and A-8 proxy-to-segment-pool change are NOT refuted and can be landed once the A-1 clause is fixed or separated out. The dead-symbol sweep for A-5 is clean within this repo and history.
 THE CHORE IS DEFAULT-OFF AND HAS NEVER RUN: the body returns immediately unless CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED is truthy (scripts/daemon.py:1171), and that variable is set NOWHERE on this host (MEASURED 2026-10-20: not in the environment, not in any settings file, not in the installed plugin data dir). Nothing about this work has ever killed a process. The owner's opt-in is still outstanding, and the DESIGN must be right before the opt-in, because the opt-in is what makes it live.
 NEXT ACTION: read 'THE DESIGN CONSULT RETURNED' (immediately below this block) and the blast-radius section after it — they carry the measured refutation of the root-walking proposal, the `CLAUDE_PID` mechanism, the four real orphans, and the `gemini` counterexample that makes the forbidden list load-bearing. The design consult is DONE, so the remaining gate is the OWNER's ruling on (a) whether Claude Desktop's descendants are in kill scope (the directive hedges: 'if it is possible to handle those sessions too') and (b) the membership of the forbidden-client list, for which `gemini` MUST be added on the measurement. Then implement the polarity fix as: parse `CLAUDE_PID` as a parsed value (it is NOT in `CLAUDE_ENV_MARKERS`), make abandonment 'owner positively identified AND owner target DEAD', keep 'unknown ⇒ never abandoned', and make the Claude-family name test case-insensitive. The change MUST ship with a fixture that is Claude-owned, orphaned, long-lived AND shape-matching and is SELECTED by the rule, because MEASURED the real orphans match no `RUNAWAY_SHAPES` pattern — a fix with no observable change in killable count is what a wrong fix looks like. MUTATION-VERIFY every new assertion.
+2026-10-21 — THE BLOCK ABOVE IS STALE ON WHAT IS COMMITTED. Landed: b15c9d5d (A-0 900 s floor, A-1 as CLAUDE_PID ownership with case-insensitive Claude-family names, A-5, A-6 janitor-self exclusion, A-7 swapfile/compressor readings, A-8, gemini added to _FORBIDDEN_EXECUTABLES), f7c02ce4 (a failed owner probe never reads as a dead owner; probe call sites audited), e83328be (the refusal reason is named in the stand-down alert; _CLOSURE_MAX raised from 65 to 70 to fit it). STILL OPEN: A-2, the kill-ledger destination, must be reworked with the killed process's environment captured BEFORE the kill (daemon.py comment near line 1364); the selected-orphan fixture the NEXT ACTION above demands must be confirmed present in tests/test_runaway_guard.py; the owner's opt-in (CLAUDE_PLUGIN_OPTION_RUNAWAY_GUARD_ENABLED) is still unset, so nothing has ever been killed.
 
 
 
@@ -91,6 +92,7 @@ THE CONSEQUENCE FOR A-7 AND A-8. The SWAPFILES arm becomes REACHABLE (the count 
 ## Approval log
 
 - 2026-10-20T19:07:56+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-21T19:16:17+0200 — column → dev by main-agent@ai-maestro-janitor. A-0..A-8 except A-2 landed in b15c9d5d, f7c02ce4, e83328be; A-2 and the fixture check remain
 
 ## A-0 and A-1 — the discriminator (REFUTED, superseded 2026-10-20 22:45) — DO NOT IMPLEMENT (see the STATE block at the top of this card; the rule below was described as 'settled' and is REFUTED)
 
