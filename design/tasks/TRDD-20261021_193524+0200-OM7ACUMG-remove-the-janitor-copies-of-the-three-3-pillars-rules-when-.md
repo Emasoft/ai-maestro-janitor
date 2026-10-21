@@ -4,7 +4,7 @@ title: Remove the janitor copies of the three 3-pillars rules when 3-pillars-tas
 column: backburner
 status: tasked
 created: 2026-10-21T19:35:24+0200
-updated: 2026-10-21T19:35:24+0200
+updated: 2026-10-21T19:39:45+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-21T19:35:24+0200
+review-after: 2026-11-18
 ---
 
 # Remove the janitor copies of the three 3-pillars rules when 3-pillars-tasks-management ships them
@@ -30,3 +31,7 @@ Blocked on: the handover message from the ai-maestro session. Not actionable bef
 ## Approval log
 
 - 2026-10-21T19:35:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Also in the removal release
+
+The rule copies the janitor already wrote to ~/.claude/rules/ (trdd-design-tasks.md, prrd-design-rules.md, universal-kanban.md) must not stay loaded next to the new plugin's skill and pointer rule. Decide whether the release moves them out (they are outside the project tree, so ask or use safe-delete) and never leave both loaded. Update the tests that assert the installer ships these three rules in the same release.
