@@ -1259,7 +1259,11 @@ def task_runaway_guard() -> None:
             rg.DEFAULT_ALERT_RSS_KB,
         )
         if alert_rss_kb > 0:
-            hog = rg.select_refused_alert(
+            # WHY the reason token is in the line: a guard that refuses
+            # EVERYTHING (e.g. a persistently failing `ps` -> owner-probe-failed)
+            # is otherwise indistinguishable in the daemon log from one that
+            # rightly refuses non-Claude processes; the token makes it visible.
+            found = rg.select_refused_alert_with_reason(
                 # NO `min_etime_s` HERE: the alert path is REPORT-ONLY — it
                 # has no kill surface, so the age floor that bounds the kill
                 # surface has nothing to bound on this path (TRDD-ZIKYQQY0
@@ -1268,15 +1272,17 @@ def task_runaway_guard() -> None:
                 rows, protected_pids=protected,
                 min_rss_kb=alert_rss_kb,
             )
-            if hog is not None:
+            if found is not None:
+                hog, refusal = found
                 state.log_line(
                     "daemon",
                     "runaway-guard ALERT: the host is under pressure and the "
                     "largest process above the alert bar is one the guard will "
-                    f"not kill: pid={hog.pid} {rg.base_name(hog.command)} "
+                    f"not kill (reason={refusal}): pid={hog.pid} "
+                    f"{rg.base_name(hog.command)} "
                     f"rss={hog.rss_kb // 1024}MB age={hog.etime_s}s. The "
-                    "never-kill invariant holds (not attributable to Claude "
-                    f"Code); a human decides. Pressure was {pressure.readings()}.",
+                    "never-kill invariant holds; a human decides. "
+                    f"Pressure was {pressure.readings()}.",
                 )
         return
 

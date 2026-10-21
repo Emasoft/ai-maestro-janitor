@@ -1323,6 +1323,7 @@ def claude_owner_pid(
         return pointed
     return claude_ancestor(row.pid, ancestry)
 
+
 class OwnerProbeError(RuntimeError):
     """The owner-liveness probe could not READ the process table.
 

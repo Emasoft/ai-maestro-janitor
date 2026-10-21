@@ -2008,6 +2008,14 @@ def test_an_unreadable_probe_reads_probe_failed_and_is_never_abandoned() -> None
         owner_probe=_owner_probe({pid: owner}),
         liveness_probe=_raising_probe,
     )
+    # CONTROL: identical row/ancestry/owner_probe, owner ABSENT (dead) must
+    # be abandoned, so the assertion above depends on the probe failing.
+    assert rg.is_abandoned(
+        row,
+        ancestry,
+        owner_probe=_owner_probe({pid: owner}),
+        liveness_probe=_liveness_probe({}),
+    )
 
 
 def test_the_selection_gate_refuses_with_owner_probe_failed_when_the_probe_raises() -> None:
@@ -2031,7 +2039,7 @@ def test_the_selection_gate_refuses_with_owner_probe_failed_when_the_probe_raise
 
 def test_read_owner_comm_returns_none_for_a_reaped_child() -> None:
     """The real ps probe reports a reaped child's pid ABSENT (None)."""
-    child = subprocess.Popen(["true"])
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
     child.wait()
     result = rg.read_owner_comm(child.pid)
     if result is not None:
