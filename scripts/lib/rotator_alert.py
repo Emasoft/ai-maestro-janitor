@@ -86,6 +86,7 @@ def _remediation_key(condition: str, kind: str, slot: str) -> str:
 def _remediation_lock(root: Path) -> Path:
     return root / (OWNER_REMEDIATION_NAME + ".lock")
 
+
 REMEDIATION_MAX_AGE_S = 7 * 86400  # a record not re-seen for a week is a condition long gone
 
 
@@ -470,11 +471,18 @@ def _clear_observed_gone(
         if name == "auth-failed":
             if (root / AUTH_FAILED_NAME).exists():
                 marker = _read_json(root / AUTH_FAILED_NAME)
+                # A state.json that cannot be read is not an observation that the live account moved (TRDD-1J9B7MWO).
+                if live is None:
+                    continue
                 if not marker or (marker.get("live_email") == live and marker.get("live_exp") == live_exp):
                     continue
         elif name == "capture-refused":
             if _refusal_path(root, slot).exists():
                 continue
+        # rotation-stuck keeps its age-based clear on purpose: the rotator deletes the marker on every
+        # successful switch, but a recovery that needed no switch can leave an aged maxed marker behind
+        # (rotator.py _mark_stuck/_clear_stuck), so an aged marker may mean recovered; waiting for an
+        # observed clear would silence the next weekly all-maxed episode (TRDD-1J9B7MWO).
         else:
             clear_owner_remediations(
                 root, name, now, keep_slots=frozenset(s for n, s in active_parts if n == name)

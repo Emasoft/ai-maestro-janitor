@@ -568,6 +568,20 @@ def test_a_moved_live_account_or_expiry_is_a_clear_for_auth_failed(root: Path) -
     assert "auth-failed" not in _auth_records(root)
 
 
+def test_an_unreadable_state_json_is_not_a_clear_for_auth_failed(root: Path) -> None:
+    """With state.json gone the live account is unknown, so nothing was observed to move: the
+    auth-failed record and its open episode survive."""
+    _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
+    ra.record_auth_failed(root, "authentication_failed", NOW)
+    run = Runner()
+    _fresh_tick(root)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    (root / "state.json").unlink()
+    _fresh_tick(root, NOW + 60)
+    ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
+    assert "auth-failed" in _auth_records(root)
+
+
 def test_an_aged_but_present_capture_refused_marker_is_not_a_clear_but_an_absent_one_is(root: Path) -> None:
     """The 6 h cooldown only stops the alarm; the refusal clears when its marker file is gone."""
     _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
