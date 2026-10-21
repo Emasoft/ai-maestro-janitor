@@ -666,6 +666,7 @@ def task_fleet_plugins_update() -> None:
     else:
         state.log_line("daemon", "  fleet-plugins-update: no updates")
 
+
 # TRDD-R8DRK3DG: every version-update line goes to its OWN sink, daemon-version-update.log.
 # The name differs from the detector's project-tree `version-update.log` ON PURPOSE (the
 # two live in different dirs but share a stem; one grep target per sink avoids confusion).
@@ -705,7 +706,7 @@ def task_version_update() -> None:
     Every run writes exactly one terminal line to daemon-version-update.log
     (TRDD-R8DRK3DG) and one pointer line to daemon.log.
     """
-    outcome = "ok"
+    outcome = "incomplete"
     new_latest, latest_published = "", ""
     updated = False
     try:
@@ -792,14 +793,20 @@ def task_version_update() -> None:
                     f"  version-update: periodic re-pin certified last-good="
                     f"{newly_pinned} (C3 manifest-HMAC trust anchor refreshed)",
                 )
+        # Last statement of the try body. WHY: a BaseException that is not an Exception
+        # (SystemExit from the post-self-update SIGTERM, KeyboardInterrupt) skips the
+        # except clause but still runs finally; it must never be logged as ok.
+        outcome = "ok"
     except Exception as exc:
         outcome = f"error={type(exc).__name__}"
         raise
     finally:
+        state.log_line(
+            "daemon", f"version-update: called outcome={outcome}, see daemon-version-update.log"
+        )
         _version_update_log(
             _version_update_terminal(outcome, new_latest, latest_published, updated)
         )
-        state.log_line("daemon", "version-update: ran, see daemon-version-update.log")
 
 
 def task_oauth_rotator_supervisor() -> None:

@@ -93,6 +93,20 @@ def test_terminal_format_for_unresolved_values():
     assert "updated=False" in line
     assert "outcome=ok" in line
 
+def test_disabled_run_logs_outcome_in_both_logs(tmp_path, monkeypatch):
+    """A run with auto-update disabled records outcome=disabled in the dedicated log and the pointer."""
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", "false")
+    _clear()
+    try:
+        daemon.task_version_update()
+        dedicated = (tmp_path / "daemon-version-update.log").read_text(encoding="utf-8")
+        assert "outcome=disabled" in dedicated
+        pointer = (tmp_path / "daemon.log").read_text(encoding="utf-8")
+        assert "version-update: called outcome=disabled" in pointer
+    finally:
+        _clear()
+
 
 def test_sweep_exempts_attribution_logs(tmp_path):
     """The age sweep keeps version-update.log(.1) but still removes other old logs."""

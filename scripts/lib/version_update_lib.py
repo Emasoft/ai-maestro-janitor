@@ -19,7 +19,7 @@ Functions:
   - `attempt_auto_update(log_writer)` — best-effort `claude plugin
     marketplace update` + per-scope `claude plugin update`; True iff
     at least one scope finished successfully. Designed so both the
-    daemon (logs into daemon.log inside the resolved global-state dir — see
+    daemon (logs into daemon-version-update.log inside the resolved global-state dir — see
     global_state_dir(); by default the plugin DATA dir) and
     the detector (logs into <project>/.janitor/logs/version-update.log)
     can supply their own write-line callable.
@@ -397,7 +397,7 @@ def attempt_auto_update(log_writer: Callable[[str], None],
                         update_log_path: Path | None = None) -> bool:
     """Refresh marketplace + run `claude plugin update` per scope.
 
-    `log_writer(msg)` is the caller's log sink (daemon → daemon.log,
+    `log_writer(msg)` is the caller's log sink (daemon → daemon-version-update.log,
     detector → version-update.log). `update_log_path` is where the
     `claude` subprocess's stdout/stderr is appended; when None, output
     is discarded. Returns True iff at least one scope completed rc=0;
@@ -509,7 +509,7 @@ def do_auto_update_if_needed(plugin_root: Path,
     installed = list_installed_versions(cache_parent)
     latest_installed = installed[-1] if installed else ""
 
-    # The reason goes to the CALLER's log sink (daemon → daemon.log), so a stale C3
+    # The reason goes to the CALLER's log sink (daemon → daemon-version-update.log), so a stale C3
     # anchor now names its own cause on the fire that produced it instead of being
     # reconstructed a week later from three candidate theories (TRDD-ZM5LZ24Y).
     latest_published = resolve_latest_published(
