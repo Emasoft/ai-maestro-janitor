@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T21:04:02+0200
+updated: 2026-10-21T21:06:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -58,3 +58,7 @@ Supersedes the plan section above where they differ. (a) Windows backend: split 
 
 (b) owner-remediation.json has no reader besides its two writers (rotator_alert.py, oauth-login-needed.py), grep of scripts/skills/commands/rules 2026-10-21; its comment calls it control-plane state, not a finding source. Before dropping the gate, re-grep readers: no findings ledger, SessionStart, heartbeat or agent-visible surface may read it. (c) REMOVE the four drift prints and the detector's own notify.push (it runs in every session and breaks ruling 2 by itself); the detector only records. (f) DELETE the REPEAT_S daily repeat within an episode. Episode key = condition + kind + slot where the condition is per-slot, so a second account is still notified. The sent-record lives on disk in global-state, written atomically under a lock shared by the alert thread, tick thread and main loop, so a daemon restart or handover never resends. (e) Reason for the dedicated thread: today evaluation runs on the tick thread, so a hung tick suppresses its own tick-stalled alarm. (h) Both directions: if the ai-maestro server absorbs the rotator tick, the user must still get exactly one notification, not two and not zero. (a)/(i) the Windows-backend card goes in eht:, the test-leak card in npt:, once filed.
 Filed 2026-10-21: TRDD-79728HXT (test leak, npt), TRDD-V5FP4506 (Windows backend, eht), TRDD-RVX4DRJC (rotator false all-accounts-maxed, parts A and B; related, not a blocker of this card).
+
+## Advisor consult and code facts (2026-10-21)
+
+Two units, SERIAL (both touch rotator_alert.py; one writer). UNIT 1 = scripts/dispatch.py only: delete _phase_rotator_alert, its call, and the tests asserting the rotator drift line; drift_parts stays until unit 2. UNIT 2 = rotator_alert.py + daemon.py + oauth-login-needed.py per the amended plan. Code facts read: notify.push already dedupes by content hash in global_state_dir()/notify-sent.txt (notify.py:55,110-138), but notify._deliver, which rotator_alert.evaluate calls, bypasses it; item (f) EXTENDS that store with episode semantics (condition+kind+slot key, flap window, no daily repeat), never a parallel sent-file. The detector's home is rotator.configured_rotator_home() (documented as the daemon's SSOT) and the daemon passes oauth_supervisor._rotator_root(); unit 2 must confirm both return the same path before relying on item (c). Residual: a real_state-marked test could still reach evaluate; none mentions notify.
