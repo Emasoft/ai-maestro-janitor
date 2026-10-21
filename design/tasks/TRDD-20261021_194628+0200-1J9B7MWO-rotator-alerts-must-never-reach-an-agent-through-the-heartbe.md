@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T19:47:45+0200
+updated: 2026-10-21T19:59:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,3 +36,7 @@ Ordering: scripts/dispatch.py is being edited by the worker applying the 3cb0c59
 ## Scope refined by review of 2dbd1bb7
 
 Decided: every rotator alert kind leaves agent context, EXCEPT that tick-stalled (a hung rotator daemon writes no alert file, so only the session-side watchdog sees it and the daemon cannot notify) is re-routed to a session-side desktop notification instead of a drift line, so the owner still learns of it without an agent reading it. Cause, precisely: urgent alerts print on every fire by design (janitor#342 throttled only advisories), and since TRDD-MMWDSFB4 drift_parts returns every alert as urgent with advisory always empty, so the advisory stamp branch in _phase_rotator_alert is dead code to delete. Replacement is NOT the findings ledger (session-start can inject unread findings into a turn): the record stays in the daemon's rotator log plus the desktop notification. Also in scope: scripts/detectors/oauth-login-needed.py words a stuck rotation from the same stuck_text table, so check it does not print the same false text as a drift line; tests that assert the line (tests/test_rotator_alert.py and any other hit for _phase_rotator_alert / drift_parts); the module docstring of rotator_alert.py and _phase_rotator_alert's docstring; any rule, skill or wikimem page saying the heartbeat shows rotator alerts. Out of scope: whether the daemon keeps writing rotator-alert.json (other readers: /janitor-doctor, oauth-login-needed). The false all-accounts-maxed verdict keeps raising a false desktop notification until rotator part A (branch rotator-stuck-kind-split, reverted on main as ddf470ae) and part B (waits on the user's keychain mdat line) land; no card yet tracks those two by id.
+
+## USER ruling 2026-10-21 (supersedes the open question above)
+
+USER, verbatim: "i said that the janitor must not surface the rotator or account issues to the agent, but this does not mean it must not inform the user. launch a system notification (depending on the platform you are running on), so the user will see the notification without disturbing the working agents." So: EVERY rotator and account alert (all kinds, tick-stalled included) goes to the user as a native system notification and never into agent context. Design: the daemon keeps notifying through scripts/lib/notify.py for the alerts it writes; tick-stalled, which only the session-side watchdog sees, is notified from dispatch through the same notify.py, gated by ONE machine-wide stamp with the daemon's DEBOUNCE_S/REPEAT_S backoff so N armed sessions raise one notification, not N per fire. notify.py today covers macOS (osascript) and Linux (notify-send) only: add a Windows backend (PowerShell toast) in the same change. Then remove _phase_rotator_alert's stdout print and its dead advisory stamp branch, and apply the remaining review items above (oauth-login-needed detector, tests, docstrings, rules/skills/wikimem; the Cause paragraph's 'cannot act on any rotator alert' line is superseded by this ruling).
