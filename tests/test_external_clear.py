@@ -842,7 +842,8 @@ def test_recovery_pending_true_for_an_old_but_armed_clear_flag(tmp_path):
 
 
 def test_recovery_pending_false_when_clear_observed_predates_the_flag(tmp_path):
-    """The 2026-10-21 incident shape: clear-observed.ts EXISTS (from an earlier clear) but is OLDER than the flag, so the flag is unarmed and ages out."""
+    """The 2026-10-21 incident shape: clear-observed.ts EXISTS (from an earlier clear) but is
+    OLDER than the flag, so the flag is unarmed and ages out."""
     written_at = _clear_flag(tmp_path, written_ago_s=7200)
     (tmp_path / "clear-observed.ts").write_text(str(written_at - 3600), encoding="utf-8")
     assert ec.recovery_pending(tmp_path) is False
@@ -852,6 +853,37 @@ def test_recovery_pending_true_when_clear_observed_equals_written_at(tmp_path):
     """Boundary: an observed stamp equal to written_at arms the flag."""
     written_at = _clear_flag(tmp_path, written_ago_s=7200)
     (tmp_path / "clear-observed.ts").write_text(str(written_at), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is True
+
+
+def test_recovery_pending_false_when_a_much_later_clear_stamps_an_aged_flag(tmp_path):
+    """A later janitor clear (stamp fresh now, far past written_at + the age floor) must NOT arm
+    the abandoned 7200 s flag -- else the stale flag would veto every shrink lever forever."""
+    _clear_flag(tmp_path, written_ago_s=7200)
+    (tmp_path / "clear-observed.ts").write_text(str(int(time.time())), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is False
+    assert ec.clear_flag_armed(tmp_path) is False
+
+
+def test_recovery_pending_true_when_clear_observed_is_at_the_upper_bound(tmp_path):
+    """Boundary: a stamp exactly written_at + the age floor still arms (the clear ran, just late)."""
+    written_at = _clear_flag(tmp_path, written_ago_s=7200)
+    stamp = written_at + ec._UNARMED_CLEAR_FLAG_MAX_AGE_S
+    (tmp_path / "clear-observed.ts").write_text(str(stamp), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is True
+
+
+def test_recovery_pending_false_when_clear_observed_is_one_second_before_written_at(tmp_path):
+    """No slack below written_at: the sidecar is written before the /clear Enter, so an earlier
+    stamp belongs to a previous clear."""
+    written_at = _clear_flag(tmp_path, written_ago_s=7200)
+    (tmp_path / "clear-observed.ts").write_text(str(written_at - 1), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is False
+
+
+def test_recovery_pending_true_for_a_young_unarmed_clear_flag_without_sidecar(tmp_path):
+    """No .ts sidecar and a young flag mtime: still vetoes (pairs with the old-mtime test below)."""
+    _clear_flag(tmp_path, written_ago_s=60, sidecar=False)
     assert ec.recovery_pending(tmp_path) is True
 
 
@@ -1083,7 +1115,6 @@ def test_recent_messages_skips_tool_noise(tmp_path):
     )
     got = ec.recent_messages(str(t))
     assert got == ["USER: hello", "ASSISTANT: hi back"]
-
 
 
 def test_recent_messages_drops_a_harness_admin_command_wrapper(tmp_path):

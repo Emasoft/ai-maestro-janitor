@@ -4822,6 +4822,20 @@ def test_phase_clear_resume_armed_and_fresh_still_resumes(env_isolation: dict) -
     assert out.startswith("[janitor-resume]"), f"a fresh armed flag must still resume, got {out!r}"
 
 
+def test_phase_clear_resume_aged_flag_armed_by_a_much_later_clear_is_not_replayed(
+    env_isolation: dict,
+) -> None:
+    """A 2 h old flag whose stamp is a LATER clear (fresh now) must not replay its stale
+    directive: dispatch uses the same armed definition as recovery_pending."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "stale directive TRDD-Z582IKIR", age_s=7200)
+    _observe_clear(state)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", f"a stale flag armed by a much-later clear must not resume, got {out!r}"
+
+
 def test_phase_compact_resume_expired_flag_is_swept(env_isolation: dict) -> None:
     """(sub-step 3) A post-compact flag older than the max-age bound must be swept."""
     dispatch = _import_dispatch()

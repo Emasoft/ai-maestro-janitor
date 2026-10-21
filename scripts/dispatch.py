@@ -1437,11 +1437,11 @@ def _emit_quiet_if_idle() -> None:
         print("[janitor-quiet]")
         _phase_background_worker_progress()
 
+
 # TRDD-P64SR014: a detector the dispatcher kills or cannot start protects nothing, yet
 # dispatch.log was the only trace (25 timeouts in one rotation, unseen). Three failed passes in a
 # row become ONE HIGH ledger finding + drift line per episode; the next ok pass records recovery.
 _DETECTOR_FAIL_STREAK = 3
-
 
 
 def _track_detector_streak(name: str, outcome: str) -> None:
@@ -1491,7 +1491,6 @@ def _track_detector_streak(name: str, outcome: str) -> None:
                 sys.stdout.write(line + "\n")
     except (OSError, ValueError):
         pass
-
 
 
 def _record_default_outcome(name: str, outcome: str, started: int) -> None:
@@ -2580,6 +2579,8 @@ def _phase_runaway_alert() -> None:
     # the newest `RUNAWAY_ALERT_STAMP_MAX` — the oldest go first, because
     # they are the ones a future kill is least likely to match.
     _write_runaway_alert_stamp(stamp, list(seen) + fresh_sigs)
+
+
 def _phase_rotator_alert() -> None:
     """Surface the daemon's `rotator-alert.json` as one drift line (TRDD-3OS6AXV3 R4).
 
@@ -2724,8 +2725,13 @@ def _phase_clear_resume() -> bool:
     # stall this phase exists to prevent, so the tie must break toward resuming.
     now = int(time.time())
     written_at = state.read_int_state(since_file, 0)
-    observed_at = state.read_int_state(sd / "clear-observed.ts", 0)
-    if observed_at <= 0 or observed_at < written_at:
+    # WHY the shared helper, not a local `observed_at >= written_at`: that one-sided test let
+    # a LATER clear (a janitor clear running past an abandoned, aged flag) arm the stale flag
+    # and replay its old directive as a [janitor-resume] cue. `clear_flag_armed` also bounds
+    # the stamp from above -- the same definition `recovery_pending` vetoes with.
+    import external_clear  # noqa: PLC0415 - shared armed predicate
+
+    if not external_clear.clear_flag_armed(sd):
         # NOT armed. Before leaving it, bound it: making the flag unconsumable by any other
         # phase (the fix above) also means a /clear the user never ran leaves it on disk
         # FOREVER, and the next real /clear would then resume against a directive from an

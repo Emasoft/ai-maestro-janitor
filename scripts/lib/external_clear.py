@@ -1270,8 +1270,9 @@ _UNARMED_CLEAR_FLAG_MAX_AGE_S = 3600
 
 
 def recovery_pending(state_dir: Path) -> bool:
-    """True iff a rate-limit / API-error / compact / clear resume cue is still pending (unconsumed),
-    on disk for this state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
+    """True when a rate-limit / API-error / compact / clear resume cue is still pending
+    (unconsumed), except an abandoned unarmed clear flag (see below), on disk for this
+    state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
 
     SHARED HELPER (TRDD-L32WC0H7 card 1 follow-up item 2): this used to be three separate
     inline copies of the same three-flag check -- the SessionStart hook
@@ -1288,10 +1289,10 @@ def recovery_pending(state_dir: Path) -> bool:
     replayed to the model, and a /clear right now would destroy the context that replay is
     about to need before it is ever read.
 
-    The clear flag alone is age-bounded: ARMED (clear-observed.ts stamped at or after the flag
-    was written, i.e. the /clear really ran) it vetoes at any age; UNARMED it vetoes only while
-    younger than _UNARMED_CLEAR_FLAG_MAX_AGE_S, so an abandoned never-armed flag stops
-    blocking every shrink lever. The other two flags veto at any age.
+    The clear flag alone is age-bounded: ARMED (`clear_flag_armed`, the /clear really ran) it
+    vetoes; UNARMED it vetoes only while younger than _UNARMED_CLEAR_FLAG_MAX_AGE_S, so an
+    abandoned never-armed flag stops blocking every shrink lever. The other two flags veto at
+    any age.
 
     Best-effort, fail-open (a read error reads as "nothing pending") -- the SAME asymmetry
     _fire_recorded already documents: a missed veto costs one wrongly-cleared session, a false
@@ -1303,14 +1304,34 @@ def recovery_pending(state_dir: Path) -> bool:
         clear_flag = state_dir / "resume-after-clear.flag"
         if not clear_flag.is_file():
             return False
+        if clear_flag_armed(state_dir):
+            return True
         # Same written_at shape as dispatch's resume-flag age check: sidecar, else flag mtime.
         written_at = state.read_int_state(state_dir / "resume-after-clear.ts", 0) or state.file_mtime(clear_flag)
-        observed_at = state.read_int_state(state_dir / "clear-observed.ts", 0)
-        if observed_at > 0 and observed_at >= written_at:
-            return True
         return (time.time() - written_at) < _UNARMED_CLEAR_FLAG_MAX_AGE_S
     except OSError:
         return False
+
+
+def clear_flag_armed(state_dir: Path) -> bool:
+    """True when the SessionStart(source=clear) stamp belongs to the pending resume-after-clear.flag.
+
+    Armed means `written_at <= clear-observed.ts <= written_at + _UNARMED_CLEAR_FLAG_MAX_AGE_S`
+    with the stamp present. The caller guarantees the flag exists. SHARED by `recovery_pending`
+    and dispatch `_phase_clear_resume`, so the two can never disagree on what armed means.
+
+    WHY an upper bound: a stamp far past the flag cannot be the /clear that flag announced. It
+    is a LATER clear (e.g. a janitor clear that ran once the abandoned flag aged out of the
+    veto); counting it as arming would revive the stale flag -- a permanent veto, and a replay
+    of its stale directive. WHY no slack below written_at: clear_trigger `_persist_resume_state`
+    writes the .ts sidecar and the flag strictly BEFORE the verified Enter on /clear
+    (scripts/clear_trigger.py:494-510), so the real stamp is never earlier than written_at.
+    """
+    clear_flag = state_dir / "resume-after-clear.flag"
+    # Same written_at shape as dispatch's resume-flag age check: sidecar, else flag mtime.
+    written_at = state.read_int_state(state_dir / "resume-after-clear.ts", 0) or state.file_mtime(clear_flag)
+    observed_at = state.read_int_state(state_dir / "clear-observed.ts", 0)
+    return observed_at > 0 and written_at <= observed_at <= written_at + _UNARMED_CLEAR_FLAG_MAX_AGE_S
 
 
 def cache_expired_from_harness_payload(payload: Mapping[str, object]) -> bool | None:
