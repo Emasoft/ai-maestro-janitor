@@ -85,6 +85,23 @@ def test_terminal_line_is_written_in_finally():
     assert found
 
 
+def test_outcome_starts_incomplete_and_ok_is_last_try_statement():
+    """outcome is 'incomplete' until the last statement of the try body sets 'ok', so an interrupted run never logs ok."""
+    body = _task_node().body
+    try_node = next(n for n in body if isinstance(n, ast.Try))
+
+    def sets_outcome(node: ast.stmt, value: str) -> bool:
+        return (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "outcome" for t in node.targets)
+            and isinstance(node.value, ast.Constant)
+            and node.value.value == value
+        )
+
+    assert any(sets_outcome(n, "incomplete") for n in body[: body.index(try_node)])
+    assert sets_outcome(try_node.body[-1], "ok")
+
+
 def test_terminal_format_for_unresolved_values():
     """_version_update_terminal renders empty values as unknown/unresolved and updated=False."""
     line = daemon._version_update_terminal("ok", "", "", False)
@@ -93,10 +110,12 @@ def test_terminal_format_for_unresolved_values():
     assert "updated=False" in line
     assert "outcome=ok" in line
 
+
 def test_disabled_run_logs_outcome_in_both_logs(tmp_path, monkeypatch):
     """A run with auto-update disabled records outcome=disabled in the dedicated log and the pointer."""
     monkeypatch.setenv("JANITOR_LOG_DIR", str(tmp_path))
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", "false")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     _clear()
     try:
         daemon.task_version_update()
