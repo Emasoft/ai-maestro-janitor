@@ -4834,6 +4834,30 @@ def test_phase_clear_resume_aged_flag_armed_by_a_much_later_clear_is_not_replaye
     _observe_clear(state)
     out = _capture_stdout(dispatch._phase_clear_resume)
     assert out == "", f"a stale flag armed by a much-later clear must not resume, got {out!r}"
+    assert "[janitor-resume]" not in out
+    assert (state.state_dir() / "resume-after-clear.flag").exists(), "flag is kept (not swept, not consumed)"
+
+
+def test_phase_clear_resume_aged_but_armed_flag_still_resumes(env_isolation: dict) -> None:
+    """A 5000 s old flag whose stamp landed 1000 s after it (inside the window) still resumes."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "continue TRDD-Z582IKIR", age_s=5000)
+    _observe_clear(state, age_s=4000)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]"), f"an aged but armed flag must resume, got {out!r}"
+
+
+def test_phase_clear_resume_unarmed_flag_past_window_is_not_swept(env_isolation: dict) -> None:
+    """An unarmed flag 5000 s old (past the arming window, under max-age) is left on disk."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "continue TRDD-Z582IKIR", age_s=5000)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", f"an unarmed flag must not resume, got {out!r}"
+    assert (state.state_dir() / "resume-after-clear.flag").exists(), "unarmed flag must be kept"
 
 
 def test_phase_compact_resume_expired_flag_is_swept(env_isolation: dict) -> None:

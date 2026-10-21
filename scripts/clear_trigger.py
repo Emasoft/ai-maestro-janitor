@@ -132,7 +132,6 @@ def plan_clear(transcript_path: str | None = None) -> tuple[list[str], list[str]
     return [CLEAR_CMD], clear_bootstrap(transcript_path)
 
 
-
 GOAL_CMD = "/goal"
 GOAL_MAX_CHARS = 4000
 # Bracketed-paste markers survive once their ESC is stripped as a non-printable.
@@ -183,7 +182,6 @@ def clear_bootstrap(transcript_path: str | None) -> list[str]:
         if goal:
             return [ARM_CMD, f"{GOAL_CMD} {goal}"]
     return list(_BOOTSTRAP_CMDS)
-
 
 
 def is_goal_bootstrap(cmds: Sequence[str]) -> bool:
@@ -719,12 +717,12 @@ def _run_chain_payload(payload_b64: str) -> int:
         now_ts = int(time.time())
 
         def _clear_resume_armed(sd: Path) -> bool:
-            # Mirrors dispatch.py:_phase_clear_resume's own ARMED check exactly (same `>=`
-            # tie-break, same two files) so this veto's short bound and that phase's actual
-            # consumption never disagree about which case they're in.
-            written_at = state.read_int_state(sd / "resume-after-clear.ts", 0)
-            observed_at = state.read_int_state(sd / _GATE_STAMP, 0)
-            return observed_at > 0 and observed_at >= written_at
+            # Same armed definition dispatch._phase_clear_resume and recovery_pending use
+            # (external_clear.clear_flag_armed: stamp inside the arming window), so this
+            # veto's short bound and that phase's actual consumption never disagree.
+            import external_clear  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            return external_clear.clear_flag_armed(sd)
 
         def _flag_fresh(
             flag: Path, since: Path, max_age_s: float, *, recovered_after: int | None = None
@@ -795,9 +793,10 @@ def _run_chain_payload(payload_b64: str) -> int:
                 #
                 # The short bound must NOT apply once dispatch.py's `_phase_clear_resume`
                 # (scripts/dispatch.py:1681) has ARMED -- i.e. a fresh session already
-                # stamped `clear-observed.ts` at/after this flag was written, exactly the
-                # signal that phase itself gates on (same `>=` tie-break, same comment there:
-                # "the tie means the clear landed in the same second the flag was written").
+                # stamped `clear-observed.ts` within the arming window
+                # (external_clear.clear_flag_armed), exactly the signal that phase itself gates on
+                # (it uses the same definition; its tie means the clear landed in the same second
+                # the flag was written).
                 # Once armed, dispatch's own phase will consume the flag on its NEXT
                 # heartbeat -- a matter of minutes, not hours -- so keeping the full 24h
                 # backstop here costs nothing and avoids a race: an ARMED-but-not-yet-
@@ -1407,7 +1406,8 @@ def main() -> int:
         status_b = _fire_phase(boot_cmds, delay=delay + settle, dry_run=args.dry_run)
     # Both phases share the same pane, so they degrade together: if the pane isn't
     # automatable, NEITHER fired. The resume state is still recorded, so a manual
-    # /clear + /janitor-arm still auto-resumes.
+    # /clear + /janitor-arm still auto-resumes (only within _UNARMED_CLEAR_FLAG_MAX_AGE_S,
+    # one hour, of this write).
     if status_a == _NO_ITERM and status_b == _NO_ITERM:
         print("NO_ITERM")
         return 0

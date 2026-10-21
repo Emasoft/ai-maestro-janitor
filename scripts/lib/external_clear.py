@@ -1266,13 +1266,16 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
 # WHY no clear-chain.lock flock probe: winning LOCK_EX|LOCK_NB even for an instant can make a
 # NEW chain's own LOCK_NB acquire fail ("already pending", /clear silently lost); past this age
 # a legitimate chain (180 s gate + phase B) is long gone, so a probe adds nothing.
+# This constant is BOTH the unarmed-veto age (recovery_pending) and the arming window
+# (clear_flag_armed). The two must stay equal: a flag that stopped vetoing must never be
+# re-armable by a later stamp.
 _UNARMED_CLEAR_FLAG_MAX_AGE_S = 3600
 
 
 def recovery_pending(state_dir: Path) -> bool:
     """True when a rate-limit / API-error / compact / clear resume cue is still pending
-    (unconsumed), except an abandoned unarmed clear flag (see below), on disk for this
-    state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
+    (unconsumed) on disk for this state dir, except an abandoned unarmed clear flag (see
+    below) (card 1 item 5 follow-up, TRDD-L32WC0H7).
 
     SHARED HELPER (TRDD-L32WC0H7 card 1 follow-up item 2): this used to be three separate
     inline copies of the same three-flag check -- the SessionStart hook
@@ -1290,9 +1293,9 @@ def recovery_pending(state_dir: Path) -> bool:
     about to need before it is ever read.
 
     The clear flag alone is age-bounded: ARMED (`clear_flag_armed`, the /clear really ran) it
-    vetoes; UNARMED it vetoes only while younger than _UNARMED_CLEAR_FLAG_MAX_AGE_S, so an
-    abandoned never-armed flag stops blocking every shrink lever. The other two flags veto at
-    any age.
+    vetoes until consumed, at any age; UNARMED it vetoes only while younger than
+    _UNARMED_CLEAR_FLAG_MAX_AGE_S, so an abandoned never-armed flag stops blocking every shrink
+    lever. The other two flags veto at any age.
 
     Best-effort, fail-open (a read error reads as "nothing pending") -- the SAME asymmetry
     _fire_recorded already documents: a missed veto costs one wrongly-cleared session, a false
@@ -1323,9 +1326,16 @@ def clear_flag_armed(state_dir: Path) -> bool:
     WHY an upper bound: a stamp far past the flag cannot be the /clear that flag announced. It
     is a LATER clear (e.g. a janitor clear that ran once the abandoned flag aged out of the
     veto); counting it as arming would revive the stale flag -- a permanent veto, and a replay
-    of its stale directive. WHY no slack below written_at: clear_trigger `_persist_resume_state`
-    writes the .ts sidecar and the flag strictly BEFORE the verified Enter on /clear
-    (scripts/clear_trigger.py:494-510), so the real stamp is never earlier than written_at.
+    of its stale directive.
+
+    WHY no slack below written_at: the flag has exactly two writers, both
+    `clear_trigger._write_clear_marker` (sidecar, then flag): `_persist_resume_state`
+    (pre_submit_first, right before the verified Enter, scripts/clear_trigger.py ~494-510/953)
+    and the unreadable-channel fallback in `main()` (~1400, before the blind /clear send). Both
+    write before the /clear, so the real stamp is never earlier than written_at.
+
+    Accepted cost: on the fallback path a MANUAL /clear typed more than the window after the flag
+    is written no longer auto-resumes; the cost is a missed auto-resume, never a wrong one.
     """
     clear_flag = state_dir / "resume-after-clear.flag"
     # Same written_at shape as dispatch's resume-flag age check: sidecar, else flag mtime.

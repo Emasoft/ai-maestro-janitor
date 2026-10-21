@@ -117,7 +117,6 @@ def test_plan_clear_is_clear_then_bootstrap() -> None:
     assert phase_b == ["/janitor-arm", "/janitor-resume"], "bootstrap re-arms THEN resumes"
 
 
-
 def _goal_transcript(path: Path, *, met: bool | None, condition: str = "ship C4") -> str:
     """A synthetic old transcript: one human turn, then (optionally) a goal_status record."""
     import json
@@ -187,7 +186,6 @@ def test_goal_command_never_stamps_user_intent(tmp_path: Path) -> None:
     assert user_intent.record_intent_from_prompt("/janitor-disarm", state_dir=tmp_path) == ["disarm"]
 
 
-
 def test_corrupt_transcript_falls_back_to_plain_bootstrap(tmp_path: Path, monkeypatch) -> None:
     """TRDD-B3PY3HV7: a transcript record the extractor chokes on must not leave the chain with no phase B."""
     mod = _import()
@@ -221,7 +219,6 @@ def test_cleared_goal_is_treated_as_met(tmp_path: Path) -> None:
     q = tmp_path / "p.jsonl"
     q.write_text(json.dumps(planted) + "\n", encoding="utf-8")
     assert sc.clear_fields(str(q))["goal"] == ""
-
 
 
 def test_goal_set_again_after_a_clear_is_the_goal(tmp_path: Path) -> None:
@@ -265,7 +262,6 @@ def test_goal_path_leaves_no_resume_flag(tmp_path: Path, monkeypatch) -> None:
     mod = _import()
     assert _flag_after_chain(mod, monkeypatch, tmp_path / "goal", ["/janitor-arm", "/goal ship C4"]) is False
     assert _flag_after_chain(mod, monkeypatch, tmp_path / "plain", ["/janitor-arm", "/janitor-resume"]) is True
-
 
 
 def test_daemon_goal_comes_from_the_recorded_pane_not_the_newest_transcript(tmp_path: Path, monkeypatch) -> None:
@@ -1634,6 +1630,36 @@ def test_an_armed_resume_after_clear_flag_past_the_short_bound_still_vetoes(
     ok, why = captured["still_wanted"]()
     assert ok is False
     assert "recovery pending" in why
+
+
+def test_a_much_later_clear_does_not_arm_a_stale_clear_flag_when_another_flag_is_expired(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A rate-limited.flag past its max age plus a 2 h old resume-after-clear.flag with a FRESH
+    clear-observed.ts (a much-later clear, outside the arming window) must not veto: the stale
+    clear flag is unarmed, so the old one-sided `observed_at >= written_at` test, which made it
+    look armed and gave it the 24h bound, must not come back."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: None)
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    now = int(_time.time())
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    (sd / "rate-limited-since.ts").write_text(str(now - 30 * 3600), encoding="utf-8")
+    (sd / "resume-after-clear.flag").write_text("1", encoding="utf-8")
+    (sd / "resume-after-clear.ts").write_text(str(now - 7200), encoding="utf-8")
+    (sd / mod._GATE_STAMP).write_text(str(now), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
 
 
 def test_no_headroom_constants_match_the_real_model_fallback_detector(tmp_path: Path) -> None:

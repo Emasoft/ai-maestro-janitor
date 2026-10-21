@@ -2746,12 +2746,15 @@ def _phase_clear_resume() -> bool:
             os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
         )
         age = now - (written_at or state.file_mtime(flag))
+        # A flag past the arming window is unarmable but deliberately kept until max_age:
+        # on-session-start stamps clear-observed.ts only while the flag exists, and a queued
+        # clear chain may still be waiting on that stamp (gate clear-observed.ts, give-up
+        # _CLEAR_CHAIN_GIVEUP_S).
         if max_age > 0 and age > max_age:
             for stale in (flag, since_file):
                 try:
                     stale.unlink()
                 except FileNotFoundError:
-                    pass
                     pass
             # TRDD-RAEGS1D5 card 5: sweep this abandoned flag's per-pane sidecar(s) too — a
             # PATTERN unlink, not a fixed path, because the pane id is baked into the filename
@@ -2776,7 +2779,6 @@ def _phase_clear_resume() -> bool:
             try:
                 stale.unlink()
             except FileNotFoundError:
-                pass
                 pass
         # Same pattern-based sweep as the NOT-armed branch above — an armed-but-expired flag's
         # per-pane sidecar(s) are equally orphaned once this cue is discarded unresumed.
