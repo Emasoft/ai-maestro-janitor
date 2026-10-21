@@ -21,7 +21,7 @@ approval-datetime: 2026-10-21T20:59:26+0200
 
 # Test suite writes the real plugin-data global-state notify-sent.txt
 
-Found 2026-10-21 while planning TRDD-1J9B7MWO: a full uv run pytest run wrote the REAL plugin-data global-state/notify-sent.txt instead of a temp dir, so a test run can suppress or alter a real desktop notification's dedupe. Fix: find the test(s) and the code path that resolve the notify-sent path without the test isolation override, route them through the isolated global-state dir, and add a guard test that the suite leaves the real file untouched (snapshot mtime and content before and after). Prerequisite (npt) of TRDD-1J9B7MWO, whose new tests depend on this store.
+SUSPECTED, not proven (2026-10-21, while planning TRDD-1J9B7MWO): the real plugin-data global-state/notify-sent.txt changed during a full uv run pytest run, but the live janitor daemon writes that file legitimately, so the evidence does not separate a suite leak from a daemon write. FIRST STEP: tell the two apart (run the suite with the daemon stopped and compare the file's mtime and content before and after, or identify the writing process). If the daemon wrote it, cancel this card and drop it from TRDD-1J9B7MWO's npt. If the suite leaked, fix: find the test(s) and the code path that resolve the notify-sent path without the test isolation override, route them through the isolated global-state dir, and add a guard test that the suite leaves the real file untouched (snapshot mtime and content before and after). Prerequisite (npt) of TRDD-1J9B7MWO, whose new tests depend on this store.
 
 ## Approval log
 

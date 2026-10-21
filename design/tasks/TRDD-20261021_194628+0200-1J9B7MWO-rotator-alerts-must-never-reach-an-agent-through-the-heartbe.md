@@ -24,7 +24,7 @@ eht: [V5FP4506]
 # Rotator alerts must never reach an agent through the heartbeat
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-21
-NEXT ACTION: the plan is the section "USER ruling 2 (2026-10-21) and the implementation plan" AS AMENDED by "Plan corrections before any dispatch" (a)-(i) and then "Review of 6f3dd945"; later sections win. The opening "Work:" line below (record to the findings ledger) is SUPERSEDED: no ledger, the daemon's single desktop notification only. Order: file and fix the notify-sent.txt test leak (npt), file the Windows-backend card (eht) and the rotator part A/B card, consult the Fable advisor, then brief lean-workers. No code written yet.
+NEXT ACTION: the plan is the section "USER ruling 2 (2026-10-21) and the implementation plan" AS AMENDED by "Plan corrections before any dispatch" (a)-(i) and then "Review of 6f3dd945"; later sections win. The opening "Work:" line below (record to the findings ledger) is SUPERSEDED: no ledger, the daemon's single desktop notification only. Derived cards are FILED: TRDD-79728HXT (suspected test leak, npt, work it first), TRDD-V5FP4506 (Windows backend, eht, parked in backburner, so this card cannot complete until someone pulls it), TRDD-RVX4DRJC (false all-accounts-maxed, related, not a blocker). Order: 79728HXT, then consult the Fable advisor, then brief lean-workers. No code written yet.
 
 USER, 2026-10-21, verbatim: "why you are still printing the warning about the accounts exhaustion? not only it is false, but it should not be surfaced to the agents."
 
