@@ -4,7 +4,7 @@ title: Janitor chores must yield to host pressure and never compete for CPU
 column: todo
 status: tasked
 created: 2026-10-20T18:19:36+0200
-updated: 2026-10-20T23:48:51+0200
+updated: 2026-10-21T19:08:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: manager
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T18:19:36+0200
+implementation-commits: [b15c9d5d]
 ---
 
 # Janitor chores must yield to host pressure and never compete for CPU

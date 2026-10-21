@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-10-20T00:43:11+0200
+updated: 2026-10-21T19:08:48+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -12,7 +12,7 @@ severity: major
 min-approval-requirement: none
 labels: [version-update, absorbed-chores, ai-maestro, rollout]
 npt: []
-eht: [R8DRK3DG]
+eht: [R8DRK3DG, EKZ44CDZ]
 implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
 pre-block-column: 
@@ -185,6 +185,7 @@ undoing). Tests now 9: 6 on the pure predicate, 2 on the stamp round-trips (`las
 2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: at the next release, with a janitor session armed and no hand update run, the last-raised stamp for the update flag exists, the installed-plugins record's user-scope update time minus the GitHub publish time is under 15 minutes, and the install time matches an absorbed tick in the ai-maestro server's last-run summary (not a hand update). v3.7.0 was installed about seven and a half minutes after it was published, but no last-raised stamp for the update flag exists, so the flag path was not shown to be the trigger; three releases have passed unmeasured since this card's wait was written.
 
 2026-10-19 — box-2 third condition FAILED for v3.8.11 (checked by main session). publish 2026-10-07T21:02:13Z → user-scope lastUpdated 2026-10-07T21:04:21Z = 2m08s, but ~/.aimaestro/plugin-update-trail.jsonl (509 entries) has NO fleet-plugins-update entry within ±15 min of publish, so the installer was not the server's absorbed tick; and version-update-last-raised.ts (1791401753 = 21:35:53 local Oct 7) predates the install by ~90 min and belongs to the 3.8.10 window. The trigger is unattributed — consistent with Claude Code's own marketplace autoUpdate. Box 2 stays open; a future release needs the last-raised stamp to bracket the install time.
+2026-10-21 — TIMING LIMIT OF THE JANITOR'S OWN UPDATE PATH. Detection by the per-session detector takes up to 300 s, and claude plugin update up to about 120 s, so the janitor path needs about 7 minutes in the worst case, against the 128 s publish-to-install interval observed on 2026-10-07. Since R8DRK3DG (now in testing) every daemon run writes one closing line to daemon-version-update.log recording what it attempted, so future windows are attributable; whether the path can beat a two-minute window is TRDD-EKZ44CDZ, added to eht.
 
 ## The two paths are not equivalent  ⛔ SUPERSEDED
 

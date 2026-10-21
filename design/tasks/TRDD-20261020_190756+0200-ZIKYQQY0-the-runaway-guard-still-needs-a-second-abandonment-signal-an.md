@@ -4,7 +4,7 @@ title: The runaway guard still needs a second abandonment signal and a correct l
 column: todo
 status: tasked
 created: 2026-10-20T19:07:56+0200
-updated: 2026-10-21T00:02:43+0200
+updated: 2026-10-21T19:08:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: manager
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T19:07:56+0200
+implementation-commits: [b15c9d5d, f7c02ce4, e83328be]
 ---
 
 # The runaway guard still needs a second abandonment signal and a correct ledger destination
