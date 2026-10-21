@@ -666,6 +666,23 @@ def task_fleet_plugins_update() -> None:
     else:
         state.log_line("daemon", "  fleet-plugins-update: no updates")
 
+# TRDD-R8DRK3DG: every version-update line goes to its OWN sink, daemon-version-update.log.
+# The name differs from the detector's project-tree `version-update.log` ON PURPOSE (the
+# two live in different dirs but share a stem; one grep target per sink avoids confusion).
+# daemon.log rotates within hours on a busy host, so the re-pin/C3 diagnostics scrolled
+# away before anyone investigated. Silence in the dedicated log must mean "the task did
+# not run": hence the disabled/deferred/no-op paths now log a terminal line too.
+def _version_update_log(msg: str) -> None:
+    state.log_line("daemon-version-update", msg)
+
+
+def _version_update_terminal(outcome: str, installed: str, published: str, updated: bool) -> str:
+    """The one terminal line every task_version_update run writes."""
+    return (
+        f"version-update: done outcome={outcome} installed={installed or 'unknown'} "
+        f"published={published or 'unresolved'} updated={updated}"
+    )
+
 
 def task_version_update() -> None:
     """Auto-update the janitor plugin itself when GitHub is ahead of the
@@ -684,92 +701,105 @@ def task_version_update() -> None:
     then SIGTERMs this daemon so the next `ensure_daemon_running()`
     spawns the new daemon from the new cache version. Full auto-roll,
     no human in the loop.
+
+    Every run writes exactly one terminal line to daemon-version-update.log
+    (TRDD-R8DRK3DG) and one pointer line to daemon.log.
     """
-    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", True):
-        return
-
-    # The daemon lives in `<cache>/<version>/scripts/daemon.py`, so its
-    # parent's parent is the version dir we need to pass through.
-    plugin_root = Path(__file__).resolve().parent.parent
-
-    def _log(msg: str) -> None:
-        state.log_line("daemon", f"  {msg}")
-
-    updated, new_latest, latest_published = False, "", ""
-    with gs.marketplace_lock() as got:
-        if not got:
-            _log("version-update deferred (another marketplace op holds the lock)")
-            return
-        updated, new_latest, latest_published = vu.do_auto_update_if_needed(
-            plugin_root, _log, update_log_path=None,
-        )
-    if updated:
-        gs.set_reload_flag(f"janitor-self-update@{new_latest}")
-        state.log_line(
-            "daemon",
-            f"  version-update: janitor self-updated to {new_latest}; "
-            f"reload-needed.flag SET (heartbeat will emit [janitor-reload])",
-        )
-        # C3 (TRDD-T198DT1W): certify the freshly-installed version as the
-        # last-GOOD pin so the dispatcher-stub can cross-check its manifest HMAC
-        # on future fires (the malicious-replacement anchor C2's unsigned
-        # manifest can't provide). We pin the NEW version's CACHE dir
-        # (<cache-parent>/<new_latest>), computing the HMAC over its shipped
-        # manifest with the DATA-dir key. Best-effort + FAIL-OPEN: pin_good_version
-        # is a no-op when the version shipped no manifest or no key resolves, and
-        # any failure just leaves the stub on its C2-only gate — never blocking.
-        try:
-            # resolve_cache_parent, NOT plugin_root.parent: under the staged DATA
-            # closure the latter is ~/.claude/plugins/data (TRDD-ZM5LZ24Y).
-            new_version_dir = vu.resolve_cache_parent(plugin_root) / new_latest
-            if vu.pin_good_version(new_version_dir, new_latest):
-                state.log_line(
-                    "daemon",
-                    f"  version-update: pinned last-good={new_latest} "
-                    f"(C3 manifest-HMAC trust anchor written)",
-                )
-        except Exception as exc:  # noqa: BLE001 — pinning must NEVER break self-update
-            state.log_line("daemon", f"  version-update: last-good pin skipped: {exc}")
-
-    # TRDD-ZM5LZ24Y — Option A (self-healing pin). This call MUST run on
-    # every fire, NOT only inside `if updated:` above: the block above only
-    # certifies a version the DAEMON itself just installed. A version
-    # installed by a human/agent running `claude plugin update ... --scope
-    # user` (which this project's CLAUDE.md instructs on every CI pass)
-    # never goes through `if updated:` at all — that was the entire bug: the
-    # pin stayed frozen on whatever the daemon last self-updated to, forever.
-    # `certify_newest_if_clean` re-derives the newest CACHED version itself
-    # and is a no-op when it is already pinned, so this costs nothing on a
-    # steady-state fire and only does work when the pin has actually drifted.
-    #
-    # F1 (owner-directed 2026-08-14): pass the `latest_published` tag
-    # `do_auto_update_if_needed` ALREADY resolved above (its third return
-    # value) so the provenance gate costs no second `gh api` call — do NOT
-    # call `resolve_latest_published` again here. Empty string (unresolvable:
-    # offline, no `gh`, no releases yet) makes the gate fail CLOSED inside
-    # `certify_newest_if_clean` itself: the existing pin is left untouched,
-    # never advanced on a fire where the release channel could not confirm it.
+    outcome = "ok"
+    new_latest, latest_published = "", ""
+    updated = False
     try:
-        # `log=` makes the DECLINE paths visible. Without it a fire that ran and
-        # refused to pin is byte-indistinguishable from a fire that never ran, which
-        # is exactly why TRDD-ZM5LZ24Y's soak could not be closed from the outside.
-        newly_pinned = vu.certify_newest_if_clean(
-            # resolve_cache_parent, NOT plugin_root.parent: from the staged DATA
-            # closure the latter lists zero versions, and certify's empty-installed
-            # path is its ONE silent return — the pin froze at 0.59.0 for a month
-            # with fires on cadence and nothing logged (TRDD-ZM5LZ24Y, measured).
-            vu.resolve_cache_parent(plugin_root), latest_published or None,
-            log=lambda msg: state.log_line("daemon", f"  version-update: {msg}"),
-        )
-    except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon
-        state.log_line("daemon", f"  version-update: periodic re-pin skipped: {exc}")
-    else:
-        if newly_pinned:
-            state.log_line(
-                "daemon",
-                f"  version-update: periodic re-pin certified last-good="
-                f"{newly_pinned} (C3 manifest-HMAC trust anchor refreshed)",
+        if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", True):
+            outcome = "disabled"
+            return
+
+        # The daemon lives in `<cache>/<version>/scripts/daemon.py`, so its
+        # parent's parent is the version dir we need to pass through.
+        plugin_root = Path(__file__).resolve().parent.parent
+
+        def _log(msg: str) -> None:
+            _version_update_log(f"  {msg}")
+
+        with gs.marketplace_lock() as got:
+            if not got:
+                _log("version-update deferred (another marketplace op holds the lock)")
+                outcome = "deferred"
+                return
+            updated, new_latest, latest_published = vu.do_auto_update_if_needed(
+                plugin_root, _log, update_log_path=None,
             )
+        if updated:
+            gs.set_reload_flag(f"janitor-self-update@{new_latest}")
+            _version_update_log(
+                f"  version-update: janitor self-updated to {new_latest}; "
+                f"reload-needed.flag SET (heartbeat will emit [janitor-reload])",
+            )
+            # C3 (TRDD-T198DT1W): certify the freshly-installed version as the
+            # last-GOOD pin so the dispatcher-stub can cross-check its manifest HMAC
+            # on future fires (the malicious-replacement anchor C2's unsigned
+            # manifest can't provide). We pin the NEW version's CACHE dir
+            # (<cache-parent>/<new_latest>), computing the HMAC over its shipped
+            # manifest with the DATA-dir key. Best-effort + FAIL-OPEN: pin_good_version
+            # is a no-op when the version shipped no manifest or no key resolves, and
+            # any failure just leaves the stub on its C2-only gate — never blocking.
+            try:
+                # resolve_cache_parent, NOT plugin_root.parent: under the staged DATA
+                # closure the latter is ~/.claude/plugins/data (TRDD-ZM5LZ24Y).
+                new_version_dir = vu.resolve_cache_parent(plugin_root) / new_latest
+                if vu.pin_good_version(new_version_dir, new_latest):
+                    _version_update_log(
+                        f"  version-update: pinned last-good={new_latest} "
+                        f"(C3 manifest-HMAC trust anchor written)",
+                    )
+            except Exception as exc:  # noqa: BLE001 — pinning must NEVER break self-update
+                _version_update_log(f"  version-update: last-good pin skipped: {exc}")
+
+        # TRDD-ZM5LZ24Y — Option A (self-healing pin). This call MUST run on
+        # every fire, NOT only inside `if updated:` above: the block above only
+        # certifies a version the DAEMON itself just installed. A version
+        # installed by a human/agent running `claude plugin update ... --scope
+        # user` (which this project's CLAUDE.md instructs on every CI pass)
+        # never goes through `if updated:` at all — that was the entire bug: the
+        # pin stayed frozen on whatever the daemon last self-updated to, forever.
+        # `certify_newest_if_clean` re-derives the newest CACHED version itself
+        # and is a no-op when it is already pinned, so this costs nothing on a
+        # steady-state fire and only does work when the pin has actually drifted.
+        #
+        # F1 (owner-directed 2026-08-14): pass the `latest_published` tag
+        # `do_auto_update_if_needed` ALREADY resolved above (its third return
+        # value) so the provenance gate costs no second `gh api` call — do NOT
+        # call `resolve_latest_published` again here. Empty string (unresolvable:
+        # offline, no `gh`, no releases yet) makes the gate fail CLOSED inside
+        # `certify_newest_if_clean` itself: the existing pin is left untouched,
+        # never advanced on a fire where the release channel could not confirm it.
+        try:
+            # `log=` makes the DECLINE paths visible. Without it a fire that ran and
+            # refused to pin is byte-indistinguishable from a fire that never ran, which
+            # is exactly why TRDD-ZM5LZ24Y's soak could not be closed from the outside.
+            newly_pinned = vu.certify_newest_if_clean(
+                # resolve_cache_parent, NOT plugin_root.parent: from the staged DATA
+                # closure the latter lists zero versions, and certify's empty-installed
+                # path is its ONE silent return — the pin froze at 0.59.0 for a month
+                # with fires on cadence and nothing logged (TRDD-ZM5LZ24Y, measured).
+                vu.resolve_cache_parent(plugin_root), latest_published or None,
+                log=lambda msg: _version_update_log(f"  version-update: {msg}"),
+            )
+        except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon
+            _version_update_log(f"  version-update: periodic re-pin skipped: {exc}")
+        else:
+            if newly_pinned:
+                _version_update_log(
+                    f"  version-update: periodic re-pin certified last-good="
+                    f"{newly_pinned} (C3 manifest-HMAC trust anchor refreshed)",
+                )
+    except Exception as exc:
+        outcome = f"error={type(exc).__name__}"
+        raise
+    finally:
+        _version_update_log(
+            _version_update_terminal(outcome, new_latest, latest_published, updated)
+        )
+        state.log_line("daemon", "version-update: ran, see daemon-version-update.log")
 
 
 def task_oauth_rotator_supervisor() -> None:
@@ -4973,6 +5003,9 @@ def main() -> int:
                 # a one-line diagnosis (e.g. "reason=stale(age=91.2)" pins it to the 90 s
                 # window rather than a restart). Still transition-only — no per-tick logging.
                 state.log_line("daemon", _chore_coordination_message(yielded, probe))
+                # TRDD-R8DRK3DG: the chore's own sink must also say why no `ran` line follows.
+                if "version-update" in yielded:
+                    _version_update_log("version-update: yielded to ai-maestro server")
 
             # The consume paths are cadence-bypass entrances to two absorbed tasks, so each
             # gates on ITS OWN task being yielded (not on "anything yielded" — that would

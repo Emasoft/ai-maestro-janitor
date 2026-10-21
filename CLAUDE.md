@@ -61,7 +61,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   janitor's own `task_version_update`. While the server owns that chore the fire never
   comes. So do NOT wait it out, and do NOT read a frozen `version-update.last-run.ts`
   as a dead daemon (for an absorbed chore a frozen janitor stamp is exactly what
-  healthy server-side execution looks like). Diagnose instead: grep `daemon.log` for
+  healthy server-side execution looks like). Diagnose instead: grep the global-state
+  `daemon-version-update.log` (same dir as `daemon.log`) for
   `version-update: C3 re-pin declined`, which names the refusing predicate outright.
 - **Every janitor-armed session on this machine must end up on the new version.** Prefer a
   path that does NOT require `/reload-plugins`, which breaks the prompt-cache prefix and

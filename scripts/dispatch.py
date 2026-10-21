@@ -1671,13 +1671,24 @@ def _sweep_retired_sentinels() -> None:
             pass
 
 
-def _sweep_old_files(root, suffixes: tuple[str, ...], cutoff: float) -> None:
+# TRDD-R8DRK3DG: attribution logs are exempt from the age sweep. Investigations happen on hosts
+# that have been idle since the release, so a 30-day mtime sweep would delete the evidence.
+# The bound is log_line's 1 MiB rotation (.log.1 is overwritten on rotation — never swept, not
+# never deleted); an abandoned project keeps at most ~2 MiB of it.
+_ATTRIBUTION_LOG_STEMS = ("version-update",)
+
+
+def _sweep_old_files(
+    root, suffixes: tuple[str, ...], cutoff: float, exempt_stems: tuple[str, ...] = ()
+) -> None:
     """Unlink files directly under `root` whose name ends with one of `suffixes`
-    and whose mtime predates `cutoff`. Never recurses, never raises."""
+    and whose mtime predates `cutoff`. Never recurses, never raises. A file named
+    `<stem>.log` or `<stem>.log.1` for a stem in `exempt_stems` is never touched."""
     if not root.is_dir():
         return
+    exempt = {f"{stem}{ext}" for stem in exempt_stems for ext in (".log", ".log.1")}
     for f in root.iterdir():
-        if not f.is_file() or not f.name.endswith(suffixes):
+        if not f.is_file() or not f.name.endswith(suffixes) or f.name in exempt:
             continue
         try:
             if f.stat().st_mtime < cutoff:
@@ -1705,7 +1716,9 @@ def _phase_log_retention() -> None:
     if prev == today:
         return
 
-    _sweep_old_files(state.log_dir(), (".log", ".log.1"), time.time() - (days * 86400))
+    _sweep_old_files(
+        state.log_dir(), (".log", ".log.1"), time.time() - (days * 86400), _ATTRIBUTION_LOG_STEMS
+    )
 
     # F21 (wikimem audit): sweep dead per-session STATE files on the same daily
     # gate. .janitor/state/ accumulates per-session seen-files (e.g. the
