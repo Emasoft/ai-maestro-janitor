@@ -74,6 +74,18 @@ def test_recovery_flag_reports_no_timer(proj: Path) -> None:
     assert dispatch._active_waiting_signal(sd, int(time.time())) == ("recovery-flag", "on-consume")
 
 
+def test_abandoned_unarmed_clear_flag_is_not_a_recovery_signal(proj: Path) -> None:
+    """A 10 h old resume-after-clear.flag whose /clear never ran (no clear-observed.ts) no longer
+    holds the watcher: the age floor in external_clear.recovery_pending ignores it."""
+    dispatch = _import_dispatch()
+    sd = _sd(proj)
+    flag = sd / "resume-after-clear.flag"
+    flag.write_text("x", encoding="utf-8")
+    old = time.time() - 36_000
+    os.utime(flag, (old, old))
+    assert dispatch._active_waiting_signal(sd, int(time.time())) is None
+
+
 def test_resume_stamp_reports_seconds_left(proj: Path) -> None:
     """A fresh last-resume stamp is reported with the seconds until its 30-minute window ends."""
     dispatch = _import_dispatch()

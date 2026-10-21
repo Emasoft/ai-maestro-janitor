@@ -10,6 +10,7 @@ regression guard for the whole reason this module deviates from the card's liter
 
 import dataclasses
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -800,10 +801,73 @@ def test_recovery_pending_defaults_false_so_an_omitting_caller_is_unaffected():
 
 
 def test_recovery_pending_true_on_each_of_the_three_flags(tmp_path):
-    """Any one of the three pending-recovery flags is enough — `recovery_pending` is an OR."""
+    """Any one of the three pending-recovery flags is enough — `recovery_pending` is an OR
+    (the clear flag here is fresh, so its age floor does not apply)."""
     for flag in ("rate-limited.flag", "resume-after-compact.flag", "resume-after-clear.flag"):
         d = tmp_path / flag
         d.write_text("", encoding="utf-8")
+        assert ec.recovery_pending(tmp_path) is True
+        d.unlink()
+
+
+def _clear_flag(sd: Path, *, written_ago_s: int, sidecar: bool = True) -> int:
+    """Write resume-after-clear.flag (+ optional .ts sidecar) aged `written_ago_s`; return written_at."""
+    written_at = int(time.time()) - written_ago_s
+    flag = sd / "resume-after-clear.flag"
+    flag.write_text("", encoding="utf-8")
+    os.utime(flag, (written_at, written_at))
+    if sidecar:
+        (sd / "resume-after-clear.ts").write_text(str(written_at), encoding="utf-8")
+    return written_at
+
+
+def test_recovery_pending_false_for_an_old_unarmed_clear_flag(tmp_path):
+    """An abandoned clear flag whose /clear never ran (no clear-observed.ts) stops vetoing
+    once older than the age floor."""
+    _clear_flag(tmp_path, written_ago_s=7200)
+    assert ec.recovery_pending(tmp_path) is False
+
+
+def test_recovery_pending_true_for_a_young_unarmed_clear_flag(tmp_path):
+    """A just-written, not-yet-armed clear flag still vetoes (its /clear may be queued)."""
+    _clear_flag(tmp_path, written_ago_s=60)
+    assert ec.recovery_pending(tmp_path) is True
+
+
+def test_recovery_pending_true_for_an_old_but_armed_clear_flag(tmp_path):
+    """Armed (clear-observed.ts >= written_at) vetoes at any age: the /clear really ran."""
+    written_at = _clear_flag(tmp_path, written_ago_s=36_000)
+    (tmp_path / "clear-observed.ts").write_text(str(written_at + 5), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is True
+
+
+def test_recovery_pending_false_when_clear_observed_predates_the_flag(tmp_path):
+    """The 2026-10-21 incident shape: clear-observed.ts EXISTS (from an earlier clear) but is OLDER than the flag, so the flag is unarmed and ages out."""
+    written_at = _clear_flag(tmp_path, written_ago_s=7200)
+    (tmp_path / "clear-observed.ts").write_text(str(written_at - 3600), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is False
+
+
+def test_recovery_pending_true_when_clear_observed_equals_written_at(tmp_path):
+    """Boundary: an observed stamp equal to written_at arms the flag."""
+    written_at = _clear_flag(tmp_path, written_ago_s=7200)
+    (tmp_path / "clear-observed.ts").write_text(str(written_at), encoding="utf-8")
+    assert ec.recovery_pending(tmp_path) is True
+
+
+def test_recovery_pending_clear_flag_age_falls_back_to_mtime_without_sidecar(tmp_path):
+    """No .ts sidecar: the flag's own old mtime still ages it out, never reads as just-written."""
+    _clear_flag(tmp_path, written_ago_s=7200, sidecar=False)
+    assert ec.recovery_pending(tmp_path) is False
+
+
+def test_recovery_pending_other_flags_veto_at_any_age(tmp_path):
+    """rate-limited.flag and resume-after-compact.flag are not age-bounded."""
+    old = time.time() - 36_000
+    for flag in ("rate-limited.flag", "resume-after-compact.flag"):
+        d = tmp_path / flag
+        d.write_text("", encoding="utf-8")
+        os.utime(d, (old, old))
         assert ec.recovery_pending(tmp_path) is True
         d.unlink()
 

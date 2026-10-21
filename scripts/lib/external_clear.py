@@ -1256,9 +1256,22 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
     return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
 
 
+# An UNARMED resume-after-clear.flag (no SessionStart source=clear stamped clear-observed.ts
+# yet) vetoes only while younger than this. WHY: an abandoned flag whose /clear never ran (seen
+# 2026-10-21, 10 h old) otherwise vetoed every shrink lever until dispatch's 86400 s sweep.
+# WHY 3600 and not clear_trigger's 780 s gate+margin: a /clear typed while Claude is mid-turn is
+# QUEUED and runs when the turn ends, after the chain released its lock, and this helper's other
+# callers (daemon lane, cold-cache SessionStart, dispatch idle phases) could start another
+# shrink over it -- so the shared helper is more conservative than the chain's own cancel check.
+# WHY no clear-chain.lock flock probe: winning LOCK_EX|LOCK_NB even for an instant can make a
+# NEW chain's own LOCK_NB acquire fail ("already pending", /clear silently lost); past this age
+# a legitimate chain (180 s gate + phase B) is long gone, so a probe adds nothing.
+_UNARMED_CLEAR_FLAG_MAX_AGE_S = 3600
+
+
 def recovery_pending(state_dir: Path) -> bool:
-    """True iff a rate-limit / API-error / compact / clear resume cue is still armed,
-    unconsumed, on disk for this state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
+    """True iff a rate-limit / API-error / compact / clear resume cue is still pending (unconsumed),
+    on disk for this state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
 
     SHARED HELPER (TRDD-L32WC0H7 card 1 follow-up item 2): this used to be three separate
     inline copies of the same three-flag check -- the SessionStart hook
@@ -1275,15 +1288,27 @@ def recovery_pending(state_dir: Path) -> bool:
     replayed to the model, and a /clear right now would destroy the context that replay is
     about to need before it is ever read.
 
+    The clear flag alone is age-bounded: ARMED (clear-observed.ts stamped at or after the flag
+    was written, i.e. the /clear really ran) it vetoes at any age; UNARMED it vetoes only while
+    younger than _UNARMED_CLEAR_FLAG_MAX_AGE_S, so an abandoned never-armed flag stops
+    blocking every shrink lever. The other two flags veto at any age.
+
     Best-effort, fail-open (a read error reads as "nothing pending") -- the SAME asymmetry
     _fire_recorded already documents: a missed veto costs one wrongly-cleared session, a false
     one costs the whole lever, silently, on every resume.
     """
     try:
-        return any(
-            (state_dir / flag).is_file()
-            for flag in (state.RATE_LIMITED_FLAG, "resume-after-compact.flag", "resume-after-clear.flag")
-        )
+        if any((state_dir / flag).is_file() for flag in (state.RATE_LIMITED_FLAG, "resume-after-compact.flag")):
+            return True
+        clear_flag = state_dir / "resume-after-clear.flag"
+        if not clear_flag.is_file():
+            return False
+        # Same written_at shape as dispatch's resume-flag age check: sidecar, else flag mtime.
+        written_at = state.read_int_state(state_dir / "resume-after-clear.ts", 0) or state.file_mtime(clear_flag)
+        observed_at = state.read_int_state(state_dir / "clear-observed.ts", 0)
+        if observed_at > 0 and observed_at >= written_at:
+            return True
+        return (time.time() - written_at) < _UNARMED_CLEAR_FLAG_MAX_AGE_S
     except OSError:
         return False
 
