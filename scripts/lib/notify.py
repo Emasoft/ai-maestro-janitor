@@ -74,7 +74,9 @@ EPISODE_ACTIVE = "episode-active"  # notify_episode: this episode was already no
 
 # notify_episode: a condition absent for longer than this is a new episode.
 EPISODE_FLAP_S = 3600
-_EPISODE_PREFIX = "ep-"  # digest prefix of an episode line in the sent-store
+_EPISODE_PREFIX = "ep-"  # digest prefix of an episode (sent) line in the sent-store
+_CLEAR_PREFIX = "epx-"  # digest prefix of an OBSERVED-clear line of the same episode
+_EPISODE_PREFIXES = (_EPISODE_PREFIX, _CLEAR_PREFIX)
 
 
 def enabled() -> bool:
@@ -124,7 +126,7 @@ def _read_sent(now: int) -> tuple[set[str], int]:
     try:
         for line in _sent_path().read_text(encoding="utf-8").splitlines():
             parts = line.split()
-            if len(parts) != 2 or not parts[0].isdigit() or parts[1].startswith(_EPISODE_PREFIX):
+            if len(parts) != 2 or not parts[0].isdigit() or parts[1].startswith(_EPISODE_PREFIXES):
                 continue
             ts, digest = int(parts[0]), parts[1]
             hashes.add(digest)
@@ -133,6 +135,34 @@ def _read_sent(now: int) -> tuple[set[str], int]:
     except OSError:
         pass
     return hashes, recent
+
+
+def _is_episode_line(line: str) -> bool:
+    parts = line.split()
+    return len(parts) == 2 and parts[1].startswith(_EPISODE_PREFIXES)
+
+
+def _trim_sent_lines(lines: list[str]) -> list[str]:
+    """Structural trim with SEPARATE budgets: push content-hash lines and episode lines each keep
+    their newest `_SENT_KEEP_LINES`, so a burst of episode lines can never evict the permanent
+    content-hash records of `push` (an evicted hash is a repeated notification)."""
+    push_lines = [ln for ln in lines if not _is_episode_line(ln)]
+    ep_lines = [ln for ln in lines if _is_episode_line(ln)]
+    return push_lines[-_SENT_KEEP_LINES:] + ep_lines[-_SENT_KEEP_LINES:]
+
+
+def _rewrite_sent_unlocked(drop: set[str], add: tuple[int, str]) -> None:
+    """Drop every line whose digest is in `drop`, append `add`, trim, atomic-replace. The caller
+    holds the sent-store lock. Dropping the digest's older lines keeps ONE line per episode digest."""
+    path = _sent_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    kept = [ln for ln in lines if not (len(ln.split()) == 2 and ln.split()[1] in drop)]
+    kept.append(f"{add[0]} {add[1]}")
+    state.atomic_write(path, "\n".join(_trim_sent_lines(kept)) + "\n")
 
 
 def _record_sent(digest: str, now: int) -> None:
@@ -146,13 +176,7 @@ def _record_sent(digest: str, now: int) -> None:
 def _append_sent_unlocked(digest: str, now: int) -> None:
     """Append + structural trim (every append site must rotate or trim). The caller holds the
     sent-store lock: the trim is a read-modify-write that would drop a concurrent append."""
-    path = _sent_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(f"{now} {digest}\n")
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if len(lines) > _SENT_KEEP_LINES:
-        state.atomic_write(path, "\n".join(lines[-_SENT_KEEP_LINES:]) + "\n")
+    _rewrite_sent_unlocked(set(), (now, digest))
 
 
 def _under_sent_lock(fn: Callable[[], _T]) -> _T:
@@ -161,11 +185,16 @@ def _under_sent_lock(fn: Callable[[], _T]) -> _T:
     and the trim rewrites the whole file, so an unlocked append can be lost to it - a lost
     record is a repeated notification. The lock lives in a sidecar because the trim replaces
     the sent file's inode, which would release a lock held on the file itself."""
+    return under_lock(_sent_path().with_name(SENT_NAME + ".lock"), fn)
+
+
+def under_lock(lock_path: Path, fn: Callable[[], _T]) -> _T:
+    """Run `fn` holding an exclusive flock on the sidecar `lock_path` (created if missing).
+    The shared helper for every read-modify-write of a state file several processes write."""
     import fcntl  # noqa: PLC0415 -- POSIX-only; global_state already requires it
 
-    path = _sent_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.with_name(SENT_NAME + ".lock").open("a") as lock:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         try:
             return fn()
@@ -186,6 +215,10 @@ def _last_episode_ts(digest: str) -> Optional[int]:
     return last
 
 
+def _episode_key(condition: str, kind: str, slot: str) -> str:
+    return hashlib.sha256("\0".join((condition, kind, slot)).encode("utf-8")).hexdigest()[:12]
+
+
 def notify_episode(
     *,
     condition: str,
@@ -203,21 +236,36 @@ def notify_episode(
     The episode key is condition + kind + slot, stored as an `ep-` line in the SAME sent-store
     `push` uses (`notify-sent.txt`), so the record survives a daemon restart and is shared by
     every process on the machine. The check, the record and the lock are one step: two callers
-    racing on the same key get exactly one notification. A caller that still sees the
-    condition refreshes the line (at most once per window/3, to keep the store small); a
-    condition absent for longer than `window_s` is a NEW episode and notifies again. There is no
-    daily repeat inside an episode. Returns PUSHED, EPISODE_ACTIVE or DISABLED."""
+    racing on the same key get exactly one notification.
+
+    An episode ends ONLY on an OBSERVED clear (`clear_episode`, called by whoever saw the
+    condition go away) - never on a gap in observation: session heartbeats can be hours apart,
+    and a silent gap says nothing about the condition. After a clear, the condition coming back
+    within `window_s` is a flap (same episode, no notification); coming back later is a NEW
+    episode. There is no daily repeat inside an episode.
+
+    This is the owner-alarm path: it deliberately BYPASSES `push`'s severity floor and its
+    rolling daily cap - an owner alarm must not be swallowed by either. Returns PUSHED,
+    EPISODE_ACTIVE or DISABLED."""
     t = int(time.time()) if now is None else int(now)
     if not enabled():
         return DISABLED
-    digest = _EPISODE_PREFIX + hashlib.sha256("\0".join((condition, kind, slot)).encode("utf-8")).hexdigest()[:12]
+    key = _episode_key(condition, kind, slot)
+    sent_d, clear_d = _EPISODE_PREFIX + key, _CLEAR_PREFIX + key
 
     def _decide() -> bool:
-        last = _last_episode_ts(digest)
-        is_new = last is None or t - last > window_s
-        if last is None or t - last >= window_s // 3:
-            _append_sent_unlocked(digest, t)
-        return is_new
+        if _last_episode_ts(sent_d) is None:
+            _rewrite_sent_unlocked(set(), (t, sent_d))
+            return True
+        cleared = _last_episode_ts(clear_d)
+        if cleared is None:
+            return False
+        if t - cleared > window_s:
+            _rewrite_sent_unlocked({sent_d, clear_d}, (t, sent_d))
+            return True
+        # Back within the flap window: the clear is void, same episode, no notification.
+        _drop_clear_unlocked(clear_d)
+        return False
 
     # Record BEFORE delivering: a crash or a failed delivery must never turn into a repeat.
     if not _under_sent_lock(_decide):
@@ -226,6 +274,33 @@ def notify_episode(
     _deliver(f"[janitor] {_clean(message, _MAX_MSG_CHARS + 40)}", runner=runner, opener=opener)
     state.log_line("daemon", f"notify-episode: sent condition={_clean(condition, 48)} kind={_clean(kind, 48)}")
     return PUSHED
+
+
+def _drop_clear_unlocked(clear_d: str) -> None:
+    path = _sent_path()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [ln for ln in lines if not (len(ln.split()) == 2 and ln.split()[1] == clear_d)]
+    state.atomic_write(path, "\n".join(kept) + "\n")
+
+
+def clear_episode(
+    *, condition: str, kind: str = "", slot: str = "", now: Optional[float] = None
+) -> None:
+    """Record that the caller OBSERVED the condition gone: the episode may end (see
+    `notify_episode`). A no-op when no episode was ever notified, or when a clear is already
+    recorded (the absence is measured from the FIRST observed clear). Never raises."""
+    t = int(time.time()) if now is None else int(now)
+    key = _episode_key(condition, kind, slot)
+    sent_d, clear_d = _EPISODE_PREFIX + key, _CLEAR_PREFIX + key
+
+    def _mark() -> None:
+        if _last_episode_ts(sent_d) is not None and _last_episode_ts(clear_d) is None:
+            _rewrite_sent_unlocked(set(), (t, clear_d))
+
+    try:
+        _under_sent_lock(_mark)
+    except Exception:  # noqa: BLE001 -- bookkeeping must never break the caller
+        pass
 
 
 def _deliver(

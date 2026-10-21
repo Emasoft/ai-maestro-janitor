@@ -49,12 +49,10 @@ def _fresh_tick(root: Path, now: float = NOW) -> None:
     _stamp(root, now - 30)
 
 
-
 def _stamp(root: Path, at: float) -> None:
     p = root / "tick-completed.ts"
     p.write_text(str(int(at)))
     os.utime(p, (at, at))  # the evaluator reads the stamp's mtime
-
 
 
 def _stuck(root: Path, at: float = NOW, **fields: object) -> None:
@@ -117,7 +115,6 @@ def test_stale_slot_twin_never_raises_live_token_expired(root: Path) -> None:
     assert run.argvs == [] and not (root / ra.ALERT_NAME).exists()
 
 
-
 def test_live_twin_with_future_expiry_is_not_a_rotation_target(root: Path) -> None:
     """The live account's own twin expires later, every spare is expired: still no target."""
     _fresh_tick(root)
@@ -142,7 +139,6 @@ def test_auth_failed_marker_raises_a_banner_at_once_and_expires(root: Path) -> N
     assert "auth-failed" not in ra.active_conditions(root, NOW + 6 * 3600 + 1, True)
 
 
-
 def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
     """No completed tick for 11 min fires with a claude session up, and not without one."""
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
@@ -150,7 +146,6 @@ def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
     _stamp(root, NOW - 660)
     assert ra.evaluate(root, now=NOW, claude_running=False, runner=Runner()) == []
     assert ra.evaluate(root, now=NOW, claude_running=True, runner=Runner()) == ["tick-stalled"]
-
 
 
 def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
@@ -235,7 +230,6 @@ def test_an_unchanged_condition_notifies_once_and_never_repeats(root: Path) -> N
     assert saved["first_seen"] == int(NOW) and "last_notified" not in saved
 
 
-
 def test_no_spare_account_for_days_gives_one_banner(root: Path) -> None:
     """Condition (a) held for 3 days, evaluated every minute: ONE banner, not ~72."""
     _write_state(root, live_exp_s=NOW - 3600, spare_exp_s=NOW - 60)
@@ -245,7 +239,6 @@ def test_no_spare_account_for_days_gives_one_banner(root: Path) -> None:
         _stamp(root, t - 30)
         ra.evaluate(root, now=t, claude_running=True, runner=run)
     assert len(run.argvs) == 1
-
 
 
 def test_a_change_of_the_condition_set_notifies_immediately(root: Path) -> None:
@@ -282,7 +275,6 @@ def test_a_condition_that_flaps_follows_the_backoff(root: Path) -> None:
     assert len(run.argvs) == 2
 
 
-
 def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:
     """Once nothing holds, rotator-alert.json is removed."""
     stuck = root / "rotation-stuck.json"
@@ -292,6 +284,7 @@ def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:
     stuck.unlink()
     ra.evaluate(root, now=NOW + 60, claude_running=False, runner=Runner())
     assert not (root / ra.ALERT_NAME).exists()
+
 
 def test_a_second_account_is_its_own_episode_and_neither_repeats(root: Path) -> None:
     """The episode key includes the slot (USER ruling 2026-10-21): a refused capture on account A
@@ -400,6 +393,7 @@ def test_session_side_tick_stalled_shares_the_daemons_episode(root: Path) -> Non
     """A hung or dead daemon cannot notify, so a heartbeat session does - under the SAME episode
     key as the daemon's own evaluation: any number of sessions plus the daemon raise ONE
     notification, and a fresh or absent tick stamp raises none."""
+    (root / "opt-in.flag").touch()
     run = Runner()
     assert ra.notify_session_tick_stalled(root, NOW, runner=run) is None  # no stamp at all
     _stamp(root, NOW - 30)
@@ -411,6 +405,144 @@ def test_session_side_tick_stalled_shares_the_daemons_episode(root: Path) -> Non
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
     assert "tick-stalled" in ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
     assert len(run.argvs) == 1  # the daemon's own evaluation does not add a second copy
+
+
+def test_session_side_tick_stalled_is_silent_without_the_opt_in_flag(root: Path) -> None:
+    """No opt-in flag means the rotator never ticks on this machine: a stale or missing stamp is
+    not a stall, so the session-side watchdog must not raise a false alarm (the daemon gates the
+    same way)."""
+    run = Runner()
+    _stamp(root, NOW - 5000)
+    assert ra.notify_session_tick_stalled(root, NOW, runner=run) is None
+    assert run.argvs == []
+
+
+def test_session_side_tick_stalled_is_silent_while_the_server_owns_the_tick(root: Path) -> None:
+    """While the ai-maestro server owns the rotator tick its stamp is not ours to judge."""
+    (root / "opt-in.flag").touch()
+    run = Runner()
+    _stamp(root, NOW - 5000)
+    assert ra.notify_session_tick_stalled(root, NOW, server_owns_tick=True, runner=run) is None
+    assert run.argvs == []
+    assert ra.notify_session_tick_stalled(root, NOW, server_owns_tick=False, runner=run) is not None
+    assert len(run.argvs) == 1
+
+
+def test_a_fresh_tick_seen_by_a_session_ends_the_tick_stalled_episode(root: Path) -> None:
+    """A fresh stamp is an OBSERVED clear: the next stall, after the flap window, notifies again."""
+    from notify import EPISODE_FLAP_S  # type: ignore[import-not-found]
+
+    (root / "opt-in.flag").touch()
+    run = Runner()
+    _stamp(root, NOW - 700)
+    ra.notify_session_tick_stalled(root, NOW, runner=run)
+    _stamp(root, NOW + 10)  # the daemon ticked again
+    assert ra.notify_session_tick_stalled(root, NOW + 20, runner=run) is None
+    later = NOW + 20 + EPISODE_FLAP_S + 1
+    _stamp(root, later - 700)
+    ra.notify_session_tick_stalled(root, later, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_a_gap_in_observation_is_not_a_clear_for_the_daemon_conditions(root: Path) -> None:
+    """The same unchanged condition re-evaluated hours or days later (sparse callers) never
+    notifies a second time: only an observation of the condition GONE ends an episode."""
+    _stuck(root, NOW)
+    run = Runner()
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    for gap in (2400, 3600 * 3, 3 * 86400):
+        _stuck(root, NOW + gap)
+        ra.evaluate(root, now=NOW + gap, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+
+
+def test_an_observed_clear_then_a_return_after_the_flap_window_notifies_again(root: Path) -> None:
+    """evaluate observes the stuck marker gone (record deleted, episode ended); the same verdict
+    back after the flap window is a new episode, back inside it is not."""
+    run = Runner()
+    _stuck(root, NOW)
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    (root / "rotation-stuck.json").unlink()
+    ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
+    assert not [c for c in json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]]
+    back = NOW + 60 + ra.DEBOUNCE_S + 1
+    _stuck(root, back)
+    ra.evaluate(root, now=back, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_a_pass_that_could_not_observe_a_condition_does_not_clear_it(root: Path) -> None:
+    """Without a running claude the no-rotation-target check is not made at all: that is a gap in
+    observation, not a clear, so the record survives and the return does not renotify."""
+    _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=None)
+    _fresh_tick(root)
+    run = Runner()
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
+    recs = json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]
+    assert "no-rotation-target" in recs
+    _fresh_tick(root, NOW + 60 + ra.DEBOUNCE_S + 1)
+    ra.evaluate(root, now=NOW + 60 + ra.DEBOUNCE_S + 1, claude_running=True, runner=run)
+    assert len(run.argvs) == 1
+
+
+def test_concurrent_remediation_writers_lose_no_record(root: Path) -> None:
+    """The detector of every session and the daemon thread write owner-remediation.json: the
+    read-modify-write is flock-guarded, so 16 writers keep all 16 records."""
+    import threading
+
+    def write(i: int) -> None:
+        for n in range(5):
+            ra.record_owner_remediation(root, "oauth-login-needed", "act", NOW + n, kind="k", slot=f"s{i}")
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    recs = json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]
+    assert len(recs) == 16
+
+
+def test_one_record_per_condition_and_slot_a_new_kind_supersedes_the_old(root: Path) -> None:
+    ra.record_owner_remediation(root, "oauth-login-needed", "a", NOW, kind="48h", slot="x@y")
+    ra.record_owner_remediation(root, "oauth-login-needed", "b", NOW, kind="24h", slot="x@y")
+    ra.record_owner_remediation(root, "oauth-login-needed", "c", NOW, kind="48h", slot="z@y")
+    recs = json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]
+    assert set(recs) == {"oauth-login-needed:24h:x@y", "oauth-login-needed:48h:z@y"}
+
+
+def test_the_alert_thread_evaluates_once_at_start_before_waiting(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restarted daemon must evaluate at once, not one interval later."""
+    import daemon  # type: ignore[import-not-found]
+
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
+    calls: list[bool] = []
+    alerter = daemon._RotatorAlertThread(eval_fn=calls.append, interval_s=3600)
+    alerter.start()
+    try:
+        deadline = time.time() + 10
+        while not calls and time.time() < deadline:
+            time.sleep(0.02)
+        assert calls, "no pass at thread start"
+        time.sleep(0.3)
+        assert len(calls) == 1, "then it must wait the interval, not spin"
+    finally:
+        alerter.shutdown(5)
+
+
+def test_the_first_pass_does_not_judge_a_server_owned_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first pass runs before the main loop has published the yield state: the pass must ask
+    the same predicate the daemon uses, or a server-owned tick stamp raises a false tick-stalled."""
+    import daemon  # type: ignore[import-not-found]
+
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(daemon.oauth_supervisor, "_server_owns_chores", lambda: True)
+    calls: list[bool] = []
+    daemon._RotatorAlertThread(eval_fn=calls.append).run_once()
+    assert calls == [False]
 
 
 def test_every_condition_is_recorded_as_an_owner_remediation(root: Path) -> None:
@@ -526,7 +658,6 @@ def test_scheduled_rotator_task_is_the_tick_only() -> None:
     assert ran == ["tick"]
 
 
-
 def test_the_alert_thread_pass_writes_the_alert_file_for_a_stuck_rotator(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -633,6 +764,7 @@ def test_dispatch_prints_nothing_without_an_alert_file(
     _arm_summary_hold(state.state_dir(), expires_in_s=900)
     assert "rotator alert" not in _run_main(dispatch)
 
+
 def _plant_runaway_kill(dispatch) -> None:
     """Plant a fresh runaway-kill broadcast: a drift line `main()` prints before the summary-hold
     gate, used as a positive control that the drift-printing stage ran."""
@@ -650,7 +782,6 @@ def _assert_no_old_rotator_drift(out: str) -> None:
     """None of the three prefixes the removed rotator drift line / watchdog used."""
     for old in ("rotator alert:", "stopped ticking", "janitor-doctor"):
         assert old not in out, f"{old!r} found in {out!r}"
-
 
 
 def test_dispatch_watchdog_prints_nothing_for_a_hung_daemon_without_an_alert_file(
@@ -697,7 +828,6 @@ def test_dispatch_watchdog_is_quiet_after_a_fresh_completed_tick(
     assert "rotator alert" not in _run_main(dispatch)
 
 
-
 def _spare_state(root: Path, *, live_exp_s: float, spares: dict[str, float]) -> None:
     slots = {LIVE: {"expires_at": int(live_exp_s * 1000)}}
     slots.update({name: {"expires_at": int(exp * 1000)} for name, exp in spares.items()})
@@ -738,7 +868,6 @@ def test_spare_stale_threshold_is_env_tunable(root: Path, monkeypatch: pytest.Mo
     assert "spare-stale" in ra.active_conditions(root, NOW, claude_running=True)
 
 
-
 def test_bad_spare_stale_env_falls_back_to_4h_and_keeps_other_conditions(
         root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-B78NJU35: ROTATOR_SPARE_STALE_AFTER_H="12h" must not raise (the daemon's fail-open
@@ -750,7 +879,6 @@ def test_bad_spare_stale_env_falls_back_to_4h_and_keeps_other_conditions(
     assert "rotation-stuck" in active and "spare-stale" in active  # 5 h > the 4 h fallback
 
 
-
 def test_spare_stale_notifies_once_per_episode(root: Path) -> None:
     """spare-stale notifies at first sight and never again while it holds."""
     run = Runner()
@@ -760,7 +888,6 @@ def test_spare_stale_notifies_once_per_episode(root: Path) -> None:
         _spare_state(root, live_exp_s=at, spares={SPARE: at - 5 * 3600, "healthy-spare": at + 3 * 3600})
         assert "spare-stale" in ra.evaluate(root, now=at, claude_running=True, runner=run)
         assert len(run.argvs) == 1
-
 
 
 # ---------- dispatch: the advisory throttle (TRDD-MMWDSFB4, janitor#342) ----------

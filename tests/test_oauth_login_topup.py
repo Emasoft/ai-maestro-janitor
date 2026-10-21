@@ -41,34 +41,21 @@ def _write_healthy_slot(home: Path, email: str) -> None:
     }
     (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
 
+
 def _records(home: Path) -> dict[str, dict]:
     path = home / "owner-remediation.json"
     return json.loads(path.read_text(encoding="utf-8"))["conditions"] if path.is_file() else {}
 
 
-def test_topup_due_true_when_no_stamp_exists(tmp_path: Path) -> None:
-    """No stamp yet -> due (fail-open toward nudging, never toward silence)."""
-    assert det._topup_due(tmp_path, time.time(), 7.0) is True
-
-
-def test_topup_due_false_within_the_cadence_window(tmp_path: Path) -> None:
-    """A stamp written 1 day ago, cadence 7 days -> not due yet."""
-    now = time.time()
-    det._topup_stamp_path(tmp_path).write_text(str(now - 1 * 86400))
-    assert det._topup_due(tmp_path, now, 7.0) is False
-
-
-def test_topup_due_true_once_the_cadence_window_elapses(tmp_path: Path) -> None:
-    """A stamp written 8 days ago, cadence 7 days -> due again."""
-    now = time.time()
-    det._topup_stamp_path(tmp_path).write_text(str(now - 8 * 86400))
-    assert det._topup_due(tmp_path, now, 7.0) is True
-
-
-def test_topup_due_true_on_a_corrupt_stamp(tmp_path: Path) -> None:
-    """A corrupt/unparseable stamp reads as due — fail-open, not permanently silenced."""
-    det._topup_stamp_path(tmp_path).write_text("not-a-number")
-    assert det._topup_due(tmp_path, time.time(), 7.0) is True
+def test_topup_cycle_is_the_calendar_period_number() -> None:
+    """Same period -> same cycle (one episode); the next period -> the next cycle (a new episode)."""
+    period = 7 * 86400
+    base = 1_800_000_000.0
+    cycle = det._topup_cycle(base, 7.0)
+    assert det._topup_cycle(base + 3600, 7.0) in (cycle, cycle + 1)  # only a period edge may differ
+    assert det._topup_cycle(cycle * period, 7.0) == cycle
+    assert det._topup_cycle(cycle * period + period - 1, 7.0) == cycle
+    assert det._topup_cycle((cycle + 1) * period, 7.0) == cycle + 1
 
 
 def test_topup_days_default_is_seven(monkeypatch) -> None:
@@ -82,12 +69,12 @@ def test_topup_days_env_override(monkeypatch) -> None:
     assert det._topup_days() == 14.0
 
 
-def test_main_records_topup_on_first_run_with_no_stamp(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_main_records_topup_on_first_run(tmp_path: Path, monkeypatch, capsys) -> None:
     """A healthy account (no reactive remediation due) still gets the periodic topup record on a
-    fresh home — proactive, independent of any single account being currently urgent. The
-    detector prints nothing and notifies nobody; the daemon notifies the record once."""
+    fresh home - proactive, independent of any single account being currently urgent. The
+    detector prints nothing and notifies nobody; the daemon notifies the record once. No
+    "last nudged" stamp is written (it was written before the daemon notified and lost the
+    nudge whenever the daemon was down)."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
@@ -101,13 +88,15 @@ def test_main_records_topup_on_first_run_with_no_stamp(
     (key, rec), = recs.items()
     assert key.startswith("oauth-login-topup:") and rec["condition"] == "oauth-login-topup"
     assert "/janitor-capture-all-logins" in rec["action"]
-    assert det._topup_stamp_path(home).is_file()  # stamped so the next run doesn't re-record
+    assert not (home / ".login-topup-last.txt").exists()
 
 
-def test_main_does_not_rerecord_topup_within_the_cadence_window(
+def test_main_refreshes_the_topup_record_every_heartbeat_of_the_cycle(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    """A second run right after the first (stamp just written) must NOT touch the record again."""
+    """A second run in the same cycle keeps ONE record under the SAME key (same episode, the
+    daemon notifies once) and refreshes last_seen, so a daemon that was down at the first
+    heartbeat still sees a fresh record to notify."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
@@ -115,11 +104,13 @@ def test_main_does_not_rerecord_topup_within_the_cadence_window(
     base = 1_800_000_000.0
     monkeypatch.setattr(det.time, "time", lambda: base)
     assert det.main() == 0
-    monkeypatch.setattr(det.time, "time", lambda: base + 3600)
-    assert det.main() == 0  # same cadence window — stamp already fresh
+    first = _records(home)
+    monkeypatch.setattr(det.time, "time", lambda: base + 60)
+    assert det.main() == 0
 
     recs = _records(home)
-    assert len(recs) == 1 and next(iter(recs.values()))["last_seen"] == int(base)
+    assert set(recs) == set(first)
+    assert next(iter(recs.values()))["last_seen"] == int(base) + 60
 
 
 def test_main_skips_topup_when_cadence_set_to_zero(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -159,10 +150,10 @@ def _isolated_env(tmp_path: Path, monkeypatch, home: Path) -> None:
     (tmp_path / "userhome").mkdir(exist_ok=True)
 
 
-def test_main_topup_is_a_new_episode_next_due_cycle(tmp_path: Path, monkeypatch) -> None:
-    """A second due fire 4 days later (3-day cadence) records under a NEW key (the period is the record's
-    kind), so the daemon's episode logic notifies again instead of staying silent behind last
-    cycle's episode."""
+def test_main_topup_is_a_new_episode_next_cycle(tmp_path: Path, monkeypatch) -> None:
+    """A heartbeat 4 days later (3-day cycle) records under a NEW key (the cycle number is the
+    record kind), so the daemon notifies again; the previous cycle's record is superseded
+    (one record per condition)."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
@@ -171,14 +162,13 @@ def test_main_topup_is_a_new_episode_next_due_cycle(tmp_path: Path, monkeypatch)
     base = 1_800_000_000.0
     monkeypatch.setattr(det.time, "time", lambda: base)
     assert det.main() == 0
-    assert float(det._topup_stamp_path(home).read_text(encoding="utf-8")) == base
+    (rec1,) = _records(home).values()
 
-    later = base + 4 * 86400  # past the 3-day cadence set below, inside the 7-day record retention
+    later = base + 4 * 86400
     monkeypatch.setattr(det.time, "time", lambda: later)
     assert det.main() == 0
-    assert float(det._topup_stamp_path(home).read_text(encoding="utf-8")) == later
-    recs = _records(home)
-    assert len(recs) == 2 and {r["kind"] for r in recs.values()} == {
-        time.strftime("%Y-%m-%d", time.localtime(base)), time.strftime("%Y-%m-%d", time.localtime(later))}
+    (rec2,) = _records(home).values()
+    assert rec1["kind"] != rec2["kind"]
+    assert rec2["kind"] == str(det._topup_cycle(later, 3.0))
 
 

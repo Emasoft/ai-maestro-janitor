@@ -59,10 +59,11 @@ token, or a refresh chain is revoked. The rotator closes that gap with two
 heartbeat-driven pieces (TRDD-32acd15f P4c/P4d), so you only ever do the one
 thing a machine can't: the human sign-in.
 
-- **Ask-to-login** — the opt-in `oauth-login-needed` detector surfaces, on the
-  janitor heartbeat, *exactly* the accounts that need a one-time human login —
-  the ones that can neither self-renew (no refresh token) nor auto-bootstrap (no
-  live claude.ai session). The nudge names the resolved `open-login.sh <email>`
+- **Ask-to-login** — the opt-in `oauth-login-needed` detector records *exactly* the accounts
+  that need a one-time human login — the ones that can neither self-renew (no refresh
+  token) nor auto-bootstrap (no live claude.ai session) — and the janitor daemon tells you
+  with ONE desktop notification per problem (nothing is printed into the agent session, and
+  the same problem is never notified twice). The nudge names the resolved `open-login.sh <email>`
   for THIS host and is explicit that it
   opens a **dedicated Chrome window**: your default browser (e.g. Safari) stays
   untouched, and you do **not** need to make Chrome your default — Chrome only
@@ -187,7 +188,7 @@ and does NOT touch per-project state. To deactivate, run
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotator.py` — the rotator engine (`tick`/`auto`/`capture`/`usage`); the daemon's `oauth-rotator-tick` Task runs its `tick`. `tick` also runs the post-login auto-bootstrap (`_bootstrap_seeded_slots`).
 - `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/slot_capture_browser.py` — mints a refresh-bearing slot from a human-seeded Chrome session (the auto-bootstrap subprocess).
-- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/oauth-login-needed.py` — the heartbeat detector that nudges you to run `open-login.sh` for accounts that need a one-time login (opens a dedicated Chrome window; default browser untouched).
+- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/oauth-login-needed.py` — the heartbeat detector that records the accounts that need a one-time login; the daemon then notifies you once to run `open-login.sh` (opens a dedicated Chrome window; default browser untouched).
 - `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/open-login.sh <email>` (or the legacy rotator-home copy, resolved by `rotator.open_login_script()`) — opens the dedicated Chrome for the one-time human sign-in (no default-browser change needed).
 - `/janitor-capture-all-logins` (backed by `${CLAUDE_PLUGIN_ROOT}/scripts/capture_all_logins.py`) — proactively tops up EVERY account's OAuth token in one pass, before any expire.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/daemon.py` — the always-on daemon that owns the 60s `oauth-rotator-tick`.

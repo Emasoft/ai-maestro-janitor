@@ -177,10 +177,6 @@ def _disp(path: Path) -> str:
         return str(path)
 
 
-def _topup_stamp_path(home: Path) -> Path:
-    return home / ".login-topup-last.txt"
-
-
 def _topup_days() -> float:
     """Cadence (days) of the proactive "top up ALL logins" nudge (TRDD-GZXTSJSR P3c).
 
@@ -197,15 +193,13 @@ def _topup_days() -> float:
     )
 
 
-def _topup_due(home: Path, now: float, every_days: float) -> bool:
-    """True when the periodic top-up nudge is due: no stamp yet, or the stamp is older
-    than `every_days`. A missing/corrupt stamp reads as "due" (fail-open toward nudging,
-    never toward permanent silence)."""
-    try:
-        last = float(_topup_stamp_path(home).read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return True
-    return (now - last) >= every_days * 86400
+def _topup_cycle(now: float, every_days: float) -> int:
+    """The calendar cycle number of the top-up nudge: floor(now / period). It is the record's kind,
+    so a new cycle is a NEW notification episode and the same cycle is one. WHY no "last nudged"
+    stamp: a stamp written before the daemon notified lost the weekly nudge whenever the daemon
+    was down; the record is refreshed on every heartbeat of the cycle and the episode store alone
+    remembers that it was sent."""
+    return int(now // (every_days * 86400))
 
 
 def main() -> int:
@@ -224,7 +218,9 @@ def main() -> int:
     # itself, so the heartbeat side raises that one under the daemon's episode key, which the
     # machine-wide notify-sent store collapses to one notification across every session.
     try:
-        rotator_alert.notify_session_tick_stalled(home, now)
+        rotator_alert.notify_session_tick_stalled(
+            home, now, server_owns_tick=supervisor._server_owns_chores()
+        )
     except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
         pass
 
@@ -256,7 +252,19 @@ def main() -> int:
         elif slot_capture_stalled(f.has_refresh, has_session, f.refresh_failures):
             stalled.append(f.email)
 
-    # PRIMARY — accounts that need a fresh human sign-in. One record per account; the urgency
+    # OBSERVED CLEARS: an account seen fine on this pass (logged in, self-renewing, or captured) has
+    # its record deleted and its episode ended, so a later relapse notifies again. Only this pass
+    # observes it; a gap between heartbeats never ends an episode (facts empty: unobserved, no clear).
+    rotator_alert.clear_owner_remediations(
+        home, "oauth-login-needed", now, keep_slots=frozenset(e for e, _ in needing)
+    )
+    rotator_alert.clear_owner_remediations(
+        home, "oauth-capture-stalled", now, keep_slots=frozenset(stalled)
+    )
+
+    # PRIMARY — accounts that need a fresh human sign-in. One record per account (not one aggregated
+    # record: an account that logs in must clear alone, and a second account must still notify).
+    # The urgency
     # bucket is the record's kind, so a worsening account (48h -> 24h -> expired) is a NEW
     # episode and the daemon notifies again, while an unchanged one stays silent.
     for email, bucket in sorted(needing):
@@ -317,22 +325,17 @@ def main() -> int:
     # action neither the janitor daemon nor the ai-maestro server can perform for the
     # user, so the nudge must surface regardless of which side currently owns rotation.
     topup_days = _topup_days()
-    if topup_days > 0 and _topup_due(home, now, topup_days):
-        # The period is the record's kind: a new due cycle is a NEW episode, so the daemon
-        # notifies again instead of staying silent behind last cycle's episode.
-        period = time.strftime("%Y-%m-%d", time.localtime(now))
+    if topup_days > 0:
+        # The cycle number is the record's kind: a new calendar cycle is a NEW episode, the same
+        # cycle is one (re-recorded every heartbeat, notified once by the daemon).
         rotator_alert.record_owner_remediation(
             home,
             "oauth-login-topup",
-            f"proactive top-up ({period}): refresh all {len(facts)} rotator login(s) before any "
+            f"proactive top-up: refresh all {len(facts)} rotator login(s) before any "
             f"expire - run /janitor-capture-all-logins",
             now,
-            kind=period,
+            kind=str(_topup_cycle(now, topup_days)),
         )
-        try:
-            state.atomic_write(_topup_stamp_path(home), str(now))
-        except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
-            pass
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

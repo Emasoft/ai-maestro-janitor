@@ -436,6 +436,7 @@ def _stdout_proves_plugin_updated(stdout: str) -> bool:
             return True
     return False
 
+
 _running = True  # flipped to False by SIGTERM/SIGINT — read by the main loop
 
 
@@ -923,7 +924,6 @@ def task_oauth_rotator_beat() -> None:
     task_oauth_rotator_tick()
 
 
-
 _RC_STDERR_TAIL_CHARS = 300
 # TRDD-JY0OBQZ4: a rotator tick (subprocess + ESC pass) at or above this many seconds gets one extra
 # "rotator tick slow:" daemon.log line; 3-6% of ticks ran 30 s+ and the cause was never logged.
@@ -957,6 +957,7 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
             state.log_line("daemon", f"rotator tick result not logged: {type(exc).__name__}")
         except Exception:  # noqa: BLE001, S110 - even the fallback line must not raise
             pass
+
 
 def _masked_stderr_tail(err: str) -> str:
     """Sanitized, masked, line-boundary tail of a child's stderr for ONE log line.
@@ -3694,7 +3695,6 @@ def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
     return min(due, key=lambda t: t._last_run()) if due else None
 
 
-
 # ---------- THE HOST-PRESSURE GATE (TRDD-C8SALZOO) --------------------------
 #
 # The owner directive (2026-10-20), verbatim: "make this rule for the janitor
@@ -4238,6 +4238,7 @@ def _consume_version_update_request(tasks: list[Task]) -> bool:
             break
     return True
 
+
 class _RotatorTickThread(threading.Thread):
     """Runs the `own_thread` oauth-rotator-tick task on its own 1 s-polled cadence.
 
@@ -4338,15 +4339,21 @@ class _RotatorAlertThread(threading.Thread):
         """One evaluation pass (the thread's loop body; tests call it directly)."""
         if gs.kill_switch_present() or not oauth_supervisor.opt_in_present():
             return
-        self._eval_fn(not self._tick_yielded.is_set())
+# The server-owns probe is read here too, not only via set_tick_yielded: the FIRST pass runs at
+        # thread start, before the main loop has published the yield state, and a server-owned tick
+        # stamp is not ours to judge (a false tick-stalled alarm otherwise).
+        self._eval_fn(not (self._tick_yielded.is_set() or oauth_supervisor._server_owns_chores()))
 
     def run(self) -> None:
         _thread_state.no_heartbeat = True
-        while not self._stop_evt.wait(self._interval_s):
+        while True:
             try:
                 self.run_once()
             except Exception as exc:  # noqa: BLE001 - one bad pass must not end the thread
                 state.log_line("daemon", f"rotator-alert: pass failed: {exc}")
+            # One pass at thread start, then wait: a daemon restart must evaluate at once, not 60 s later.
+            if self._stop_evt.wait(self._interval_s):
+                return
 
 
 def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
@@ -4501,6 +4508,7 @@ class _ProcessSizeWatchThread(threading.Thread):
                 # not end the thread.
                 state.log_line("daemon", f"process-size-watch: pass failed: {exc}")
 
+
 _OVERRUN_WATCH_INTERVAL_S = 5.0
 # thread id -> (task name, start epoch, start monotonic) of every `Task.run` in flight. The
 # lock guards ONLY this dict. WHY (6CF3L7IJ): every Task.run takes the lock in its `finally`
@@ -4531,6 +4539,7 @@ def _overrun_clear(name: str) -> None:
     # one interval, acceptable because each task name runs on one thread.
     with contextlib.suppress(OSError):
         _overrun_stamp_path(name).unlink()
+
 
 def _overrun_sweep_stale() -> None:
     """At daemon start, drop stamps left by a previous daemon (first field is its pid).
@@ -4624,6 +4633,7 @@ class _OverrunWatchThread(threading.Thread):
                     self._failure_logged = True
                     with contextlib.suppress(Exception):
                         state.log_line("daemon", f"overrun-watch: pass failed: {exc}")
+
 
 _PLUGIN_UPDATE_LOCK_TIMEOUT_SEC = 30
 _PLUGIN_UPDATE_MAX_FAILS = 2

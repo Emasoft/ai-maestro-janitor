@@ -422,6 +422,8 @@ def test_a_stalled_daemon_is_notified_once_across_all_session_heartbeats(tmp_pat
     out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0}, env_extra=env_extra,
                    before=lambda home: stale_tick(home, 30))
     assert rc == 0 and out == "" and not banners.exists()
+
+
 def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:
     """No rotator home with a state.json anywhere → silent no-op (opt-in by presence)."""
     env = dict(os.environ)
@@ -598,9 +600,10 @@ def test_an_expired_token_is_recorded_as_the_expired_bucket(tmp_path, monkeypatc
     assert "oauth-login-needed:expired:dead@x.com" in _records(tmp_path)
 
 
-def test_a_worsening_account_is_a_new_episode_in_the_same_day(tmp_path, monkeypatch, capsys) -> None:
+def test_a_worsening_account_supersedes_its_old_record(tmp_path, monkeypatch, capsys) -> None:
     """The urgency bucket is part of the episode key: an account that worsens (48h -> expired)
-    gets a NEW record (so the daemon notifies again), an unchanged one re-stamps its record."""
+    gets a NEW record (so the daemon notifies again) and ONE record per account stays - the old
+    bucket's record is superseded; an unchanged account re-stamps its record."""
     for days, key in ((1.9, "oauth-login-needed:48h:worsen@x.com"), (1.9, "oauth-login-needed:48h:worsen@x.com"),
                       (-1.0, "oauth-login-needed:expired:worsen@x.com")):
         out, rc = _run_inprocess(
@@ -610,7 +613,59 @@ def test_a_worsening_account_is_a_new_episode_in_the_same_day(tmp_path, monkeypa
         assert rc == 0 and out == ""
         assert key in _records(tmp_path)
     assert {k for k in _records(tmp_path) if k.startswith("oauth-login-needed")} == {
-        "oauth-login-needed:48h:worsen@x.com", "oauth-login-needed:expired:worsen@x.com"}
+        "oauth-login-needed:expired:worsen@x.com"}
+
+
+class _Banners:
+    def __init__(self) -> None:
+        self.argvs: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> None:
+        self.argvs.append(argv)
+
+
+def _write_fine_slot(home: Path, email: str) -> None:
+    """A self-renewing account (refresh token, far expiry): never needs a login."""
+    (home / "slots").mkdir(parents=True, exist_ok=True)
+    (home / "state.json").write_text(json.dumps({"slots": {email: {"refresh_failures": 0}}}))
+    (home / "opt-in.flag").touch()
+    oauth = {"accessToken": "x", "refreshToken": "r", "expiresAt": int((time.time() + 30 * 86400) * 1000)}
+    (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
+
+
+def test_an_account_seen_fine_ends_its_episode_and_sparse_heartbeats_do_not_renotify(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Heartbeats hours apart are NOT a clear (an unchanged account notifies once); the detector
+    seeing the account fine deletes the record and ends the episode, so a relapse after the flap
+    window notifies again and a relapse inside it does not."""
+    import notify  # type: ignore[import-not-found]
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS", "0")
+    banners = _Banners()
+    base = 1_800_000_000.0
+
+    def beat(at: float, needing: bool) -> None:
+        monkeypatch.setattr(det.time, "time", lambda: at)
+        _run_inprocess(
+            tmp_path, "rotator", monkeypatch, capsys,
+            before=(lambda h: _write_login_slot(h, "a@x.com", expires_in_days=-1.0))
+            if needing else (lambda h: _write_fine_slot(h, "a@x.com")),
+        )
+        det.rotator_alert.notify_new_remediations(tmp_path / "rotator", at, runner=banners)
+
+    beat(base, True)
+    assert len(banners.argvs) == 1
+    beat(base + 7200, True)  # the next heartbeat, 2 h later: same unchanged episode
+    assert len(banners.argvs) == 1
+    beat(base + 7300, False)  # seen fine: record deleted, episode ended
+    assert _account_keys(_records(tmp_path)) == set()
+    beat(base + 7400, True)  # relapse inside the flap window: same episode
+    assert len(banners.argvs) == 1
+    beat(base + 7500, False)
+    beat(base + 7500 + notify.EPISODE_FLAP_S + 1, True)  # relapse after the window: new episode
+    assert len(banners.argvs) == 2
 
 
 # ---------------------------------------------------------------------------

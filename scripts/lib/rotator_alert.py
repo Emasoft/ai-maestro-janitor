@@ -9,7 +9,8 @@ heartbeat drift line and no agent-visible channel). Every active alarm is record
 remediation record once through `notify.notify_episode`.
 
 Reads only state.json / rotation-stuck.json / tick-completed.ts — never a credential. The text
-names the single action and never a token or an e-mail.
+names the single action; a remediation record may carry the affected account e-mail (it is owner-only
+state and a desktop notification, never agent context), and never a token.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ _STUCK_TEXT = {
 }
 
 
-REMEDIATION_FRESH_S = 1800  # an owner-remediation record not re-seen for this long is a condition that went away
+REMEDIATION_FRESH_S = 1800  # a record not re-seen for this long is not NEWLY notified (an episode ends only on an observed clear, never on this age)
 AUTH_FAILED_NAME = "auth-failed.json"  # written by the StopFailure hook on a 401
 AUTH_FAILED_TTL_S = 6 * 3600  # the marker expires on its own after 6 h
 AUTH_FAILED_ACTION = "the login was rejected (Login expired) - run /login"
@@ -78,6 +79,18 @@ def _epoch(raw: object) -> Optional[float]:
     return raw / 1000 if raw > 1e12 else float(raw)
 
 
+def _remediation_key(condition: str, kind: str, slot: str) -> str:
+    return ":".join(p for p in (condition, kind, slot) if p)
+
+
+def _remediation_lock(root: Path) -> Path:
+    return root / (OWNER_REMEDIATION_NAME + ".lock")
+
+
+def _write_remediations(root: Path, records: dict) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(root / OWNER_REMEDIATION_NAME, json.dumps({"conditions": records}, sort_keys=True))
+
 
 def _spare_stale_after_s() -> float:
     """ROTATOR_SPARE_STALE_AFTER_H (hours past expiry, default 4) in seconds. A malformed value
@@ -86,7 +99,6 @@ def _spare_stale_after_s() -> float:
     if spare_stale_env_malformed() is not None:
         return 4 * 3600.0
     return float(os.environ.get("ROTATOR_SPARE_STALE_AFTER_H", "4")) * 3600
-
 
 
 def spare_stale_env_malformed() -> Optional[str]:
@@ -100,6 +112,7 @@ def spare_stale_env_malformed() -> Optional[str]:
         return raw if not float(raw) >= 0 else None  # NaN and negatives are malformed too
     except ValueError:
         return raw
+
 
 def _live(st: dict) -> tuple[Optional[str], Optional[float]]:
     """(live account e-mail, its slot twin expiry) from state.json - no credential read."""
@@ -121,7 +134,6 @@ def record_auth_failed(root: Path, kind: str, now: float) -> None:
     )
 
 
-
 def clear_auth_failed(root: Path) -> None:
     """Called by the Stop hook: Claude Code fires Stop only for a turn that ended WITHOUT an
     API error, so a Stop is proof the login works again - the marker is no longer true. (The
@@ -139,19 +151,58 @@ def record_owner_remediation(
 ) -> None:
     """Durably record an owner-only remediation without creating agent-context output.
     The record key is condition[:kind][:slot] - the same three parts that make one notification
-    episode (`notify.notify_episode`). The daemon notifies each fresh record once."""
-    path = root / OWNER_REMEDIATION_NAME
-    records = _dict(_read_json(path).get("conditions"))
-    key = ":".join(p for p in (condition, kind, slot) if p)
-    records[key] = {"condition": condition, "kind": kind, "slot": slot, "action": action, "last_seen": int(now)}
-    # Bounded file: a record not re-seen for a week is a condition long gone.
-    records = {
-        k: v for k, v in records.items()
-        if isinstance(v, dict) and now - (_epoch(v.get("last_seen")) or 0) <= 7 * 86400
-    }
-    root.mkdir(parents=True, exist_ok=True)
-    state.atomic_write(path, json.dumps({"conditions": records}, sort_keys=True))
+    episode (`notify.notify_episode`). The daemon notifies each fresh record once.
+    One record per (condition, slot): a record of the same condition and slot under ANOTHER kind
+    is superseded (the old kind no longer holds - observed), and its episode is cleared.
+    The read-modify-write runs under a sidecar flock: the daemon's alert thread and every
+    session's detector write this file, and an unlocked update is a lost record."""
 
+    def _update() -> None:
+        records = _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions"))
+        for old_key, old in list(records.items()):
+            old = _dict(old)
+            if old.get("condition") == condition and (old.get("slot") or "") == slot and (old.get("kind") or "") != kind:
+                del records[old_key]
+                notify.clear_episode(condition=condition, kind=str(old.get("kind") or ""), slot=slot, now=now)
+        records[_remediation_key(condition, kind, slot)] = {
+            "condition": condition, "kind": kind, "slot": slot, "action": action, "last_seen": int(now)
+        }
+        # Bounded file: a record not re-seen for a week is a condition long gone.
+        records = {
+            k: v for k, v in records.items()
+            if isinstance(v, dict) and now - (_epoch(v.get("last_seen")) or 0) <= 7 * 86400
+        }
+        _write_remediations(root, records)
+
+    root.mkdir(parents=True, exist_ok=True)
+    notify.under_lock(_remediation_lock(root), _update)
+
+
+def clear_owner_remediations(
+    root: Path, condition: str, now: float, *, keep_slots: frozenset[str] = frozenset()
+) -> None:
+    """The caller OBSERVED `condition` gone for every slot not in `keep_slots`: delete those
+    records and end their notification episodes (`notify.clear_episode`). This - never a gap in
+    observation - is what lets a returning condition notify again."""
+
+    def _update() -> None:
+        records = _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions"))
+        gone = {
+            k: _dict(v) for k, v in records.items()
+            if _dict(v).get("condition") == condition and (_dict(v).get("slot") or "") not in keep_slots
+        }
+        if not gone:
+            return
+        for k in gone:
+            del records[k]
+        _write_remediations(root, records)
+        for rec in gone.values():
+            notify.clear_episode(
+                condition=condition, kind=str(rec.get("kind") or ""), slot=str(rec.get("slot") or ""), now=now
+            )
+
+    if (root / OWNER_REMEDIATION_NAME).exists():
+        notify.under_lock(_remediation_lock(root), _update)
 
 
 # WHY a marker file (TRDD-0SU2C2IM): the capture is launched DETACHED, so the launcher never sees
@@ -199,8 +250,15 @@ def _tick_age(root: Path, now: float) -> float:
         return float("inf")  # never stamped: a tick that ran just before this would have stamped
 
 
-
 _STUCK_FRESH_S = 3600  # mirrors the oauth-login-needed detector gate and rotator.STUCK_MARKER_FRESH_S
+
+# Daemon-written conditions: only `evaluate` observes them, so only it clears their records.
+# The first three are observable only while a Claude session runs; tick-stalled also only while
+# the tick is ours to judge.
+_DAEMON_CONDITIONS = frozenset(
+    {"no-rotation-target", "spare-stale", "tick-stalled", "rotation-stuck", "auth-failed", "capture-refused"}
+)
+_CLAUDE_GATED_CONDITIONS = frozenset({"no-rotation-target", "spare-stale", "tick-stalled"})
 
 
 def active_conditions(
@@ -236,7 +294,7 @@ def active_conditions(
         # the live account's slot twin, and that goes stale BY DESIGN, so it would fire ~8 h
         # after every switch while the real login is fine. The wall itself is reported by
         # `auth-failed` below, written by the session's StopFailure hook.
-# check_tick is False while the ai-maestro server owns the rotator tick: its stamp is not ours to judge.
+        # check_tick is False while the ai-maestro server owns the rotator tick: its stamp is not ours to judge.
         if check_tick and _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
     # WHY (TRDD-7T4J5T6Z): only a marker the rotator rewrote within the last hour is a live verdict;
@@ -273,6 +331,7 @@ def active_conditions(
             else f"profile {target} could not be confirmed as signed in; sign it in as {target}"
         )
     return out
+
 
 def _episode_parts(cond: str, stuck_kind: str) -> tuple[str, str, str]:
     """(condition, kind, slot) of an active alarm - the three parts of its notification episode.
@@ -322,20 +381,48 @@ def notify_session_tick_stalled(
     root: Path,
     now: float,
     *,
+    server_owns_tick: bool = False,
     runner: Optional[Callable[[list[str]], None]] = None,
 ) -> Optional[str]:
     """Session-side tick-stalled notification: a hung or dead daemon cannot raise its own alarm,
     so the heartbeat-side detector calls this. It uses the SAME episode key the daemon's
     evaluation uses (condition `tick-stalled`) in the machine-wide notify-sent store, so N
     sessions plus the daemon produce ONE desktop notification per episode. Prints nothing -
-    the owner learns of it, no agent reads it. Returns the notify outcome, or None when the
-    rotator has ticked recently (or never ticked: no stamp, nothing to compare)."""
-    if not (root / "tick-completed.ts").exists() or _tick_age(root, now) <= TICK_STALL_S:
+    the owner learns of it, no agent reads it.
+
+    Gated exactly like the daemon's own alarm, or it is a false alarm: no opt-in flag means the
+    rotator never ticks here, and `server_owns_tick` (the ai-maestro server owns the tick, so
+    its stamp is not ours to judge) switches the check off. Returns the notify outcome, or None
+    when nothing was notified. A tick seen fresh is an OBSERVED clear: it ends the episode."""
+    if not (root / "opt-in.flag").is_file() or server_owns_tick:
+        return None
+    if not (root / "tick-completed.ts").exists():
+        return None  # never stamped: nothing to compare, nothing observed
+    if _tick_age(root, now) <= TICK_STALL_S:
+        notify.clear_episode(condition="tick-stalled", now=now)
         return None
     return notify.notify_episode(
         condition="tick-stalled", message=_ACTIONS["tick-stalled"], now=now, runner=runner
     )
 
+
+def _clear_observed_gone(
+    root: Path, now: float, active_parts: set[tuple[str, str]], claude_running: bool, check_tick: bool
+) -> None:
+    """End the episode of every daemon condition that was OBSERVED not to hold on this pass.
+    A condition this pass could not observe (no claude running; tick not ours to judge) is left
+    alone: a gap in observation is not a clear."""
+    for rec in _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions")).values():
+        name, slot = str(_dict(rec).get("condition") or ""), str(_dict(rec).get("slot") or "")
+        if name not in _DAEMON_CONDITIONS or (name, slot) in active_parts:
+            continue
+        if name in _CLAUDE_GATED_CONDITIONS and not claude_running:
+            continue
+        if name == "tick-stalled" and not check_tick:
+            continue
+        clear_owner_remediations(
+            root, name, now, keep_slots=frozenset(s for n, s in active_parts if n == name)
+        )
 
 
 def evaluate(
@@ -346,13 +433,17 @@ def evaluate(
     runner: Optional[Callable[[list[str]], None]] = None,
     check_tick: bool = True,
 ) -> list[str]:
-    """Persist active alarms, record each as an owner remediation, and notify the owner once
-    per new episode (`notify_new_remediations`). Nothing here reaches an agent."""
+    """Persist active alarms, record each as an owner remediation, end the episode of every
+    daemon condition observed gone, and notify the owner once per new episode
+    (`notify_new_remediations`). Nothing here reaches an agent."""
     active = active_conditions(root, now, claude_running, check_tick=check_tick)
     stuck_kind = str(_read_json(root / "rotation-stuck.json").get("kind") or "")
+    active_parts: set[tuple[str, str]] = set()
     for cond, action in active.items():
         name, kind, slot = _episode_parts(cond, stuck_kind)
+        active_parts.add((name, slot))
         record_owner_remediation(root, name, action, now, kind=kind, slot=slot)
+    _clear_observed_gone(root, now, active_parts, claude_running, check_tick)
     path = root / ALERT_NAME
     prior = _dict(_read_json(path).get("alerts"))
     alerts = {

@@ -32,6 +32,7 @@ def _native_notifier_available(monkeypatch):
     if sys.platform != "darwin":
         monkeypatch.setattr(notify.shutil, "which", lambda _name: "/usr/bin/notify-send")
 
+
 NOW = 1_800_000_000
 
 
@@ -147,7 +148,6 @@ def test_min_severity_is_tunable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _push(rec, sev="CRITICAL") == notify.PUSHED
 
 
-
 def _episode(rec: _Recorder, *, condition: str = "tick-stalled", kind: str = "", slot: str = "",
              now: int = NOW) -> str:
     return notify.notify_episode(condition=condition, kind=kind, slot=slot, message="act",
@@ -177,16 +177,47 @@ def test_episode_key_is_condition_kind_and_slot() -> None:
     assert "[janitor] act" in rec.argvs[0][2]  # the prefix is not defanged by the sanitizer
 
 
-def test_episode_renotifies_only_after_the_condition_was_absent_longer_than_the_flap_window() -> None:
-    """A condition re-seen inside the window is the same episode; one that had not been seen for
-    longer than the window is a new episode."""
+def test_episode_renotifies_only_after_an_observed_clear_older_than_the_flap_window() -> None:
+    """An episode ends only on an OBSERVED clear. Back inside the flap window after the clear:
+    the same episode; back after the window: a new episode."""
     rec = _Recorder()
     assert _episode(rec) == notify.PUSHED
-    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S) == notify.EPISODE_ACTIVE  # exactly the window
-    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S + 1) == notify.EPISODE_ACTIVE  # refreshed at the line above
-    gap = notify.EPISODE_FLAP_S + 2
-    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S + 1 + gap) == notify.PUSHED
+    notify.clear_episode(condition="tick-stalled", now=NOW + 100)
+    assert _episode(rec, now=NOW + 100 + notify.EPISODE_FLAP_S) == notify.EPISODE_ACTIVE  # exactly the window
+    # the flap voided the clear: without a new clear the episode cannot end, however long it lasts
+    assert _episode(rec, now=NOW + 10 * 86400) == notify.EPISODE_ACTIVE
+    notify.clear_episode(condition="tick-stalled", now=NOW + 11 * 86400)
+    assert _episode(rec, now=NOW + 11 * 86400 + notify.EPISODE_FLAP_S + 1) == notify.PUSHED
     assert len(rec.argvs) == 2
+
+
+def test_a_gap_in_observation_never_ends_an_episode() -> None:
+    """Sparse callers (session heartbeats hours apart) and long silences are not a clear: the
+    condition is unchanged, so no second notification at ~2400 s, at 2 h, or after 3 days."""
+    rec = _Recorder()
+    assert _episode(rec) == notify.PUSHED
+    for gap in (2400, 3601, 7200, 3 * 86400):
+        assert _episode(rec, now=NOW + gap) == notify.EPISODE_ACTIVE
+    assert len(rec.argvs) == 1
+
+
+def test_clear_without_an_episode_is_a_noop_and_the_first_clear_wins() -> None:
+    rec = _Recorder()
+    notify.clear_episode(condition="tick-stalled", now=NOW)
+    assert not notify._sent_path().exists()
+    assert _episode(rec, now=NOW + 1) == notify.PUSHED
+    notify.clear_episode(condition="tick-stalled", now=NOW + 10)
+    notify.clear_episode(condition="tick-stalled", now=NOW + 5000)  # must not move the clear later
+    assert _episode(rec, now=NOW + 10 + notify.EPISODE_FLAP_S + 1) == notify.PUSHED
+
+
+def test_episode_lines_never_evict_push_content_hashes() -> None:
+    """Separate trim budgets: a flood of distinct episode lines leaves the push hashes alone."""
+    rec = _Recorder()
+    assert _push(rec, code="C-1", summary="finding 1") == notify.PUSHED
+    for i in range(notify._SENT_KEEP_LINES + 50):
+        _episode(rec, condition="c", slot=f"s{i}")
+    assert _push(rec, code="C-1", summary="finding 1", now=NOW + 1) == notify.DEDUPED
 
 
 def test_episode_lines_do_not_consume_the_push_cap_or_dedupe_a_push() -> None:
