@@ -1596,7 +1596,9 @@ def test_cmd_auto_all_maxed_line_names_every_alternate_verdict(
     monkeypatch.setattr(rotator, "_decide", lambda msg: decided.append(msg))
     rotator.cmd_auto()
     assert switches == []
-    stuck = [m for m in decided if "all paid accounts maxed" in m]
+    # One spare is a dead login (locally-expired-no-refresh), so since the stuck-kind split (2026-10-21)
+    # this is a need-login line, not "all paid accounts maxed"; the per-alternate verdicts remain.
+    stuck = [m for m in decided if "need a login" in m]
     assert len(stuck) == 1
     assert "wall@x:util(5h=99,7d=99)" in stuck[0]
     assert "dead@x:locally-expired-no-refresh" in stuck[0]
@@ -1619,6 +1621,116 @@ def test_cmd_auto_no_alternates_is_distinct_from_all_maxed(
     assert not any("all paid accounts maxed" in m for m in decided)
     unmeasured = [m for m in decided if "no alternate accounts to measure" in m]
     assert len(unmeasured) == 1
+
+
+
+def _auto_stuck_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slot_blobs: dict, usage: dict,
+                       *, streaks: dict | None = None) -> tuple[dict, list[str]]:
+    """Run the real cmd_auto verdict loop (refresh grant failing) and return (marker, decisions)."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs=slot_blobs, usage={"LIVE": (401, None), **usage})
+    st = rotator.load_state()
+    for email, streak in (streaks or {}).items():
+        st["slots"][email]["alt_429_streak"] = streak
+    rotator.save_state(st)
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)
+    decided: list[str] = []
+    monkeypatch.setattr(rotator, "_decide", lambda msg: decided.append(msg))
+    rotator.cmd_auto()
+    assert switches == []
+    return json.loads((tmp_path / "rotation-stuck.json").read_text()), decided
+
+
+def test_cmd_auto_credential_dead_spares_mark_alternates_need_login(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-21 incident: two spares dead (refresh fails) and none at a limit must NOT be
+    reported as all-accounts-maxed; the marker names the login remedy and counts need-login=2."""
+    monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
+    marker, decided = _auto_stuck_marker(
+        tmp_path, monkeypatch,
+        {"a@x": _blob("A", expires_ms=_ms_in(-5)), "b@x": _blob("B", expires_ms=_ms_in(-5))}, {})
+    assert marker["kind"] == "alternates-need-login"
+    assert marker["detail"].startswith("need-login=2;maxed=0;unusable=0|")
+    assert any("2 spare account(s) need a login" in m and "/janitor-refresh-cc-logins" in m for m in decided)
+    assert not any("all paid accounts maxed" in m for m in decided)
+
+
+def test_cmd_auto_mixed_maxed_and_dead_spare_marks_need_login_with_both_counts(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One spare genuinely maxed (429 streak at the debounce) + one dead: still a login problem."""
+    monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
+    marker, decided = _auto_stuck_marker(
+        tmp_path, monkeypatch,
+        {"max@x": _blob("MAX", expires_ms=_ms_in(80)), "dead@x": _blob("D", expires_ms=_ms_in(-5))},
+        {"MAX": (429, None)}, streaks={"max@x": 1})
+    assert marker["kind"] == "alternates-need-login"
+    assert marker["detail"].startswith("need-login=1;maxed=1;unusable=0|")
+    assert any("1 spare account(s) need a login (1 at its usage limit)" in m for m in decided)
+
+
+def test_cmd_auto_all_usage_wall_spares_keep_all_accounts_maxed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every rejection a usage wall -> the unchanged all-accounts-maxed marker and decision text."""
+    wall = {"five_hour": {"utilization": 99}, "seven_day": {"utilization": 99}}
+    marker, decided = _auto_stuck_marker(
+        tmp_path, monkeypatch,
+        {"a@x": _blob("A", expires_ms=_ms_in(80)), "b@x": _blob("B", expires_ms=_ms_in(80))},
+        {"A": (200, wall), "B": (200, wall)})
+    assert marker["kind"] == "all-accounts-maxed"
+    assert any("all paid accounts maxed; waiting for a window to reset" in m for m in decided)
+
+
+def test_cmd_auto_only_unusable_spares_mark_alternates_unusable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A spare with no readable slot is neither at a limit nor a dead login: alternates-unusable."""
+    marker, decided = _auto_stuck_marker(tmp_path, monkeypatch, {"gone@x": None}, {})
+    assert marker["kind"] == "alternates-unusable"
+    assert marker["detail"].startswith("need-login=0;maxed=0;unusable=1|")
+    assert any("1 unusable, 0 at its usage limit; see rotator.log" in m for m in decided)
+
+
+def test_cmd_auto_429_expired_spare_is_not_a_login_problem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 means the server accepted the token and rate-limited it: a first-429 spare that is
+    locally unusable (probe-429-expired) is a usage wall, never alternates-need-login."""
+    # no expiresAt -> not locally expired, but not degraded-eligible either -> probe-429(...)-expired
+    marker, _ = _auto_stuck_marker(
+        tmp_path, monkeypatch, {"t@x": _blob("T", refresh=None)}, {"T": (429, None)})
+    assert marker["kind"] == "all-accounts-maxed"
+    assert "t@x:probe-429(x1,throttle?)-expired" in marker["detail"]
+
+
+def test_mark_stuck_keeps_first_seen_across_need_login_unusable_flip(tmp_path: Path) -> None:
+    """A keychain latch can flip need-login <-> unusable; that is ONE episode, so the 600 s
+    persistence clock (first_seen) must survive the flip, while an unrelated kind still resets it."""
+    stuck = tmp_path / "rotation-stuck.json"
+    now = int(time.time())
+    stuck.write_text(json.dumps({"kind": "alternates-need-login", "detail": "d",
+                                 "first_seen_epoch": now - 5000, "last_seen_epoch": now - 60}))
+    rotator._mark_stuck("alternates-unusable", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] == now - 5000
+    rotator._mark_stuck("all-accounts-maxed", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] >= now
+
+
+
+def test_mark_stuck_family_flip_after_300s_resets_first_seen(tmp_path: Path) -> None:
+    """A need-login <-> unusable flip keeps first_seen only when the prior marker is <= 300 s old."""
+    stuck = tmp_path / "rotation-stuck.json"
+    now = int(time.time())
+    stuck.write_text(json.dumps({"kind": "alternates-need-login", "detail": "d",
+                                 "first_seen_epoch": now - 5000, "last_seen_epoch": now - 301}))
+    rotator._mark_stuck("alternates-unusable", "d")
+    assert json.loads(stuck.read_text())["first_seen_epoch"] >= now
+
+
+def test_cmd_auto_every_verdict_append_has_a_class_append() -> None:
+    """Structural guard: each verdicts.append( in cmd_auto needs its verdict_classes.append( twin."""
+    import inspect
+    src = inspect.getsource(rotator.cmd_auto)
+    assert src.count("verdicts.append(") == src.count("verdict_classes.append(")
+    assert src.count("verdicts.append(") > 0
 
 
 def test_cmd_auto_degraded_rotate_when_in_tick_refresh_fails(

@@ -274,6 +274,26 @@ def _stuck_file() -> Path:
 #: The stuck kinds whose dead end an identity resolution proves over (TRDD-7T4J5T6Z).
 _IDENTITY_STUCK_KINDS = ("no-usable-slot-twin", "identity-unknowable")
 
+#: Per-alternate verdict classes (rotator stuck-kind split, 2026-10-21): what the tier-3 stuck kind is derived from.
+VERDICT_USAGE_WALL = "usage-wall"  # the account is at / burning toward a usage limit
+VERDICT_CREDENTIAL = "credential"  # the saved login is dead or expired and could not be renewed
+VERDICT_UNUSABLE = "unusable"  # no slot, unknown usage, or a degraded fallback that was not taken
+#: One episode, not two: a keychain latch can flip need-login <-> unusable between ticks, and
+#: resetting first_seen on each flip would restart the 600 s persistence gate (rotator_alert) forever.
+_ALTERNATES_STUCK_FAMILY = frozenset({"alternates-need-login", "alternates-unusable"})
+_FAMILY_FLIP_FRESH_S = 300  # max prior-marker age for a need-login<->unusable flip to keep first_seen
+
+
+def _probe_verdict_class(status: int) -> str:
+    """Class of a rejected alternate by its usage-PROBE status, not by the verdict suffix: 401/403
+    = the login is dead (credential); 429 = the server accepted the token and rate-limited it
+    (usage wall); anything else (5xx, 0, unknown) is a server/network problem, not a login one."""
+    if status in (401, 403):
+        return VERDICT_CREDENTIAL
+    if status == 429:
+        return VERDICT_USAGE_WALL
+    return VERDICT_UNUSABLE
+
 
 
 #: A stuck marker whose last_seen_epoch is older than this is a past episode (TRDD-7T4J5T6Z); keep in
@@ -298,8 +318,14 @@ def _mark_stuck(kind: str, detail: str) -> None:
         # a recovery that needed no rotation, and a later episode must not inherit its start time.
         if (
             isinstance(prior, dict)
-            and prior.get("kind") == kind
-            and now - int(prior.get("last_seen_epoch") or 0) <= STUCK_MARKER_FRESH_S
+            # A flip within the need-login/unusable family is one episode only while the prior marker
+            # is under 300 s old (a keychain-latch flicker); a longer gap is a new episode.
+            and now - int(prior.get("last_seen_epoch") or 0)
+            <= (
+                STUCK_MARKER_FRESH_S
+                if prior.get("kind") == kind
+                else _FAMILY_FLIP_FRESH_S if {prior.get("kind"), kind} <= _ALTERNATES_STUCK_FAMILY else -1
+            )
         ):
             first = int(prior.get("first_seen_epoch") or now)
     except Exception:  # noqa: BLE001 -- absent/corrupt marker: start a fresh window
@@ -2716,12 +2742,17 @@ def cmd_auto() -> int:
     # this tick. Appended to the all-maxed line ONLY — the composite "no alternate is
     # healthy…" verdict without per-account reasons cost a forensic log dig on 2026-07-18.
     verdicts: list[str] = []
+    # Parallel to `verdicts`, one class per entry (rotator stuck-kind split, 2026-10-21): tier 3 must
+    # tell "every spare is at a usage limit" from "a spare needs a login"; the 2026-10-21 incident
+    # printed "waiting for a window to reset" for two refresh-failed (invalid_grant) spares.
+    verdict_classes: list[str] = []
     for email in state.get("slots", {}):
         if email == live_email:
             continue
         b = read_slot(email)
         if not b:
             verdicts.append("%s:no-slot" % email)
+            verdict_classes.append(VERDICT_UNUSABLE)
             continue
         if _blob_locally_expired(b):
             # RENEW-before-rotate (TRDD-1IKF0A6D, lesson [^2] of oauth-rotation-renew-reauth.md):
@@ -2737,10 +2768,12 @@ def cmd_auto() -> int:
             # invariant (never rotate ONTO a dead/dying token) is preserved.
             if not (network_up and _oauth(b).get("refreshToken")):
                 verdicts.append("%s:locally-expired-no-refresh" % email)
+                verdict_classes.append(VERDICT_CREDENTIAL)
                 continue
             refreshed, healed = _refresh_and_heal_slot(email, b, state)
             if refreshed is None or _blob_locally_expired(refreshed):
                 verdicts.append("%s:refresh-failed" % email)
+                verdict_classes.append(VERDICT_CREDENTIAL)
                 continue
             index_healed = index_healed or healed
             b = refreshed
@@ -2773,8 +2806,10 @@ def cmd_auto() -> int:
                     if _oauth(b).get("refreshToken") and _eh is not None and not _blob_locally_expired(b):
                         degraded.append((email, b, _eh))
                         verdicts.append("%s:probe-%s-degraded" % (email, st2))
+                        verdict_classes.append(VERDICT_UNUSABLE)
                     else:
                         verdicts.append("%s:probe-%s-unrenewable" % (email, st2))
+                        verdict_classes.append(_probe_verdict_class(st2))
                     continue
                 index_healed = index_healed or healed
                 b = refreshed
@@ -2805,17 +2840,22 @@ def cmd_auto() -> int:
                         if _eh is not None and not _blob_locally_expired(b):
                             degraded.append((email, b, _eh))
                             verdicts.append("%s:probe-429(x%d,throttle?)-degraded" % (email, streak))
+                            verdict_classes.append(VERDICT_USAGE_WALL)
                         else:
                             verdicts.append("%s:probe-429(x%d,throttle?)-expired" % (email, streak))
+                            verdict_classes.append(VERDICT_USAGE_WALL)
                     else:
                         verdicts.append("%s:maxed-429(x%d)" % (email, streak))
+                        verdict_classes.append(VERDICT_USAGE_WALL)
                 else:
                     _eh = expires_in_h(b)
                     if _eh is not None and not _blob_locally_expired(b):
                         degraded.append((email, b, _eh))
                         verdicts.append("%s:probe-%s-degraded" % (email, st2))
+                        verdict_classes.append(VERDICT_UNUSABLE)
                     else:
                         verdicts.append("%s:probe-%s-expired" % (email, st2))
+                        verdict_classes.append(_probe_verdict_class(st2))
                 continue
             meta = state.get("slots", {}).get(email)
             if isinstance(meta, dict) and meta.get("alt_429_streak"):
@@ -2825,6 +2865,7 @@ def cmd_auto() -> int:
             bsd = _util(d2, "seven_day")
             if bfh is None or bsd is None:
                 verdicts.append("%s:unknown-usage" % email)
+                verdict_classes.append(VERDICT_UNUSABLE)
                 continue  # unknown usage -> not a safe target
             # Feed the alternate's reading into ITS burn ring too (TRDD-FQXBURNR) — probes
             # only happen while a rotation is being considered, so history is sparse, but
@@ -2834,6 +2875,7 @@ def cmd_auto() -> int:
             meta_dirty = True
             if not is_safe_alternate(bfh, bsd):
                 verdicts.append("%s:util(5h=%.0f,7d=%.0f)" % (email, bfh, bsd))
+                verdict_classes.append(VERDICT_USAGE_WALL)
                 continue  # itself near a limit -> skip
             rings2 = burn_gate.account_rings(state, email)
             caps2 = burn_gate.account_caps(state, email)
@@ -2845,6 +2887,7 @@ def cmd_auto() -> int:
                 # it buys minutes, not a session (the second half of the 2026-07-17
                 # incident). Fail-open: sparse history simply never trips this.
                 verdicts.append("%s:walls-soon" % email)
+                verdict_classes.append(VERDICT_USAGE_WALL)
                 continue
             veto = token_burn.scoped_rotation_veto(
                 live_data, d2, int(time.time()), bars={"5h": SAFE_5H, "7d": SAFE_7D}
@@ -2859,6 +2902,7 @@ def cmd_auto() -> int:
                 scoped_blocked.append((email, b, bfh, bsd))
                 scoped_veto[email] = veto
                 verdicts.append("%s:scoped-spent(%s)" % (email, veto))
+                verdict_classes.append(VERDICT_USAGE_WALL)
                 continue
             candidates.append((email, b, bfh, bsd))
         else:
@@ -2964,9 +3008,38 @@ def cmd_auto() -> int:
     # this the host goes quiet at exactly the moment a human is the only way out.
     if network_up:
         if verdicts:
-            detail = "; ".join(verdicts)
-            _decide("auto: live %s exhausted (%s) but every alternate was measured and none is usable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, detail))
-            _mark_stuck("all-accounts-maxed", detail)
+            # Rotator stuck-kind split, 2026-10-21: "all-accounts-maxed" is only true when EVERY
+            # rejection was a usage wall. The 2026-10-21 incident had two spares dead with
+            # invalid_grant (none at a limit) and still told the owner to wait for a window to
+            # reset - a wait that never ends, because only a fresh login fixes a dead credential.
+            # The verdict list and its class list are appended in lockstep; a length mismatch
+            # means a future verdict site forgot its class, so fail loudly (an assert would
+            # vanish under -O).
+            if len(verdict_classes) != len(verdicts):
+                raise RuntimeError(
+                    "cmd_auto: %d verdicts but %d verdict classes" % (len(verdicts), len(verdict_classes))
+                )
+            joined = "; ".join(verdicts)
+            n_login = verdict_classes.count(VERDICT_CREDENTIAL)
+            n_maxed = verdict_classes.count(VERDICT_USAGE_WALL)
+            n_unusable = verdict_classes.count(VERDICT_UNUSABLE)
+            counts = "need-login=%d;maxed=%d;unusable=%d|%s" % (n_login, n_maxed, n_unusable, joined)
+            if n_login:
+                _decide(
+                    "auto: live %s exhausted (%s) but no alternate is usable — %d spare account(s) need a login%s; "
+                    "run /janitor-refresh-cc-logins then /janitor-capture-all-logins [%s]"
+                    % (live_email or "(live)", live_desc, n_login, (" (%d at its usage limit)" % n_maxed) if n_maxed else "", joined)
+                )
+                _mark_stuck("alternates-need-login", counts)
+            elif n_maxed == len(verdict_classes):
+                _decide("auto: live %s exhausted (%s) but every alternate was measured and none is usable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, joined))
+                _mark_stuck("all-accounts-maxed", joined)
+            else:
+                _decide(
+                    "auto: live %s exhausted (%s) but no spare account is usable (%d unusable, %d at its usage limit; see rotator.log for each reason) [%s]"
+                    % (live_email or "(live)", live_desc, n_unusable, n_maxed, joined)
+                )
+                _mark_stuck("alternates-unusable", counts)
         else:
             _decide("auto: live %s exhausted (%s) but there are no alternate accounts to measure — cannot rotate; add another paid account" % (live_email or "(live)", live_desc))
             _mark_stuck("no-alternates-configured", live_desc)

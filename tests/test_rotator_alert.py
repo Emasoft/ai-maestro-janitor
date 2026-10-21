@@ -174,6 +174,52 @@ def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) ->
     assert "capture-all-logins" not in text
 
 
+
+def test_need_login_is_not_surfaced_before_it_persists_600s(root: Path) -> None:
+    """One tick's invalid_grant can be a refresh-token race: under 600 s nothing is surfaced."""
+    _stuck(root, NOW, kind="alternates-need-login", detail="need-login=2;maxed=0;unusable=0|x",
+           first_seen_epoch=int(NOW) - 599, last_seen_epoch=int(NOW))
+    assert "rotation-stuck" not in ra.active_conditions(root, NOW, False)
+
+
+def test_need_login_surfaced_after_600s_names_both_commands_and_counts(root: Path) -> None:
+    """At >= 600 s the text names both remedies and the counts from the marker detail."""
+    _stuck(root, NOW, kind="alternates-need-login", detail="need-login=2;maxed=1;unusable=0|x",
+           first_seen_epoch=int(NOW) - 600, last_seen_epoch=int(NOW))
+    text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
+    assert "2 spare account(s) need a login (1 at its usage limit)" in text
+    assert "/janitor-refresh-cc-logins" in text and "/janitor-capture-all-logins" in text
+
+
+def test_need_login_without_parseable_counts_uses_generic_need_login_text(root: Path) -> None:
+    """A detail with no leading counts still yields the need-login remedy, without numbers."""
+    _stuck(root, NOW, kind="alternates-need-login", detail="garbage",
+           first_seen_epoch=int(NOW) - 900, last_seen_epoch=int(NOW))
+    text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
+    assert text == ra._STUCK_TEXT["alternates-need-login"]
+    assert "/janitor-refresh-cc-logins" in text
+
+
+
+def test_unusable_text_folds_in_counts_and_falls_back_when_unparseable() -> None:
+    """alternates-unusable is neutral about its cause and shows counts when the detail parses."""
+    assert ra.stuck_text("alternates-unusable", "need-login=0;maxed=1;unusable=2|x") == (
+        "no spare account is usable (2 unusable, 1 at its usage limit; see rotator.log for each reason)"
+    )
+    assert ra.stuck_text("alternates-unusable", "garbage") == "no spare account is usable (see rotator.log for each reason)"
+
+
+def test_the_three_maxed_login_unusable_texts_are_pairwise_distinct() -> None:
+    """The usage-limit, need-login and unusable stuck kinds each word their own remedy."""
+    texts = [
+        ra.stuck_text("all-accounts-maxed"),
+        ra.stuck_text("alternates-need-login", "need-login=1;maxed=0;unusable=0|x"),
+        ra.stuck_text("alternates-unusable"),
+    ]
+    assert len(set(texts)) == 3
+    assert ra.stuck_text("all-accounts-maxed") == ra._STUCK_ALL_MAXED_TEXT
+
+
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [

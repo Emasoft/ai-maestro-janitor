@@ -393,13 +393,14 @@ def main() -> int:
     stuck_live = (
         isinstance(stuck, dict) and stuck.get("kind")
         and (now - int(stuck.get("last_seen_epoch") or 0)) <= 3600
+        and rotator_alert.stuck_surfaced(stuck, now)
     )
     if stuck_live:
         assert stuck is not None  # narrows Optional for pyright; stuck_live just proved it
         first = int(stuck.get("first_seen_epoch") or now)
         kind = str(stuck.get("kind"))
         hours = max(0.0, (now - first) / 3600.0)
-        remedy = rotator_alert.stuck_text(kind)
+        remedy = rotator_alert.stuck_text(kind, stuck.get("detail"))
         msg3 = (
             f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
             f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
