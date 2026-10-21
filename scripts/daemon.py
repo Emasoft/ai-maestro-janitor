@@ -4339,7 +4339,7 @@ class _RotatorAlertThread(threading.Thread):
         """One evaluation pass (the thread's loop body; tests call it directly)."""
         if gs.kill_switch_present() or not oauth_supervisor.opt_in_present():
             return
-# The server-owns probe is read here too, not only via set_tick_yielded: the FIRST pass runs at
+        # The server-owns probe is read here too, not only via set_tick_yielded: the FIRST pass runs at
         # thread start, before the main loop has published the yield state, and a server-owned tick
         # stamp is not ours to judge (a false tick-stalled alarm otherwise).
         self._eval_fn(not (self._tick_yielded.is_set() or oauth_supervisor._server_owns_chores()))

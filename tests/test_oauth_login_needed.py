@@ -668,6 +668,62 @@ def test_an_account_seen_fine_ends_its_episode_and_sparse_heartbeats_do_not_reno
     assert len(banners.argvs) == 2
 
 
+
+def _record_for(home: Path, email: str, kind: str = "expired") -> None:
+    det.rotator_alert.record_owner_remediation(
+        home, "oauth-login-needed", f"account {email} needs a one-time login", time.time(),
+        kind=kind, slot=email,
+    )
+
+
+def test_an_account_not_read_this_pass_keeps_its_record_and_episode(tmp_path, monkeypatch, capsys) -> None:
+    """_slot_facts skips a slot whose blob is unreadable: that account was NOT observed, so its
+    record must survive (only the account actually read and found fine is cleared)."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS", "0")
+
+    def before(home: Path) -> None:
+        _write_fine_slot(home, "read@example.com")
+        _record_for(home, "read@example.com")
+        _record_for(home, "unread@example.com")
+
+    _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=before)
+    keys = _account_keys(_records(tmp_path))
+    assert not any("read@example.com" in k and "unread" not in k for k in keys)  # observed fine: cleared
+    assert any(k.endswith(":unread@example.com") for k in keys)  # unobserved: kept
+
+
+def test_a_readable_but_degraded_blob_is_not_observed_fine(tmp_path, monkeypatch, capsys) -> None:
+    """A readable blob with no refresh token and no expiry still needs a login: it is recorded,
+    never cleared as fine."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS", "0")
+    email = "deg@example.com"
+
+    def before(home: Path) -> None:
+        (home / "slots").mkdir(parents=True)
+        (home / "state.json").write_text(json.dumps({"slots": {email: {"refresh_failures": 0}}}))
+        (home / "opt-in.flag").touch()
+        (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "x"}}))
+        _record_for(home, email)
+
+    _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=before)
+    assert any(k.endswith(f":{email}") for k in _account_keys(_records(tmp_path)))
+
+
+def test_the_server_owns_probe_never_runs_with_the_rotator_off(tmp_path, monkeypatch, capsys) -> None:
+    """A rotator home without the opt-in flag never evaluates the server-owns probe."""
+    calls: list[int] = []
+    monkeypatch.setattr(det.supervisor, "_server_owns_chores", lambda: calls.append(1) or False)
+
+    def off(home: Path) -> None:
+        home.mkdir(parents=True)
+        (home / "state.json").write_text(json.dumps({"slots": {}}))
+
+    _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=off)
+    assert calls == []
+    _run_inprocess(tmp_path, "rotator_on", monkeypatch, capsys, before=lambda h: _write_fine_slot(h, "a@x.com"))
+    assert calls == [1]
+
+
 # ---------------------------------------------------------------------------
 # TRDD-TK529Q0F, superseded by TRDD-1J9B7MWO (USER ruling 2026-10-21): the rotation-stuck
 # verdict reaches the user through the daemon (rotator_alert, one notification per kind), never

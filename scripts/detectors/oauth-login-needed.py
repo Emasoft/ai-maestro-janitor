@@ -218,9 +218,12 @@ def main() -> int:
     # itself, so the heartbeat side raises that one under the daemon's episode key, which the
     # machine-wide notify-sent store collapses to one notification across every session.
     try:
-        rotator_alert.notify_session_tick_stalled(
-            home, now, server_owns_tick=supervisor._server_owns_chores()
-        )
+        # The server-owns probe runs only with the rotator opted in (the rotator-off path never
+        # probes; TRDD-1J9B7MWO).
+        if supervisor.opt_in_present(home):
+            rotator_alert.notify_session_tick_stalled(
+                home, now, server_owns_tick=supervisor._server_owns_chores()
+            )
     except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
         pass
 
@@ -255,11 +258,17 @@ def main() -> int:
     # OBSERVED CLEARS: an account seen fine on this pass (logged in, self-renewing, or captured) has
     # its record deleted and its episode ended, so a later relapse notifies again. Only this pass
     # observes it; a gap between heartbeats never ends an episode (facts empty: unobserved, no clear).
+    # WHY observed_slots (TRDD-1J9B7MWO): _slot_facts silently skips a slot whose blob is unreadable,
+    # so an account absent from `facts` was NOT observed this pass; clearing "everything not
+    # needing" would end its episode on non-observation and pop the same alert again later. Only
+    # accounts actually read (present in facts) and no longer in the condition may be cleared.
+    observed = frozenset(f.email for f in facts)
     rotator_alert.clear_owner_remediations(
-        home, "oauth-login-needed", now, keep_slots=frozenset(e for e, _ in needing)
+        home, "oauth-login-needed", now,
+        keep_slots=frozenset(e for e, _ in needing), observed_slots=observed,
     )
     rotator_alert.clear_owner_remediations(
-        home, "oauth-capture-stalled", now, keep_slots=frozenset(stalled)
+        home, "oauth-capture-stalled", now, keep_slots=frozenset(stalled), observed_slots=observed
     )
 
     # PRIMARY — accounts that need a fresh human sign-in. One record per account (not one aggregated

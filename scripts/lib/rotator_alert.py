@@ -86,6 +86,44 @@ def _remediation_key(condition: str, kind: str, slot: str) -> str:
 def _remediation_lock(root: Path) -> Path:
     return root / (OWNER_REMEDIATION_NAME + ".lock")
 
+REMEDIATION_MAX_AGE_S = 7 * 86400  # a record not re-seen for a week is a condition long gone
+
+
+def _prune_stale(records: dict, now: float) -> dict:
+    """`records` without the ones not re-seen for REMEDIATION_MAX_AGE_S, each pruned record's
+    notification episode ended. WHY clear_episode (TRDD-1J9B7MWO): an episode ends only on an
+    observed clear, so a record dropped by age alone would leave its episode open and suppress
+    every later notification for that condition forever; the backstop makes the worst case one
+    repeat a week for a condition that can never be observed clear. Limitation: an episode
+    whose record vanished by some other route without clear_episode is not covered (every known
+    removal path calls it)."""
+    kept: dict = {}
+    for k, v in records.items():
+        if isinstance(v, dict) and now - (_epoch(v.get("last_seen")) or 0) <= REMEDIATION_MAX_AGE_S:
+            kept[k] = v
+        elif isinstance(v, dict):
+            notify.clear_episode(
+                condition=str(v.get("condition") or ""),
+                kind=str(v.get("kind") or ""),
+                slot=str(v.get("slot") or ""),
+                now=now,
+            )
+    return kept
+
+
+def prune_stale_remediations(root: Path, now: float) -> None:
+    """Age-prune owner-remediation.json under its lock. Called every daemon pass (`evaluate`) so a
+    quiet host that records nothing new still prunes."""
+
+    def _update() -> None:
+        records = _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions"))
+        kept = _prune_stale(records, now)
+        if len(kept) != len(records):
+            _write_remediations(root, kept)
+
+    if (root / OWNER_REMEDIATION_NAME).exists():
+        notify.under_lock(_remediation_lock(root), _update)
+
 
 def _write_remediations(root: Path, records: dict) -> None:
     root.mkdir(parents=True, exist_ok=True)
@@ -167,29 +205,32 @@ def record_owner_remediation(
         records[_remediation_key(condition, kind, slot)] = {
             "condition": condition, "kind": kind, "slot": slot, "action": action, "last_seen": int(now)
         }
-        # Bounded file: a record not re-seen for a week is a condition long gone.
-        records = {
-            k: v for k, v in records.items()
-            if isinstance(v, dict) and now - (_epoch(v.get("last_seen")) or 0) <= 7 * 86400
-        }
-        _write_remediations(root, records)
+        _write_remediations(root, _prune_stale(records, now))
 
     root.mkdir(parents=True, exist_ok=True)
     notify.under_lock(_remediation_lock(root), _update)
 
 
 def clear_owner_remediations(
-    root: Path, condition: str, now: float, *, keep_slots: frozenset[str] = frozenset()
+    root: Path,
+    condition: str,
+    now: float,
+    *,
+    keep_slots: frozenset[str] = frozenset(),
+    observed_slots: Optional[frozenset[str]] = None,
 ) -> None:
     """The caller OBSERVED `condition` gone for every slot not in `keep_slots`: delete those
     records and end their notification episodes (`notify.clear_episode`). This - never a gap in
-    observation - is what lets a returning condition notify again."""
+    observation - is what lets a returning condition notify again.
+    `observed_slots`, when given, limits the clear to those slots: a slot the caller could not
+    read this pass is not observed, so its record and episode must survive (TRDD-1J9B7MWO)."""
 
     def _update() -> None:
         records = _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions"))
         gone = {
             k: _dict(v) for k, v in records.items()
             if _dict(v).get("condition") == condition and (_dict(v).get("slot") or "") not in keep_slots
+            and (observed_slots is None or (_dict(v).get("slot") or "") in observed_slots)
         }
         if not gone:
             return
@@ -412,6 +453,8 @@ def _clear_observed_gone(
     """End the episode of every daemon condition that was OBSERVED not to hold on this pass.
     A condition this pass could not observe (no claude running; tick not ours to judge) is left
     alone: a gap in observation is not a clear."""
+    st = _read_json(root / "state.json")
+    live, live_exp = _live(st)
     for rec in _dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions")).values():
         name, slot = str(_dict(rec).get("condition") or ""), str(_dict(rec).get("slot") or "")
         if name not in _DAEMON_CONDITIONS or (name, slot) in active_parts:
@@ -420,9 +463,24 @@ def _clear_observed_gone(
             continue
         if name == "tick-stalled" and not check_tick:
             continue
-        clear_owner_remediations(
-            root, name, now, keep_slots=frozenset(s for n, s in active_parts if n == name)
-        )
+        # WHY (TRDD-1J9B7MWO): a marker that is merely PRESENT but aged past its TTL / cooldown is
+        # not an observation of the condition being gone - age is the absence of a look. Only an
+        # absent marker (the Stop hook / a successful capture removed it) or, for auth-failed, a
+        # live account or expiry that moved ends the episode; otherwise it would re-notify later.
+        if name == "auth-failed":
+            if (root / AUTH_FAILED_NAME).exists():
+                marker = _read_json(root / AUTH_FAILED_NAME)
+                if not marker or (marker.get("live_email") == live and marker.get("live_exp") == live_exp):
+                    continue
+        elif name == "capture-refused":
+            if _refusal_path(root, slot).exists():
+                continue
+        else:
+            clear_owner_remediations(
+                root, name, now, keep_slots=frozenset(s for n, s in active_parts if n == name)
+            )
+            continue
+        clear_owner_remediations(root, name, now, observed_slots=frozenset({slot}))
 
 
 def evaluate(
@@ -444,6 +502,7 @@ def evaluate(
         active_parts.add((name, slot))
         record_owner_remediation(root, name, action, now, kind=kind, slot=slot)
     _clear_observed_gone(root, now, active_parts, claude_running, check_tick)
+    prune_stale_remediations(root, now)
     path = root / ALERT_NAME
     prior = _dict(_read_json(path).get("alerts"))
     alerts = {

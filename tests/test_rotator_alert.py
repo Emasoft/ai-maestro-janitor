@@ -512,6 +512,103 @@ def test_one_record_per_condition_and_slot_a_new_kind_supersedes_the_old(root: P
     assert set(recs) == {"oauth-login-needed:24h:x@y", "oauth-login-needed:48h:z@y"}
 
 
+
+def _auth_records(root: Path) -> dict:
+    return json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]
+
+
+def test_an_aged_but_present_auth_failed_marker_is_not_a_clear(root: Path) -> None:
+    """A marker past its 6 h TTL is not an observation of recovery: the record and the open
+    episode survive, so the same failure later does not pop a second banner."""
+    _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
+    ra.record_auth_failed(root, "authentication_failed", NOW)
+    run = Runner()
+    _fresh_tick(root)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    later = NOW + 7 * 3600
+    _fresh_tick(root, later)
+    ra.evaluate(root, now=later, claude_running=True, runner=run)
+    assert "auth-failed" in _auth_records(root)
+    again = later + ra.DEBOUNCE_S + 1
+    ra.record_auth_failed(root, "authentication_failed", again)
+    _fresh_tick(root, again)
+    ra.evaluate(root, now=again, claude_running=True, runner=run)
+    assert len(run.argvs) == 1
+
+
+def test_an_absent_auth_failed_marker_is_a_clear_and_a_new_failure_notifies_once(root: Path) -> None:
+    """The Stop hook removed the marker: observed gone. The record goes and a failure after the
+    flap window is a new episode notified exactly once."""
+    _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
+    ra.record_auth_failed(root, "authentication_failed", NOW)
+    run = Runner()
+    _fresh_tick(root)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    ra.clear_auth_failed(root)
+    ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
+    assert "auth-failed" not in _auth_records(root)
+    again = NOW + 60 + ra.DEBOUNCE_S + 1
+    ra.record_auth_failed(root, "authentication_failed", again)
+    _fresh_tick(root, again)
+    ra.evaluate(root, now=again, claude_running=True, runner=run)
+    ra.evaluate(root, now=again + 30, claude_running=True, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_a_moved_live_account_or_expiry_is_a_clear_for_auth_failed(root: Path) -> None:
+    """The live account or its slot expiry moved (a rotation, or a token renewal on the same
+    account, which changes live_exp): the marker no longer describes the live login."""
+    _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
+    ra.record_auth_failed(root, "authentication_failed", NOW)
+    run = Runner()
+    _fresh_tick(root)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    _write_state(root, live_exp_s=NOW + 9000, spare_exp_s=NOW + 7200)
+    ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
+    assert "auth-failed" not in _auth_records(root)
+
+
+def test_an_aged_but_present_capture_refused_marker_is_not_a_clear_but_an_absent_one_is(root: Path) -> None:
+    """The 6 h cooldown only stops the alarm; the refusal clears when its marker file is gone."""
+    _write_state(root, live_exp_s=NOW + 30 * 86400, spare_exp_s=NOW + 30 * 86400)
+    ra.record_capture_refused(root, SPARE, "other@example.test", NOW)
+    run = Runner()
+    _fresh_tick(root)
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    later = NOW + 7 * 3600
+    _fresh_tick(root, later)
+    ra.evaluate(root, now=later, claude_running=True, runner=run)
+    assert any(k.startswith("capture-refused") for k in _auth_records(root))
+    ra.clear_capture_refused(root, SPARE)
+    ra.evaluate(root, now=later + 60, claude_running=True, runner=run)
+    assert not any(k.startswith("capture-refused") for k in _auth_records(root))
+
+
+def test_clear_owner_remediations_only_clears_observed_slots(root: Path) -> None:
+    ra.record_owner_remediation(root, "oauth-login-needed", "a", NOW, kind="k", slot="seen@y")
+    ra.record_owner_remediation(root, "oauth-login-needed", "b", NOW, kind="k", slot="unseen@y")
+    ra.clear_owner_remediations(root, "oauth-login-needed", NOW, observed_slots=frozenset({"seen@y"}))
+    assert set(_auth_records(root)) == {"oauth-login-needed:k:unseen@y"}
+
+
+def test_evaluate_prunes_a_week_old_record_and_ends_its_episode(root: Path) -> None:
+    """Backstop: an episode that can never be observed clear would suppress every later
+    notification forever. A record not re-seen for 7 days is pruned by a quiet daemon pass and
+    its episode cleared, so a new occurrence notifies once."""
+    run = Runner()
+    ra.record_owner_remediation(root, "oauth-login-needed", "act", NOW, kind="k", slot="s@y")
+    ra.notify_new_remediations(root, NOW, runner=run)
+    assert len(run.argvs) == 1
+    later = NOW + 8 * 86400
+    _write_state(root, live_exp_s=later + 3600, spare_exp_s=later + 7200)
+    ra.evaluate(root, now=later, claude_running=False, runner=run)
+    assert _auth_records(root) == {}
+    again = later + ra.DEBOUNCE_S + 1
+    ra.record_owner_remediation(root, "oauth-login-needed", "act", again, kind="k", slot="s@y")
+    ra.notify_new_remediations(root, again, runner=run)
+    assert len(run.argvs) == 2
+
+
 def test_the_alert_thread_evaluates_once_at_start_before_waiting(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
