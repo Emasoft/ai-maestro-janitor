@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-21T23:08:40+0200
+updated: 2026-10-21T23:09:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -80,3 +80,4 @@ UNIT 4 landed in 6a435927 + 96a172d2 (reviewed). MEMORY SWEEP done 2026-10-21 ac
 ## Unit 5 — oauth-cookie-reminder still prints to agents (2026-10-21)
 
 Found by the review of 6344cb5e, verified in code: scripts/detectors/oauth-cookie-reminder.py main() prints '[oauth-cookie-refresh] N claude.ai login(s) need refresh: <emails> ...' to the heartbeat once a day (dedupe.emit_once, line ~163). That is an account issue reaching every agent, against USER ruling 1. Fix like unit 2-4: no print; record per-account owner remediations (condition oauth-cookie-refresh, slot=email, kind = the reason bucket: login-needed / cookie / setup-token), clear only accounts observed fine (present in the slot list and not at risk), so the daemon sends one desktop notification per episode; drop the .oauth-cookie-reminder-seen.txt daily dedupe. Check the daemon's notify_new_remediations picks up the new condition with a readable message; update README/SKILL prose that says it prints; tests + mutation; full suite.
+Amended by the review of 51571887 (sent to the worker): no login-needed bucket (oauth-login-needed owns it; two popups for one problem otherwise); urgency in the kind (cookie / cookie-now, setup-token / setup-token-now when no account has healthy OAuth) so the NOW escalation notifies; keep the opt-in gate; an unreadable profile is neither recorded nor cleared if distinguishable. AFTER unit 5 is committed: correct the oauth-cookie-reminder row of memory atom ATOM-Q2B2-FBQP (oauth-rotation-renew-reauth-operations.md), left unchanged by the memory worker on purpose.
