@@ -4,7 +4,7 @@ title: trdd-design-tasks step 12 carve-outs apply only before a terminal card is
 column: backburner
 status: tasked
 created: 2026-10-21T20:57:56+0200
-updated: 2026-10-21T20:57:56+0200
+updated: 2026-10-21T21:00:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -26,3 +26,7 @@ Peer request from the ai-maestro 3-pillars session (2026-10-21). Shipped IND rul
 ## Approval log
 
 - 2026-10-21T20:57:56+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Peer answers (2026-10-21, ai-maestro session, peer-reported from its code)
+
+ai-maestro tracks the same proposal as its TRDD-7KY62GNB (commit f7dab2a40), also marked pending USER ratification. (a) A late approval on an archived card has no home today: lib/trdd-store.ts appendTrddSection G2 returns 409 for every append to an archived card, Approval log included. This is a gap for the USER to rule on. (b) The archived test in lib/pillar/edit-guard.ts is path-based (zone === 'archived'), so a failed card left in design/tasks/ stays editable, matching the failed-stays-open ruling.
