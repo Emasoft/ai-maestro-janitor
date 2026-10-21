@@ -1,10 +1,10 @@
 ---
 trdd-id: C8SALZOO
 title: Janitor chores must yield to host pressure and never compete for CPU
-column: dev
+column: todo
 status: tasked
 created: 2026-10-20T18:19:36+0200
-updated: 2026-10-21T19:16:16+0200
+updated: 2026-10-21T19:20:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -24,7 +24,7 @@ implementation-commits: [b15c9d5d]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-21
 
-LANDED in b15c9d5d (shared with TRDD-ZIKYQQY0): scripts/lib/host_pressure.py defers daemon chores and the heavy detectors while the runnable-process count is at or above 300 (the bar measured in the Measurements section; fail-open when unreadable), releases the deferred queue one chore per calm pass with 0.7 hysteresis, and logs once per pressure episode; tests/test_host_pressure_gate.py. That covers acceptance (1), (5) and the visibility half of (6). Acceptance (4) is REFUTED by measurement (the bar is a runnable count, not a core-relative load). STILL OPEN: (2) pausing a chore that is already running is deliberately NOT implemented (stated in the daemon.py comment); (3) the runaway-kill exemption must be confirmed by a test that the runaway chore RUNS under simulated pressure; (7) reaping the janitor's own abandoned work belongs to TRDD-ZIKYQQY0 and TRDD-5G66S0HK. NEXT: verify (3) in tests/test_host_pressure_gate.py, then decide (2).
+Per the b15c9d5d commit body, NOT verified against the tests: scripts/lib/host_pressure.py defers daemon chores and the HEAVY detectors (not all detectors) while the runnable-process count is at or above 300 (fail-open when unreadable), releases the deferred queue one chore per calm pass with 0.7 hysteresis, and logs once per pressure episode; tests/test_host_pressure_gate.py. Acceptance (4) is REFUTED by the Measurements section (the bar is a runnable count). OPEN, all on this card: (1) confirm the deferral test and the later-run test exist; (2) pausing a chore already running is deliberately NOT implemented (daemon.py comment); (3) a test that the runaway chore RUNS under simulated pressure; (5) only the heavy detectors are gated, the card must state why the rest are exempt; (6) a once-per-episode log line is not the status line acceptance (6) asks for; (7) reaping the janitor's own abandoned work is not done here.
 
 OWNER DIRECTIVE (2026-10-20), verbatim: 'make this rule for the janitor chores: never execute them when the system is under pressure. wait a moment when the system activity is low to launch them, and pause them as soon as the system becomes too busy again. even if they will slip to the night, it is better than having those chores executed while the other main agents are struggling for cpu time and resources!'
 
@@ -50,12 +50,13 @@ DO NOT make the bar a load-average constant copied from another host. MEASURE th
 
 - 2026-10-20T18:19:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-21T19:16:16+0200 — column → dev by main-agent@ai-maestro-janitor. gate landed in b15c9d5d; acceptance (2) and the (3) test check remain
+- 2026-10-21T19:20:42+0200 — column → todo by main-agent@ai-maestro-janitor. dev claimed activity no worker is doing; partial landing recorded in STATE (review of b0aac65b, C3)
 
 ## Measurements
 
 2026-10-20 20:20 — THE LOAD BAR IS MEASURED, and the card's precondition is FALSIFIED as stated: the existing bar (cores x 4 = 56) is NOT a 'struggling' bar on this host, it is a bar this host crosses CONSTANTLY while being perfectly usable. MEASURED over six samples two minutes apart: load5 = 192.49, 193.06, 192.47, 192.76, 189.44, 185.21 (14 cores, so 13.2x to 13.8x cores) with runnable = 159, 118, 169, 128, 132, 132 and total RSS 35-37 GB on a 64 GB box. THE HOST IS USABLE at load ~190 — nine Claude sessions are running fine, tool calls are fast, and the swapfile sits at its normal 82% of its own total with 1M free pages. So the card's premise that 'the bar must sit in the band between 214 (usable) and 856 (unusable)' is WRONG: 214 and 190 are the SAME condition, and both are usable. What actually differed in the incident was not the load average but the RUNNABLE COUNT: 427 runnable at the incident, versus 118-169 now. A load average on macOS counts UNINTERRUPTIBLE-SLEEP processes too, and this host's baseline includes a large population of them (the 166 iOS Simulator daemons and their launchd agents), so the load average is inflated by a roughly CONSTANT background and does not track 'are the agents struggling'. A bar on the load average would therefore have the janitor deferring its chores forever on a healthy busy host. THE BAR MUST BE ON A SIGNAL THAT MOVES WITH THE STALL. The candidate is the RUNNABLE COUNT (processes actually runnable right now), because that is what the incident moved (427 vs ~130) and because it is directly the quantity the user feels as 'the other main agents are struggling for CPU time'. MEASURED SPREAD: 118-169 runnable across six samples on a HEALTHY busy host, so a bar around 300 runnable separates the measured healthy band from the measured 427 incident with real headroom on both sides, and it is measured on THIS host with its scope recorded. The bar is therefore NOT a function of the core count and MUST NOT be presented as one — the card's acceptance clause 4 ('the pressure bar is derived from the host's core count') is REFUTED by this measurement and needs its correction, because a core-relative bar has no meaning for a count that is not a rate. A SECOND FINDING FOR THE SAME CARD: scripts/detectors/host-load.py has NEVER fired on this host — there is no host-load.log in this project's .janitor/logs/ nor in the plugin DATA global-state dir — because the load average here (13.2x-13.8x cores) sits permanently above the cores x 4 bar, so the detector's 'first fire of an overload episode' never had a normal state to depart from. Any pressure rule built on that bar would be permanently-on, and the card's requirement (6) that a deferred chore be VISIBLE would be drowned by a detector that fires on every beat.
 
-## The review verdict — the gate is sound, the kill-ledger destination is not
+
 
 ## The review verdict — the gate's architecture survives, the kill-ledger destination does not
 
