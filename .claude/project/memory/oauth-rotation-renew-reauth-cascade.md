@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth-cascade
 description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free', 'rotation is stuck with a lot of headroom', '7d wall projected in ~0 min', 'learned cap from a usage endpoint 429'."
 ocd: 2026-06-13
-lmd: 2026-10-05
+lmd: 2026-10-21
 metadata:
   node_type: memory
   type: project
@@ -125,13 +125,12 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
 - RENEW is fully automatic but REQUIRES a still-valid cookie for the cookie sub-leg — when
   the cookie is dead too, it falls back to layer 3.
 
-^5S350686 [desc:"REAUTHENTICATE is the last resort when refresh and cookie are dead: janitor nudges monthly via oauth-login-needed; reauth.py drives the hands-free tmux+CDP login flow.", keywords:"is_the_reauth_step_ever_fully_hands_free_without_a_human reauth_nudge_points_to_janitor_refresh_claude_logins reauth_py_tmux_claude_auth_login_cdp_authorize_click claude_ai_login_cookie_lasts_about_a_month wait_setup_token_benign_in_between_state classify_returns_healthy_when_refresh_and_runway_ample", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^5S350686 [desc: "REAUTHENTICATE is the last resort when refresh and cookie are dead: the daemon notifies monthly (oauth-login-needed records it); reauth.py drives the hands-free tmux+CDP login flow.", keywords: is_the_reauth_step_ever_fully_hands_free_without_a_human reauth_nudge_points_to_janitor_refresh_claude_logins reauth_py_tmux_claude_auth_login_cdp_authorize_click claude_ai_login_cookie_lasts_about_a_month wait_setup_token_benign_in_between_state classify_returns_healthy_when_refresh_and_runway_ample, type: project, ocd: 2026-06-13, lmd: 2026-10-21]
 **3. REAUTHENTICATE — the cookies themselves (fallback when RENEW can't: no USABLE refresh —
 none OR dead — AND no live cookie, token dead/near-dead).** Each account's claude.ai login cookie lasts ~1 month.
 When it expires (age, or the user logged in on another device), RENEW is impossible for
 that account, and the ONLY non-behind-the-scenes step remains: a human re-login. The
-janitor proactively NUDGES via the heartbeat detector (`oauth-login-needed` →
-`REAUTH_NUDGE` leg), pointing the user at the orchestrating skill `/janitor-refresh-claude-logins`.
+janitor proactively notifies: the detector `oauth-login-needed` (`REAUTH_NUDGE` leg) only RECORDS the owner remediation (prints nothing on the heartbeat) and the daemon sends ONE desktop notification per episode (an episode ends only on an observed clear; 7-day prune backstop), pointing the user at the orchestrating skill `/janitor-refresh-claude-logins`.
 ~Monthly cadence; can target only the EXPIRED cookies if others have runway. The
 hands-free LIVE-credential reauth path is `reauth.py`: it drives the OFFICIAL `claude auth
 login` over a detached tmux session — claude opens the consent URL, the script drives an

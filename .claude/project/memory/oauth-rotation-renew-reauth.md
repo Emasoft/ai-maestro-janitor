@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth
 description: "How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROTATE → RENEW → REAUTHENTICATE cascade, the keychain storage, the exact commands, and what to check when 'the rotator failed / a 429 landed instead of rotating / accounts won't switch / had to log in manually / the reauth login-nudge is SILENT though the daemon logs reauth-nudge / renew shows the login page not Authorize / token exchange 403 / error code 1010 / keychain secret truncated or came back as hex / tests wrote fake @x lines to rotator.log / what is the ROTATE RENEW REAUTHENTICATE cascade / why do two callers of cascade.classify disagree / how does the rotator drain-first select a target account / why is the 7-day window threshold different from the 5-hour threshold / is the reauth step ever fully hands-free without a human'. The component overview page; don't conflate the three layers."
 ocd: 2026-06-13
-lmd: 2026-09-17
+lmd: 2026-10-21
 metadata:
   node_type: memory
   type: project
@@ -16,7 +16,7 @@ publish-globally: false
 split-lineage: 9870cb5403f14c3b8f062f0bc8cebb5d
 ---
 
-^1F3DSNBQ [desc:"The rotator is ONE cascade of three fallback layers — ROTATE, RENEW, REAUTHENTICATE — sharing a single classify() SSOT so the daemon and the nudge detectors never disagree.", keywords:"what_is_the_rotate_renew_reauthenticate_cascade why_do_two_callers_of_cascade_classify_disagree single_source_of_truth_classify cascade_governs_daemon_tick_and_detectors conflating_the_three_layers_is_the_number_one_debugging_mistake shared_function_must_resolve_same_state_json", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^1F3DSNBQ [desc: "The rotator is ONE cascade of three fallback layers — ROTATE, RENEW, REAUTHENTICATE — sharing a single classify() SSOT so the daemon and the OAuth detectors never disagree.", keywords: what_is_the_rotate_renew_reauthenticate_cascade why_do_two_callers_of_cascade_classify_disagree single_source_of_truth_classify cascade_governs_daemon_tick_and_detectors conflating_the_three_layers_is_the_number_one_debugging_mistake shared_function_must_resolve_same_state_json, type: project, ocd: 2026-06-13, lmd: 2026-10-21]
 The janitor OAuth account rotator (TRDD-32acd15f; redesign TRDD-dfc0959a) keeps an
 unattended Claude Code session alive across **N of the user's own paid Claude
 subscriptions** by swapping the live credential before any one account hits a rate
@@ -27,7 +27,7 @@ conflating them is the #1 cause of wrong debugging.
 The cascade is the *governing control-flow* for the daemon tick **and** every helper,
 not three disconnected mechanisms. Its SINGLE SOURCE OF TRUTH is
 `scripts/oauth_rotator/cascade.py::classify` — both the global daemon
-(`rotator.cmd_tick`) and the heartbeat nudge detectors (`oauth-login-needed`,
+(`rotator.cmd_tick`) and the OAuth detectors (`oauth-login-needed`, which only records owner remediations for the daemon's one-per-episode desktop notification, and
 `oauth-cookie-reminder`) import it so they can never disagree about whether an account
 self-renews, can be renewed behind the scenes, or genuinely needs a human re-login. Sharing
 `classify()` is necessary but NOT sufficient — both callers must also resolve the SAME
