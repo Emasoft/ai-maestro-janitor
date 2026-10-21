@@ -1156,10 +1156,10 @@ def _log_drift_printed(name: str, line: str) -> None:
 # Membership is a CONTRACT the tests check only loosely (the detector file merely contains
 # `emit_once`), so adding an ungated print to a member makes that line print on EVERY fire --
 # re-verify membership whenever a member detector is edited.
+# oauth-login-needed is NOT a member: it only records owner remediation and prints nothing (TRDD-1J9B7MWO).
 _SELF_DEDUPING_DETECTORS = frozenset({
     "host-load",
     "memgrep-binary-stale",
-    "oauth-login-needed",
     "stale-index-lock",
     "system-daemon-runaway",
     "trdd-cross-card-blindspot",

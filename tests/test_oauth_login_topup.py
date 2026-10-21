@@ -2,8 +2,8 @@
 oauth-login-needed.py. TRDD-GZXTSJSR.
 
 Real code under test (no mocks of the logic itself): `_topup_due` (pure) and
-the notify.push firing from `main()` (monkeypatch only the notify boundary,
-same pattern as test_oauth_login_needed.py).
+the owner-remediation record `main()` writes (the detector prints and notifies nothing; the
+daemon notifies the record once per episode).
 """
 
 from __future__ import annotations
@@ -12,8 +12,6 @@ import importlib.util
 import json
 import time
 from pathlib import Path
-
-import pytest
 
 _HERE = Path(__file__).resolve().parent
 _DETECTOR = _HERE.parent / "scripts" / "detectors" / "oauth-login-needed.py"
@@ -42,6 +40,10 @@ def _write_healthy_slot(home: Path, email: str) -> None:
         "expiresAt": int((time.time() + 30 * 86400) * 1000),
     }
     (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
+
+def _records(home: Path) -> dict[str, dict]:
+    path = home / "owner-remediation.json"
+    return json.loads(path.read_text(encoding="utf-8"))["conditions"] if path.is_file() else {}
 
 
 def test_topup_due_true_when_no_stamp_exists(tmp_path: Path) -> None:
@@ -80,82 +82,62 @@ def test_topup_days_env_override(monkeypatch) -> None:
     assert det._topup_days() == 14.0
 
 
-def test_main_fires_topup_notify_on_first_run_with_no_stamp(
+def test_main_records_topup_on_first_run_with_no_stamp(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    """A healthy account (no reactive nudge due) still gets the periodic topup push on a
-    fresh home — proactive, independent of any single account being currently urgent."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    """A healthy account (no reactive remediation due) still gets the periodic topup record on a
+    fresh home — proactive, independent of any single account being currently urgent. The
+    detector prints nothing and notifies nobody; the daemon notifies the record once."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
-    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
-    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
-    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
-    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
-    (tmp_path / "proj").mkdir(exist_ok=True)
-    (tmp_path / "userhome").mkdir(exist_ok=True)
+    _isolated_env(tmp_path, monkeypatch, home)
 
     rc = det.main()
 
     assert rc == 0
-    topup_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-TOPUP"]
-    assert len(topup_calls) == 1
-    assert topup_calls[0]["sev"] == "HIGH"
-    assert topup_calls[0]["hint"] == "/janitor-capture-all-logins"
-    assert det._topup_stamp_path(home).is_file()  # stamped so the next run doesn't re-fire
+    assert capsys.readouterr().out == ""
+    recs = _records(home)
+    assert len(recs) == 1
+    (key, rec), = recs.items()
+    assert key.startswith("oauth-login-topup:") and rec["condition"] == "oauth-login-topup"
+    assert "/janitor-capture-all-logins" in rec["action"]
+    assert det._topup_stamp_path(home).is_file()  # stamped so the next run doesn't re-record
 
 
-def test_main_does_not_refire_topup_within_the_cadence_window(
+def test_main_does_not_rerecord_topup_within_the_cadence_window(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    """A second run right after the first (stamp just written) must NOT re-push."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    """A second run right after the first (stamp just written) must NOT touch the record again."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
-    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
-    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
-    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
-    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
-    (tmp_path / "proj").mkdir(exist_ok=True)
-    (tmp_path / "userhome").mkdir(exist_ok=True)
+    _isolated_env(tmp_path, monkeypatch, home)
 
+    base = 1_800_000_000.0
+    monkeypatch.setattr(det.time, "time", lambda: base)
     assert det.main() == 0
-    assert det.main() == 0  # second run, same tick — stamp already fresh
+    monkeypatch.setattr(det.time, "time", lambda: base + 3600)
+    assert det.main() == 0  # same cadence window — stamp already fresh
 
-    topup_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-TOPUP"]
-    assert len(topup_calls) == 1
+    recs = _records(home)
+    assert len(recs) == 1 and next(iter(recs.values()))["last_seen"] == int(base)
 
 
 def test_main_skips_topup_when_cadence_set_to_zero(tmp_path: Path, monkeypatch, capsys) -> None:
-    """Setting the cadence to 0 opts out of the periodic topup nudge entirely."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    """Setting the cadence to 0 opts out of the periodic topup remediation entirely."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
-    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
-    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
-    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
-    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    _isolated_env(tmp_path, monkeypatch, home)
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS", "0")
-    (tmp_path / "proj").mkdir(exist_ok=True)
-    (tmp_path / "userhome").mkdir(exist_ok=True)
 
     assert det.main() == 0
 
-    topup_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-TOPUP"]
-    assert topup_calls == []
+    assert _records(home) == {}
 
 
 # ---------------------------------------------------------------------------
-# F1 (TRDD-GZXTSJSR follow-up) — the topup summary must vary by period (so
-# notify.push's content-hash dedupe doesn't silently swallow every fire after
-# the first forever), the stamp must gate on an ACTUAL push, and the
-# in-context heartbeat line must exist alongside the notify.push channel.
+# F1 (TRDD-GZXTSJSR follow-up), reshaped by TRDD-1J9B7MWO (USER ruling 2026-10-21): the topup
+# record carries its period as the episode kind (so each due cycle is a new episode for the
+# daemon's once-per-episode notification), and the detector prints and notifies nothing.
 # ---------------------------------------------------------------------------
 
 
@@ -177,71 +159,26 @@ def _isolated_env(tmp_path: Path, monkeypatch, home: Path) -> None:
     (tmp_path / "userhome").mkdir(exist_ok=True)
 
 
-def test_main_topup_pushes_again_next_due_cycle_with_real_notify(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """A second due fire 7 days later must return PUSHED, not DEDUPED — the summary
-    now bakes in the period, so the message content-hash differs cycle to cycle.
-    Real `notify.push` (only actual OS-level delivery is mocked out)."""
-    monkeypatch.setattr(det.notify, "_deliver", lambda *a, **kw: None)  # no real popup
+def test_main_topup_is_a_new_episode_next_due_cycle(tmp_path: Path, monkeypatch) -> None:
+    """A second due fire 4 days later (3-day cadence) records under a NEW key (the period is the record's
+    kind), so the daemon's episode logic notifies again instead of staying silent behind last
+    cycle's episode."""
     home = tmp_path / "rotator"
     _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS", "3")
 
     base = 1_800_000_000.0
     monkeypatch.setattr(det.time, "time", lambda: base)
     assert det.main() == 0
-    stamp1 = det._topup_stamp_path(home).read_text(encoding="utf-8")
-    assert float(stamp1) == base  # F1: stamped because notify.push actually PUSHED
+    assert float(det._topup_stamp_path(home).read_text(encoding="utf-8")) == base
 
-    later = base + 8 * 86400  # past the default 7-day cadence
+    later = base + 4 * 86400  # past the 3-day cadence set below, inside the 7-day record retention
     monkeypatch.setattr(det.time, "time", lambda: later)
     assert det.main() == 0
-    stamp2 = det._topup_stamp_path(home).read_text(encoding="utf-8")
-    assert float(stamp2) == later  # re-stamped: the second cycle PUSHED, not DEDUPED
+    assert float(det._topup_stamp_path(home).read_text(encoding="utf-8")) == later
+    recs = _records(home)
+    assert len(recs) == 2 and {r["kind"] for r in recs.values()} == {
+        time.strftime("%Y-%m-%d", time.localtime(base)), time.strftime("%Y-%m-%d", time.localtime(later))}
 
 
-@pytest.mark.parametrize(
-    "outcome", ["capped", "deduped", "below-severity", "disabled"]
-)
-def test_main_does_not_stamp_topup_when_push_did_not_actually_push(
-    tmp_path: Path, monkeypatch, outcome: str
-) -> None:
-    """F1: DISABLED/BELOW_SEVERITY/CAPPED/DEDUPED must NOT burn the 7-day cadence —
-    only a real PUSHED/PUSHED_DIGEST may write the stamp."""
-    monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
-    home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@invalid")
-    _isolated_env(tmp_path, monkeypatch, home)
-
-    assert det.main() == 0
-    assert not det._topup_stamp_path(home).is_file()
-
-
-@pytest.mark.parametrize("outcome", ["pushed", "pushed-digest"])
-def test_main_stamps_topup_only_on_an_actual_push(
-    tmp_path: Path, monkeypatch, outcome: str
-) -> None:
-    monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
-    home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@invalid")
-    _isolated_env(tmp_path, monkeypatch, home)
-
-    assert det.main() == 0
-    assert det._topup_stamp_path(home).is_file()
-
-
-def test_main_prints_topup_heartbeat_line_for_attended_sessions(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    """P2's "belt and suspenders" — the in-context heartbeat line must exist
-    alongside the notify.push desktop channel, not just replace it."""
-    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
-    home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@invalid")
-    _isolated_env(tmp_path, monkeypatch, home)
-
-    rc = det.main()
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "[oauth-login-topup]" in out

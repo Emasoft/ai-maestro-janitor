@@ -1,9 +1,10 @@
 """The daemon -> session broadcast channel for runaway kills (TRDD-5G66S0HK).
 
-The janitor already has exactly the right shape for this: the OAuth
-rotator writes ONE file into the machine-wide global-state dir and
-`dispatch.py::_phase_rotator_alert` prints ONE drift line per session
-from it. This module is that pattern again, for a different condition.
+The janitor already has a shape for this: one file in the machine-wide global-state dir,
+which the daemon writes and each session reads. The OAuth rotator alert used it too until
+2026-10-21 (TRDD-1J9B7MWO): rotator and account issues no longer reach any agent, so that
+drift line is gone and the rotator only notifies the user. This module keeps the shape for
+a different condition.
 
 WHY ONE FILE IN THE GLOBAL STATE DIR, and not a write into every
 project's state dir: the daemon does not know the project set. The

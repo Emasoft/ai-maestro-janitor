@@ -8,9 +8,12 @@ process guaranteed alive (the daemon) gets a severity-gated path to a human; the
 notification's job is to get the human to START the right Claude — never to carry the
 full report (the body lives in the ticket/TRDD/ledger the message's project points at).
 
-DAEMON-ONLY by design: N sessions pushing would stampede the channel with duplicates —
-the single-writer daemon is the only caller (the per-session surface is the heartbeat
-drift line / findings ledger, TRDD-FENWWB4E).
+DAEMON-ONLY by design: N sessions pushing would stampede the channel with duplicates — the
+single-writer daemon is the only steady caller (the per-session surface is the heartbeat
+drift line / findings ledger, TRDD-FENWWB4E). `notify_episode` is the machine-wide
+once-per-episode form (USER ruling 2026-10-21); its key lives in the same `notify-sent.txt`,
+so the one session-side exception (a hung or dead daemon cannot report its own stall) shares
+the daemon's key and still yields ONE notification.
 
 Two tiers:
   1. native desktop notification — DEFAULT ON, zero config: macOS `osascript
@@ -41,7 +44,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -55,6 +58,7 @@ import tls_context  # noqa: E402  -- sibling lib (TRDD-X6I04SAO)
 SENT_NAME = "notify-sent.txt"
 DIGEST_STAMP_NAME = "notify-digest.ts"
 _SENT_KEEP_LINES = 500
+_T = TypeVar("_T")
 _MAX_MSG_CHARS = 200
 
 _SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MAJOR": 2, "MEDIUM": 2, "LOW": 1, "MINOR": 1}
@@ -66,6 +70,11 @@ DEDUPED = "deduped"
 CAPPED = "capped"
 BELOW_SEVERITY = "below-severity"
 DISABLED = "disabled"
+EPISODE_ACTIVE = "episode-active"  # notify_episode: this episode was already notified
+
+# notify_episode: a condition absent for longer than this is a new episode.
+EPISODE_FLAP_S = 3600
+_EPISODE_PREFIX = "ep-"  # digest prefix of an episode line in the sent-store
 
 
 def enabled() -> bool:
@@ -107,13 +116,15 @@ def build_message(*, sev: str, code: str, project: str, summary: str, hint: str 
 
 
 def _read_sent(now: int) -> tuple[set[str], int]:
-    """(the set of already-pushed content hashes, pushes within the last 24 h)."""
+    """(the set of already-pushed content hashes, pushes within the last 24 h). Episode lines
+    (`ep-` digests, see `notify_episode`) are not pushes: they neither dedupe a content hash nor
+    count against the daily cap."""
     hashes: set[str] = set()
     recent = 0
     try:
         for line in _sent_path().read_text(encoding="utf-8").splitlines():
             parts = line.split()
-            if len(parts) != 2 or not parts[0].isdigit():
+            if len(parts) != 2 or not parts[0].isdigit() or parts[1].startswith(_EPISODE_PREFIX):
                 continue
             ts, digest = int(parts[0]), parts[1]
             hashes.add(digest)
@@ -125,17 +136,96 @@ def _read_sent(now: int) -> tuple[set[str], int]:
 
 
 def _record_sent(digest: str, now: int) -> None:
-    """Append + structural trim (every append site must rotate or trim)."""
+    """Locked append + structural trim."""
     try:
-        path = _sent_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(f"{now} {digest}\n")
-        lines = path.read_text(encoding="utf-8").splitlines()
-        if len(lines) > _SENT_KEEP_LINES:
-            state.atomic_write(path, "\n".join(lines[-_SENT_KEEP_LINES:]) + "\n")
+        _under_sent_lock(lambda: _append_sent_unlocked(digest, now))
     except Exception:  # noqa: BLE001 -- bookkeeping must never block a push
         pass
+
+
+def _append_sent_unlocked(digest: str, now: int) -> None:
+    """Append + structural trim (every append site must rotate or trim). The caller holds the
+    sent-store lock: the trim is a read-modify-write that would drop a concurrent append."""
+    path = _sent_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"{now} {digest}\n")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if len(lines) > _SENT_KEEP_LINES:
+        state.atomic_write(path, "\n".join(lines[-_SENT_KEEP_LINES:]) + "\n")
+
+
+def _under_sent_lock(fn: Callable[[], _T]) -> _T:
+    """Run `fn` holding an exclusive flock on the sent-store lock file. WHY a lock: the daemon
+    (alert thread, tick thread, main loop) and every session heartbeat write notify-sent.txt,
+    and the trim rewrites the whole file, so an unlocked append can be lost to it - a lost
+    record is a repeated notification. The lock lives in a sidecar because the trim replaces
+    the sent file's inode, which would release a lock held on the file itself."""
+    import fcntl  # noqa: PLC0415 -- POSIX-only; global_state already requires it
+
+    path = _sent_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_name(SENT_NAME + ".lock").open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _last_episode_ts(digest: str) -> Optional[int]:
+    """Newest timestamp recorded for an episode digest, or None."""
+    last: Optional[int] = None
+    try:
+        for line in _sent_path().read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == digest and parts[0].isdigit():
+                last = max(last or 0, int(parts[0]))
+    except OSError:
+        pass
+    return last
+
+
+def notify_episode(
+    *,
+    condition: str,
+    kind: str = "",
+    slot: str = "",
+    message: str,
+    now: Optional[float] = None,
+    runner: Optional[Callable[[list[str]], None]] = None,
+    opener: Optional[Callable[[str, bytes], None]] = None,
+    window_s: int = EPISODE_FLAP_S,
+) -> str:
+    """Notify ONCE per episode of a condition (USER ruling 2026-10-21: never repeat a
+    notification already sent, never one copy per Claude Code instance).
+
+    The episode key is condition + kind + slot, stored as an `ep-` line in the SAME sent-store
+    `push` uses (`notify-sent.txt`), so the record survives a daemon restart and is shared by
+    every process on the machine. The check, the record and the lock are one step: two callers
+    racing on the same key get exactly one notification. A caller that still sees the
+    condition refreshes the line (at most once per window/3, to keep the store small); a
+    condition absent for longer than `window_s` is a NEW episode and notifies again. There is no
+    daily repeat inside an episode. Returns PUSHED, EPISODE_ACTIVE or DISABLED."""
+    t = int(time.time()) if now is None else int(now)
+    if not enabled():
+        return DISABLED
+    digest = _EPISODE_PREFIX + hashlib.sha256("\0".join((condition, kind, slot)).encode("utf-8")).hexdigest()[:12]
+
+    def _decide() -> bool:
+        last = _last_episode_ts(digest)
+        is_new = last is None or t - last > window_s
+        if last is None or t - last >= window_s // 3:
+            _append_sent_unlocked(digest, t)
+        return is_new
+
+    # Record BEFORE delivering: a crash or a failed delivery must never turn into a repeat.
+    if not _under_sent_lock(_decide):
+        return EPISODE_ACTIVE
+    # The "[janitor]" prefix is added HERE, after sanitizing: _clean defangs bracketed markers.
+    _deliver(f"[janitor] {_clean(message, _MAX_MSG_CHARS + 40)}", runner=runner, opener=opener)
+    state.log_line("daemon", f"notify-episode: sent condition={_clean(condition, 48)} kind={_clean(kind, 48)}")
+    return PUSHED
 
 
 def _deliver(

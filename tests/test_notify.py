@@ -145,3 +145,123 @@ def test_min_severity_is_tunable(monkeypatch: pytest.MonkeyPatch) -> None:
     rec = _Recorder()
     assert _push(rec, sev="HIGH") == notify.BELOW_SEVERITY
     assert _push(rec, sev="CRITICAL") == notify.PUSHED
+
+
+
+def _episode(rec: _Recorder, *, condition: str = "tick-stalled", kind: str = "", slot: str = "",
+             now: int = NOW) -> str:
+    return notify.notify_episode(condition=condition, kind=kind, slot=slot, message="act",
+                                 now=now, runner=rec.run, opener=rec.open)
+
+
+def test_episode_notifies_once_and_never_repeats_while_it_holds() -> None:
+    """USER ruling 2026-10-21: an episode already notified is never notified again, however long
+    it holds - evaluated every minute for 3 days, exactly one notification."""
+    rec = _Recorder()
+    assert _episode(rec) == notify.PUSHED
+    for t in range(NOW + 60, NOW + 3 * 86400, 60):
+        assert _episode(rec, now=t) == notify.EPISODE_ACTIVE
+    assert len(rec.argvs) == 1
+
+
+def test_episode_key_is_condition_kind_and_slot() -> None:
+    """Another slot, another kind or another condition is a new episode."""
+    rec = _Recorder()
+    assert _episode(rec, condition="capture-refused", slot="a") == notify.PUSHED
+    assert _episode(rec, condition="capture-refused", slot="b") == notify.PUSHED
+    assert _episode(rec, condition="capture-refused", slot="a") == notify.EPISODE_ACTIVE
+    assert _episode(rec, condition="rotation-stuck", kind="k1") == notify.PUSHED
+    assert _episode(rec, condition="rotation-stuck", kind="k2") == notify.PUSHED
+    assert _episode(rec, condition="rotation-stuck", kind="k1") == notify.EPISODE_ACTIVE
+    assert len(rec.argvs) == 4
+    assert "[janitor] act" in rec.argvs[0][2]  # the prefix is not defanged by the sanitizer
+
+
+def test_episode_renotifies_only_after_the_condition_was_absent_longer_than_the_flap_window() -> None:
+    """A condition re-seen inside the window is the same episode; one that had not been seen for
+    longer than the window is a new episode."""
+    rec = _Recorder()
+    assert _episode(rec) == notify.PUSHED
+    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S) == notify.EPISODE_ACTIVE  # exactly the window
+    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S + 1) == notify.EPISODE_ACTIVE  # refreshed at the line above
+    gap = notify.EPISODE_FLAP_S + 2
+    assert _episode(rec, now=NOW + notify.EPISODE_FLAP_S + 1 + gap) == notify.PUSHED
+    assert len(rec.argvs) == 2
+
+
+def test_episode_lines_do_not_consume_the_push_cap_or_dedupe_a_push() -> None:
+    """Episode refreshes share notify-sent.txt but are not pushes: they never count towards the
+    daily cap and never dedupe a content hash."""
+    rec = _Recorder()
+    for t in range(NOW, NOW + 3 * 3600, 300):
+        _episode(rec, now=t)
+    for i in range(3):
+        assert _push(rec, code=f"C-{i}", summary=f"finding {i}", now=NOW + 3 * 3600) == notify.PUSHED
+    assert notify._read_sent(NOW + 3 * 3600)[1] == 3
+
+
+def test_episode_respects_the_disabled_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_NOTIFY_ENABLED", "0")
+    rec = _Recorder()
+    assert _episode(rec) == notify.DISABLED and rec.argvs == []
+
+
+def test_episode_survives_a_restart_because_the_record_is_on_disk() -> None:
+    """The sent-record is the file in the global-state dir, not process memory."""
+    rec = _Recorder()
+    assert _episode(rec) == notify.PUSHED
+    text = (notify._sent_path()).read_text()
+    assert text.split()[1].startswith("ep-")
+    import importlib
+
+    importlib.reload(notify)  # a new process image: nothing but the file remains
+    assert _episode(rec, now=NOW + 60) == notify.EPISODE_ACTIVE
+    assert len(rec.argvs) == 1
+
+
+def test_concurrent_episode_callers_get_exactly_one_notification() -> None:
+    """Many sessions and the daemon racing on the same episode: the check-and-record is one locked
+    step, so exactly one of them delivers."""
+    import threading
+
+    rec = _Recorder()
+    barrier = threading.Barrier(16)
+    out: list[str] = []
+
+    def worker() -> None:
+        barrier.wait()
+        out.append(_episode(rec))
+
+    threads = [threading.Thread(target=worker) for _ in range(16)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert out.count(notify.PUSHED) == 1 and len(rec.argvs) == 1
+
+
+def test_concurrent_appends_to_the_sent_store_lose_no_record() -> None:
+    """Appends race the trim (a read-modify-write of the whole file). With the file already over
+    the keep limit EVERY append trims, so an unlocked append is lost to a concurrent trim.
+    Eight writers x 25 digests: every one of them must be on disk afterwards."""
+    import threading
+
+    path = notify._sent_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{NOW} pre{i:09d}\n" for i in range(notify._SENT_KEEP_LINES + 5)))
+    barrier = threading.Barrier(8)
+
+    def writer(w: int) -> None:
+        barrier.wait()
+        for i in range(25):
+            notify._record_sent(f"w{w}n{i:03d}", NOW + i)
+
+    threads = [threading.Thread(target=writer, args=(w,)) for w in range(8)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    digests = {line.split()[1] for line in path.read_text().splitlines()}
+    expected = {f"w{w}n{i:03d}" for w in range(8) for i in range(25)}
+    assert expected <= digests, f"{len(expected - digests)} records lost"
+    assert len(path.read_text().splitlines()) <= notify._SENT_KEEP_LINES

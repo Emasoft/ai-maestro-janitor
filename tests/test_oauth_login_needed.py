@@ -9,8 +9,8 @@ Two layers, both real (no mocks of the code under test):
   * Integration — build an isolated temp rotator home (state.json + plaintext
     slot files) and per-account Chrome profiles (a minimal Cookies sqlite
     carrying a `sessionKey` at a chosen expiry), run the detector as a
-    subprocess with a hermetic env, and assert which emails are surfaced + the
-    daily dedupe. Read-only detector; no network, no real keychain write, no
+    subprocess with a hermetic env, and assert which owner remediations are recorded (the detector
+    prints nothing). Read-only detector; no network, no real keychain write, no
     browser.
 """
 
@@ -24,6 +24,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+import pytest
 
 _HERE = Path(__file__).resolve().parent
 _DETECTOR = _HERE.parent / "scripts" / "detectors" / "oauth-login-needed.py"
@@ -209,123 +211,114 @@ def _run(
     return r.stdout, r.returncode
 
 
-def _login_line(out: str) -> str:
-    """The single [oauth-login-needed] line (the LOGIN nudge), or '' if absent."""
-    for ln in out.splitlines():
-        if ln.startswith("[oauth-login-needed]"):
-            return ln
-    return ""
+def _records(tmp_path: Path) -> dict[str, dict]:
+    """The owner remediations the detector recorded in the test rotator home, by record key."""
+    path = tmp_path / "rotator" / "owner-remediation.json"
+    return json.loads(path.read_text(encoding="utf-8"))["conditions"] if path.is_file() else {}
 
 
-def _stalled_line(out: str) -> str:
-    """The single [oauth-capture-stalled] line (the B3 nudge), or '' if absent."""
-    for ln in out.splitlines():
-        if ln.startswith("[oauth-capture-stalled]"):
-            return ln
-    return ""
+def _account_keys(recs: dict[str, dict]) -> set[str]:
+    """The per-account record keys: a fresh home also gets the weekly top-up record."""
+    return {k for k in recs if not k.startswith("oauth-login-topup:")}
 
 
 def test_surfaces_only_no_refresh_no_session_slot(tmp_path: Path) -> None:
-    """Three slots: refreshable (skip), no-refresh+live-session (B3 stalled nudge, NOT login),
-    no-refresh+no-session (the ONLY one that needs a human LOGIN)."""
+    """Three slots: refreshable (skip), no-refresh+live-session (capture-stalled record, NOT login),
+    no-refresh+no-session (the ONLY one that needs a human LOGIN). The detector PRINTS NOTHING
+    (USER ruling 2026-10-21): everything lands in owner-remediation.json."""
     out, rc = _run(
         tmp_path,
         {"refresh@x.com": True, "session@x.com": False, "login@x.com": False},
         {"refresh@x.com": 30.0, "session@x.com": 20.0, "login@x.com": None},
     )
-    assert rc == 0
-    login = _login_line(out)
-    assert "login@x.com" in login
-    assert "refresh@x.com" not in login   # daemon refreshes it
-    assert "session@x.com" not in login   # bootstrap-eligible → not a LOGIN nudge
-    assert "1 account(s) need a one-time login" in login
-    # The live-session-but-no-refresh account surfaces in the SECONDARY stalled nudge instead.
-    stalled = _stalled_line(out)
-    assert "session@x.com" in stalled
-    assert "refresh@x.com" not in stalled  # self-renews → never stalled
+    assert rc == 0 and out == ""
+    recs = _records(tmp_path)
+    assert _account_keys(recs) == {"oauth-login-needed:expired:login@x.com", "oauth-capture-stalled:session@x.com"}
+    assert recs["oauth-login-needed:expired:login@x.com"]["slot"] == "login@x.com"
 
 
 def test_nudge_names_open_login_and_reassures_default_browser(tmp_path: Path) -> None:
-    """The nudge points at open-login.sh AND makes explicit it opens a DEDICATED
+    """The remedy points at open-login.sh AND makes explicit it opens a DEDICATED
     Chrome window so the user's default browser (Safari) is untouched."""
-    out, _ = _run(tmp_path, {"login@x.com": False}, {"login@x.com": None})
-    assert "open-login.sh" in out
-    assert "login@x.com" in out
-    assert "DEDICATED Chrome window" in out
-    assert "default browser is untouched" in out
+    _run(tmp_path, {"login@x.com": False}, {"login@x.com": None})
+    action = _records(tmp_path)["oauth-login-needed:expired:login@x.com"]["action"]
+    assert "open-login.sh" in action
+    assert "login@x.com" in action
+    assert "DEDICATED Chrome window" in action
+    assert "default browser is untouched" in action
 
 
 def test_expired_session_counts_as_no_session(tmp_path: Path) -> None:
-    """An EXPIRED claude.ai session (no live sessionKey) cannot bootstrap → login nudge."""
+    """An EXPIRED claude.ai session (no live sessionKey) cannot bootstrap → login remediation."""
     out, _ = _run(tmp_path, {"login@x.com": False}, {"login@x.com": -2.0})
-    assert "[oauth-login-needed]" in out
-    assert "login@x.com" in out
+    assert out == ""
+    assert "oauth-login-needed:expired:login@x.com" in _records(tmp_path)
 
 
 def test_no_login_nudge_when_all_refreshable_or_seeded(tmp_path: Path) -> None:
     """Every slot either self-renews or has a live session → NO account needs a LOGIN.
-    The seeded-but-no-refresh account still gets the B3 stalled nudge, but the LOGIN line
-    is silent."""
+    The seeded-but-no-refresh account is capture-stalled, but no login record exists."""
     out, rc = _run(
         tmp_path,
         {"refresh@x.com": True, "session@x.com": False},
         {"refresh@x.com": None, "session@x.com": 25.0},
     )
-    assert rc == 0
-    assert "[oauth-login-needed]" not in out          # no LOGIN needed
-    assert "[oauth-capture-stalled]" in out           # but the seeded slot is capture-stalled
-    assert "session@x.com" in _stalled_line(out)
+    assert rc == 0 and out == ""
+    assert _account_keys(_records(tmp_path)) == {"oauth-capture-stalled:session@x.com"}
 
 
 def test_fully_silent_when_all_refreshable(tmp_path: Path) -> None:
-    """Every slot self-renews (has refreshToken) → BOTH nudges silent (nothing to do)."""
+    """Every slot self-renews (has refreshToken) → nothing printed, no account record."""
     out, rc = _run(
         tmp_path,
         {"a@x.com": True, "b@x.com": True},
         {"a@x.com": None, "b@x.com": 25.0},
     )
-    assert rc == 0
-    assert "[oauth-login-needed]" not in out
-    assert "[oauth-capture-stalled]" not in out
+    assert rc == 0 and out == ""
+    assert not any(k.startswith(("oauth-login-needed", "oauth-capture-stalled")) for k in _records(tmp_path))
 
 
-def test_daily_dedupe_second_run_silent(tmp_path: Path) -> None:
-    """Machine-scoped daily dedupe: the same needing-login set emits once/day."""
+def test_a_second_run_refreshes_the_same_record_and_prints_nothing(tmp_path: Path) -> None:
+    """The detector runs in every session: a second run re-stamps the SAME record (the daemon's
+    freshness signal) and never creates a second one or prints anything."""
     slots = {"login@x.com": False}
     profiles: dict[str, float | None] = {"login@x.com": None}
     first, _ = _run(tmp_path, slots, profiles)
-    assert "[oauth-login-needed]" in first
+    key = "oauth-login-needed:expired:login@x.com"
+    seen1 = _records(tmp_path)[key]["last_seen"]
+    time.sleep(1.1)
     second, rc = _run(tmp_path, slots, profiles)
-    assert rc == 0
-    assert "[oauth-login-needed]" not in second  # deduped within the same day
+    assert rc == 0 and first == "" and second == ""
+    recs = _records(tmp_path)
+    assert [k for k in recs if k.startswith("oauth-login-needed")] == [key]
+    assert recs[key]["last_seen"] > seen1
 
 
-def test_capture_stalled_nudge_points_to_log_and_reseed(tmp_path: Path) -> None:
+def test_capture_stalled_remedy_points_to_log_and_reseed(tmp_path: Path) -> None:
     """B3: a logged-in account whose OAuth capture hasn't completed (no refresh + live
-    session) gets the SECONDARY '[oauth-capture-stalled]' nudge pointing at a log that
-    ACTUALLY EXISTS plus the open-login.sh re-seed.
+    session) gets a capture-stalled remediation pointing at a log that ACTUALLY EXISTS plus the
+    open-login.sh re-seed.
 
     CORRECTED 2026-08-13 (janitor#258). This test used to assert the literal
     `bootstrap-<email>.log`, under a docstring claiming both paths "ACTUALLY EXIST". Neither
     claim held: that file is opened only when `_invoke_slot_capture` actually LAUNCHES a
-    capture, so on a host where the launch was skipped it is absent — and the test pinned the
-    defect rather than the contract, which is why the wrong pointer shipped and survived. The
-    contract is: name evidence that is there. `rotator.log` is written unconditionally."""
+    capture, so on a host where the launch was skipped it is absent. The contract is: name
+    evidence that is there. `rotator.log` is written unconditionally."""
     out, rc = _run(tmp_path, {"seed@x.com": False}, {"seed@x.com": 20.0})
-    assert rc == 0
-    stalled = _stalled_line(out)
-    assert "[oauth-capture-stalled]" in stalled
-    assert "seed@x.com" in stalled
-    assert "logged in but their OAuth capture hasn't completed" in stalled
-    assert "rotator.log" in stalled
+    assert rc == 0 and out == ""
+    recs = _records(tmp_path)
+    action = recs["oauth-capture-stalled:seed@x.com"]["action"]
+    assert "seed@x.com" in action
+    assert "logged in but its OAuth capture hasn't completed" in action
+    assert "rotator.log" in action
     # No capture was launched in this fixture, so no bootstrap log exists -> never named.
-    assert "bootstrap-" not in stalled
-    assert "open-login.sh <email>" in stalled
-    # It must NOT be misclassified as a LOGIN nudge.
-    assert _login_line(out) == ""
+    assert "bootstrap-" not in action
+    assert "open-login.sh" in action
+    # It must NOT be misclassified as a LOGIN remediation.
+    assert not any(k.startswith("oauth-login-needed") for k in recs)
 
 
-def test_stalled_nudge_names_the_bootstrap_log_only_when_it_exists(tmp_path: Path) -> None:
+def test_stalled_remedy_names_the_bootstrap_log_only_when_it_exists(tmp_path: Path) -> None:
     """The other half of the contract: when a capture DID launch, its per-account log is real
     evidence and IS named alongside rotator.log. Proves the omission above is conditional on
     the file's absence, not a blanket removal (janitor#258)."""
@@ -334,18 +327,18 @@ def test_stalled_nudge_names_the_bootstrap_log_only_when_it_exists(tmp_path: Pat
     (home / "bootstrap-seed@x.com.log").write_text("consent page timed out\n")
     out, rc = _run(tmp_path, {"seed@x.com": False}, {"seed@x.com": 20.0})
     assert rc == 0
-    stalled = _stalled_line(out)
-    assert "rotator.log" in stalled
-    assert "bootstrap-seed@x.com.log" in stalled
+    action = _records(tmp_path)["oauth-capture-stalled:seed@x.com"]["action"]
+    assert "rotator.log" in action
+    assert "bootstrap-seed@x.com.log" in action
 
 
 def test_no_message_hard_codes_the_legacy_rotator_home(tmp_path: Path) -> None:
-    """THE janitor#258 regression guard. Every path a message names must be RESOLVED from the
+    """THE janitor#258 regression guard. Every path a remediation names must be RESOLVED from the
     home the detector actually read, never the literal `~/.claude/account-rotator/`.
 
     The state read was moved onto `configured_rotator_home()` by TRDD-5EUYV08H, but these two
     messages kept the legacy literal — so on a migrated install the detector read the canonical
-    dir and then told the reader to look in the legacy one. Both nudges are asserted here
+    dir and then told the reader to look in the legacy one. Both remediations are asserted here
     because the bug was in BOTH and only one was reported."""
     out, rc = _run(
         tmp_path,
@@ -353,58 +346,82 @@ def test_no_message_hard_codes_the_legacy_rotator_home(tmp_path: Path) -> None:
         {"login@x.com": None, "seed@x.com": 20.0},
     )
     assert rc == 0
-    login, stalled = _login_line(out), _stalled_line(out)
-    assert login and stalled
+    recs = _records(tmp_path)
+    login = recs["oauth-login-needed:expired:login@x.com"]["action"]
+    stalled = recs["oauth-capture-stalled:seed@x.com"]["action"]
     for line in (login, stalled):
         assert ".claude/account-rotator" not in line
     # The home-owned artifact (rotator.log) must point INTO the home actually in use...
     assert str(tmp_path) in stalled
     # ...while open-login.sh is a SHIPPED script: this fixture's home has no copy, so the
     # resolver must fall back to the plugin tree. Assert the remedy names a path that is
-    # really there — that is the whole contract janitor#258 broke, so test it directly
-    # rather than testing which directory it happens to be in.
+    # really there — that is the whole contract janitor#258 broke.
     for line in (login, stalled):
         named = [tok.strip("`") for tok in line.split() if "open-login.sh" in tok]
         assert named, f"no open-login.sh path in: {line}"
         assert Path(named[0]).is_file(), f"remedy names a missing file: {named[0]}"
 
 
-def test_capture_stalled_daily_dedupe(tmp_path: Path) -> None:
-    """B3: the stalled nudge is machine-scoped daily-deduped (separate seen-file from the
-    login nudge) — the same stalled set emits once/day."""
-    slots = {"seed@x.com": False}
-    profiles: dict[str, float | None] = {"seed@x.com": 20.0}
-    first, _ = _run(tmp_path, slots, profiles)
-    assert "[oauth-capture-stalled]" in first
-    second, rc = _run(tmp_path, slots, profiles)
-    assert rc == 0
-    assert "[oauth-capture-stalled]" not in second  # deduped within the same day
-
-
-
-def test_capture_stalled_persists_and_notifies_even_when_stdout_dedupes(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    """A repeat capture-stalled pass keeps owner state and attempts notification despite dedupe."""
-    pushed: list[dict] = []
-    monkeypatch.setattr(det.notify, "push", lambda **kwargs: pushed.append(kwargs) or "deduped")
+def test_the_detector_never_notifies_and_never_prints(tmp_path: Path, monkeypatch, capsys) -> None:
+    """USER ruling 2026-10-21: no per-session notification and no agent-visible output. Every
+    notification entry point is replaced by a tripwire; a run over a login-needed account, a
+    stalled-capture account, a live stuck marker and a due top-up must not touch any of them."""
+    tripped: list[str] = []
+    monkeypatch.setattr(det.rotator_alert.notify, "push", lambda **kw: tripped.append("push"))
+    monkeypatch.setattr(det.rotator_alert.notify, "_deliver", lambda *a, **kw: tripped.append("_deliver"))
+    monkeypatch.setattr(det.rotator_alert.notify, "notify_episode", lambda **kw: tripped.append("episode"))
 
     def fixture(home: Path) -> None:
         _write_login_slot(home, "stalled@example.com", expires_in_days=-1.0)
-        profile = tmp_path / "profiles" / "chrome-profile-stalled@example.com"
-        _make_cookies(profile, 2.0)
+        _make_cookies(tmp_path / "profiles" / "chrome-profile-stalled@example.com", 2.0)
+        (home / "rotation-stuck.json").write_text(
+            json.dumps({"kind": "all-accounts-maxed", "detail": "d", "first_seen_epoch": int(time.time()) - 7200,
+                        "last_seen_epoch": int(time.time()) - 30})
+        )
 
-    first, rc1 = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=fixture)
-    second, rc2 = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=fixture)
-    record = tmp_path / "rotator" / "owner-remediation.json"
-    assert rc1 == rc2 == 0
-    assert "oauth-capture-stalled" in first
-    assert "oauth-capture-stalled" not in second
-    assert record.is_file()
-    assert "oauth-capture-stalled" in record.read_text(encoding="utf-8")
-    assert len([call for call in pushed if call["code"] == "OAUTH-CAPTURE-STALLED"]) == 2
+    out, rc = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys, before=fixture)
+    assert rc == 0 and out == ""
+    assert tripped == []
+    recs = _records(tmp_path)
+    assert "oauth-capture-stalled:stalled@example.com" in recs
+    assert any(k.startswith("oauth-login-topup:") for k in recs)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through a fake osascript")
+def test_a_stalled_daemon_is_notified_once_across_all_session_heartbeats(tmp_path: Path) -> None:
+    """A hung or dead daemon cannot report itself, so the heartbeat-side detector does - under
+    the daemon's episode key in the machine-wide store. Three sessions' heartbeats (three real
+    detector processes) raise ONE banner, print nothing, and a fresh tick raises none."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    banners = tmp_path / "banners.txt"
+    exe = bindir / "osascript"
+    exe.write_text(f'#!/bin/sh\necho "$@" >> "{banners}"\n')
+    exe.chmod(0o755)
+    env_extra = {
+        "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        "CLAUDE_PLUGIN_OPTION_NOTIFY_ENABLED": "true",
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gs"),
+    }
+
+    def stale_tick(home: Path, age_s: float) -> None:
+        stamp = home / "tick-completed.ts"
+        stamp.write_text("0")
+        at = time.time() - age_s
+        os.utime(stamp, (at, at))
+
+    for _ in range(3):
+        out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0}, env_extra=env_extra,
+                       before=lambda home: stale_tick(home, 700))
+        assert rc == 0 and out == ""
+    assert banners.read_text().count("janitor") >= 1
+    assert len(banners.read_text().splitlines()) == 1
+    assert "stopped ticking" in banners.read_text()
+    banners.unlink()
+    (tmp_path / "gs" / "notify-sent.txt").unlink()
+    out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0}, env_extra=env_extra,
+                   before=lambda home: stale_tick(home, 30))
+    assert rc == 0 and out == "" and not banners.exists()
 def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:
     """No rotator home with a state.json anywhere → silent no-op (opt-in by presence)."""
     env = dict(os.environ)
@@ -450,14 +467,15 @@ def _write_stuck(home: Path, kind: str, *, age_h: float = 2.0, last_seen_ago_s: 
     }), encoding="utf-8")
 
 
-def test_a_live_stuck_marker_is_reported_to_the_human(tmp_path: Path) -> None:
-    """The whole point: an all-accounts-maxed dead end must reach the human, not just a log."""
+def test_a_live_stuck_marker_is_not_the_detectors_business(tmp_path: Path) -> None:
+    """The rotation-stuck verdict reaches the user through the daemon's rotator_alert (one
+    notification per kind). The detector no longer words it from `stuck_text`: that text printed
+    the false all-accounts-maxed verdict into agent context (TRDD-1J9B7MWO)."""
     out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0},
                    before=lambda home: _write_stuck(home, "all-accounts-maxed"))
     assert rc == 0
-    assert "[oauth-rotation-stuck]" in out, out
-    assert "all-accounts-maxed" in out
-    assert "stall" in out, "the consequence must be stated — that is why the human should care"
+    assert out == ""
+    assert not any("stuck" in k for k in _records(tmp_path))
 
 
 def test_a_stale_marker_is_NOT_reported(tmp_path: Path) -> None:
@@ -486,42 +504,6 @@ def test_a_corrupt_marker_is_survived_silently(tmp_path: Path) -> None:
     out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0}, before=_corrupt)
     assert rc == 0
     assert "[oauth-rotation-stuck]" not in out
-
-
-def test_each_stuck_kind_names_its_own_remedy(tmp_path: Path) -> None:
-    """The three dead ends need DIFFERENT human actions — waiting, adding an account, and
-    fixing the network. One generic 'rotation failed' would send the reader down the wrong path."""
-    seen = {}
-    for kind, expect in (
-        ("all-accounts-maxed", "wait"),
-        ("no-alternates-configured", "no second account"),
-        ("expired-and-offline", "network"),
-    ):
-        out, rc = _run(tmp_path / kind, {"a@x": True}, {"a@x": 30.0},
-                       before=lambda home, k=kind: _write_stuck(home, k))
-        assert rc == 0
-        assert expect in out.lower(), f"{kind}: expected {expect!r} in {out!r}"
-        seen[kind] = out
-    assert len({v.split("Detail:")[0] for v in seen.values()}) == 3, "remedies must differ"
-
-
-
-def test_stuck_line_uses_the_alert_table_text(tmp_path: Path) -> None:
-    """The heartbeat line words each stuck kind exactly as the desktop alert does (one table)."""
-    import rotator_alert  # scripts/lib is on sys.path once the detector module is loaded
-
-    for kind in (
-        "all-accounts-maxed",
-        "no-alternates-configured",
-        "expired-and-offline",
-        "no-usable-slot-twin",
-        "identity-unknowable",
-        "some-new-kind",
-    ):
-        out, rc = _run(tmp_path / kind, {"a@x": True}, {"a@x": 30.0},
-                       before=lambda home, k=kind: _write_stuck(home, k))
-        assert rc == 0
-        assert rotator_alert.stuck_text(kind) in out, f"{kind}: {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -593,174 +575,49 @@ def _run_inprocess(tmp_path: Path, home_name: str, monkeypatch, capsys, *, befor
     return capsys.readouterr().out, rc
 
 
-def test_notify_pushed_high_for_a_48h_bucket_account(tmp_path, monkeypatch, capsys) -> None:
-    """Acceptance #1: an account within the (now 48h) proactive window fires a HIGH
-    notify.push — the decisive fix for root cause 4 (an unattended session never
-    reads the passive heartbeat line)."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+def test_a_48h_bucket_account_is_recorded_with_its_urgency_as_the_kind(tmp_path, monkeypatch, capsys) -> None:
+    """An account within the (48h) proactive window gets a login remediation whose kind is its
+    urgency bucket (the daemon notifies it once per episode; the detector prints nothing)."""
     out, rc = _run_inprocess(
         tmp_path, "rotator", monkeypatch, capsys,
         before=lambda home: _write_login_slot(home, "soon@x.com", expires_in_days=1.5),
     )
-    assert rc == 0
-    assert "[oauth-login-needed]" in out
-    # A fresh home also has no topup stamp yet, so the P3c periodic top-up notify
-    # (a distinct OAUTH-LOGIN-TOPUP push, see test_oauth_login_topup.py) fires
-    # alongside this one on a first run — select the acceptance-#1 call by code.
-    login_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-NEEDED"]
-    assert len(login_calls) == 1
-    assert login_calls[0]["sev"] == "HIGH"
-    assert "soon@x.com" in login_calls[0]["summary"]
+    assert rc == 0 and out == ""
+    rec = _records(tmp_path)["oauth-login-needed:48h:soon@x.com"]
+    assert rec["condition"] == "oauth-login-needed" and rec["kind"] == "48h" and rec["slot"] == "soon@x.com"
+    assert "soon@x.com" in rec["action"]
 
 
-def test_notify_escalates_to_critical_when_expired(tmp_path, monkeypatch, capsys) -> None:
-    """An expired token must escalate the notify severity to CRITICAL, not stay at
-    the plain HIGH a still-proactive 48h-out account gets."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+def test_an_expired_token_is_recorded_as_the_expired_bucket(tmp_path, monkeypatch, capsys) -> None:
+    """An expired token is the maximal-urgency bucket, a different episode from the 48h one."""
     out, rc = _run_inprocess(
         tmp_path, "rotator", monkeypatch, capsys,
         before=lambda home: _write_login_slot(home, "dead@x.com", expires_in_days=-1.0),
     )
-    assert rc == 0
-    login_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-NEEDED"]
-    assert len(login_calls) == 1
-    assert login_calls[0]["sev"] == "CRITICAL"
+    assert rc == 0 and out == ""
+    assert "oauth-login-needed:expired:dead@x.com" in _records(tmp_path)
 
 
-def test_escalation_sig_re_notifies_same_day_when_bucket_worsens(tmp_path, monkeypatch, capsys) -> None:
-    """Root cause 3: the old daily-only dedupe key went silent after one nudge even
-    while the login stayed overdue. The bucket-aware signature must re-emit the
-    SAME DAY when the account's urgency worsens (48h -> expired)."""
-    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
-    first, rc1 = _run_inprocess(
-        tmp_path, "rotator", monkeypatch, capsys,
-        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=1.9),
-    )
-    assert rc1 == 0
-    assert "[oauth-login-needed]" in first
-
-    second, rc2 = _run_inprocess(
-        tmp_path, "rotator", monkeypatch, capsys,
-        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=1.9),
-    )
-    assert rc2 == 0
-    assert "[oauth-login-needed]" not in second  # unchanged bucket -> same-day dedupe holds
-
-    third, rc3 = _run_inprocess(
-        tmp_path, "rotator", monkeypatch, capsys,
-        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=-1.0),
-    )
-    assert rc3 == 0
-    assert "[oauth-login-needed]" in third  # worsened to "expired" -> re-notifies same day
+def test_a_worsening_account_is_a_new_episode_in_the_same_day(tmp_path, monkeypatch, capsys) -> None:
+    """The urgency bucket is part of the episode key: an account that worsens (48h -> expired)
+    gets a NEW record (so the daemon notifies again), an unchanged one re-stamps its record."""
+    for days, key in ((1.9, "oauth-login-needed:48h:worsen@x.com"), (1.9, "oauth-login-needed:48h:worsen@x.com"),
+                      (-1.0, "oauth-login-needed:expired:worsen@x.com")):
+        out, rc = _run_inprocess(
+            tmp_path, "rotator", monkeypatch, capsys,
+            before=lambda home, d=days: _write_login_slot(home, "worsen@x.com", expires_in_days=d),
+        )
+        assert rc == 0 and out == ""
+        assert key in _records(tmp_path)
+    assert {k for k in _records(tmp_path) if k.startswith("oauth-login-needed")} == {
+        "oauth-login-needed:48h:worsen@x.com", "oauth-login-needed:expired:worsen@x.com"}
 
 
 # ---------------------------------------------------------------------------
-# TRDD-TK529Q0F — a can't-rotate dead end reaches the OWNER (notify.push), not
-# only the ledger. The tertiary nudge used to print a day-deduped heartbeat line:
-# an unattended session never reads stdout, and the dedupe key was `stuck-<day>-
-# <kind>` so the condition never re-alarmed on a state change and nothing reached
-# the human channel at all. Dedupe is now PER STATE CHANGE (kind+detail key) with
-# a CRITICAL notify.push, forgotten when the marker clears.
+# TRDD-TK529Q0F, superseded by TRDD-1J9B7MWO (USER ruling 2026-10-21): the rotation-stuck
+# verdict reaches the user through the daemon (rotator_alert, one notification per kind), never
+# through this per-session detector and never into agent context. The tests below pin that the
+# detector stays silent for every stuck-marker shape.
 # ---------------------------------------------------------------------------
 
 
-def _write_stuck_detail(home: Path, kind: str, detail: str) -> None:
-    """A FRESH (still-observed) stuck marker with an explicit detail — the detail is part
-    of the dedupe key, so tests that change it prove the state-change re-alarm. Also seeds
-    one healthy refreshable slot file: `_slot_facts` (which main() reads BEFORE the stuck
-    branch) falls back to plaintext slot files and returns () on an index-only home, which
-    would end main() before the tertiary nudge ever runs."""
-    now = int(time.time())
-    _write_login_slot(home, "healthy@users.noreply.github.com", expires_in_days=30.0)
-    (home / "rotation-stuck.json").write_text(json.dumps({
-        "kind": kind,
-        "detail": detail,
-        "first_seen_epoch": now - 7200,
-        "last_seen_epoch": now - 30,
-    }), encoding="utf-8")
-
-
-def test_stuck_marker_pushes_critical_to_the_owner(tmp_path, monkeypatch, capsys) -> None:
-    """THE acceptance: a can't-rotate state reaches notify.push (the owner channel) as
-    CRITICAL — the heartbeat print alone was invisible to an unattended session, which is
-    exactly how the 2026-09-24 dead end went unheard for hours."""
-    calls = []
-    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
-    out, rc = _run_inprocess(
-        tmp_path, "rotator", monkeypatch, capsys,
-        before=lambda home: _write_stuck_detail(home, "all-accounts-maxed", "a@x 5h=99%"),
-    )
-    assert rc == 0
-    assert "[oauth-rotation-stuck]" in out, "the in-context heartbeat line stays"
-    stuck_calls = [c for c in calls if c["code"] == "OAUTH-ROTATION-STUCK"]
-    assert len(stuck_calls) == 1, f"expected exactly one owner push, got {calls}"
-    assert stuck_calls[0]["sev"] == "CRITICAL"
-    assert "all-accounts-maxed" in stuck_calls[0]["summary"]
-
-
-def test_stuck_dedupe_is_per_state_change_not_per_day(tmp_path, monkeypatch, capsys) -> None:
-    """The old key was `stuck-<day>-<kind>`: one nudge per day, never re-alarmed when the
-    dead end CHANGED shape, and still keyed after the condition resolved. Now: unchanged
-    state -> silent; changed detail (a genuinely new situation) -> re-alarms the same day;
-    resolved -> key forgotten so an identical recurrence re-alarms.
-
-    The home is seeded ONCE and then mutated in place (marker rewritten / removed between
-    runs) — recreating it per run would wipe `.oauth-rotation-stuck-seen.txt` and destroy
-    the very dedupe continuity under test."""
-    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
-    home = tmp_path / "rotator"
-
-    def base_home() -> None:
-        home.mkdir(parents=True, exist_ok=True)
-        (home / "slots").mkdir(parents=True, exist_ok=True)
-        # The slot file is "<address>.json". The suffix is appended to a variable
-        # because the push gate's address lint reads "<address>.json" written as
-        # one literal as an address on a different, non-exempt domain.
-        healthy = "healthy@users.noreply.github.com"
-        (home / "state.json").write_text(json.dumps({"slots": {healthy: {}}}))
-        (home / "opt-in.flag").touch()
-        (home / "slots" / (healthy + ".json")).write_text(json.dumps(
-            {"claudeAiOauth": {"accessToken": "x",
-                               "expiresAt": int((time.time() + 30 * 86400) * 1000)}}))
-
-    def set_marker(detail: str) -> None:
-        base_home()  # idempotent: refreshes state files, never touches the seen-file
-        now = int(time.time())
-        (home / "rotation-stuck.json").write_text(json.dumps({
-            "kind": "all-accounts-maxed", "detail": detail,
-            "first_seen_epoch": now - 7200, "last_seen_epoch": now - 30,
-        }), encoding="utf-8")
-
-    def clear_marker() -> None:
-        base_home()
-        (home / "rotation-stuck.json").unlink(missing_ok=True)
-
-    def run() -> str:
-        # The home (and its seen-file) persists across runs; `before` is a no-op because
-        # set_marker/clear_marker already staged the state for this run.
-        out, rc = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys,
-                                 before=lambda _h: None)
-        assert rc == 0
-        return out
-
-    set_marker("a@x 5h=99%")
-    out1 = run()
-    assert "[oauth-rotation-stuck]" in out1
-
-    set_marker("a@x 5h=99%")  # unchanged state
-    out2 = run()
-    assert "[oauth-rotation-stuck]" not in out2, "unchanged state must stay silent"
-
-    set_marker("b@x 7d=100%")  # the dead end CHANGED shape
-    out3 = run()
-    assert "[oauth-rotation-stuck]" in out3, "a changed detail re-alarms the same day"
-
-    clear_marker()  # resolved
-    out4 = run()
-    assert "[oauth-rotation-stuck]" not in out4
-
-    set_marker("a@x 5h=99%")  # the SAME dead end recurs
-    out5 = run()
-    assert "[oauth-rotation-stuck]" in out5, "keys were forgotten on resolve: recurrence re-alarms"

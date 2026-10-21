@@ -675,10 +675,10 @@ def test_refused_capture_raises_exactly_one_alert_naming_both_accounts(
     sent: list[list[str]] = []
     assert ra.evaluate(rotator.ROOT, now=now, claude_running=False, runner=sent.append) == [f"capture-refused:{_SPARE_ADDR}"]
     ra.evaluate(rotator.ROOT, now=now + 60, claude_running=False, runner=sent.append)
-    assert len(sent) <= 1  # debounced (none on a platform without the desktop channel)
+    assert len(sent) <= 1  # one notification per episode (none on a platform without the desktop channel)
     alerts = json.loads((rotator.ROOT / ra.ALERT_NAME).read_text())["alerts"]
     assert list(alerts) == [f"capture-refused:{_SPARE_ADDR}"]
-    assert alerts[f"capture-refused:{_SPARE_ADDR}"]["notified"] == 1
+    assert "notified" not in alerts[f"capture-refused:{_SPARE_ADDR}"]  # sent-state lives in notify-sent.txt
     assert alerts[f"capture-refused:{_SPARE_ADDR}"]["action"] == (
         f"profile {_SPARE_ADDR} is signed in as {_OTHER_ADDR}; sign it in as {_SPARE_ADDR}"
     )

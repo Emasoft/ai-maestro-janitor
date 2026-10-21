@@ -6,7 +6,7 @@
 oauth-cookie-reminder (TRDD-32acd15f, P4c).
 
 When the local multi-account rotator is set up, this per-session detector
-surfaces the accounts that need a ONE-TIME human login because they can
+records the accounts that need a ONE-TIME human login because they can
 neither self-renew NOR auto-bootstrap:
 
   * no refreshToken  → the daemon's keepalive-refresh cannot keep it alive, AND
@@ -25,14 +25,15 @@ is found (CLAUDE_ROTATOR_HOME, ~/.claude/account-rotator, or
 $CLAUDE_PLUGIN_DATA/oauth-rotator). NOT gated on the opt-in.flag — the login
 nudge helps the user finish setup even before they flip full auto-management on.
 Read-only: reads cookie + slot metadata, never secret values, never launches a
-browser. Machine-scoped daily dedupe keeps it to ~one nudge/day while a login is
-due, even though the per-session heartbeat fires it in every project.
+browser. PRINTS NOTHING and sends no account notification (USER ruling 2026-10-21, TRDD-1J9B7MWO): rotator
+and account issues never reach an agent. It only records owner remediations in
+owner-remediation.json; the janitor daemon notifies the user once per episode.
+The one notification it raises itself is the daemon-stalled one (a hung or dead daemon cannot
+report itself), under the daemon's episode key, so N sessions still yield ONE.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import sys
 import time
@@ -43,16 +44,10 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
-import dedupe  # noqa: E402
-import notify  # noqa: E402  # scripts/lib/notify.py (human-notification channel, TRDD-4649ZLE0)
 import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (canonical session-key probe + profiles root)
 import rotator_alert  # noqa: E402  # scripts/lib/rotator_alert.py (stuck-rotation wording SSOT, TRDD-MI018FID)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
-
-# Escalation dedupe key rank (TRDD-GZXTSJSR root cause 3) — "dead-refresh" and "expired"
-# are equally maximal urgency (both mean only a human re-login fixes it right now).
-_URGENCY_RANK = {"expired": 0, "dead-refresh": 0, "24h": 1, "48h": 2}
 
 
 def _rotator_home() -> Path | None:
@@ -213,48 +208,25 @@ def _topup_due(home: Path, now: float, every_days: float) -> bool:
     return (now - last) >= every_days * 86400
 
 
-def _forget_resolved_stuck(home: Path) -> None:
-    """Forget the per-state stuck dedupe keys when no LIVE marker exists (TRDD-TK529Q0F),
-    so an identical dead end recurring later re-alarms instead of staying silent behind an
-    old key. Best-effort; never raises."""
-    seen = home / ".oauth-rotation-stuck-seen.txt"
-    try:
-        keys = [ln.strip() for ln in seen.read_text().splitlines() if ln.strip()]
-    except OSError:
-        return
-    for k in keys:
-        dedupe.emit_forget(seen, k)
-
-
-
-def _record_owner_remediation(home: Path, condition: str, message: str, now: float) -> None:
-    """Persist owner-only remediation before any best-effort notification."""
-    rotator_alert.record_owner_remediation(home, condition, message, now)
-
-
-def _notify_capture_stalled(home: Path, message: str, count: int, login_sh: str, now: float) -> None:
-    """Keep capture-stalled owner-visible even when notification delivery fails or dedupes."""
-    # WHY (TRDD-JWIGGMH0): the control-plane record is written first and never enters
-    # automatic context; notification remains a best-effort attention channel.
-    _record_owner_remediation(home, "oauth-capture-stalled", message, now)
-    try:
-        notify.push(
-            sev="CRITICAL",
-            code="OAUTH-CAPTURE-STALLED",
-            project="oauth-rotator",
-            summary=f"OAuth capture stalled for {count} account(s)",
-            hint=login_sh,
-        )
-    except Exception:  # noqa: BLE001 -- durable remediation already exists
-        pass
-
-
 def main() -> int:
     state.init_state()
 
     home = _rotator_home()
     if home is None:
         return 0  # opt-in: no rotator configured on this machine -> silent no-op
+
+    now = time.time()
+
+    # USER ruling 2026-10-21 (TRDD-1J9B7MWO): rotator and account issues NEVER reach an agent, so
+    # this detector prints nothing and notifies nobody. It only RECORDS owner remediations
+    # (owner-remediation.json); the janitor DAEMON is the one notifier and tells the user once per
+    # episode. The single exception is the daemon's own stall: a hung or dead daemon cannot report
+    # itself, so the heartbeat side raises that one under the daemon's episode key, which the
+    # machine-wide notify-sent store collapses to one notification across every session.
+    try:
+        rotator_alert.notify_session_tick_stalled(home, now)
+    except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
+        pass
 
     # Every path named in the messages below is RESOLVED, never hard-coded (janitor#258).
     # These lines used to spell `~/.claude/account-rotator/...` literally while the state read
@@ -264,17 +236,14 @@ def main() -> int:
     login_sh = _disp(rotator.open_login_script())
 
     grace = _grace_days()
-    now = time.time()
 
     # supervisor._slot_facts is keychain-aware (reads each slot's token blob from
     # the OS keychain, plaintext-file fallback) and returns only NON-secret
     # metadata: (email, has_refresh, expires_days). Exactly what the classifier needs.
+    # It stays HERE (a per-heartbeat, per-session process), never in the daemon's 60 s loop:
+    # a keychain read there risks a prompt storm.
     facts = supervisor._slot_facts(home, now)
     if not facts:
-        # No slots at all → no rotation is possible either, but the STUCK marker branch
-        # below never runs from here; the key-forget must still happen so a resolved
-        # dead end is forgotten on a machine whose slots were removed (TK529Q0F).
-        _forget_resolved_stuck(home)
         state.rotate_log_if_big("oauth-login-needed")
         return 0
 
@@ -287,60 +256,25 @@ def main() -> int:
         elif slot_capture_stalled(f.has_refresh, has_session, f.refresh_failures):
             stalled.append(f.email)
 
-    day = int(now // 86400)
-
-    # PRIMARY nudge — accounts that need a fresh human sign-in. Machine-scoped daily
-    # dedupe (the rotator is machine-wide, not per-project) so one nudge/day regardless
-    # of how many sessions fire heartbeats.
-    if needing:
-        needing = sorted(needing)
-        emails = ", ".join(e for e, _ in needing)
-        seen = home / ".oauth-login-needed-seen.txt"
-        # Escalation signature: bucket-aware, not just the email set (root cause 3). A
-        # worsening account (48h -> 24h -> expired) changes the sig even within the
-        # same day, so it re-notifies instead of staying silent behind yesterday's key.
-        sig = hashlib.sha1(
-            ",".join(f"{e}:{b}" for e, b in needing).encode("utf-8"), usedforsecurity=False
-        ).hexdigest()[:8]
-        msg = (
-            f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
-            f"{emails} — run `{login_sh} <email>` for each "
-            f"(opens a DEDICATED Chrome window; your default browser is untouched). "
-            f"The rotator auto-bootstraps the rest."
+    # PRIMARY — accounts that need a fresh human sign-in. One record per account; the urgency
+    # bucket is the record's kind, so a worsening account (48h -> 24h -> expired) is a NEW
+    # episode and the daemon notifies again, while an unchanged one stays silent.
+    for email, bucket in sorted(needing):
+        rotator_alert.record_owner_remediation(
+            home,
+            "oauth-login-needed",
+            f"account {email} needs a one-time login ({bucket}) - run `{login_sh} {email}` "
+            f"(opens a DEDICATED Chrome window; your default browser is untouched)",
+            now,
+            kind=bucket,
+            slot=email,
         )
-        line = dedupe.emit_once(seen, f"due-{day}-{sig}", msg)
-        if line is not None:
-            print(line)
-        rotator_alert.record_owner_remediation(home, "oauth-login-needed", msg, now)
 
-        # Root cause 4 (the decisive gap) — a heartbeat print is invisible to an
-        # UNATTENDED session. Route through the real human channel too. notify.push
-        # owns its own gates (severity floor, content-hash dedupe, 24h cap, digest),
-        # so calling it every tick is safe; the worst-case account decides severity so
-        # an expired/dead-refresh account escalates past a plain 48h-out HIGH.
-        worst = min((b for _, b in needing), key=lambda b: _URGENCY_RANK[b])
-        sev = "CRITICAL" if worst in ("expired", "dead-refresh") else "HIGH"
-        try:
-            notify.push(
-                sev=sev,
-                code="OAUTH-LOGIN-NEEDED",
-                project="oauth-rotator",
-                summary=f"{len(needing)} account(s) need a one-time login ({worst}): {emails}",
-                hint=login_sh,
-            )
-        except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
-            pass
-
-    # SECONDARY nudge (B3) — accounts that ARE logged in but whose automatic OAuth capture
-    # hasn't completed (the detached bootstrap keeps launching but never succeeds: CF
-    # challenge, missing playwright, a wedged consent page). Tell the user to run the
-    # capture MANUALLY once. Separate seen-file + signature so it dedupes independently of
-    # the login nudge (the two sets are disjoint by construction).
+    # SECONDARY (B3) — accounts that ARE logged in but whose automatic OAuth capture hasn't
+    # completed (the detached bootstrap keeps launching but never succeeds: CF challenge,
+    # missing playwright, a wedged consent page). One record per account.
     if stalled:
         stalled = sorted(stalled)
-        seen2 = home / ".oauth-capture-stalled-seen.txt"
-        sig2 = hashlib.sha1(",".join(stalled).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-        emails2 = ", ".join(stalled)
         # The per-account `bootstrap-<email>.log` exists ONLY if a capture was actually
         # LAUNCHED — `rotator._invoke_slot_capture` opens it at Popen time, and the launch is
         # skippable (auto-launch opted off, past the launch cap, or a denied domain). Naming it
@@ -357,82 +291,21 @@ def main() -> int:
         evidence = f"`{_disp(home / 'rotator.log')}`"
         if boot_logs:
             evidence += " and " + ", ".join(f"`{_disp(p)}`" for p in boot_logs)
-        msg2 = (
-            f"[oauth-capture-stalled] {len(stalled)} account(s) are logged in but their OAuth "
-            f"capture hasn't completed: {emails2} — the rotator retries the capture every tick; "
-            f"if it keeps failing, check {evidence}, "
-            f"and if the session has lapsed re-run `{login_sh} <email>`."
-        )
-        line2 = dedupe.emit_once(seen2, f"stalled-{day}-{sig2}", msg2)
-        if line2 is not None:
-            print(line2)
-        _notify_capture_stalled(home, msg2, len(stalled), login_sh, now)
+        for email in stalled:
+            rotator_alert.record_owner_remediation(
+                home,
+                "oauth-capture-stalled",
+                f"account {email} is logged in but its OAuth capture hasn't completed - the "
+                f"rotator retries every tick; if it keeps failing, check {evidence}, and if the "
+                f"session has lapsed re-run `{login_sh} {email}`",
+                now,
+                slot=email,
+            )
 
-    # TERTIARY nudge — rotation is IMPOSSIBLE right now, and no human knows.
-    #
-    # The two nudges above cover per-account credential death. They do NOT cover the other
-    # dead end: every account is alive but USAGE-EXHAUSTED, or there is no alternate to
-    # rotate to at all. `rotator._decide()` records those to stdout and `rotator.log`, and
-    # MEASURED 2026-08-20: nothing in `scripts/` reads that log for them. So the one moment
-    # a human is the only way forward was the one moment the janitor said nothing, and the
-    # session simply stalled — the shape the owner reports as "projects stall after a while".
-    #
-    # Reads the MARKER (`rotation-stuck.json`), never greps the log: the rotator knows it is
-    # stuck and says so structurally, and a log grep would re-derive that by pattern-matching
-    # prose that is free to be reworded.
-    try:
-        stuck = json.loads((home / "rotation-stuck.json").read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 -- absent (the healthy case) or corrupt: stay silent
-        stuck = None
-    seen3 = home / ".oauth-rotation-stuck-seen.txt"
-    # STALENESS GATE. The marker is cleared on a successful rotation, but a host whose
-    # rotator stopped running entirely would leave one behind forever. Only report while
-    # the condition is still being OBSERVED (last_seen within the hour), so this can never
-    # nag about a dead end that ended when the rotator did — and anything NOT live here
-    # (absent, corrupt, stale) falls to the forget arm below.
-    stuck_live = (
-        isinstance(stuck, dict) and stuck.get("kind")
-        and (now - int(stuck.get("last_seen_epoch") or 0)) <= 3600
-    )
-    if stuck_live:
-        assert stuck is not None  # narrows Optional for pyright; stuck_live just proved it
-        first = int(stuck.get("first_seen_epoch") or now)
-        kind = str(stuck.get("kind"))
-        hours = max(0.0, (now - first) / 3600.0)
-        remedy = rotator_alert.stuck_text(kind)
-        msg3 = (
-            f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
-            f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
-            f"rescued by rotating — it will stall. Detail: {stuck.get('detail') or 'n/a'}"
-        )
-        # TK529Q0F — owner-facing escalation. The heartbeat line below used to dedupe per
-        # DAY, which left the 2026-09-24 dead end unheard for hours: an unattended session
-        # never reads stdout, and the condition is a genuine exception to the
-        # findings-go-to-the-agent routing (TRDD-WZKFSQ2N decision 3) because only a human
-        # can re-login. Dedupe is PER STATE CHANGE, not per day: the key carries kind +
-        # detail, so a worsening dead end (a new kind or detail) re-alarms the same day,
-        # while an unchanged one stays silent; keys are forgotten when the marker clears or
-        # goes stale (the `not stuck_live` arm) so an identical recurrence re-alarms too.
-        # notify.push's own content-hash + 24h-cap gates bound the actual push volume.
-        state_key = f"stuck-{kind}-{stuck.get('detail') or 'n/a'}"
-        line3 = dedupe.emit_once(seen3, state_key, msg3)
-        if line3 is not None:
-            print(line3)
-            try:
-                notify.push(
-                    sev="CRITICAL",
-                    code="OAUTH-ROTATION-STUCK",
-                    project="oauth-rotator",
-                    summary=f"rotation IMPOSSIBLE {hours:.1f}h ({kind}) — {remedy}",
-                    hint="/janitor-findings",
-                )
-            except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
-                pass
-    else:
-        # No marker, a corrupt one, or a STALE one (the rotator stopped observing): forget
-        # the keys so an identical dead end coming back later re-alarms instead of staying
-        # silent behind an old key.
-        _forget_resolved_stuck(home)
+    # The "rotation is IMPOSSIBLE" dead end (rotation-stuck.json) is NOT handled here any more:
+    # `rotator_alert.active_conditions` already reads the same marker with the same one-hour
+    # staleness gate, and the daemon notifies it once per (condition, kind) episode. Wording it
+    # from `stuck_text` here printed the false all-accounts-maxed verdict to agents (TRDD-1J9B7MWO).
 
     # QUATERNARY nudge (P3c) — proactive "top up ALL your logins" on a flat calendar
     # cadence, independent of whether any single account is currently flagged above.
@@ -442,55 +315,24 @@ def main() -> int:
     # NOT gated on `supervisor._server_owns_chores()` (P5) — deliberately. That
     # predicate decides who runs the automatic 60s rotation TICK; a login is a HUMAN
     # action neither the janitor daemon nor the ai-maestro server can perform for the
-    # user, so the nudge must surface regardless of which side currently owns
-    # rotation. No shared suppression-flag protocol exists on the server side (none
-    # found by grep) — inventing one here would be speculative, so both sides simply
-    # notify; `notify.push`'s own content-hash dedupe + 24h cap already bound how often
-    # the human is actually interrupted if both fire.
+    # user, so the nudge must surface regardless of which side currently owns rotation.
     topup_days = _topup_days()
     if topup_days > 0 and _topup_due(home, now, topup_days):
-        # The period (F1) makes the message content-hash DIFFERENT each due cycle —
-        # without it the summary was byte-identical every time, so notify.push's own
-        # content-hash dedupe (scripts/lib/notify.py ~L205-211, checked against the
-        # FULL sent-history) silently deduped every fire after the very first one,
-        # forever, on a given host.
+        # The period is the record's kind: a new due cycle is a NEW episode, so the daemon
+        # notifies again instead of staying silent behind last cycle's episode.
         period = time.strftime("%Y-%m-%d", time.localtime(now))
-        outcome = None
-        try:
-            outcome = notify.push(
-                sev="HIGH",
-                code="OAUTH-LOGIN-TOPUP",
-                project="oauth-rotator",
-                summary=(
-                    f"proactive top-up ({period}): refresh all {len(facts)} rotator "
-                    f"login(s) before any expire"
-                ),
-                hint="/janitor-capture-all-logins",
-            )
-        except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
-            pass
-
-        # In-context heartbeat line for ATTENDED sessions (P2's "belt and suspenders"),
-        # via the same dedupe.emit_once mechanism the other nudges in this file use —
-        # once per day regardless of how many project heartbeats fire.
-        seen4 = home / ".oauth-login-topup-seen.txt"
-        line4 = dedupe.emit_once(
-            seen4,
-            f"topup-{day}",
-            f"[oauth-login-topup] proactive top-up due — run `/janitor-capture-all-logins` "
-            f"to refresh all {len(facts)} rotator login(s) before any expire.",
+        rotator_alert.record_owner_remediation(
+            home,
+            "oauth-login-topup",
+            f"proactive top-up ({period}): refresh all {len(facts)} rotator login(s) before any "
+            f"expire - run /janitor-capture-all-logins",
+            now,
+            kind=period,
         )
-        if line4 is not None:
-            print(line4)
-
-        # Stamp ONLY on an actual push (F1) — DISABLED/BELOW_SEVERITY/CAPPED/DEDUPED
-        # must NOT burn the 7-day cadence, or a config gate (or the dedupe bug above)
-        # silently disables the proactive topup forever after its very first tick.
-        if outcome in (notify.PUSHED, notify.PUSHED_DIGEST):
-            try:
-                state.atomic_write(_topup_stamp_path(home), str(now))
-            except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
-                pass
+        try:
+            state.atomic_write(_topup_stamp_path(home), str(now))
+        except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
+            pass
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

@@ -875,12 +875,15 @@ def task_oauth_rotator_supervisor() -> None:
         pass
 
 
-def _evaluate_rotator_alert() -> None:
-    """R4 (TRDD-3OS6AXV3): after each rotator tick, raise the out-of-band desktop alarm.
+def _evaluate_rotator_alert(check_tick: bool = True) -> None:
+    """R4 (TRDD-3OS6AXV3): raise the out-of-band desktop alarm, once per condition episode.
 
     WHY here and not in a heartbeat detector: after the 2026-10-03 expiry every model turn
     only printed "Login expired", so the alarm has to come from the daemon, which lives on.
-    Fail-open: an alarm bug must never take the rotator tick (or the rotation-ESC pass) down.
+    Runs on `_RotatorAlertThread`, NOT after the tick (USER ruling 2026-10-21 + review): a hung
+    tick on the tick thread used to suppress its own tick-stalled alarm. `check_tick` is False
+    while the ai-maestro server owns the tick (its stamp is not ours to judge).
+    Fail-open: an alarm bug must never take the daemon down.
     """
     try:
         import rotator_alert  # noqa: PLC0415 - lazy, like the rotator module itself
@@ -904,20 +907,20 @@ def _evaluate_rotator_alert() -> None:
             oauth_supervisor._rotator_root(),
             now=time.time(),
             claude_running=rot is not None and rot.claude_running(),
+            check_tick=check_tick,
         )
     except Exception as exc:  # noqa: BLE001 - see docstring
         state.log_line("daemon", f"rotator-alert: evaluation failed: {exc}")
 
 
 def task_oauth_rotator_beat() -> None:
-    """The SCHEDULED `oauth-rotator-tick`: the tick, then the R4 out-of-band alarm.
+    """The SCHEDULED `oauth-rotator-tick`: the tick only.
 
-    Kept apart from `task_oauth_rotator_tick` so a direct call of the tick (unit tests, a
-    manual run) can never raise a real desktop notification.
-    """
+    The R4 out-of-band alarm is NOT here any more: it runs on `_RotatorAlertThread`, so a tick
+    that hangs cannot suppress its own tick-stalled alarm. Kept apart from
+    `task_oauth_rotator_tick` as the scheduled entry point (the tick thread runs it through
+    `Task.run()`)."""
     task_oauth_rotator_tick()
-    if oauth_supervisor.opt_in_present():
-        _evaluate_rotator_alert()
 
 
 
@@ -4241,7 +4244,7 @@ class _RotatorTickThread(threading.Thread):
     WHY (incident 2026-10-03): the single-threaded main loop sat ~31 min inside a step
     OUTSIDE `_run_due_tasks` (prime suspect `_consume_plugin_update_requests`), and the 60 s
     rotator tick — which only the main loop ran — stopped with it. The tick now has its own
-    thread; the task body (`task_oauth_rotator_beat`: tick, then the R4 alarm) runs here
+    thread; the task body (`task_oauth_rotator_beat`: the tick; the R4 alarm has its own `_RotatorAlertThread`) runs here
     after every tick, via `Task.run()` so failcount/backoff bookkeeping is unchanged.
 
     The thread NEVER writes the daemon heartbeat (`_thread_state.no_heartbeat`): the heartbeat
@@ -4293,6 +4296,57 @@ class _RotatorTickThread(threading.Thread):
                 self._task.run()
             finally:
                 _thread_state.wedge_tick = False
+
+
+_ROTATOR_ALERT_INTERVAL_S = 60.0  # same cadence the alarm had when it rode the 60 s tick
+
+
+class _RotatorAlertThread(threading.Thread):
+    """Runs the rotator alert evaluation on its OWN small thread, every `interval_s`.
+
+    WHY (USER ruling 2026-10-21, review of 6f3dd945): the evaluation used to run after the tick
+    on the tick thread, so a hung tick also blocked its own tick-stalled alarm, and the main loop
+    recorded a ~31 min stall on 2026-10-03. This thread shares neither. It reads state files only
+    (never a keychain: `supervisor._slot_facts` stays out of this loop), notifies through
+    `notify.notify_episode` (one notification per episode, shared sent-store), and is NOT
+    yielded to the ai-maestro server: the daemon is the single notifier, so the user gets
+    exactly one notification whoever runs the tick. While the server owns the tick only the
+    tick-stalled check is switched off (`set_tick_yielded`). Never writes the daemon heartbeat."""
+
+    def __init__(
+        self,
+        eval_fn: Optional[Callable[[bool], None]] = None,
+        interval_s: float = _ROTATOR_ALERT_INTERVAL_S,
+    ) -> None:
+        super().__init__(name="rotator-alert", daemon=True)
+        self._eval_fn = eval_fn or _evaluate_rotator_alert
+        self._interval_s = interval_s
+        self._stop_evt = threading.Event()
+        self._tick_yielded = threading.Event()
+
+    def set_tick_yielded(self, yielded: bool) -> None:
+        if yielded:
+            self._tick_yielded.set()
+        else:
+            self._tick_yielded.clear()
+
+    def shutdown(self, timeout: float) -> None:
+        self._stop_evt.set()
+        self.join(timeout)
+
+    def run_once(self) -> None:
+        """One evaluation pass (the thread's loop body; tests call it directly)."""
+        if gs.kill_switch_present() or not oauth_supervisor.opt_in_present():
+            return
+        self._eval_fn(not self._tick_yielded.is_set())
+
+    def run(self) -> None:
+        _thread_state.no_heartbeat = True
+        while not self._stop_evt.wait(self._interval_s):
+            try:
+                self.run_once()
+            except Exception as exc:  # noqa: BLE001 - one bad pass must not end the thread
+                state.log_line("daemon", f"rotator-alert: pass failed: {exc}")
 
 
 def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
@@ -4908,6 +4962,9 @@ def main() -> int:
     # (incident 2026-10-03, see _RotatorTickThread). daemon=True: it can never block exit.
     ticker = _RotatorTickThread(next(t for t in tasks if t.own_thread))
     ticker.start()
+    # Own thread for the alert evaluation: a hung tick must not suppress its own tick-stalled alarm.
+    alerter = _RotatorAlertThread()
+    alerter.start()
     size_watch = _ProcessSizeWatchThread()
     size_watch.start()
     # WHY (6CF3L7IJ): observes task runs that outlive the foreground budget while they run.
@@ -5003,6 +5060,7 @@ def main() -> int:
                 tasks, yielded, harness_backend.read_owner_leases(), time.time()
             )
             ticker.set_yielded("oauth-rotator-tick" in yielded)
+            alerter.set_tick_yielded("oauth-rotator-tick" in yielded)
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
                 # TRDD-HXZ8B0IS: a flap between "yielded" and "resumed" used to log with no
@@ -5091,6 +5149,7 @@ def main() -> int:
     finally:
         # _run_workload kills the tick child within ~10 s once `_running` is False.
         ticker.shutdown(15)
+        alerter.shutdown(5)
         # Daemon thread: without an explicit stop, a pass mid-scan or mid-notify at exit is killed part-way.
         size_watch.shutdown(5)
         overrun_watch.shutdown(5)

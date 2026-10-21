@@ -1,9 +1,12 @@
 """Out-of-band rotator alarm (TRDD-3OS6AXV3 R4) — the DAEMON's last-resort channel.
 
 Incident 2026-10-03 00:37: the only live login expired with no warning, and every model turn
-afterwards just printed "Login expired", so a heartbeat drift line could never be read. The
-daemon (alive regardless of any login) therefore raises a desktop notification, and ALSO writes
-`rotator-alert.json` so the heartbeat can show the same fact once a turn can run.
+afterwards just printed "Login expired". The daemon (alive regardless of any login) therefore
+raises ONE desktop notification per condition episode (USER ruling 2026-10-21: the user is
+told, no agent is: rotator and account issues never reach agent context, so there is no
+heartbeat drift line and no agent-visible channel). Every active alarm is recorded in
+`rotator-alert.json` (diagnostics) and `owner-remediation.json`; the daemon notifies each new
+remediation record once through `notify.notify_episode`.
 
 Reads only state.json / rotation-stuck.json / tick-completed.ts — never a credential. The text
 names the single action and never a token or an e-mail.
@@ -25,7 +28,7 @@ import notify  # noqa: E402  -- the existing daemon-only desktop notifier
 import state  # noqa: E402
 
 ALERT_NAME = "rotator-alert.json"
-DEBOUNCE_S = 3600  # 2nd notification of an unchanged condition after 1 h; later ones use REPEAT_S
+DEBOUNCE_S = 3600  # flap window: a condition gone longer than this is a NEW episode and notifies again
 TICK_STALL_S = 600  # no completed rotator tick for this long while claude runs
 
 _ACTIONS = {
@@ -45,7 +48,7 @@ _STUCK_TEXT = {
 }
 
 
-REPEAT_S = 86400  # after the 2nd notification, repeat an unchanged condition at most daily
+REMEDIATION_FRESH_S = 1800  # an owner-remediation record not re-seen for this long is a condition that went away
 AUTH_FAILED_NAME = "auth-failed.json"  # written by the StopFailure hook on a 401
 AUTH_FAILED_TTL_S = 6 * 3600  # the marker expires on its own after 6 h
 AUTH_FAILED_ACTION = "the login was rejected (Login expired) - run /login"
@@ -129,14 +132,23 @@ def clear_auth_failed(root: Path) -> None:
 # WHY (TRDD-JWIGGMH0): owner remediation is control-plane state, not a finding source.
 # Desktop delivery may fail or dedupe; this record remains readable by explicit pull diagnostics.
 OWNER_REMEDIATION_NAME = "owner-remediation.json"
-_AGENT_VISIBLE_CONDITIONS = frozenset({"tick-stalled"})
 
 
-def record_owner_remediation(root: Path, condition: str, action: str, now: float) -> None:
-    """Durably record an owner-only remediation without creating agent-context output."""
+def record_owner_remediation(
+    root: Path, condition: str, action: str, now: float, *, kind: str = "", slot: str = ""
+) -> None:
+    """Durably record an owner-only remediation without creating agent-context output.
+    The record key is condition[:kind][:slot] - the same three parts that make one notification
+    episode (`notify.notify_episode`). The daemon notifies each fresh record once."""
     path = root / OWNER_REMEDIATION_NAME
     records = _dict(_read_json(path).get("conditions"))
-    records[condition] = {"action": action, "last_seen": int(now)}
+    key = ":".join(p for p in (condition, kind, slot) if p)
+    records[key] = {"condition": condition, "kind": kind, "slot": slot, "action": action, "last_seen": int(now)}
+    # Bounded file: a record not re-seen for a week is a condition long gone.
+    records = {
+        k: v for k, v in records.items()
+        if isinstance(v, dict) and now - (_epoch(v.get("last_seen")) or 0) <= 7 * 86400
+    }
     root.mkdir(parents=True, exist_ok=True)
     state.atomic_write(path, json.dumps({"conditions": records}, sort_keys=True))
 
@@ -191,7 +203,9 @@ def _tick_age(root: Path, now: float) -> float:
 _STUCK_FRESH_S = 3600  # mirrors the oauth-login-needed detector gate and rotator.STUCK_MARKER_FRESH_S
 
 
-def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str, str]:
+def active_conditions(
+    root: Path, now: float, claude_running: bool, *, check_tick: bool = True
+) -> dict[str, str]:
     """Condition name -> action text for every alarm that holds right now."""
     out: dict[str, str] = {}
     st = _read_json(root / "state.json")
@@ -222,7 +236,8 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         # the live account's slot twin, and that goes stale BY DESIGN, so it would fire ~8 h
         # after every switch while the real login is fine. The wall itself is reported by
         # `auth-failed` below, written by the session's StopFailure hook.
-        if _tick_age(root, now) > TICK_STALL_S:
+# check_tick is False while the ai-maestro server owns the rotator tick: its stamp is not ours to judge.
+        if check_tick and _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
     # WHY (TRDD-7T4J5T6Z): only a marker the rotator rewrote within the last hour is a live verdict;
     # one left by a recovered or stopped rotator must not alert forever. Mirrors the detector gate
@@ -259,14 +274,68 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         )
     return out
 
+def _episode_parts(cond: str, stuck_kind: str) -> tuple[str, str, str]:
+    """(condition, kind, slot) of an active alarm - the three parts of its notification episode.
+    A per-slot alarm (`capture-refused:<email>`) carries its slot; `rotation-stuck` carries the
+    stuck kind (a new kind is a new episode, the same kind is the same one)."""
+    if cond.startswith("capture-refused:"):
+        return "capture-refused", "", cond.split(":", 1)[1]
+    if cond == "rotation-stuck":
+        return cond, stuck_kind, ""
+    return cond, "", ""
 
 
-def _due(prior: dict, now: float) -> bool:
-    # Backoff: 2nd notification after DEBOUNCE_S (1 h), then once per REPEAT_S while it holds.
-    last, n = prior.get("last_notified"), prior.get("notified")
-    if not isinstance(last, (int, float)) or not isinstance(n, int):
-        return True
-    return now - last >= (DEBOUNCE_S if n <= 1 else REPEAT_S)
+def notify_new_remediations(
+    root: Path,
+    now: float,
+    *,
+    runner: Optional[Callable[[list[str]], None]] = None,
+) -> list[str]:
+    """Notify the owner ONCE per episode for every fresh record in owner-remediation.json -
+    the records this module AND the oauth-login-needed detector write. The daemon is the only
+    caller (USER ruling 2026-10-21: one notification per episode, never one per session).
+    A record whose last_seen is older than REMEDIATION_FRESH_S is a condition that went away.
+    Returns the keys of the records that actually raised a notification."""
+    sent: list[str] = []
+    for key, rec in sorted(_dict(_read_json(root / OWNER_REMEDIATION_NAME).get("conditions")).items()):
+        rec = _dict(rec)
+        seen = _epoch(rec.get("last_seen"))
+        cond, action = rec.get("condition"), rec.get("action")
+        if not isinstance(cond, str) or not isinstance(action, str) or seen is None:
+            continue
+        if now - seen > REMEDIATION_FRESH_S:
+            continue
+        outcome = notify.notify_episode(
+            condition=cond,
+            kind=str(rec.get("kind") or ""),
+            slot=str(rec.get("slot") or ""),
+            message=action,
+            now=now,
+            runner=runner,
+        )
+        if outcome == notify.PUSHED:
+            sent.append(key)
+    return sent
+
+
+def notify_session_tick_stalled(
+    root: Path,
+    now: float,
+    *,
+    runner: Optional[Callable[[list[str]], None]] = None,
+) -> Optional[str]:
+    """Session-side tick-stalled notification: a hung or dead daemon cannot raise its own alarm,
+    so the heartbeat-side detector calls this. It uses the SAME episode key the daemon's
+    evaluation uses (condition `tick-stalled`) in the machine-wide notify-sent store, so N
+    sessions plus the daemon produce ONE desktop notification per episode. Prints nothing -
+    the owner learns of it, no agent reads it. Returns the notify outcome, or None when the
+    rotator has ticked recently (or never ticked: no stamp, nothing to compare)."""
+    if not (root / "tick-completed.ts").exists() or _tick_age(root, now) <= TICK_STALL_S:
+        return None
+    return notify.notify_episode(
+        condition="tick-stalled", message=_ACTIONS["tick-stalled"], now=now, runner=runner
+    )
+
 
 
 def evaluate(
@@ -275,67 +344,26 @@ def evaluate(
     now: float,
     claude_running: bool,
     runner: Optional[Callable[[list[str]], None]] = None,
+    check_tick: bool = True,
 ) -> list[str]:
-    """Persist active alarms, notify with backoff, and retain owner remediation state."""
-    active = active_conditions(root, now, claude_running)
-    path = root / ALERT_NAME
-    recent_path = root / "rotator-alert-recent.json"
-    prior = _dict(_read_json(path).get("alerts"))
-    recent = {
-        c: _dict(v)
-        for c, v in _read_json(recent_path).items()
-        if isinstance(v, dict) and now - (_epoch(v.get("t")) or 0) <= DEBOUNCE_S
-    }
-    alerts: dict[str, dict] = {}
-    new = {c for c in active if c not in prior and c not in recent}
+    """Persist active alarms, record each as an owner remediation, and notify the owner once
+    per new episode (`notify_new_remediations`). Nothing here reaches an agent."""
+    active = active_conditions(root, now, claude_running, check_tick=check_tick)
+    stuck_kind = str(_read_json(root / "rotation-stuck.json").get("kind") or "")
     for cond, action in active.items():
-        p = _dict(prior.get(cond)) or _dict(recent.get(cond))
-        last, n = p.get("last_notified"), p.get("notified")
-        # WHY (TRDD-JWIGGMH0): write before notification so disabled, deduped, or failed
-        # delivery cannot erase the persistent owner-readable remediation.
-        if cond not in _AGENT_VISIBLE_CONDITIONS:
-            record_owner_remediation(root, cond, action, now)
-        if cond in new or _due(p, now):
-            if notify.enabled():
-                notify._deliver(f"[janitor] {action}", runner=runner)
-            last = now
-            n = 1 if cond in new or not isinstance(n, int) else n + 1
-        alerts[cond] = {
-            "first_seen": p.get("first_seen", int(now)),
-            "last_notified": int(last) if isinstance(last, (int, float)) else int(now),
-            "notified": n if isinstance(n, int) else 1,
-            "action": action,
-        }
-    recent.update({c: {**a, "t": int(now)} for c, a in alerts.items()})
-    if recent:
-        state.atomic_write(recent_path, json.dumps(recent))
-    else:
-        recent_path.unlink(missing_ok=True)
+        name, kind, slot = _episode_parts(cond, stuck_kind)
+        record_owner_remediation(root, name, action, now, kind=kind, slot=slot)
+    path = root / ALERT_NAME
+    prior = _dict(_read_json(path).get("alerts"))
+    alerts = {
+        c: {"first_seen": _dict(prior.get(c)).get("first_seen", int(now)), "action": a}
+        for c, a in active.items()
+    }
     if alerts:
         state.atomic_write(path, json.dumps({"alerts": alerts}))
     else:
         path.unlink(missing_ok=True)
+    notify_new_remediations(root, now, runner=runner)
     return list(active)
-
-
-def _is_advisory(cond: str) -> bool:
-    # WHY (janitor#342, TRDD-MMWDSFB4): only these two are standing chores the daemon already
-    # backs off (first / 1 h / daily); everything else, tick-stalled included, is urgent and
-    # keeps printing on every fire.
-    return cond == "spare-stale" or cond.startswith("capture-refused:")
-
-
-def drift_parts(root: Path, now: float) -> tuple[list[str], dict[str, tuple[int | None, str]]]:
-    """Return only agent-actionable rotator output; owner telemetry stays control-plane-only."""
-    alerts = _dict(_read_json(root / ALERT_NAME).get("alerts"))
-    urgent: set[str] = set()
-    for cond, alert in alerts.items():
-        if cond not in _AGENT_VISIBLE_CONDITIONS or not isinstance(alert, dict):
-            continue
-        urgent.add(str(alert.get("action", cond)))
-    if (root / "tick-completed.ts").exists() and _tick_age(root, now) > TICK_STALL_S:
-        urgent.add(_ACTIONS["tick-stalled"])
-    # The second value remains for dispatch compatibility; no owner-only advisory may enter it.
-    return sorted(urgent), {}
 
 

@@ -96,7 +96,7 @@ def test_no_rotation_target_notifies_once_with_the_single_action(root: Path) -> 
     assert "example.test" not in script
     saved = json.loads((root / ra.ALERT_NAME).read_text())
     assert "example.test" not in json.dumps(saved)
-    assert saved["alerts"]["no-rotation-target"]["last_notified"] == int(NOW)
+    assert saved["alerts"]["no-rotation-target"]["first_seen"] == int(NOW)
 
 
 def test_healthy_state_raises_nothing(root: Path) -> None:
@@ -215,9 +215,10 @@ def test_stuck_marker_without_a_kind_or_unreadable_does_not_alert(root: Path) ->
         assert "rotation-stuck" not in ra.active_conditions(root, NOW, False)
 
 
-def test_banner_backoff_first_then_hourly_then_daily(root: Path) -> None:
-    """Notify at first sight, again after 1 h, then at most once per 24 h; the file updates
-    on every evaluation and first_seen is preserved."""
+def test_an_unchanged_condition_notifies_once_and_never_repeats(root: Path) -> None:
+    """USER ruling 2026-10-21: a condition already notified is NEVER notified again while it
+    holds - not after 1 h, not daily. Over 5 days of evaluations exactly one notification goes
+    out, the alert file keeps updating and first_seen is preserved."""
     run = Runner()
 
     def ev(t: float) -> None:
@@ -225,29 +226,25 @@ def test_banner_backoff_first_then_hourly_then_daily(root: Path) -> None:
         ra.evaluate(root, now=t, claude_running=False, runner=run)
 
     ev(NOW)
-    ev(NOW + 600)
+    # Evaluated every 10 min for 5 days (the daemon runs every minute; the condition is never
+    # absent, so it is never a new episode).
+    for t in range(int(NOW) + 600, int(NOW) + 5 * 86400, 600):
+        ev(t)
     assert len(run.argvs) == 1
-    ev(NOW + 3601)
-    assert len(run.argvs) == 2
-    ev(NOW + 3601 + 7200)
-    ev(NOW + 3601 + 80000)
-    assert len(run.argvs) == 2  # no 3rd banner inside 24 h of the 2nd
-    ev(NOW + 3601 + 86400)
-    assert len(run.argvs) == 3
     saved = json.loads((root / ra.ALERT_NAME).read_text())["alerts"]["rotation-stuck"]
-    assert saved["first_seen"] == int(NOW) and saved["last_notified"] == int(NOW + 3601 + 86400)
+    assert saved["first_seen"] == int(NOW) and "last_notified" not in saved
 
 
 
-def test_no_spare_account_for_days_gives_a_handful_of_banners(root: Path) -> None:
-    """Condition (a) held for 3 days, evaluated every minute: at most 5 banners, not ~72."""
+def test_no_spare_account_for_days_gives_one_banner(root: Path) -> None:
+    """Condition (a) held for 3 days, evaluated every minute: ONE banner, not ~72."""
     _write_state(root, live_exp_s=NOW - 3600, spare_exp_s=NOW - 60)
     run = Runner()
     for i in range(3 * 24 * 60):
         t = NOW + i * 60
         _stamp(root, t - 30)
         ra.evaluate(root, now=t, claude_running=True, runner=run)
-    assert len(run.argvs) <= 5
+    assert len(run.argvs) == 1
 
 
 
@@ -296,6 +293,203 @@ def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:
     ra.evaluate(root, now=NOW + 60, claude_running=False, runner=Runner())
     assert not (root / ra.ALERT_NAME).exists()
 
+def test_a_second_account_is_its_own_episode_and_neither_repeats(root: Path) -> None:
+    """The episode key includes the slot (USER ruling 2026-10-21): a refused capture on account A
+    does not silence account B, and neither one is ever notified twice while it holds."""
+    run = Runner()
+    ra.record_capture_refused(root, "a.person@example.test", "other@example.test", NOW)
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    ra.record_capture_refused(root, "b.person@example.test", None, NOW + 60)
+    ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
+    for t in range(int(NOW) + 120, int(NOW) + 5 * 3600, 300):
+        ra.evaluate(root, now=t, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_a_new_stuck_kind_is_a_new_episode_but_the_same_kind_is_not(root: Path) -> None:
+    """Episode key = condition + kind: all-accounts-maxed then expired-and-offline notifies twice."""
+    run = Runner()
+    _stuck(root, NOW, kind="all-accounts-maxed")
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    _stuck(root, NOW + 60, kind="all-accounts-maxed")
+    ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    _stuck(root, NOW + 120, kind="expired-and-offline")
+    ra.evaluate(root, now=NOW + 120, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_a_flapping_verdict_is_one_episode_until_absent_longer_than_the_flap_window(root: Path) -> None:
+    """A verdict that disappears and returns within the flap window stays ONE episode (one
+    notification); after it was absent longer than the window it is a new episode."""
+    stuck = root / "rotation-stuck.json"
+    run = Runner()
+    _stuck(root, NOW)
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    stuck.unlink()
+    for t in range(int(NOW) + 60, int(NOW) + 3000, 60):  # absent for 49 min: shorter than the window
+        ra.evaluate(root, now=t, claude_running=False, runner=run)
+    _stuck(root, NOW + 3000)
+    ra.evaluate(root, now=NOW + 3000, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    stuck.unlink()
+    # absent for far longer than the flap window plus the record freshness
+    for t in range(int(NOW) + 3060, int(NOW) + 3000 + 2 * ra.DEBOUNCE_S + ra.REMEDIATION_FRESH_S, 300):
+        ra.evaluate(root, now=t, claude_running=False, runner=run)
+    t_back = NOW + 3000 + 2 * ra.DEBOUNCE_S + ra.REMEDIATION_FRESH_S
+    _stuck(root, t_back)
+    ra.evaluate(root, now=t_back, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
+
+
+def test_the_episode_survives_a_daemon_restart(root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second process (a restarted or handed-over daemon) reads the sent-record on disk and does
+    not notify the same episode again. Real executables: a fake osascript counts the banners."""
+    import subprocess
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    out = tmp_path / "banners.txt"
+    exe = bindir / "osascript"
+    exe.write_text(f'#!/bin/sh\necho banner >> "{out}"\n')
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    _stuck(root, NOW)
+    ra.evaluate(root, now=NOW, claude_running=False)
+    assert out.read_text().count("banner") == 1
+    code = (
+        "import sys; sys.path[:0] = [sys.argv[1]]; import rotator_alert as ra; "
+        "from pathlib import Path; "
+        "ra.evaluate(Path(sys.argv[2]), now=float(sys.argv[3]), claude_running=False)"
+    )
+    subprocess.run(
+        [sys.executable, "-I", "-c", code, str(_ROOT / "scripts" / "lib"), str(root), str(NOW + 600)],
+        check=True, capture_output=True, timeout=60,
+    )
+    assert out.read_text().count("banner") == 1
+
+
+def test_a_detector_record_is_notified_once_by_the_daemon_evaluation(root: Path) -> None:
+    """The oauth-login-needed detector only records; the daemon's evaluation notifies each fresh
+    record once and ignores a stale or malformed one."""
+    run = Runner()
+    ra.record_owner_remediation(
+        root, "oauth-login-needed", "account x needs a one-time login (expired)", NOW, kind="expired", slot="x@example.test"
+    )
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    assert len(run.argvs) == 1 and "one-time login" in run.argvs[0][2]
+    for t in range(int(NOW) + 60, int(NOW) + 1500, 60):  # the detector refreshes its record
+        ra.record_owner_remediation(
+            root, "oauth-login-needed", "account x needs a one-time login (expired)", t, kind="expired", slot="x@example.test"
+        )
+        ra.evaluate(root, now=t, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    # a record nobody refreshed any more is a condition that went away: never notified again
+    stale = NOW + 10 * 86400
+    ra.record_owner_remediation(root, "other", "another action", NOW, slot="y")
+    (root / ra.OWNER_REMEDIATION_NAME).write_text(
+        json.dumps({"conditions": {"junk": "not-a-record", "old": {"condition": "old", "action": "old action", "last_seen": int(NOW)}}})
+    )
+    ra.evaluate(root, now=stale, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+
+
+def test_session_side_tick_stalled_shares_the_daemons_episode(root: Path) -> None:
+    """A hung or dead daemon cannot notify, so a heartbeat session does - under the SAME episode
+    key as the daemon's own evaluation: any number of sessions plus the daemon raise ONE
+    notification, and a fresh or absent tick stamp raises none."""
+    run = Runner()
+    assert ra.notify_session_tick_stalled(root, NOW, runner=run) is None  # no stamp at all
+    _stamp(root, NOW - 30)
+    assert ra.notify_session_tick_stalled(root, NOW, runner=run) is None  # fresh tick
+    _stamp(root, NOW - 700)
+    for _ in range(5):  # five sessions' heartbeats
+        ra.notify_session_tick_stalled(root, NOW + 1, runner=run)
+    assert len(run.argvs) == 1 and "janitor-doctor" in run.argvs[0][2]
+    _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
+    assert "tick-stalled" in ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
+    assert len(run.argvs) == 1  # the daemon's own evaluation does not add a second copy
+
+
+def test_every_condition_is_recorded_as_an_owner_remediation(root: Path) -> None:
+    """tick-stalled included: no condition is agent-visible any more (USER ruling 2026-10-21)."""
+    _write_state(root, live_exp_s=NOW + 1000, spare_exp_s=None)
+    _stamp(root, NOW - ra.TICK_STALL_S - 1)
+    _stuck(root, NOW, kind="all-accounts-maxed")
+    ra.evaluate(root, now=NOW, claude_running=True, runner=Runner())
+    conditions = json.loads((root / ra.OWNER_REMEDIATION_NAME).read_text())["conditions"]
+    assert {"no-rotation-target", "tick-stalled", "rotation-stuck:all-accounts-maxed"} <= set(conditions)
+
+
+def _patch_alert_thread_world(daemon: object, monkeypatch: pytest.MonkeyPatch, root: Path) -> list[str]:
+    """Point the daemon's alert pass at `root` with a rotator that says claude is running; return
+    the list the notifier appends to (no real popup)."""
+    delivered: list[str] = []
+
+    class _Rot:
+        @staticmethod
+        def claude_running() -> bool:
+            return True
+
+    monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)  # type: ignore[attr-defined]
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)  # type: ignore[attr-defined]
+    monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_module", lambda: _Rot)  # type: ignore[attr-defined]
+    monkeypatch.setattr(daemon.notify, "_deliver", lambda message, **_k: delivered.append(message))  # type: ignore[attr-defined]
+    return delivered
+
+
+def test_a_hung_tick_cannot_suppress_its_own_tick_stalled_alarm(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tick thread is blocked inside the tick (hung); the separate alert thread still raises
+    tick-stalled. Under the old design the evaluation ran AFTER the tick on the tick thread."""
+    import threading
+
+    import daemon  # type: ignore[import-not-found]
+
+    _write_state(root, live_exp_s=time.time() + 3600, spare_exp_s=time.time() + 7200)
+    _stamp(root, time.time() - 700)
+    delivered = _patch_alert_thread_world(daemon, monkeypatch, root)
+    release = threading.Event()
+    monkeypatch.setattr(daemon, "task_oauth_rotator_tick", lambda: release.wait(30))
+    tick_thread = threading.Thread(target=daemon.task_oauth_rotator_beat, daemon=True)
+    tick_thread.start()
+    alerter = daemon._RotatorAlertThread(interval_s=0.05)
+    alerter.start()
+    try:
+        deadline = time.time() + 10
+        while not delivered and time.time() < deadline:
+            time.sleep(0.05)
+        assert tick_thread.is_alive(), "the tick must still be hung"
+        assert any("stopped ticking" in m for m in delivered), delivered
+    finally:
+        release.set()
+        alerter.shutdown(5)
+        tick_thread.join(5)
+
+
+def test_the_alert_pass_skips_tick_stalled_while_the_server_owns_the_tick(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While the ai-maestro server owns the rotator tick its stamp is not ours to judge: the pass
+    still runs (the daemon stays the one notifier of every other condition) but raises no
+    tick-stalled; once the tick is ours again it does."""
+    import daemon  # type: ignore[import-not-found]
+
+    _write_state(root, live_exp_s=time.time() + 3600, spare_exp_s=time.time() + 7200)
+    _stamp(root, time.time() - 700)
+    _stuck(root, time.time())
+    delivered = _patch_alert_thread_world(daemon, monkeypatch, root)
+    alerter = daemon._RotatorAlertThread()
+    alerter.set_tick_yielded(True)
+    alerter.run_once()
+    assert len(delivered) == 1 and "stopped ticking" not in delivered[0]  # the stuck verdict only
+    alerter.set_tick_yielded(False)
+    alerter.run_once()
+    assert len(delivered) == 2 and "stopped ticking" in delivered[1]
+
 
 def test_real_fake_osascript_executable_receives_the_notification(
     root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -314,30 +508,39 @@ def test_real_fake_osascript_executable_receives_the_notification(
     assert lines[0] == "-e" and lines[1].startswith("display notification")
 
 
-def test_scheduled_rotator_task_is_the_tick_plus_alarm() -> None:
-    """The registered `oauth-rotator-tick` Task runs the beat (tick + alarm), not the bare tick."""
+def test_scheduled_rotator_task_is_the_tick_only() -> None:
+    """The registered `oauth-rotator-tick` Task runs the beat, which is the bare tick: the alarm
+    lives on its own thread so a hung tick cannot suppress it."""
     import daemon  # type: ignore[import-not-found]
 
     task = {t.name: t for t in daemon._build_tasks()}["oauth-rotator-tick"]
     assert task.fn is daemon.task_oauth_rotator_beat
+    ran: list[str] = []
+    orig_tick, orig_eval = daemon.task_oauth_rotator_tick, daemon._evaluate_rotator_alert
+    daemon.task_oauth_rotator_tick = lambda: ran.append("tick")  # type: ignore[assignment]
+    daemon._evaluate_rotator_alert = lambda *a, **k: ran.append("eval")  # type: ignore[assignment]
+    try:
+        daemon.task_oauth_rotator_beat()
+    finally:
+        daemon.task_oauth_rotator_tick, daemon._evaluate_rotator_alert = orig_tick, orig_eval  # type: ignore[assignment]
+    assert ran == ["tick"]
 
 
 
-def test_the_daemon_beat_writes_the_alert_file_for_a_stuck_rotator(
+def test_the_alert_thread_pass_writes_the_alert_file_for_a_stuck_rotator(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """task_oauth_rotator_beat evaluates the alarm after the tick (rotator subprocess stubbed)."""
+    """One `_RotatorAlertThread` pass evaluates the alarm (no tick involved) and records the
+    owner remediation."""
     import daemon  # type: ignore[import-not-found]
 
     (root / "opt-in.flag").write_text("")
     _stuck(root, time.time())  # the daemon evaluates at the real clock
     monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)
-    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
-    monkeypatch.setattr(daemon, "_run_workload", lambda *a, **k: None)
     monkeypatch.setattr(daemon.notify, "_deliver", lambda *a, **k: None)
-    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", lambda **_k: [])
-    daemon.task_oauth_rotator_beat()
+    daemon._RotatorAlertThread().run_once()
     assert "rotation-stuck" in json.loads((root / ra.ALERT_NAME).read_text())["alerts"]
+    assert "rotation-stuck" in (root / ra.OWNER_REMEDIATION_NAME).read_text()
 
 
 def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
@@ -430,13 +633,32 @@ def test_dispatch_prints_nothing_without_an_alert_file(
     _arm_summary_hold(state.state_dir(), expires_in_s=900)
     assert "rotator alert" not in _run_main(dispatch)
 
+def _plant_runaway_kill(dispatch) -> None:
+    """Plant a fresh runaway-kill broadcast: a drift line `main()` prints before the summary-hold
+    gate, used as a positive control that the drift-printing stage ran."""
+    import runaway_alert  # type: ignore[import-not-found]
+
+    root = dispatch.gs.global_state_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    runaway_alert.record_kill(
+        root,
+        runaway_alert.kill_record(pid=4242, name="node", rss_mb=2100, age_s=7200, reason="test", readings="r"),
+    )
 
 
-def test_dispatch_watchdog_reports_a_hung_daemon_without_an_alert_file(
+def _assert_no_old_rotator_drift(out: str) -> None:
+    """None of the three prefixes the removed rotator drift line / watchdog used."""
+    for old in ("rotator alert:", "stopped ticking", "janitor-doctor"):
+        assert old not in out, f"{old!r} found in {out!r}"
+
+
+
+def test_dispatch_watchdog_prints_nothing_for_a_hung_daemon_without_an_alert_file(
     env_isolation: dict,  # noqa: F811 -- the imported fixture
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stale tick and no alert file still print no rotator text (TRDD-1J9B7MWO)."""
+    """A stale tick and no alert file print none of the old rotator drift text (TRDD-1J9B7MWO);
+    a planted runaway-kill line proves main() reached the drift-printing stage."""
     import time
 
     home = tmp_path / "rot-home"
@@ -449,7 +671,10 @@ def test_dispatch_watchdog_reports_a_hung_daemon_without_an_alert_file(
 
     state.state_dir().mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(state.state_dir(), expires_in_s=900)
-    assert "rotator" not in _run_main(dispatch).lower()
+    _plant_runaway_kill(dispatch)
+    out = _run_main(dispatch)
+    assert "pid 4242" in out, out  # positive control: drift lines DO print in this run
+    _assert_no_old_rotator_drift(out)
 
 
 def test_dispatch_watchdog_is_quiet_after_a_fresh_completed_tick(
@@ -526,60 +751,15 @@ def test_bad_spare_stale_env_falls_back_to_4h_and_keeps_other_conditions(
 
 
 
-def test_spare_stale_follows_the_due_backoff(root: Path) -> None:
-    """spare-stale notifies at first sight, not again within the hour, and again after 1 h."""
-    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 5 * 3600, "healthy-spare": NOW + 3 * 3600})
+def test_spare_stale_notifies_once_per_episode(root: Path) -> None:
+    """spare-stale notifies at first sight and never again while it holds."""
     run = Runner()
-    for at, expected in ((NOW, 1), (NOW + 600, 1), (NOW + 3601, 2)):
+    for at in range(int(NOW), int(NOW) + 90000, 600):
         _fresh_tick(root, at)  # keep tick-stalled quiet so only spare-stale is counted
+        # the slot expiries move with the clock, so the same condition holds the whole time
+        _spare_state(root, live_exp_s=at, spares={SPARE: at - 5 * 3600, "healthy-spare": at + 3 * 3600})
         assert "spare-stale" in ra.evaluate(root, now=at, claude_running=True, runner=run)
-        assert len(run.argvs) == expected
-
-
-
-def test_drift_parts_excludes_all_owner_conditions(root: Path) -> None:
-    """Credential, stale-spare, and rotation-capacity conditions never enter heartbeat text."""
-    alerts = {
-        c: {"first_seen": 1, "last_notified": 100, "notified": 1, "action": f"action for {c}"}
-        for c in (
-            "capture-refused:x@example.invalid",
-            "spare-stale",
-            "rotation-stuck",
-            "no-rotation-target",
-            "auth-failed",
-        )
-    }
-    (root / ra.ALERT_NAME).write_text(json.dumps({"alerts": alerts}))
-    _fresh_tick(root)
-    assert ra.drift_parts(root, NOW) == ([], {})
-
-
-
-def test_owner_only_alerts_are_persisted_but_never_returned_to_heartbeat(root: Path) -> None:
-    """Owner remediation stays durable while only tick-stalled remains agent-visible."""
-    _write_state(root, live_exp_s=NOW + 1000, spare_exp_s=None)
-    _fresh_tick(root)
-    runner = Runner()
-    ra.evaluate(root, now=NOW, claude_running=True, runner=runner)
-    record = root / ra.OWNER_REMEDIATION_NAME
-    assert record.is_file()
-    text = record.read_text(encoding="utf-8")
-    assert "no-rotation-target" in text
-    urgent, advisory = ra.drift_parts(root, NOW)
-    assert urgent == []
-    assert advisory == {}
-
-
-def test_tick_stalled_remains_agent_visible_and_is_not_owner_remediation(root: Path) -> None:
-    """The watchdog action remains automatic because the current agent can investigate it."""
-    _write_state(root, live_exp_s=NOW + 1000, spare_exp_s=NOW + 1000)
-    _stamp(root, NOW - ra.TICK_STALL_S - 1)
-    ra.evaluate(root, now=NOW, claude_running=True, runner=Runner())
-    urgent, advisory = ra.drift_parts(root, NOW)
-    assert urgent == ["the account rotator has stopped ticking - run /janitor-doctor"]
-    assert advisory == {}
-    record = root / ra.OWNER_REMEDIATION_NAME
-    assert not record.exists() or "tick-stalled" not in record.read_text(encoding="utf-8")
+        assert len(run.argvs) == 1
 
 
 
@@ -679,9 +859,12 @@ def test_corrupt_advisory_stamp_cannot_leak_owner_text(
 def test_tick_stalled_alert_file_and_stale_tick_watchdog_print_nothing(
     env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """A present rotator-alert.json plus a stale tick put NO rotator text in the heartbeat (TRDD-1J9B7MWO)."""
+    """A present rotator-alert.json plus a stale tick put none of the old rotator drift text in
+    the heartbeat (TRDD-1J9B7MWO); the runaway-kill positive control proves drift printing ran."""
     dispatch, home, _ = _fire_setup(tmp_path, monkeypatch)
     _set_alerts(home, **{"tick-stalled": (100, _STALL_TEXT)})
     _stamp(home, time.time() - 660)
+    _plant_runaway_kill(dispatch)
     out = _run_main(dispatch)
-    assert "rotator" not in out.lower() and "janitor-doctor" not in out, out
+    assert "pid 4242" in out, out
+    _assert_no_old_rotator_drift(out)
