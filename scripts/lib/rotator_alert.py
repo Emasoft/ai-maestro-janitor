@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Callable, Optional
@@ -37,24 +36,12 @@ _ACTIONS = {
 # WHY (TRDD-5CCRBM1H): one name for the all-accounts-maxed stuck text, so the test imports it
 # instead of repeating the literal and the two cannot drift.
 _STUCK_ALL_MAXED_TEXT = "every account is at its usage limit - waiting for a window to reset"
-STUCK_NEED_LOGIN = "alternates-need-login"
-STUCK_UNUSABLE = "alternates-unusable"
-_NEED_LOGIN_REMEDY = "run /janitor-refresh-cc-logins, then /janitor-capture-all-logins"
-# WHY: one tick's invalid_grant can be a rotating-refresh-token race, not a dead login; a spare
-# needs-login verdict that persists this long across ticks is a real one.
-NEED_LOGIN_PERSIST_S = 600
-_NEED_LOGIN_COUNTS = re.compile(r"^need-login=(\d+);maxed=(\d+)")
-_UNUSABLE_COUNTS = re.compile(r"^need-login=\d+;maxed=(\d+);unusable=(\d+)")
 # WHY (TRDD-DM7IJQ1T): a login capture cannot help these kinds, so each names its own remedy.
 _STUCK_TEXT = {
     "all-accounts-maxed": _STUCK_ALL_MAXED_TEXT,
     "no-alternates-configured": "no second account to rotate to - add another paid account",
     "expired-and-offline": "the login expired and the API is unreachable - check the network, then run /login",
     "identity-unknowable": "the live login cannot be identified - start one interactive Claude session, or run /login",
-    # WHY (rotator stuck-kind split, 2026-10-21): a spare whose saved login is dead is not "at its usage limit";
-    # waiting for a window to reset never fixes it, only a fresh login does.
-    STUCK_NEED_LOGIN: "spare accounts need a login - " + _NEED_LOGIN_REMEDY,
-    STUCK_UNUSABLE: "no spare account is usable (see rotator.log for each reason)",
 }
 
 
@@ -65,35 +52,9 @@ AUTH_FAILED_ACTION = "the login was rejected (Login expired) - run /login"
 
 
 # WHY (TRDD-MI018FID): the alert and the oauth-login-needed detector word a stuck rotation from this one table.
-def stuck_text(kind: object, detail: object = None) -> str:
-    """Owner-facing wording for a stuck-rotation kind; unknown kinds get the generic remedy.
-    `detail` is the marker detail: for alternates-need-login its leading
-    `need-login=N;maxed=M;...` counts are folded into the text when parseable."""
-    if kind == STUCK_NEED_LOGIN:
-        m = _NEED_LOGIN_COUNTS.match(detail) if isinstance(detail, str) else None
-        if m:
-            n, maxed = int(m.group(1)), int(m.group(2))
-            limit = f" ({maxed} at its usage limit)" if maxed else ""
-            return f"{n} spare account(s) need a login{limit} - {_NEED_LOGIN_REMEDY}"
-    if kind == STUCK_UNUSABLE:
-        m = _UNUSABLE_COUNTS.match(detail) if isinstance(detail, str) else None
-        if m:
-            return (
-                f"no spare account is usable ({m.group(2)} unusable, {m.group(1)} at its usage limit;"
-                " see rotator.log for each reason)"
-            )
+def stuck_text(kind: object) -> str:
+    """Owner-facing wording for a stuck-rotation kind; unknown kinds get the generic remedy."""
     return _STUCK_TEXT.get(str(kind), _ACTIONS["rotation-stuck"])
-
-
-def stuck_surfaced(stuck: dict, now: float) -> bool:
-    """False while a stuck marker must stay silent. alternates-need-login is surfaced only once
-    it has persisted NEED_LOGIN_PERSIST_S across ticks (a single tick's invalid_grant can be a
-    rotating-refresh-token race). Shared by the out-of-band alert and the oauth-login-needed
-    detector so the two cannot disagree."""
-    if stuck.get("kind") != STUCK_NEED_LOGIN:
-        return True
-    first, last = _epoch(stuck.get("first_seen_epoch")), _epoch(stuck.get("last_seen_epoch"))
-    return first is not None and last is not None and last - first >= NEED_LOGIN_PERSIST_S
 
 
 def _read_json(path: Path) -> dict:
@@ -268,15 +229,10 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
     # in oauth-login-needed.py.
     stuck = _read_json(root / "rotation-stuck.json")
     stuck_seen = _epoch(stuck.get("last_seen_epoch"))
-    if (
-        stuck.get("kind")
-        and stuck_seen is not None
-        and now - stuck_seen <= _STUCK_FRESH_S
-        and stuck_surfaced(stuck, now)
-    ):
+    if stuck.get("kind") and stuck_seen is not None and now - stuck_seen <= _STUCK_FRESH_S:
         # WHY: a login capture cannot help when every account is at its limit; on 2026-10-05 the
         # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
-        out["rotation-stuck"] = stuck_text(stuck.get("kind"), stuck.get("detail"))
+        out["rotation-stuck"] = stuck_text(stuck.get("kind"))
     marker = _read_json(root / AUTH_FAILED_NAME)
     ts = _epoch(marker.get("ts"))
     # Normally cleared by the next successful Stop (`clear_auth_failed`); these are backstops:

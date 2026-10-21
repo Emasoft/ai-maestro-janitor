@@ -524,19 +524,6 @@ def test_stuck_line_uses_the_alert_table_text(tmp_path: Path) -> None:
         assert rotator_alert.stuck_text(kind) in out, f"{kind}: {out!r}"
 
 
-
-def test_need_login_stuck_marker_is_gated_at_600s_in_the_detector(tmp_path: Path) -> None:
-    """The detector applies the same 600 s persistence gate as the desktop alert (shared helper)."""
-    out, rc = _run(tmp_path / "young", {"a@x": True}, {"a@x": 30.0},
-                   before=lambda home: _write_stuck(home, "alternates-need-login", age_h=0.1))
-    assert rc == 0
-    assert "[oauth-rotation-stuck]" not in out, out
-    out, rc = _run(tmp_path / "old", {"a@x": True}, {"a@x": 30.0},
-                   before=lambda home: _write_stuck(home, "alternates-need-login", age_h=1.0))
-    assert rc == 0
-    assert "[oauth-rotation-stuck]" in out and "/janitor-refresh-cc-logins" in out, out
-
-
 # ---------------------------------------------------------------------------
 # Phase 1 (TRDD-GZXTSJSR) — wider proactive grace window + urgency escalation +
 # the real notify.py human channel. In-process (not subprocess) so notify.push
