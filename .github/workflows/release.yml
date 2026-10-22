@@ -23,11 +23,11 @@ jobs:
     # >13m one is a STALL (a wedged cargo/network fetch), not the normal cost.
     # Do not "fix" a stall by chasing compile speed.
     #
-    # 30 is therefore HEADROOM, not the fix — a killed gate is worse than a slow
+    # 40 is therefore HEADROOM, not the fix (3 x 600 s CPV attempts = 30 min) — a killed gate is worse than a slow
     # one (it never reaches a verdict, so it asserts nothing while showing a red
-    # badge nobody reads), and 30 still bounds a true zombie an order of
+    # badge nobody reads), and 40 still bounds a true zombie an order of
     # magnitude below GitHub's 6h.
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: write
     steps:
@@ -96,8 +96,9 @@ jobs:
         # Unwrapped, this step simply ran until `timeout-minutes` killed the job —
         # v0.35.3 died at the old 15m bound, v0.35.6 and v0.35.8 at the 30m one.
         # Raising the bound was never a fix; it doubled the stall. Successes take
-        # ~3.5 min of VALIDATION, so a 420 s per-attempt cap — now covering validation
-        # ONLY, with the uvx build hoisted out below — is generous, and three attempts
+        # ~3.5 min of VALIDATION (a full run measured 296 s at CPV v5.22.3 on 2026-10-22,
+        # skillaudit_native 173.8 s, so 300/420 had no headroom); a 600 s per-attempt cap — covering validation
+        # ONLY, with the uvx build hoisted out below — leaves headroom, and three attempts
         # self-heal the hang (v0.24.4 hit it on the first attempt AND the retry, so
         # retry-once was empirically insufficient).
         #
@@ -127,7 +128,8 @@ jobs:
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+            # Measured 296 s at CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so the old 420 s cap had no headroom; 3 x 600 s = 30 min fits the 40 min job bound.
+            timeout 600 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
@@ -140,7 +142,7 @@ jobs:
             run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
             if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
-            echo "::warning::CPV validation hung (timed out at 420s) — attempt $attempt/3"
+            echo "::warning::CPV validation hung (timed out at 600s) — attempt $attempt/3"
           done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"

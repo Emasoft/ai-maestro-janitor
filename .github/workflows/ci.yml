@@ -133,7 +133,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -192,7 +192,8 @@ jobs:
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
           run_cpv() {
-            timeout 300 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+            # Measured 296 s at CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so the old 300 s cap had no headroom; 3 x 600 s = 30 min fits the 40 min job bound.
+            timeout 600 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
@@ -204,7 +205,7 @@ jobs:
             run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
             if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
-            echo "::warning::CPV validation hung (timed out at 300s) — attempt $attempt/3"
+            echo "::warning::CPV validation hung (timed out at 600s) — attempt $attempt/3"
           done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"
