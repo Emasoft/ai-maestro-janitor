@@ -1919,10 +1919,14 @@ def _export_head(root: Path, dest: Path) -> None:
     WHY a clone: see stage_ci_preflight. `--depth 1` clones the current branch tip;
     the rev-parse comparison proves it is the same commit as the source HEAD, so a
     detached or odd HEAD can never silently preflight a different commit.
+    WHY hooks are off: core.hooksPath=/dev/null and an empty --template keep a machine-wide
+    post-checkout hook from running inside the throwaway clone on every publish, and
+    `--no-local` with a plain path makes `--depth` apply without a file:// URL (which would
+    percent-decode the path).
     """
     subprocess.run(
-        ["git", "clone", "--quiet", "--no-hardlinks", "--depth", "1",
-         f"file://{root.resolve()}", str(dest)],
+        ["git", "-c", "core.hooksPath=/dev/null", "clone", "--quiet", "--no-local",
+         "--depth", "1", "--template=", str(root.resolve()), str(dest)],
         timeout=120, capture_output=True, text=True, check=True,
         cwd=str(dest.parent),
     )
