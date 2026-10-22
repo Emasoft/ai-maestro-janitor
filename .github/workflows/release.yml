@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*.*.*'
 
+# Least privilege: the release job's own permissions block grants the contents: write it needs.
+permissions: {}
+
 jobs:
   release:
     runs-on: ubuntu-latest
