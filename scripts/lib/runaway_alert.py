@@ -21,7 +21,7 @@ payload may name the pid, the process's BASE NAME, its RSS, its age and
 the pressure readings — and must NEVER carry a project path, a project
 name, or a command line that carries one.
 
-THE LINE IS DESCRIPTIVE, NEVER IMPERPATIVE. "killed pid 1234 node
+THE LINE IS DESCRIPTIVE, NEVER IMPERATIVE. "killed pid 1234 node
 (rss 2100MB, age 7200s) — host swap exhausted" states what happened. It
 does not tell the reader what to do. This codebase has already been
 burned by imperative status lines being executed by autonomous readers.

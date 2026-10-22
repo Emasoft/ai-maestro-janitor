@@ -182,7 +182,7 @@ def test_probe_reports_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_probe_reports_malformed_for_a_wrong_shaped_but_valid_json_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
 ) -> None:
-    """Valid JSON, wrong shape (missing/misstyped `ts` or `capabilities`) ⇒ "malformed" —
+    """Valid JSON, wrong shape (missing/mistyped `ts` or `capabilities`) ⇒ "malformed" —
     distinct from a file that fails to parse at all (see the read-error test below)."""
     f = tmp_path / "liveness.json"
     f.write_text(content, encoding="utf-8")

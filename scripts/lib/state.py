@@ -382,7 +382,7 @@ def pane_key_from_terminal(terminal: Mapping[str, str] | None) -> str | None:
     TRDD-RAEGS1D5 card 5: the clear chain child persists a per-pane sidecar naming the
     transcript being cleared, keyed off the PANE THE CHAIN TYPES INTO — the `terminal` dict
     already carried in its payload (`{"kind": "tmux", "pane": ...}` or `{"kind": "iterm",
-    "session_id": ...}`), not necessarily the childs own env (`_spawn_chain`s `env=`
+    "session_id": ...}`), not necessarily the child's own env (`_spawn_chain`s `env=`
     override can differ from the parent). The fresh sessions SessionStart hook resolves the
     SAME id from its own env via `pane_key_from_terminal(terminal_trigger.self_terminal(env))` --
     the two MUST agree on one id for the same pane, so this applies the identical

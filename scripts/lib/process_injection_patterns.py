@@ -768,7 +768,7 @@ def scan_text(
                                 code, Node direct-CLI loader, vm.run*,
                                 docker-sock binds, compose-style priv
                                 flags, .pth body, YAMA bypass, sys.settrace,
-                                signal-swallow, Win regsitry / setx / PS,
+                                signal-swallow, Win registry / setx / PS,
                                 persistence-activation, schtasks-create.
       * "pth"               — special mode for *.pth file bodies. ONLY
                                 the _PTH_DANGEROUS_BODY_RE runs (so a
