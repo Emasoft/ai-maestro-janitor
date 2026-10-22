@@ -223,7 +223,7 @@ If `complete` exits 2 saying more than one claim is in flight, re-run it adding 
 
 The shared data model lives in the OTHER skill's
 [wikimem-model](../janitor-memory-write/references/wikimem-model.md); read it once. Its TOC:
-A wiki, not a pile — and collaborative like Wikipedia; The editorial decision flow (run this on any change worth remembering); EXPAND and REDUCE — radiating suns vs receiving terminals; The three tiers (a page's role in the pyramid); The edge model — EVERY link is bidirectional (the link law); Page anatomy; Atoms — first-class body elements (block-properties).
+  > A wiki, not a pile — and collaborative like Wikipedia; The editorial decision flow (run this on any change worth remembering); EXPAND and REDUCE — radiating suns vs receiving terminals; The three tiers (a page's role in the pyramid); The edge model — EVERY link is bidirectional (the link law); Page anatomy; Atoms — first-class body elements (block-properties).
 
 - [repair-background](references/repair-background.md) — this skill's own TOC:
   Why REPAIR exists; What REPAIR is (and is not); Claim exit codes; desc: quoting grammar (TRDD-3SOO1RWE); Description trims keep recall; Superseded-atom delimiter mechanics; Why `publish-globally` is NOT a repair defect; Execution context and what this is; EXIT / SUCCESS / idempotency contract; Security — forged-marker defense; Pass 2 — inverted tier shape fix; Pass 2 — nested ocd/lmd fix; Scope.
