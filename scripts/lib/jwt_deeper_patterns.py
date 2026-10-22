@@ -774,8 +774,8 @@ RULES: tuple[Rule, ...] = (
             "revocation list / token-version check / `jti` blacklist. "
             "Password reset, role demotion, session logout = ignored "
             "until exp. Combined with fat payloads (roles + permissions "
-            "embedded), one issuance is a 24-hour gap of irrevocable "
-            "authority. Reference: distill-round-7 P11, "
+            "embedded), one issuance is a 24-hour window in which the "
+            "token cannot be revoked. Reference: distill-round-7 P11, "
             "CodeSentinel/config.py:13 evidence (24h ACCESS_TOKEN)."
         ),
         pattern=_JWT_LONG_EXP_RE,
