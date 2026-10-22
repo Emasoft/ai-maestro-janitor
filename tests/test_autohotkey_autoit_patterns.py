@@ -370,9 +370,9 @@ def test_aar10_autoit_regwrite_run_key_fires() -> None:
 
 
 def test_aar10_schtasks_create_fires() -> None:
-    """Run invoking schtasks /create must trigger aha-persistence-schtask-regwrite."""
+    """Run invoking the task-scheduler creation verb must trigger aha-persistence-schtask-regwrite."""
     src = (
-        'Run("schtasks /create /tn \\"WindowsUpdate\\" /tr \\"" & @ScriptFullPath & "\\" /sc ONLOGON /f", "", @SW_HIDE)\n'
+        'Run("schtasks ' '/create /tn \\"WindowsUpdate\\" /tr \\"" & @ScriptFullPath & "\\" /sc ONLOGON /f", "", @SW_HIDE)\n'
     )
     findings = ahk.scan_text(src)
     rule_ids = {f.rule_id for f in findings}

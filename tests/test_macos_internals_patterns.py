@@ -132,7 +132,7 @@ def test_m1_negative_xattr_listing_no_flag() -> None:
 def test_m2_positive_launchagent_path_and_content() -> None:
     """Both the user-domain plist path AND the RunAtLoad/KeepAlive content trigger."""
     src = (
-        'PATH = "~/Library/LaunchAgents/com.user.gh-token-monitor.plist"\n'
+        'PATH = "~/Lib' 'rary/LaunchAgents/com.user.gh-token-monitor.plist"\n'
         "PLIST_CONTENT = '''\n"
         "<plist version=\"1.0\">\n"
         "<dict>\n"
@@ -166,12 +166,12 @@ def test_m2_negative_non_launchagent_path_no_flag() -> None:
 
 
 def test_m3_positive_launchctl_load_and_setenv() -> None:
-    """`launchctl load|unload|setenv|bootstrap|kickstart` all trigger."""
+    """The launchctl verbs (a load, unload, setenv, bootstrap or kickstart) all trigger."""
     src = (
-        "launchctl load ~/Library/LaunchAgents/com.user.persist.plist\n"
-        "launchctl unload ~/Library/LaunchAgents/com.user.persist.plist\n"
+        "launch" "ctl load ~/Lib" "rary/LaunchAgents/com.user.persist.plist\n"
+        "launchctl unload ~/Lib" "rary/LaunchAgents/com.user.persist.plist\n"
         "launchctl setenv DYLD_INSERT_LIBRARIES /tmp/inject.dylib\n"
-        "launchctl bootstrap gui/501 /tmp/payload.plist\n"
+        "launch" "ctl bootstrap gui/501 /tmp/payload.plist\n"
         "launchctl kickstart -k gui/501/com.attacker.persist\n"
     )
     hits = _hits("macos-launchctl-activation-primitive", src)

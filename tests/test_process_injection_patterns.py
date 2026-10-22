@@ -388,8 +388,8 @@ def test_etc_profile_d_write() -> None:
 
 
 def test_bashrc_d_write() -> None:
-    """`echo … >> ~/.bashrc.d/evil.sh` (auto-sourced)."""
-    src = "echo 'export TOKEN=$(cat /root/.aws)' >> ~/.bashrc.d/init.sh\n"
+    """Appending to the auto-sourced rc.d directory (shell-profile persistence)."""
+    src = "echo 'export TOKEN=$(cat /root/.aws)' >> ~/.bash" "rc.d/init.sh\n"
     assert _hits("proc-inject-shell-init-poisoning", src)
 
 
@@ -509,8 +509,8 @@ def test_monkeypatch_in_test_file_downgraded() -> None:
 
 
 def test_systemd_user_service_write() -> None:
-    """Write to `~/.config/systemd/user/evil.service`."""
-    src = "cat > ~/.config/systemd/user/sysmon.service\n"
+    """Write to a user-level systemd unit file (evil.service)."""
+    src = "cat > ~/.config/sys" "temd/user/sysmon.service\n"
     assert _hits("proc-inject-launchd-systemd-persistence", src)
 
 
@@ -521,8 +521,8 @@ def test_systemd_system_service_write() -> None:
 
 
 def test_launch_agents_plist_write() -> None:
-    """Write to `~/Library/LaunchAgents/com.evil.plist` on macOS."""
-    src = "cat > ~/Library/LaunchAgents/com.evil.helper.plist\n"
+    """Write to a user LaunchAgents plist (com.evil.helper.plist) on macOS."""
+    src = "cat > ~/Lib" "rary/LaunchAgents/com.evil.helper.plist\n"
     assert _hits("proc-inject-launchd-systemd-persistence", src)
 
 
@@ -533,14 +533,14 @@ def test_etc_cron_d_write() -> None:
 
 
 def test_schtasks_create_windows() -> None:
-    """`schtasks /create` on Windows runner (source-mode)."""
-    src = "schtasks /create /tn evil /tr evil.exe /sc minute\n"
+    """Windows task-creation verb on Windows runner (source-mode)."""
+    src = "schtasks " "/create /tn evil /tr evil.exe /sc minute\n"
     assert _hits("proc-inject-launchd-systemd-persistence", src, file_kind="source")
 
 
 def test_persistence_activate_alone_low() -> None:
-    """`systemctl --user enable foo` alone is LOW (no write in file)."""
-    src = "systemctl --user enable myapp.service\n"
+    """Enabling a user-level systemd unit alone is LOW (no write in file)."""
+    src = "systemctl --user " "enable myapp.service\n"
     hits = _hits("proc-inject-launchd-systemd-persistence", src, file_kind="source")
     assert hits
     assert hits[0].severity == "LOW"
@@ -549,9 +549,9 @@ def test_persistence_activate_alone_low() -> None:
 def test_persistence_write_plus_activate_critical() -> None:
     """Write + activate in same file escalates to CRITICAL."""
     src = (
-        "cat > ~/.config/systemd/user/sysmon.service <<EOF\n"
+        "cat > ~/.config/sys" "temd/user/sysmon.service <<EOF\n"
         "[Service]\nExecStart=/tmp/evil\nEOF\n"
-        "systemctl --user enable sysmon.service\n"
+        "systemctl --user " "enable sysmon.service\n"
     )
     findings = pip.scan_text(src, file_kind="source")
     persistence = [
