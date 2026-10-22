@@ -1913,6 +1913,31 @@ def stage_validate(root: Path) -> None:
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 
+def _export_head(root: Path, dest: Path) -> None:
+    """Clone HEAD of `root` into `dest` the way a CI checkout would see it.
+
+    WHY a clone: see stage_ci_preflight. `--depth 1` clones the current branch tip;
+    the rev-parse comparison proves it is the same commit as the source HEAD, so a
+    detached or odd HEAD can never silently preflight a different commit.
+    """
+    subprocess.run(
+        ["git", "clone", "--quiet", "--no-hardlinks", "--depth", "1",
+         f"file://{root.resolve()}", str(dest)],
+        timeout=120, capture_output=True, text=True, check=True,
+        cwd=str(dest.parent),
+    )
+    heads = [
+        subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            timeout=120, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        for repo in (root, dest)
+    ]
+    if heads[0] != heads[1]:
+        raise RuntimeError(
+            f"clone HEAD {heads[1]} differs from source HEAD {heads[0]}")
+
+
 def stage_ci_preflight(root: Path) -> None:
     """Step 4b: CI-parity preflight via REMOTE CPV. MANDATORY — no skip.
 
@@ -1947,25 +1972,26 @@ def stage_ci_preflight(root: Path) -> None:
     # wedged preflight would hang the publish indefinitely with no diagnostic —
     # the opposite failure from stage_validate's too-tight cap, from the same
     # cause of nobody stating the number.
-    # WHY an export of HEAD and not the live tree: the preflight must see exactly
-    # what a GitHub CI checkout sees — tracked files only, at HEAD. Run against the
-    # working tree it also scanned GITIGNORED folders (downloads_dev/, reports_dev/,
-    # ...) that CI never has, and checkov blocked a publish on a file in
-    # downloads_dev/. Uncommitted changes are excluded on purpose: publish runs on
-    # committed state. An archive failure blocks — no fallback to the working tree.
+    # WHY a fresh `git clone` of HEAD and not the live tree: the preflight should see
+    # what a GitHub CI checkout contains — the tracked files at HEAD plus a real
+    # `.git`, with no gitignored folders and no export-ignore filtering. Run against
+    # the working tree it also scanned GITIGNORED folders (downloads_dev/,
+    # reports_dev/, ...) that CI never has, and checkov blocked a publish on a file
+    # in downloads_dev/. `git archive` was rejected: it has no `.git` (git-dependent
+    # checks could silently scan nothing) and it honors export-ignore/export-subst,
+    # which a checkout does not. Uncommitted changes are excluded on purpose —
+    # step 1 requires a clean tree, so HEAD is the publish state. This is NOT
+    # "exactly" CI: a macOS host still differs from the Linux runner. A clone
+    # failure blocks — no fallback to the working tree.
     with tempfile.TemporaryDirectory(prefix="ci-preflight-") as tmp:
+        dest = Path(tmp) / "repo"
         try:
-            archive = subprocess.run(
-                ["git", "-C", str(root), "archive", "--format=tar", "HEAD"],
-                capture_output=True, check=True, timeout=_CPV_TIMEOUT_SEC,
-            )
-            subprocess.run(
-                ["tar", "-x", "-C", tmp], input=archive.stdout, check=True,
-                timeout=_CPV_TIMEOUT_SEC,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _export_head(root, dest)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                RuntimeError) as exc:
+            detail = getattr(exc, "stderr", None) or str(exc)
             cprint(f"  {RED}BLOCKED: could not export HEAD for the CI-parity "
-                   f"preflight: {exc}{NC}")
+                   f"preflight: {detail}{NC}")
             sys.exit(1)
         try:
             rc = subprocess.run([
@@ -1973,7 +1999,7 @@ def stage_ci_preflight(root: Path) -> None:
                 _CPV_SPEC,
                 "--with", "pyyaml",
                 "cpv-remote-validate", "ci-preflight", ".",
-            ], cwd=tmp, timeout=_CPV_TIMEOUT_SEC).returncode
+            ], cwd=str(dest), timeout=_CPV_TIMEOUT_SEC).returncode
         except subprocess.TimeoutExpired:
             cprint(f"  {RED}BLOCKED: CI-parity preflight timed out after "
                    f"{_CPV_TIMEOUT_SEC}s.{NC}")
