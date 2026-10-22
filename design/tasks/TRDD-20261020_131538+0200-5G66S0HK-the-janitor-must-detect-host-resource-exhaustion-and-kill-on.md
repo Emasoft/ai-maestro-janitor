@@ -21,7 +21,7 @@ approval-datetime: 2026-10-20T13:15:38+0200
 
 # The janitor must detect host resource exhaustion and kill only what Claude Code caused
 
-# The janitor must detect host resource exhaustion, and kill only what Claude Code caused
+## The janitor must detect host resource exhaustion, and kill only what Claude Code caused
 
 THE INCIDENT, MEASURED, NOT HYPOTHETICAL. On 2026-10-20 at 10:41:37 this macOS 64 GB box panicked the kernel: `watchdog timeout: no checkins from watchdogd in 90 seconds`, with `Compressor Info: 100% of segments limit (BAD), 69 swapfiles`. The reboot followed 27 seconds later (kern.boottime 1792485724 = 10:42:04). The file's own mtime of 11:33 is when CrashReporter WROTE it, not when the crash happened — the panic log's `Calendar:` epoch field (0x6ad72941) resolves to 10:41:37. The macOS jetsam snapshot from the same memory episode (JetsamEvent-2026-10-20-120837.ips) recorded 986 processes holding 19.8 GB RSS: 8 concurrent `claude` CLI sessions at ~6 GB, 21 `node` at 1.8 GB, 12 Codex renderers at 1.8 GB, 33 `agentlenspro` statusline processes at 329 MB, WindowServer+iTerm2 at 2.3 GB.
 
