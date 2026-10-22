@@ -151,9 +151,20 @@ A lean-worker creates each card with `trddgrep new` and links it with `trddgrep 
 - **Verify**: `rotator.py list` shows both with a future `token-expiry`.
 
 **N2 (main, after owner approval).** Put the LaunchAgent at normal priority.
-1. Copy `the per-user LaunchAgents directory/com.ai-maestro-janitor.daemon.plist` to `<repo>/builds_dev/` as a backup.
+1. Copy the installed daemon plist (path below) to `<repo>/builds_dev/` as a backup.
+
+   ```text
+   ~/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist
+   ```
+
 2. `plutil -replace ProcessType -string Standard <plist>`.
-3. `launchctl bootout gui/$UID <plist>; the bootstrap verb of launchctl, gui/$UID <plist>`.
+3. Reload the job so the new ProcessType takes effect:
+
+   ```sh
+   launchctl bootout gui/$UID <plist>; launchctl bootstrap gui/$UID <plist>
+   ```
+
+
 - **Verify**:
   - `plutil -extract ProcessType raw <plist>` prints `Standard`.
   - `ps -o pri,command -p <new daemon pid>` shows priority above 4.

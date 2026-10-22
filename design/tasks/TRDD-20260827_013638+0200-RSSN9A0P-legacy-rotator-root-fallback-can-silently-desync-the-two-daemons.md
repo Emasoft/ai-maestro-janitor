@@ -109,7 +109,7 @@ capture.
 `os.environ.get("CLAUDE_ROTATOR_SLOT_KEYCHAIN_SERVICE", "Claude Code-rotator-slot")` — a runtime
 value — while ai-maestro's is a compile-time const, so identical source text would NOT prove
 identical addressing if anything exported that variable. Nothing does: it is absent from
-`ecosystem.config.js`, from `~/.claude/*.json`, from `the per-user LaunchAgents directory/*.plist`, and from
+`ecosystem.config.js`, from `~/.claude/*.json`, from the plist files in the per-user LaunchAgents directory, and from
 the environment. Limit of this check, stated rather than hidden: I read the configs that START the
 daemons, not the env of the live PIDs.
 
