@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-22T03:28:14+0200
+updated: 2026-10-23T00:12:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,6 +37,7 @@ Ordering: scripts/dispatch.py is being edited by the worker applying the 3cb0c59
 ## Approval log
 
 - 2026-10-21T19:46:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-22 — USER approved, verbatim: "Yes, publish now" to a one-time publish with PLUGIN_SKIP_GITHUB_INTEGRITY=1 at CPV 5.16.2 (whose integrity check always fails, CPV issue 261), after: "the janitor must never surface any warning about accounts, rotation or api tokens exhaustions, those are warning for the user and must only be sent to the system notifications". Attempt 1 blocked by flaky test_bulk_lane_runs_one_at_a_time (fixed in the commit after 9d3f26d6). Attempt 2 (log reports_dev/publish-20261022-alertfix-2.log): tests 18857 passed, CPV validation passed, then BLOCKED at step 4b CI-parity preflight: cspell (unknown words in tracked agents/*.md and CHANGELOG.md, 42k lines) and checkov (findings in gitignored downloads_dev/ terraform). Nothing pushed.
 
 ## Scope refined by review of 2dbd1bb7
 
