@@ -1947,17 +1947,37 @@ def stage_ci_preflight(root: Path) -> None:
     # wedged preflight would hang the publish indefinitely with no diagnostic —
     # the opposite failure from stage_validate's too-tight cap, from the same
     # cause of nobody stating the number.
-    try:
-        rc = subprocess.run([
-            "uvx", "--from",
-            _CPV_SPEC,
-            "--with", "pyyaml",
-            "cpv-remote-validate", "ci-preflight", ".",
-        ], cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
-    except subprocess.TimeoutExpired:
-        cprint(f"  {RED}BLOCKED: CI-parity preflight timed out after "
-               f"{_CPV_TIMEOUT_SEC}s.{NC}")
-        sys.exit(1)
+    # WHY an export of HEAD and not the live tree: the preflight must see exactly
+    # what a GitHub CI checkout sees — tracked files only, at HEAD. Run against the
+    # working tree it also scanned GITIGNORED folders (downloads_dev/, reports_dev/,
+    # ...) that CI never has, and checkov blocked a publish on a file in
+    # downloads_dev/. Uncommitted changes are excluded on purpose: publish runs on
+    # committed state. An archive failure blocks — no fallback to the working tree.
+    with tempfile.TemporaryDirectory(prefix="ci-preflight-") as tmp:
+        try:
+            archive = subprocess.run(
+                ["git", "-C", str(root), "archive", "--format=tar", "HEAD"],
+                capture_output=True, check=True, timeout=_CPV_TIMEOUT_SEC,
+            )
+            subprocess.run(
+                ["tar", "-x", "-C", tmp], input=archive.stdout, check=True,
+                timeout=_CPV_TIMEOUT_SEC,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            cprint(f"  {RED}BLOCKED: could not export HEAD for the CI-parity "
+                   f"preflight: {exc}{NC}")
+            sys.exit(1)
+        try:
+            rc = subprocess.run([
+                "uvx", "--from",
+                _CPV_SPEC,
+                "--with", "pyyaml",
+                "cpv-remote-validate", "ci-preflight", ".",
+            ], cwd=tmp, timeout=_CPV_TIMEOUT_SEC).returncode
+        except subprocess.TimeoutExpired:
+            cprint(f"  {RED}BLOCKED: CI-parity preflight timed out after "
+                   f"{_CPV_TIMEOUT_SEC}s.{NC}")
+            sys.exit(1)
     if rc != 0:
         cprint(f"  {RED}BLOCKED: CI-parity preflight FAILED.{NC}")
         cprint(f"  {RED}The gates listed above would fail GitHub CI — and without this{NC}")
