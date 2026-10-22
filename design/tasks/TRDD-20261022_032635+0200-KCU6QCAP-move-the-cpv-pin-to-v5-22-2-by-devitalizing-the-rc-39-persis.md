@@ -4,7 +4,7 @@ title: Move the CPV pin to v5.22.2 by devitalizing the RC-39 persistence finding
 column: todo
 status: tasked
 created: 2026-10-22T03:26:35+0200
-updated: 2026-10-22T03:26:35+0200
+updated: 2026-10-22T03:45:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
