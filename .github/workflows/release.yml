@@ -95,9 +95,10 @@ jobs:
         # identical local gate in publish.py has already passed on the same commit.
         # Unwrapped, this step simply ran until `timeout-minutes` killed the job —
         # v0.35.3 died at the old 15m bound, v0.35.6 and v0.35.8 at the 30m one.
-        # Raising the bound was never a fix; it doubled the stall. Successes take
-        # ~3.5 min of VALIDATION (a full run measured 296 s at CPV v5.22.3 on 2026-10-22,
-        # skillaudit_native 173.8 s, so 300/420 had no headroom); a 600 s per-attempt cap — covering validation
+        # Raising the bound was never a fix; it doubled the stall.
+        # Successes took ~3.5 min of VALIDATION at CPV v5.16.2; a full run measured 296 s at
+        # CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so 300/420 had no headroom;
+        # a 600 s per-attempt cap — covering validation
         # ONLY, with the uvx build hoisted out below — leaves headroom, and three attempts
         # self-heal the hang (v0.24.4 hit it on the first attempt AND the retry, so
         # retry-once was empirically insufficient).

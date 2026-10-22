@@ -191,6 +191,11 @@ jobs:
           # not fix — while publish.py's pinned local gate passed on the same commit.
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
+          # The cold uvx build of CPV is hoisted out of the timed attempts so the 600 s cap
+          # measures validation only, mirroring release.yml; `|| true` because this line
+          # must never fail the job.
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+            --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
           run_cpv() {
             # Measured 296 s at CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so the old 300 s cap had no headroom; 3 x 600 s = 30 min fits the 40 min job bound.
             timeout 600 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
