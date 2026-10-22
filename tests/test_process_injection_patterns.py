@@ -389,7 +389,7 @@ def test_etc_profile_d_write() -> None:
 
 def test_bashrc_d_write() -> None:
     """Appending to the auto-sourced rc.d directory (shell-profile persistence)."""
-    src = "echo 'export TOKEN=$(cat /root/.aws)' >> ~/.bash" "rc.d/init.sh\n"
+    src = "echo 'export TOKEN=$(cat /root/.aws)' >" "> ~/.bashrc.d/init.sh\n"
     assert _hits("proc-inject-shell-init-poisoning", src)
 
 
