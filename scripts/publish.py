@@ -1924,16 +1924,19 @@ def _export_head(root: Path, dest: Path) -> None:
     `--no-local` with a plain path makes `--depth` apply without a file:// URL (which would
     percent-decode the path).
     """
+    # WHY env=_readonly_git_env(): these calls only READ the source repo; without
+    # GIT_OPTIONAL_LOCKS=0 they can take .git/index.lock and kill a concurrent write (janitor#245).
     subprocess.run(
         ["git", "-c", "core.hooksPath=/dev/null", "clone", "--quiet", "--no-local",
          "--depth", "1", "--template=", str(root.resolve()), str(dest)],
         timeout=120, capture_output=True, text=True, check=True,
-        cwd=str(dest.parent),
+        cwd=str(dest.parent), env=_readonly_git_env(),
     )
     heads = [
         subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "HEAD"],
             timeout=120, capture_output=True, text=True, check=True,
+            env=_readonly_git_env(),
         ).stdout.strip()
         for repo in (root, dest)
     ]
