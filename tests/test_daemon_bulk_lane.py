@@ -135,12 +135,19 @@ def test_bulk_lane_runs_one_at_a_time(isolated_env: Path) -> None:
     # let A's reap-stamp silently satisfy B's cadence and mask the deferral.
     a = daemon.Task("noop-a", 3600, lambda: None, background=True)
     b = daemon.Task("noop-b", 3600, lambda: None, background=True)
-    a._child = _sleeping_child(1.0)
+    # Why 30 s and an explicit kill: with a 1 s child, a loaded parallel suite run could
+    # let A exit before the first due pass, which then reaped A and spawned B, failing
+    # the deferral assertion on timing alone (publish blocked 2026-10-22). A must be
+    # provably alive during the first pass; the lane is freed by killing it.
+    a._child = _sleeping_child(30.0)
     a._child_t0 = time.time()
-    busy = daemon._run_due_tasks([a, b], set())
-    assert busy is True
-    assert b._child is None, "one bulk lane: B must be deferred while A runs"
-    a._child.wait()
+    try:
+        busy = daemon._run_due_tasks([a, b], set())
+        assert busy is True
+        assert b._child is None, "one bulk lane: B must be deferred while A runs"
+    finally:
+        a._child.kill()
+        a._child.wait()
     daemon._run_due_tasks([a, b], set())  # reaps A (stamps), lane free → spawns B
     assert b._child is not None
     _wait_child_exit(b)
