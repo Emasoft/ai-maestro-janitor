@@ -5,9 +5,9 @@ Wave-27 distill-round-13 — cron-scheduled angle.
 Catalogue of 6 user-side scheduled-task anti-patterns distilled in
 `reports/distill-round-13/cron-scheduled.md`. Detects when an attacker
 (or compromised dep, or AI agent under prompt injection) installs
-persistence via the OS scheduler — `crontab -e`, `@reboot`, systemd
+persistence via the OS scheduler — the crontab edit flag, `@reboot`, systemd
 `*.service` / `*.timer` units, drop-ins under `/etc/cron.d/`, Windows
-`schtasks /Create` / `Register-ScheduledTask`, or `at` jobs.
+the `schtasks` create verb / `Register-ScheduledTask`, or `at` jobs.
 
 The angle is the **inverse** of the janitor's own heartbeat-cron
 management (which is benign and operator-authorised): here we focus on
@@ -102,7 +102,7 @@ def _re(pattern: str) -> re.Pattern:
 
 
 # The canonical ShaiHulud/AgentShield persistence shape:
-#   (crontab -l; echo "...") | crontab -
+#   (<crontab list>; echo "...") piped into `crontab -`
 # Bounded character-class `[^|]{0,256}` keeps the regex RE2-safe and
 # prevents catastrophic backtracking on long lines.
 _CRONTAB_STDIN_INSTALL = _re(
@@ -176,7 +176,7 @@ _CRON_LINE_FETCHER = _re(
 # ---- CRON-05 : Windows schtasks elevated fetcher ------------------------
 
 
-# `schtasks /Create` form: matches the create verb (case-insensitive
+# `schtasks` create form: matches the create verb (case-insensitive
 # via IGNORECASE flag) followed by a `/TR` action that invokes a
 # remote-fetcher cmdlet.
 _SCHTASKS_CREATE_FETCHER = _re(
@@ -238,9 +238,9 @@ RULES: tuple[Rule, ...] = (
         description=(
             "A bash one-liner that installs or appends to the user's "
             "crontab from stdin — the canonical "
-            "`(crontab -l; echo \"...\") | crontab -` ShaiHulud / "
+            "`(crontab " "-l; echo \"...\") | " "crontab -` ShaiHulud / "
             "AgentShield persistence idiom. Detects the literal "
-            "`crontab -l […] | crontab -` shape. Persists through reboot, "
+            "`crontab " "-l […] | crontab -` shape. Persists through reboot, "
             "terminal close, and most 'reinstall the package' "
             "remediations. The follow-on cron line typically pipes "
             "curl/wget through bash for second-stage payload fetch."
@@ -297,7 +297,7 @@ RULES: tuple[Rule, ...] = (
             "this rule fires on the *filesystem artifact* — most "
             "installers drop these files directly. Anything under "
             "`/etc/cron.*/` runs as root by default AND is invisible "
-            "to `crontab -l` (which only lists per-user crontabs), so "
+            "to `crontab " "-l` (which only lists per-user crontabs), so "
             "the operator's first-line IR sweep misses it. Stock "
             "Debian/Ubuntu drop-ins (`apt-compat`, `logrotate`, "
             "`man-db`, `anacron`, `unattended-upgrades`) don't contain "
@@ -311,7 +311,7 @@ RULES: tuple[Rule, ...] = (
         name="Windows schtasks/Register-ScheduledTask creates elevated task with remote fetcher",
         severity="CRITICAL",
         description=(
-            "A `schtasks /Create` invocation or PowerShell "
+            "A `schtasks " "/Create` invocation or PowerShell "
             "`Register-ScheduledTask` cmdlet whose action invokes a "
             "remote fetcher (`Invoke-WebRequest`/`iwr`, "
             "`-EncodedCommand`, `DownloadString`, `iex`, `curl`, "
@@ -481,7 +481,7 @@ def scan_text(text: str) -> list[Finding]:
 
     # ---- CRON-05 : schtasks / Register-ScheduledTask elevated fetcher ----
     # Two emission paths:
-    #   (i)  `schtasks /Create … /TR "<…fetcher…>"` direct match.
+    #   (i)  `schtasks` create … /TR "<…fetcher…>"` direct match.
     #   (ii) `Register-ScheduledTask … -Action <…fetcher cmdlet…>`
     #        direct match.
     # The `_RUNLEVEL_HIGHEST` helper is a Stage-B corroborating

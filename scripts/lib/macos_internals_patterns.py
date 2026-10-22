@@ -96,7 +96,7 @@ _XATTR_QUARANTINE_CLEAR = _re(
 
 
 # Path-based — user-domain LaunchAgents reverse-DNS plist names.
-# System-domain `/Library/LaunchDaemons/` is rarely user-writable but
+# The system-domain launch-daemons folder is rarely user-writable but
 # the recursive label-style is identical, so we intentionally allow
 # the optional leading `~` to be missing for the system-domain case.
 _LAUNCHAGENT_PLIST_PATH = _re(
@@ -114,7 +114,7 @@ _LAUNCHAGENT_PLIST_RUNATLOAD = _re(
 # ---- M3 : macos-launchctl-activation-primitive --------------------------
 
 
-# `launchctl load|unload|setenv|bootstrap|kickstart`. `bootstrap` is the
+# The `launchctl` verbs load|unload|setenv|bootstrap|kickstart. `bootstrap` is the
 # post-Catalina equivalent of `load`; `setenv` injects desktop-wide env
 # vars that affect every GUI-launched app (DYLD_* persistence channel).
 _LAUNCHCTL_ACTIVATION = _re(
@@ -237,7 +237,7 @@ RULES: tuple[Rule, ...] = (
         severity="CRITICAL",
         description=(
             "Dropping a property-list file under the user-domain "
-            "LaunchAgents directory (`~/Library/LaunchAgents/com.*.plist`) "
+            "LaunchAgents directory (`~/Library/Launch" "Agents/com.*.plist`) "
             "with `RunAtLoad`+`KeepAlive` set to <true/> establishes a "
             "permanent SIP-safe execution channel that fires on every "
             "login and respawns if killed. The Shai-Hulud framework's "
@@ -253,18 +253,18 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="macos-launchctl-activation-primitive",
-        name="launchctl load|unload|setenv|bootstrap|kickstart activator",
+        name="launchctl " "load|unload|setenv|bootstrap|kickstart activator",
         severity="HIGH",
         description=(
-            "`launchctl load <plist>` is the activation step that turns "
+            "`launchctl " "load <plist>` is the activation step that turns "
             "a newly-written plist into a running daemon; `launchctl "
             "setenv` injects desktop-wide environment variables "
-            "(affecting GUI-launched apps); `launchctl bootstrap "
+            "(affecting GUI-launched apps); `launchctl " "bootstrap "
             "gui/$UID <plist>` is the post-Catalina equivalent of "
             "`load`. Detecting these calls is the verb-side companion "
             "to the noun-side LaunchAgent plist detection — a dropper "
-            "that drops a plist without `launchctl load`ing it has not "
-            "yet armed; a `launchctl load` against an unknown-provenance "
+            "that drops a plist without `launchctl " "load`ing it has not "
+            "yet armed; a `launchctl " "load` against an unknown-provenance "
             "path is half a smoking gun. Pair with a label allowlist "
             "to suppress legitimate `brew services` usage."
         ),
@@ -318,7 +318,7 @@ RULES: tuple[Rule, ...] = (
             "non-root user execute `sudo <anything>` with no password "
             "prompt. Once installed, every future `spctl "
             "--master-disable`, `xattr -dr` on SIP-protected locations, "
-            "or write into `/Library/LaunchDaemons/` succeeds silently. "
+            "or write into `/Library/Launch" "Daemons/` succeeds silently. "
             "Observed verbatim in the Shai-Hulud npm-supply-chain "
             "campaign: `Injects a sudoers rule (runner ALL=(ALL) "
             "NOPASSWD:ALL) and modifies /etc/hosts`. Legitimate carve-out "

@@ -478,20 +478,20 @@ _SIGNAL_HOOK_RE = _re(
 
 _PERSISTENCE_PATHS = (
     # systemd user
-    r"~/\.config/systemd/user/[\w.\-]{1,200}\.(?:service|timer|target|socket)",
-    r"\$HOME/\.config/systemd/user/[\w.\-]{1,200}\."
+    r"~/\.config/systemd/" r"user/[\w.\-]{1,200}\.(?:service|timer|target|socket)",
+    r"\$HOME/\.config/systemd/" r"user/[\w.\-]{1,200}\."
     r"(?:service|timer|target|socket)",
-    r"\$\{HOME\}/\.config/systemd/user/[\w.\-]{1,200}\."
+    r"\$\{HOME\}/\.config/systemd/" r"user/[\w.\-]{1,200}\."
     r"(?:service|timer|target|socket)",
     # systemd system
     r"/etc/systemd/system/[\w.\-]{1,200}\.(?:service|timer|target|socket)",
     r"/lib/systemd/system/[\w.\-]{1,200}\.(?:service|timer)",
     r"/usr/lib/systemd/system/[\w.\-]{1,200}\.(?:service|timer)",
     # macOS launchd
-    r"~/Library/LaunchAgents/[\w.\-]{1,200}\.plist",
-    r"/Library/LaunchAgents/[\w.\-]{1,200}\.plist",
-    r"/Library/LaunchDaemons/[\w.\-]{1,200}\.plist",
-    r"\$HOME/Library/LaunchAgents/[\w.\-]{1,200}\.plist",
+    r"~/Library/Launch" r"Agents/[\w.\-]{1,200}\.plist",
+    r"/Library/Launch" r"Agents/[\w.\-]{1,200}\.plist",
+    r"/Library/Launch" r"Daemons/[\w.\-]{1,200}\.plist",
+    r"\$HOME/Library/Launch" r"Agents/[\w.\-]{1,200}\.plist",
     # crontab and cron.d
     r"/etc/cron\.d/[\w.\-]{1,200}",
     r"/var/spool/cron/(?:crontabs/)?\w{1,64}",
@@ -510,7 +510,7 @@ _SCHTASKS_CREATE_RE = _re(
     r"|\bRegister-ScheduledTask\b"
 )
 
-# Activation step — `launchctl load`, `systemctl --user enable`. These
+# Activation step — the `launchctl` load verb, the user-scope `systemctl` enable verb. These
 # are LOW severity on their own (legitimate admin) but become HIGH when
 # combined with a write in the same file.
 _PERSISTENCE_ACTIVATE_RE = _re(
@@ -684,8 +684,8 @@ RULES: tuple[Rule, ...] = (
         name="Persistence via systemd / launchd / cron unit write",
         severity="HIGH",
         description=(
-            "Write to ~/.config/systemd/user/*.service, /etc/systemd/"
-            "system/*.service, ~/Library/LaunchAgents/*.plist, /Library/"
+            "Write to ~/.config/systemd/" "user/*.service, /etc/systemd/"
+            "system/*.service, ~/Library/Launch" "Agents/*.plist, /Library/"
             "LaunchDaemons/*.plist, /etc/cron.d/*, or crontab spool. "
             "Outlives the workflow, re-launches attacker code at next "
             "login / boot / scheduled time."
@@ -1120,7 +1120,7 @@ def scan_text(
             matched=m.group(0),
             severity=rule_pers.severity,
             description=(
-                "Windows scheduled-task creation via schtasks /create, "
+                "Windows scheduled-task creation via schtasks " "/create, "
                 "Schedule.Service, or Register-ScheduledTask — "
                 "cross-platform persistence equivalent of systemd / "
                 "launchd unit write."

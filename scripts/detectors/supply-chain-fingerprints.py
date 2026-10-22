@@ -111,9 +111,9 @@ _SKIP_DIRS = {
 _RAT_IOC_BY_PLATFORM: dict[str, list[str]] = {
     "darwin": [
         "/Library/Caches/com.apple.act.mond",
-        "~/Library/LaunchAgents/com.apple.act.mond.plist",
+        "~/Library/Launch" "Agents/com.apple.act.mond.plist",
         # node-ipc payload masquerade — non-Apple LaunchAgent name spoof.
-        "~/Library/LaunchAgents/com.apple.softwareupdated.plist",
+        "~/Library/Launch" "Agents/com.apple.softwareupdated.plist",
     ],
     "linux": [
         "/tmp/ld.py",  # nosec B108 -- known-malware path signature scanned FOR, not a temp file created

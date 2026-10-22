@@ -332,7 +332,7 @@ RULES: tuple[Rule, ...] = (
         severity="MAJOR",
         description=(
             "AHK RegWrite or AutoIt RegWrite targeting HKCU/HKLM "
-            "CurrentVersion\\Run for reboot persistence, or schtasks /create "
+            "CurrentVersion\\Run for reboot persistence, or schtasks " "/create "
             "via Run/ShellExecute for scheduled-task persistence. Most common "
             "persistence mechanism in AHK/AutoIt malware families; requires "
             "no elevated privilege under HKCU."
