@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: todo
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T16:54:51+0200
+updated: 2026-10-23T17:40:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -36,7 +36,7 @@ RISK and the launch-path question for part B: see TRDD-M5BRPISQ.
 
 ANSWERED 2026-10-23: the slug follows Claude Code's own rule, the launch path as the session sees it, symlinks not resolved (observed 2026-10-23: this repo has one slug folder per launch path; not yet proven by launching once from each path, and this desktop-app session got the resolved form) (PRRD G24.1, superseding G23.1), so a project launched through two paths keeps two slug folders, as this repo already does (~/Code and /Volumes). OPEN, OWNER: the redesign questions listed at the end of the Owner messages section; the owner's statements are now golden rules PRRD G15 to G24, and G14 requires a detailed spec and TRDDs before any code.
 
-NEXT ACTION (ON HOLD since the owner's third message, section Owner messages; when the owner answers the launch-path question, also move TRDD-M5BRPISQ out of backburner): redesign around content-detected pages, a scope frontmatter field and one index per scope, then re-propose; the plan that follows is superseded until then: write part A's code change through a worker now, except this repo's LOCAL folder under the ~/Code slug; do not move pages before the release; afterwards decide whether each emptied wikimem folder (with its stale .memgrep) moves to .trashcan.
+NEXT ACTION (2026-10-23 17:30): the redesign is now spec design/specs/wikimem-layout-spec.md 0.1.0 DRAFT (commit 4d087d45; decisions under PRRD G26.1, each citing a measured fact). (1) Fix the advisor's findings in the spec: which frontmatter keys make a file a wikimem page (Claude Code's own notes also carry frontmatter; the real test is node_type/tier), WL-9 against a git-versioned USER root, push versus pull sync across repositories for imported copies (WL-14/WL-18; the write gate refuses writes outside its scope root), whether to bump wikimem-memgrep-spec.md to 3.0.0 instead of a parallel spec, F1 wording as observed. (2) Tell the owner that pages have no unique page id today (F8). (3) After review, a lean-worker mints the WL-TRDD cards from the spec path. Superseded below: NEXT ACTION (ON HOLD since the owner's third message, section Owner messages; when the owner answers the launch-path question, also move TRDD-M5BRPISQ out of backburner): redesign around content-detected pages, a scope frontmatter field and one index per scope, then re-propose; the plan that follows is superseded until then: write part A's code change through a worker now, except this repo's LOCAL folder under the ~/Code slug; do not move pages before the release; afterwards decide whether each emptied wikimem folder (with its stale .memgrep) moves to .trashcan.
 
 ## Approval log
 
