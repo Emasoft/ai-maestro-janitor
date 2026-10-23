@@ -4,7 +4,7 @@ title: memgrep imports wiki pages about shared components from other projects
 column: blocked
 status: tasked
 created: 2026-10-23T16:46:03+0200
-updated: 2026-10-23T18:03:53+0200
+updated: 2026-10-23T18:10:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -21,8 +21,8 @@ relevant-rules: [13, 14, 19, 20, 21, 24]
 npt: []
 blocked-by: [JI6I6JG1, W2PH88JQ]
 pre-block-column: backburner
-blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show JI6I6JG1
-blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe: trddgrep --porcelain show JI6I6JG1
+blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 blocker-probe-canary: match:JI6I6JG1
 ---
 

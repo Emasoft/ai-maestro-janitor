@@ -4,7 +4,7 @@ title: Harvest into the flat memory folder
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:06+0200
-updated: 2026-10-23T18:03:47+0200
+updated: 2026-10-23T18:10:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,17 +19,17 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:57:06+0200
 npt: [YG6NMKJA]
 relevant-rules: [13, 14, 16]
-spec: wikimem-layout-spec.md 0.2.5
+spec: wikimem-layout-spec.md 0.2.8
 blocked-by: [KLT5F93P]
 pre-block-column: backburner
-blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show KLT5F93P
-blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe: trddgrep --porcelain show KLT5F93P
+blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 blocker-probe-canary: match:KLT5F93P
 ---
 
 # Harvest into the flat memory folder
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.5 (draft). Implements WL-20. The harvest chore keeps copying Claude Code raw notes without editing them (TRDD-ab232dbd) and lands wikimem pages in the flat folder; the indexer ignores raw notes because they lack node_type and tier; the write-path hook must allow Claude Code to write its own notes there. Anchor: skills/janitor-memory-harvest/SKILL.md. Done when: harvested pages land flat and raw notes are untouched and unindexed.
+Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-20. The harvest chore keeps copying Claude Code raw notes without editing them (TRDD-ab232dbd) and lands wikimem pages in the flat folder; the indexer ignores raw notes because they lack node_type and tier; the write-path hook must allow Claude Code to write its own notes there. Anchor: skills/janitor-memory-harvest/SKILL.md. Done when: harvested pages land flat and raw notes are untouched and unindexed.
 
 ## Approval log
 

@@ -4,7 +4,7 @@ title: Measure whether Claude Code cleanup ever touches the slug design folder
 column: backburner
 status: tasked
 created: 2026-10-23T17:56:13+0200
-updated: 2026-10-23T18:01:16+0200
+updated: 2026-10-23T18:08:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -18,12 +18,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:56:13+0200
 relevant-rules: [13, 14, 15]
-spec: wikimem-layout-spec.md 0.2.5
+spec: wikimem-layout-spec.md 0.2.8
 ---
 
 # Measure whether Claude Code cleanup ever touches the slug design folder
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.5 (draft). VERIFY-3 restated: The docs list only session files for the sweep (F4). Check, by observation and source if available, that a design/ folder under a slug folder is never deleted or emptied. Blocks: WL-2 and its migration (TRDD-M5BRPISQ). Done when: the measurement is recorded as a fact in the spec's WL-FACT section with its evidence.
+Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). VERIFY-3 restated: The docs list only session files for the sweep (F4). Check, by observation and source if available, that a design/ folder under a slug folder is never deleted or emptied. Blocks: WL-2 and its migration (TRDD-M5BRPISQ). Done when: the measurement is recorded as a fact in the spec's WL-FACT section with its evidence.
 
 ## Approval log
 

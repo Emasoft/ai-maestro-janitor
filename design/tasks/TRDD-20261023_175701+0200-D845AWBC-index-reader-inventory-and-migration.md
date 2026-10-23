@@ -4,7 +4,7 @@ title: Index-reader inventory and migration
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:01+0200
-updated: 2026-10-23T18:03:44+0200
+updated: 2026-10-23T18:10:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,17 +19,17 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:57:01+0200
 npt: [UP6VP41N]
 relevant-rules: [13, 14, 18]
-spec: wikimem-layout-spec.md 0.2.5
+spec: wikimem-layout-spec.md 0.2.8
 blocked-by: [UXIL77GB]
 pre-block-column: backburner
-blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show UXIL77GB
-blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe: trddgrep --porcelain show UXIL77GB
+blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 blocker-probe-canary: match:UXIL77GB
 ---
 
 # Index-reader inventory and migration
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.5 (draft). Implements WL-10 with VERIFY-11: list every reader of the old index (memgrep reindex and lint, janitor health checks, USER mirror sync in memory_scopes.py), move the index, keep the USER mirror from copying wm_*_index.db or its journal files, remove the old index. A scope-root move is a major change under WM-VER-01. Anchors: memory_scopes.py:582-640, index.rs:33-35. Done when: no reader refers to the old path, the mirror skips the new files, and the old index is removed.
+Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-10 with VERIFY-11: list every reader of the old index (memgrep reindex and lint, janitor health checks, USER mirror sync in memory_scopes.py), move the index, keep the USER mirror from copying wm_*_index.db or its journal files, remove the old index. A scope-root move is a major change under WM-VER-01. Anchors: memory_scopes.py:582-640, index.rs:33-35. Done when: no reader refers to the old path, the mirror skips the new files, and the old index is removed.
 
 ## Approval log
 

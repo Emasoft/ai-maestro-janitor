@@ -4,7 +4,7 @@ title: LOCAL design moves to the project slug folder beside LOCAL memory
 column: blocked
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-23T18:03:51+0200
+updated: 2026-10-23T18:10:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -20,8 +20,8 @@ approval-datetime: 2026-10-23T16:12:04+0200
 blocked-by: [78GMFJB4]
 unblock-when: []
 pre-block-column: backburner
-blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show 78GMFJB4
-blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe: trddgrep --porcelain show 78GMFJB4
+blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 relevant-rules: [13, 14, 15, 24]
 npt: [KQULEGL2]
 blocker-probe-canary: match:78GMFJB4

@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: blocked
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T18:03:52+0200
+updated: 2026-10-23T18:10:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -21,8 +21,8 @@ relevant-rules: [13, 14, 15, 16, 17, 18, 19, 20, 24]
 npt: []
 blocked-by: [YG6NMKJA]
 pre-block-column: todo
-blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show YG6NMKJA
-blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe: trddgrep --porcelain show YG6NMKJA
+blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 blocker-probe-canary: match:YG6NMKJA
 ---
 
