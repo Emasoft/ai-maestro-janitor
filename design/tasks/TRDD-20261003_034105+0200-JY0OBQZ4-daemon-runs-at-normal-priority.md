@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-18T01:25:14+0200
+updated: 2026-10-23T12:48:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -53,3 +53,4 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-18T00:57:03+0200 — column → todo by main-agent@ai-maestro-janitor. field check failed: 3-6% of ticks still take 30 s or more on the Standard job
 2026-10-18 IN PROGRESS: the daemon now logs 'rotator tick slow: subprocess Ns, esc-pass Ns, rc=..., load L1 L5 L15' for every tick of 30 s or more (commit b1870adb). HIGH LOAD for this card's acceptance = load1 at or above the host's logical CPU core count (sysctl -n hw.ncpu on macOS). The line attributes a slow tick to the rotator subprocess or the ESC pass only; per-step timing inside rotator.py (keychain read, usage call, refresh) is the next step if the subprocess phase dominates. Reaches daemon.log only after a release and a local plugin update.
 - 2026-10-18T01:25:14+0200 — column → testing by main-agent@ai-maestro-janitor. slow-tick logging landed in b1870adb; acceptance judged from 'rotator tick slow:' lines after a release
+- 2026-10-23T12:48+0200 — FIELD CHECK, NOT MET (read by the main session): b1870adb is in the v3.8.12 and v3.8.13 tags; the daemon restarted 2026-10-23T08:14 after a staged newer version; of 272 oauth-rotator-tick runs since then none took 30 s or more and daemon.log holds no 'rotator tick slow:' line. Host load1 at check time was 7.32 against 14 logical cores, so the high-load case the acceptance names was not observed. Stays in testing.
