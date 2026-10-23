@@ -4,7 +4,7 @@ title: Slug-set resolver and single slug rule per language
 column: backburner
 status: tasked
 created: 2026-10-23T17:56:59+0200
-updated: 2026-10-24T00:09:15+0200
+updated: 2026-10-24T00:10:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:56:59+0200
-npt: [ICB4GTHI, 78GMFJB4, 0IJFCD2V, JE53ZDPS]
+npt: [ICB4GTHI]
 relevant-rules: [13, 14, 15, 24, 25]
 spec: wikimem-layout-spec.md 0.2.9
 blocked-by: []
@@ -37,3 +37,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.9 (draft). Implements WL-3, WL-4, 
 - 2026-10-23T18:03:44+0200 — column → blocked. waits on W17F82DN
 - 2026-10-23T20:26+0200 — ACCEPTANCE ADDED (main session, review of 26196af6): SCOPE (corrected by the review of ab750bef): adoption of a page by its project-id is out of scope for this card, with no disabled code path; it lands with TRDD-W2PH88JQ after TRDD-AAZUB0VC writes the project-id rule. The rest of the resolver does not depend on that rule.
 - 2026-10-24T00:09:15+0200 — column → backburner by main-agent@ai-maestro-janitor. blocker KQULEGL2 complete (spec F22)
+- 2026-10-24T00:10:28+0200 — KQULEGL2 complete (spec F22), back to backburner. npt set to ICB4GTHI: WL-5 makes VERIFY-1 a precondition for worktree writes, so dev waits on it (review of 6d6c1798).

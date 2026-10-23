@@ -4,7 +4,7 @@ title: LOCAL design moves to the project slug folder beside LOCAL memory
 column: backburner
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-24T00:09:15+0200
+updated: 2026-10-24T00:10:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -50,3 +50,4 @@ PARKED in backburner: its NPT TRDD-KQULEGL2 is complete (spec F22: Claude Code's
 - 2026-10-23T22:59:31+0200 — qualifies the line above (review of 4cebe04b): G26 covers the ORDER rule only if golden G24/G15 do not reach LOCAL design placement; otherwise it is the owner's call.
 - 2026-10-23T23:53:42+0200 — Q6UOJR8G measured (spec F21): trddgrep never finds LOCAL design by itself, only via --design-dir; F20's earlier clause that it finds LOCAL from cwd was wrong and is corrected.
 - 2026-10-24T00:09:15+0200 — column → backburner by main-agent@ai-maestro-janitor. blocker KQULEGL2 complete (spec F22)
+- 2026-10-24T00:10:28+0200 — KQULEGL2 complete (spec F22, Claude Code 2.1.309). Obligations for the migration: keep at least one file in each <slug>/design/ (an empty one can be rmdir-ed), and never name a design subfolder subagents, workflows, remote-agents, tool-results or mcp-tasks (they are swept like session data). F22 holds for 2.1.309 only, so step 3 adds a guard (the leftover-dir detector or a test) that alarms if a <slug>/design/ disappears (review of 6d6c1798).
