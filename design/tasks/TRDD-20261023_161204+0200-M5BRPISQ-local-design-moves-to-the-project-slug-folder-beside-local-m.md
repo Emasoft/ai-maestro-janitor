@@ -4,7 +4,7 @@ title: LOCAL design moves to the project slug folder beside LOCAL memory
 column: blocked
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-23T18:10:16+0200
+updated: 2026-10-23T22:56:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,14 +17,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:12:04+0200
-blocked-by: [78GMFJB4]
+blocked-by: [KQULEGL2]
 unblock-when: []
 pre-block-column: backburner
-blocker-probe: trddgrep --porcelain show 78GMFJB4
+blocker-probe: trddgrep --porcelain show KQULEGL2
 blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
 relevant-rules: [13, 14, 15, 24]
 npt: [KQULEGL2]
-blocker-probe-canary: match:78GMFJB4
+blocker-probe-canary: match:KQULEGL2
 ---
 
 # LOCAL design moves to the project slug folder beside LOCAL memory
@@ -45,3 +45,4 @@ PARKED in backburner (no card blocks it, so blocked would be false, and todo wou
 
 - 2026-10-23T16:12:04+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:50+0200 — column → blocked. waits on 78GMFJB4
+- 2026-10-23T22:56:05+0200 — blocker 78GMFJB4 is complete (VERIFY-7, spec F20): trddgrep reads only the cwd realpath and has no input carrying the launch path. Two questions now belong to this card: (a) which input step 2 adds so trddgrep finds a slug-folder corpus, and (b) whether trddgrep run from a linked worktree finds the gitignored in-tree .claude/local/design at all (not measured). Still blocked, now on its NPT KQULEGL2 (does Claude Code cleanup touch <slug>/design/).
