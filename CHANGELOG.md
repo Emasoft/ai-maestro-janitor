@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.13] — 2026-10-23
+
+### Documentation
+
+- Add TRDD-2GRMR89F — Linux runaway guard no-op and notifier-less alert recording (8491350)
+- Split TRDD-2GRMR89F; add TRDD-F5IE9WYI as an EHT of TRDD-1J9B7MWO (2ff4483)
+- Correct TRDD-F5IE9WYI's fix direction and move it to todo (review of 2ff44830) (74445fc)
+- TRDD-F5IE9WYI states requirements, not a mechanism (review of 74445fc7) (5cddf83)
+- Add TRDD-VZT4MY0T — remove the janitor's compaction chores and commands (99aa3bc)
+- TRDD-VZT4MY0T to todo, with a safety precondition (review of 99aa3bcd) (b6e83e4)
+- TRDD-VZT4MY0T quotes the owner's second message in full (TRDD-VZT4MY0T) (bbf0b95)
+
+### Testing
+
+- **ci:** Skip 4 macOS-only behaviour tests off darwin (TRDD-1J9B7MWO) (df927d3)
+- **ci:** Exercise the Linux notify-send branch instead of skipping off darwin (TRDD-1J9B7MWO) (a1aee77)
 ## [3.8.12] — 2026-10-23
 
 ### 5ID9CQY8
@@ -784,6 +800,7 @@ All notable changes to this project will be documented in this file.
 - **spell:** Make cspell clean over tracked files (TRDD-1J9B7MWO) (1551732)
 - Bump version to 3.8.12 (11b2f0c)
 - **spell:** Accept 4 words from the regenerated 3.8.12 CHANGELOG (TRDD-1J9B7MWO) (948c3dd)
+- Bump version to 3.8.12 (6b8b023)
 
 ### Performance
 
