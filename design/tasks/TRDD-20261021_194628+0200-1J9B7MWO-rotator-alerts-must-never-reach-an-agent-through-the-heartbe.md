@@ -4,7 +4,7 @@ title: Rotator alerts must never reach an agent through the heartbeat
 column: todo
 status: tasked
 created: 2026-10-21T19:46:28+0200
-updated: 2026-10-23T08:24:34+0200
+updated: 2026-10-23T08:29:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,7 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-21T19:46:28+0200
 npt: []
-eht: [V5FP4506]
+eht: [V5FP4506, F5IE9WYI]
 ---
 
 # Rotator alerts must never reach an agent through the heartbeat
