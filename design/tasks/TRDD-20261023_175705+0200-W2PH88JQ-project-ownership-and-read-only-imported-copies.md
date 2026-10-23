@@ -4,7 +4,7 @@ title: Project ownership and read-only imported copies
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:05+0200
-updated: 2026-10-23T18:10:20+0200
+updated: 2026-10-23T20:27:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-17, WL-18
 
 - 2026-10-23T17:57:05+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:47+0200 — column → blocked. waits on JI6I6JG1
+- 2026-10-23T20:27+0200 — SCOPE ADDED (main session): adoption of a page by its project-id, moved out of TRDD-SQBTMGYW, lands on this card, using the rule TRDD-AAZUB0VC writes into the spec (this card already waits on it through JI6I6JG1).

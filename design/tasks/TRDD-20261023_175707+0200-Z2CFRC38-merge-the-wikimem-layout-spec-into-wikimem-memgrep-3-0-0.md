@@ -4,7 +4,7 @@ title: Merge the wikimem layout spec into wikimem-memgrep 3.0.0
 column: backburner
 status: tasked
 created: 2026-10-23T17:57:07+0200
-updated: 2026-10-23T18:21:57+0200
+updated: 2026-10-23T20:27:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -28,3 +28,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.9 (draft). Major bump of design/sp
 ## Approval log
 
 - 2026-10-23T17:57:07+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T20:27+0200 — FOLD-BACK ADDITION: SQBTMGYW's Approval-log SCOPE line (adoption moved to W2PH88JQ) is a criterion added after 0.2.9 and must be folded back with the others.

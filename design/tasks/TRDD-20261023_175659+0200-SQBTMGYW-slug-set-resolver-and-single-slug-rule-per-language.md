@@ -35,4 +35,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.9 (draft). Implements WL-3, WL-4, 
 
 - 2026-10-23T17:56:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:44+0200 — column → blocked. waits on W17F82DN
-- 2026-10-23T20:26+0200 — ACCEPTANCE ADDED (main session, review of 26196af6): the adoption row (a page adopted by project-id) ships disabled until TRDD-AAZUB0VC writes the project-id rule into the spec; the rest of the resolver does not depend on that rule, so it is not blocked by it. A test shows adoption does not fire while the rule is absent.
+- 2026-10-23T20:26+0200 — ACCEPTANCE ADDED (main session, review of 26196af6): SCOPE (corrected by the review of ab750bef): adoption of a page by its project-id is out of scope for this card, with no disabled code path; it lands with TRDD-W2PH88JQ after TRDD-AAZUB0VC writes the project-id rule. The rest of the resolver does not depend on that rule.
