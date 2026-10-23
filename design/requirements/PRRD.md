@@ -1,6 +1,6 @@
 ---
-prrd-version: 1.9
-updated: "2026-10-23T16:50:00+0200"
+prrd-version: 1.10
+updated: "2026-10-23T16:52:36+0200"
 project: ai-maestro-janitor
 project-id: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
@@ -46,6 +46,8 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 - **G21.1** — Memory system — the owner's words of 2026-10-23, verbatim: "you may ask why some wikimem pages should be duplicated in different projects. but the answer is simple: different projects often share identical components or libraries. this means that any memory or discovery relative to one project can easily become relevant to all the other projects sharing the same component. so not only having wikimem pages with the same id in different projects is allowed, but it is recomended. in fact, we should add to memgrep an option to look/search for wikimem pages related to components of the current project that exists in other projects, and duplicate/import them into the current project. this will save the hassle of having to rebuild a documentation for something that was already documented in other projects. add this to the skills reccomendations and to the memgrep help use cases examples help."
 
 - **G22.1** — 3-pillars system — the owner's words of 2026-10-23, verbatim, correcting the wording of G13: "i said memory system before, but i meant 3-pillars system (prrd files are not wikimem). but this remembers me how close and similar the two systems are. maybe i will decide to merge them into one single plugin someday."
+
+- **G23.1** — 3-pillars and memory system — the owner's words of 2026-10-23, verbatim: "the slug must always be the fully resolved path. this is the same rule of claude code i think."
 
 ## 🥈 SILVER — MANAGER-mutable (agents propose via COS)
 
