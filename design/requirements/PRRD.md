@@ -1,6 +1,6 @@
 ---
-prrd-version: 2.2
-updated: "2026-10-23T16:55:47+0200"
+prrd-version: 2.3
+updated: "2026-10-23T16:58:59+0200"
 project: ai-maestro-janitor
 project-id: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
@@ -52,6 +52,8 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 - **G24.1** — 3-pillars and memory system, SUPERSEDES G23.1 — the owner's words of 2026-10-23, verbatim, on being told that Claude Code does not resolve symlinks when it names a project folder: "it doesn't?? that is troublesome.. ok, do as claude code does. we must follow their system."
 
 - **G25.1** — memory system, extends G24.1 — the owner's words of 2026-10-23, verbatim: "but make the memgrep smart enough to check if there are folders with symlinks resolving to the path it is looking for. we don't want to make memgrep report that it did not found a wikimem only because it looked for the wrong slug format. make it smart enough to sesrch for both versions."
+
+- **G26.1** — 3-pillars and memory system — the owner's words of 2026-10-23, verbatim, answering the agent's open questions on the memory redesign (TRDD-KLT5F93P, TRDD-M5BRPISQ, TRDD-TBBEB8JD): "for your other questions, i leave the decisions to you. find the best solutions. but bade your decisions on verified facts. never assume anything."
 
 ## 🥈 SILVER — MANAGER-mutable (agents propose via COS)
 
