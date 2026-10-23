@@ -22,7 +22,7 @@ relevant-rules: [24, 26]
 
 # Measure whether trddgrep run from a linked worktree finds the in-tree LOCAL design
 
-Today's layout question split off from TRDD-M5BRPISQ (review of ca17df81). The in-tree .claude/local/design is gitignored, so a linked worktree has no copy of it. trddgrep walks up from the cwd realpath (spec F20, F12), and a worktree under .claude/worktrees/ might still reach the main checkout's folder. Measure in a scratch worktree (a git write: git worktree add, then remove it afterwards; nothing else is changed) which LOCAL corpus trddgrep reports from inside it. Record the answer as a spec WL-FACT line and on TRDD-M5BRPISQ.
+Today's layout question split off from TRDD-M5BRPISQ (review of ca17df81). The in-tree .claude/local/design is gitignored, so a linked worktree has no copy of it. trddgrep walks up from the cwd realpath (spec F20, F12), and a worktree under .claude/worktrees/ might still reach the main checkout's folder. Measure in a scratch worktree (a git write: git worktree add, then remove it afterwards; nothing else is changed) and record which LOCAL corpus trddgrep reports from inside it. Record the answer as a spec WL-FACT line and on TRDD-M5BRPISQ.
 
 ## Approval log
 
