@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-# cspell:words requestbin
 """PreToolUse hook — bash-exfil, sensitive-write, and outbound-publication blocker.
 
 OPT-IN by default (set `CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED=true`
@@ -93,6 +92,9 @@ _NETWORK_SINK_PATTERNS = (
     # SCP / SFTP / rsync — out-of-band copy
     re.compile(r"\b(?:scp|sftp|rsync)\b.*?:[^/\s]"),
     # Known exfil sinks the agent-context catalogue lists
+    # A spelling directive on this code line, not a header word list: CPV skillaudit
+    # flags any comment line that names the sink word itself (DATA_EXFIL).
+    # cspell:disable-next-line
     re.compile(r"\b(?:webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com"
                r"|smee\.io|ngrok\.io|trycloudflare\.com|loca\.lt"
                r"|api\.telegram\.org/bot\d|discord\.com/api/webhooks)\b"),

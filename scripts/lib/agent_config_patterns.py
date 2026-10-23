@@ -1,4 +1,3 @@
-# cspell:words requestbin
 """Agent-config / skill-content attack patterns.
 
 Wave 2 of the github-monitoring distillation. Patterns convergent across:
@@ -363,6 +362,9 @@ _CROSS_SKILL_SHADOW = _re(
 # exfiltration in general, and COVERAGE.md says so rather than papering
 # over it.
 _EXFIL_WEBHOOK = _re(
+    # A spelling directive on this code line, not a header word list: CPV skillaudit
+    # flags any comment line that names the sink word itself (DATA_EXFIL).
+    # cspell:disable-next-line
     r"\b(?:webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com"
     r"|smee\.io|ngrok\.io|trycloudflare\.com|loca\.lt|tunnel\.dev"
     r"|discord\.com/api/webhooks"
