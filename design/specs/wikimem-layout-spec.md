@@ -13,13 +13,15 @@ relevant-rules: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26]
 
 # Wikimem layout, page identity, copies and cross-project import — DRAFT
 
+Versioning: spec-version covers the normative sections only. Adding a WL-FACT line does not change it, and a card that pins a version pins those sections.
+
 Status DRAFT: decisions below are the agent's under PRRD G26.1 ("i leave the decisions to you … bade your decisions on verified facts. never assume anything"). Each requirement is marked G (the owner's rule, quoted verbatim in the PRRD) or D (a design decision under G26.1). A G requirement rests on the owner's words. A D requirement cites the facts F1-F17 where it lists an Evidence; where it lists none it is judgment, and those are the ones to challenge. Anything not yet measured is a VERIFY item (WL-VER) that must close before the code that depends on it is written. The owner may overturn any decision; owner text in the PRRD always wins over this file.
 
 Notice for the owner: wikimem pages have no unique page id today (F8); G19's premise ("they have all an unique id") is not true of the current code. WL-13 introduces the id.
 
 ## WL-FACT — measured facts this draft rests on (2026-10-23)
 
-Fact lines are evidence, not rules. Adding one does not change the spec version; a version pin (for example 0.2.9 on SQBTMGYW and Z2CFRC38) covers the normative sections, not this list.
+Fact lines are evidence, not rules (the version rule for them is under the title).
 
 - F1. Documented slug rule: "`<project>` is your working directory path with every character other than letters and digits replaced by `-`" (cc projects-directory doc; claude-code-slug-facts report line 8). The doc does not say whether the launched or the resolved path is used. Observed: for sessions whose recorded cwd is a symlinked path, slug == transform(recorded cwd) (cli 705, sdk-py 2727, sdk-cli 139, claude-desktop 8; report lines 11, 47). Observed: the slug follows the recorded cwd, not its realpath; whether Claude Code records the as-launched or the resolved path is VERIFY-1 (this desktop-app session recorded the resolved form). Among 190 slug folders 4 do not equal transform(cwd): 3 worktree slugs and 1 long path truncated with a short hash suffix (report line 12).
 - F2. 18 projects already own two slug folders (`-Users-USER-Code-X` and `-Volumes-EmaUITEK4TBSSD-Code-X`, `~/Code` being a symlink). No two different real paths share a slug in the 119 folders with a recorded cwd. 71 slug folders have no session file; 38 of 119 recorded cwds no longer exist.

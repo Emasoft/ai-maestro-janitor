@@ -4,7 +4,7 @@ title: Slug-set resolver and single slug rule per language
 column: blocked
 status: tasked
 created: 2026-10-23T17:56:59+0200
-updated: 2026-10-23T18:19:52+0200
+updated: 2026-10-23T20:25:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,11 +20,11 @@ approval-datetime: 2026-10-23T17:56:59+0200
 npt: [ICB4GTHI, 78GMFJB4, 0IJFCD2V, JE53ZDPS]
 relevant-rules: [13, 14, 15, 24, 25]
 spec: wikimem-layout-spec.md 0.2.9
-blocked-by: [W17F82DN, KQULEGL2]
+blocked-by: [KQULEGL2, AAZUB0VC]
 pre-block-column: backburner
-blocker-probe: trddgrep --porcelain show W17F82DN
+blocker-probe: trddgrep --porcelain show KQULEGL2
 blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
-blocker-probe-canary: match:W17F82DN
+blocker-probe-canary: match:KQULEGL2
 ---
 
 # Slug-set resolver and single slug rule per language

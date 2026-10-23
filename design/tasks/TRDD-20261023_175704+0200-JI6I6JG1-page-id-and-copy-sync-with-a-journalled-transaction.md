@@ -4,7 +4,7 @@ title: Page id and copy sync with a journalled transaction
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:04+0200
-updated: 2026-10-23T20:24:09+0200
+updated: 2026-10-23T20:25:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,11 +20,12 @@ approval-datetime: 2026-10-23T17:57:04+0200
 relevant-rules: [13, 14, 19, 20, 21]
 spec: wikimem-layout-spec.md 0.2.8
 npt: []
-blocked-by: [W17F82DN]
+blocked-by: [AAZUB0VC]
 pre-block-column: backburner
-blocker-probe: trddgrep --porcelain show W17F82DN
+blocker-probe: trddgrep --porcelain show AAZUB0VC
 blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
-blocker-probe-canary: match:W17F82DN
+blocker-probe-canary: match:AAZUB0VC
+unblock-when: []
 ---
 
 # Page id and copy sync with a journalled transaction
