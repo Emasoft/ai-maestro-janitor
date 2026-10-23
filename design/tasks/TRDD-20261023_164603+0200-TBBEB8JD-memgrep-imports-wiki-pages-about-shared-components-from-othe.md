@@ -4,7 +4,7 @@ title: memgrep imports wiki pages about shared components from other projects
 column: blocked
 status: tasked
 created: 2026-10-23T16:46:03+0200
-updated: 2026-10-23T18:10:17+0200
+updated: 2026-10-23T18:17:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
