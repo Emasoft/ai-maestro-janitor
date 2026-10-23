@@ -4,7 +4,7 @@ title: Merge the wikimem layout spec into wikimem-memgrep 3.0.0
 column: backburner
 status: tasked
 created: 2026-10-23T17:57:07+0200
-updated: 2026-10-23T18:08:15+0200
+updated: 2026-10-23T18:18:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -23,7 +23,7 @@ spec: wikimem-layout-spec.md 0.2.8
 
 # Merge the wikimem layout spec into wikimem-memgrep 3.0.0
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Major bump of design/specs/wikimem-memgrep-spec.md to 3.0.0 merging wikimem-layout-spec.md (WM-META-01: that file is the single arbiter; WM-VER-01: a scope root moves). Waits until the layout spec status is normative; do not start before. Done when: the merged spec is committed and the layout spec is marked merged.
+Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Major bump of design/specs/wikimem-memgrep-spec.md to 3.0.0 merging wikimem-layout-spec.md (WM-META-01: that file is the single arbiter; WM-VER-01: a scope root moves). Waits until the layout spec status is normative; do not start before. Done when: the merged spec is committed and the layout spec is marked merged. It also folds back into the spec every acceptance criterion added to TRDD-SQBTMGYW after spec 0.2.9 (the manual tie override, the report format, and the E3 'own sessions' clarification).
 
 ## Approval log
 
