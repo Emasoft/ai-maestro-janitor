@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: todo
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T16:39:36+0200
+updated: 2026-10-23T16:43:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
