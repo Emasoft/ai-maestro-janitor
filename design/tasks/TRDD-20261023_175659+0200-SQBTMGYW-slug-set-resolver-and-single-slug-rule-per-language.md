@@ -4,7 +4,7 @@ title: Slug-set resolver and single slug rule per language
 column: blocked
 status: tasked
 created: 2026-10-23T17:56:59+0200
-updated: 2026-10-23T20:25:09+0200
+updated: 2026-10-23T20:26:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,7 +20,7 @@ approval-datetime: 2026-10-23T17:56:59+0200
 npt: [ICB4GTHI, 78GMFJB4, 0IJFCD2V, JE53ZDPS]
 relevant-rules: [13, 14, 15, 24, 25]
 spec: wikimem-layout-spec.md 0.2.9
-blocked-by: [KQULEGL2, AAZUB0VC]
+blocked-by: [KQULEGL2]
 pre-block-column: backburner
 blocker-probe: trddgrep --porcelain show KQULEGL2
 blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
@@ -35,3 +35,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.9 (draft). Implements WL-3, WL-4, 
 
 - 2026-10-23T17:56:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:44+0200 — column → blocked. waits on W17F82DN
+- 2026-10-23T20:26+0200 — ACCEPTANCE ADDED (main session, review of 26196af6): the adoption row (a page adopted by project-id) ships disabled until TRDD-AAZUB0VC writes the project-id rule into the spec; the rest of the resolver does not depend on that rule, so it is not blocked by it. A test shows adoption does not fire while the rule is absent.
