@@ -1,10 +1,10 @@
 ---
 trdd-id: AAZUB0VC
 title: Decide the project-id rule for projects without 3-pillars cards
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-23T20:24:50+0200
-updated: 2026-10-23T20:27:33+0200
+updated: 2026-10-23T20:47:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,7 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T20:24:50+0200
 relevant-rules: [24, 25, 26]
-blocked-by: [JE53ZDPS]
+blocked-by: []
 pre-block-column: todo
 blocker-probe: trddgrep --porcelain show JE53ZDPS
 blocker-holds-if: match:\t(backburner|approval|design|design_ai_review|design_human_review|todo|verify_assumptions|plan|dispatch|dev|testing|ai_review|human_review|blocked|failed|proposal|planned)\t
@@ -34,3 +34,4 @@ Spec design/specs/wikimem-layout-spec.md WL-FACT F18 (VERIFY-4, TRDD-W17F82DN) s
 - 2026-10-23T20:24:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T20:26:30+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on VERIFY-12 (JE53ZDPS), which measures the project-id markers the rule consumes
 - 2026-10-23T20:27+0200 — ACCEPTANCE AMENDED (main session): forks and two different repos with the same name were not measured (spec F18). Their outcomes in the rule must be labelled as design choices, with that unmeasured status stated in the spec; they are not facts.
+- 2026-10-23T20:47:30+0200 — column → todo by main-agent@ai-maestro-janitor. VERIFY-12 complete (F19); its only blocker is done

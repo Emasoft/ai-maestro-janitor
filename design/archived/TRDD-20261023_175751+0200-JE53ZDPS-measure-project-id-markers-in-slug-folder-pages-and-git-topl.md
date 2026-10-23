@@ -1,10 +1,10 @@
 ---
 trdd-id: JE53ZDPS
 title: Measure project-id markers in slug folder pages and git toplevel through a symlink
-column: backburner
-status: tasked
+column: complete
+status: archived
 created: 2026-10-23T17:57:51+0200
-updated: 2026-10-23T18:08:08+0200
+updated: 2026-10-23T20:47:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -28,3 +28,9 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). VERIFY-12 restated: cou
 ## Approval log
 
 - 2026-10-23T17:57:51+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T20:47+0200 — RESULT (main session): worker counted 949 pages in 89 folders, the main session's re-run gives 907 top-level .md pages in 88 non-empty folders (the worker likely counted nested files); both find zero frontmatter project-id or scope keys. Recorded as F19.
+- 2026-10-23T20:47:29+0200 — COMPLETE by main-agent@ai-maestro-janitor. VERIFY-12 measured; spec WL-FACT F19.
+
+## Acceptance checklist
+
+- [x] Measured read-only: project-id or scope keys in slug-folder memory pages (none) and git toplevel through a symlink (resolved path); recorded as spec WL-FACT F19.
