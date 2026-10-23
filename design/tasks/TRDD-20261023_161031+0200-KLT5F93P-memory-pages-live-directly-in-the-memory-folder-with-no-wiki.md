@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: todo
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T16:15:15+0200
+updated: 2026-10-23T16:17:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -44,3 +44,4 @@ NEXT ACTION (ON HOLD since the owner's third message, section Owner messages): r
 ## Owner messages
 
 - 2026-10-23, third message, verbatim: "the memgrep should be smart enough to recognize a wikimem file anywhere. so it would not be an issue where actually is. but you must add to the wikimem frontmatter the field "scope", and let the indexer index everything in a folder (and subfolders recursively) searching for wikimem files, and saving the local scope memory index in the standard place. so we will get 3 different design folders paths, each one with its specific index (wm_local_index.db, wm_project_index.db, wm_user_index.db). the local scope indexes will be in the same slug folder of each project. the project scope index in each project design folder. and the user scope index in the ~/.claude/ memory folder (can't remember the name of the folder.. was it memory? user_memory? wikimem?)" This REDIRECTS part A: pages are found by content anywhere, a scope frontmatter field is added, and each scope gets one named index file; the flatten-and-move plan in the STATE is on hold until the redesign is written.
+- 2026-10-23, open questions put to the owner in chat (not yet answered): (1) the owner wrote '3 different design folders paths' and 'the project scope index in each project design folder' while describing memory indexes, so does wm_project_index.db go in the project's .claude/project/memory folder or in its design folder? (2) when a page's scope field and its location disagree, which wins? Proposed rule, pending the owner: a page marked local or user found inside a git-tracked tree is refused and reported, never indexed, so private notes cannot be pushed. (3) The owner asked the user-scope folder's name: it is the memory folder inside the janitor plugin's data dir (plugins/data/ai-maestro-janitor-ai-maestro-plugins), with a backup mirror at ai-maestro-janitor-memory under the Claude config dir. The local index's slug folder also depends on the launch-path question on TRDD-M5BRPISQ.
