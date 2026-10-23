@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: dev
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-23T19:25:45+0200
+updated: 2026-10-23T19:27:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
