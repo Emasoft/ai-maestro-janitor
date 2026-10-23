@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: todo
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T16:53:58+0200
+updated: 2026-10-23T16:54:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -34,7 +34,7 @@ PART B moved to its own card, TRDD-M5BRPISQ (blocked).
 
 RISK and the launch-path question for part B: see TRDD-M5BRPISQ.
 
-ANSWERED 2026-10-23: the slug follows Claude Code's own rule, the launch path as given with no symlink resolution (PRRD G24.1, superseding G23.1), so a project launched through two paths keeps two slug folders, as this repo already does (~/Code and /Volumes). OPEN, OWNER: the redesign questions listed at the end of the Owner messages section; the owner's statements are now golden rules PRRD G15 to G24, and G14 requires a detailed spec and TRDDs before any code.
+ANSWERED 2026-10-23: the slug follows Claude Code's own rule, the launch path as the session sees it, symlinks not resolved (observed 2026-10-23: this repo has one slug folder per launch path; not yet proven by launching once from each path, and this desktop-app session got the resolved form) (PRRD G24.1, superseding G23.1), so a project launched through two paths keeps two slug folders, as this repo already does (~/Code and /Volumes). OPEN, OWNER: the redesign questions listed at the end of the Owner messages section; the owner's statements are now golden rules PRRD G15 to G24, and G14 requires a detailed spec and TRDDs before any code.
 
 NEXT ACTION (ON HOLD since the owner's third message, section Owner messages; when the owner answers the launch-path question, also move TRDD-M5BRPISQ out of backburner): redesign around content-detected pages, a scope frontmatter field and one index per scope, then re-propose; the plan that follows is superseded until then: write part A's code change through a worker now, except this repo's LOCAL folder under the ~/Code slug; do not move pages before the release; afterwards decide whether each emptied wikimem folder (with its stale .memgrep) moves to .trashcan.
 

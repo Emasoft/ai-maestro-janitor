@@ -4,7 +4,7 @@ title: memgrep imports wiki pages about shared components from other projects
 column: backburner
 status: tasked
 created: 2026-10-23T16:46:03+0200
-updated: 2026-10-23T16:53:59+0200
+updated: 2026-10-23T16:54:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:46:03+0200
-relevant-rules: [13, 14, 19, 20, 21]
+relevant-rules: [13, 14, 19, 20, 21, 24]
 ---
 
 # memgrep imports wiki pages about shared components from other projects

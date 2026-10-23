@@ -4,7 +4,7 @@ title: LOCAL design moves to the project slug folder beside LOCAL memory
 column: backburner
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-23T16:53:58+0200
+updated: 2026-10-23T16:54:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -37,7 +37,7 @@ ORDER (our reading of the reviews, not an owner ruling): (1) release a janitor v
 
 RISK, INFERRED from the resolve_local_design_mirror_dir docstring (scripts/lib/memory_scopes.py:668), not measured: Claude Code's cleanupPeriodDays sweep covers ~/.claude/projects/<slug>/ and 2.1.228 exempted the memory folder but not design/; verify before step 3.
 
-PARKED in backburner (no card blocks it, so blocked would be false, and todo would claim it can be pulled; step 1 could possibly share a release with TRDD-KLT5F93P, which is itself on hold). The launch-path question is ANSWERED (PRRD G24.1, 2026-10-23): the slug follows Claude Code's rule, the launch path as given with no symlink resolution, so a project started from both /Volumes/EmaUITEK4TBSSD/Code/... and ~/Code/... gets two slug folders and two LOCAL design corpora, just as Claude Code gets two memory folders. Still waits on ai-maestro's resolver (lib/pillar/kinds.ts:367) adopting the same rule.
+PARKED in backburner (no card blocks it, so blocked would be false, and todo would claim it can be pulled; step 1 could possibly share a release with TRDD-KLT5F93P, which is itself on hold). The launch-path question is ANSWERED (PRRD G24.1, 2026-10-23): the slug follows Claude Code's rule, the launch path as the session sees it, symlinks not resolved (observed 2026-10-23: this repo has one slug folder per launch path; not yet proven by launching once from each path, and this desktop-app session got the resolved form), so a project started from both /Volumes/EmaUITEK4TBSSD/Code/... and ~/Code/... gets two slug folders and two LOCAL design corpora, just as Claude Code gets two memory folders. Still waits on ai-maestro's resolver (lib/pillar/kinds.ts:367) adopting the same rule.
 
 ## Approval log
 
