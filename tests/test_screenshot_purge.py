@@ -128,9 +128,9 @@ def test_age_purge_exact_boundary(project_root: Path, shots_dir: Path) -> None:
     Detector logic: `if age < threshold_sec: continue` — so age == threshold
     means PURGE. A wall-clock test can only prove the DIRECTION of that comparison,
     not exact equality: the detector reads `time.time()` after its subprocess starts.
-    The margin is 0.1 h (6 min), not 0.001 h (3.6 s): under the 16-way pre-push gate
-    the `uv run --script` startup alone took longer than 3.6 s, aging "just-under"
-    past 72 h so it was purged (publish attempt 5, 2026-10-23).
+    The margin is 0.1 h (6 min), not 0.001 h (3.6 s): under the parallel pre-push gate
+    more than 3.6 s passed between stamping the files and the detector reading the
+    clock, so "just-under" aged past 72 h and was purged (publish attempt 5, 2026-10-23).
     """
     _make_screenshot(shots_dir, "exactly72h.png", age_hours=72.1)
     _make_screenshot(shots_dir, "just-under.png", age_hours=71.9)
