@@ -4,7 +4,7 @@ title: Merge the wikimem layout spec into wikimem-memgrep 3.0.0
 column: backburner
 status: tasked
 created: 2026-10-23T17:57:07+0200
-updated: 2026-10-23T17:57:08+0200
+updated: 2026-10-23T18:01:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -18,12 +18,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:57:07+0200
 relevant-rules: [13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25]
-spec: wikimem-layout-spec.md 0.2.3
+spec: wikimem-layout-spec.md 0.2.5
 ---
 
 # Merge the wikimem layout spec into wikimem-memgrep 3.0.0
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.3 (draft). Major bump of design/specs/wikimem-memgrep-spec.md to 3.0.0 merging wikimem-layout-spec.md (WM-META-01: that file is the single arbiter; WM-VER-01: a scope root moves). Waits until the layout spec status is normative; do not start before. Done when: the merged spec is committed and the layout spec is marked merged.
+Spec: design/specs/wikimem-layout-spec.md 0.2.5 (draft). Major bump of design/specs/wikimem-memgrep-spec.md to 3.0.0 merging wikimem-layout-spec.md (WM-META-01: that file is the single arbiter; WM-VER-01: a scope root moves). Waits until the layout spec status is normative; do not start before. Done when: the merged spec is committed and the layout spec is marked merged.
 
 ## Approval log
 

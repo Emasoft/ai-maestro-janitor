@@ -1,10 +1,10 @@
 ---
 trdd-id: TBBEB8JD
 title: memgrep imports wiki pages about shared components from other projects
-column: backburner
+column: blocked
 status: tasked
 created: 2026-10-23T16:46:03+0200
-updated: 2026-10-23T16:54:52+0200
+updated: 2026-10-23T18:03:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:46:03+0200
 relevant-rules: [13, 14, 19, 20, 21, 24]
+npt: []
+blocked-by: [JI6I6JG1, W2PH88JQ]
+pre-block-column: backburner
+blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show JI6I6JG1
+blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe-canary: match:JI6I6JG1
 ---
 
 # memgrep imports wiki pages about shared components from other projects
@@ -45,3 +51,4 @@ relevant-rules: [13, 14, 19, 20, 21, 24]
 ## Approval log
 
 - 2026-10-23T16:46:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T18:03:52+0200 — column → blocked. waits on JI6I6JG1

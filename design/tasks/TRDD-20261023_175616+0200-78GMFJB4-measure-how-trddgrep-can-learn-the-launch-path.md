@@ -4,7 +4,7 @@ title: Measure how trddgrep can learn the launch path
 column: backburner
 status: tasked
 created: 2026-10-23T17:56:16+0200
-updated: 2026-10-23T17:56:17+0200
+updated: 2026-10-23T18:01:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -18,12 +18,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T17:56:16+0200
 relevant-rules: [13, 14, 15, 24, 25]
-spec: wikimem-layout-spec.md 0.2.3
+spec: wikimem-layout-spec.md 0.2.5
 ---
 
 # Measure how trddgrep can learn the launch path
 
-Spec: design/specs/wikimem-layout-spec.md 0.2.3 (draft). VERIFY-7 restated: trddgrep reads only process.cwd(), a realpath (F12), never CLAUDE_PROJECT_DIR. Find how it can obtain the launch path, or whether it needs a change in ai-maestro lib/pillar/design-root.ts. Blocks: WL-5 for LOCAL design. Done when: the measurement is recorded as a fact in the spec's WL-FACT section with its evidence.
+Spec: design/specs/wikimem-layout-spec.md 0.2.5 (draft). VERIFY-7 restated: trddgrep reads only process.cwd(), a realpath (F12), never CLAUDE_PROJECT_DIR. Find how it can obtain the launch path, or whether it needs a change in ai-maestro lib/pillar/design-root.ts. Blocks: WL-5 for LOCAL design. Done when: the measurement is recorded as a fact in the spec's WL-FACT section with its evidence.
 
 ## Approval log
 

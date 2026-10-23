@@ -1,10 +1,10 @@
 ---
 trdd-id: KLT5F93P
 title: Memory pages live directly in the memory folder with no wikimem subfolder
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T17:44:03+0200
+updated: 2026-10-23T18:03:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -18,6 +18,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:10:31+0200
 relevant-rules: [13, 14, 15, 16, 17, 18, 19, 20, 24]
+npt: []
+blocked-by: [YG6NMKJA]
+pre-block-column: todo
+blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show YG6NMKJA
+blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
+blocker-probe-canary: match:YG6NMKJA
 ---
 
 # Memory pages live directly in the memory folder with no wikimem subfolder
@@ -41,6 +47,7 @@ NEXT ACTION (2026-10-23 17:45): the redesign is spec design/specs/wikimem-layout
 ## Approval log
 
 - 2026-10-23T16:10:31+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T18:03:51+0200 — column → blocked. waits on YG6NMKJA
 
 ## Owner messages
 

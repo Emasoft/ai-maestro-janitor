@@ -1,10 +1,10 @@
 ---
 trdd-id: M5BRPISQ
 title: LOCAL design moves to the project slug folder beside LOCAL memory
-column: backburner
+column: blocked
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-23T17:44:03+0200
+updated: 2026-10-23T18:03:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,12 +17,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:12:04+0200
-blocked-by: []
+blocked-by: [78GMFJB4]
 unblock-when: []
-pre-block-column: 
-blocker-probe: []
-blocker-holds-if: 
+pre-block-column: backburner
+blocker-probe: trddgrep --design-dir /Volumes/EmaUITEK4TBSSD/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design --porcelain show 78GMFJB4
+blocker-holds-if: match:\t(backburner|blocked|todo|plan|dev|testing)\t
 relevant-rules: [13, 14, 15, 24]
+npt: [KQULEGL2]
+blocker-probe-canary: match:78GMFJB4
 ---
 
 # LOCAL design moves to the project slug folder beside LOCAL memory
@@ -42,3 +44,4 @@ PARKED in backburner (no card blocks it, so blocked would be false, and todo wou
 ## Approval log
 
 - 2026-10-23T16:12:04+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T18:03:50+0200 — column → blocked. waits on 78GMFJB4
