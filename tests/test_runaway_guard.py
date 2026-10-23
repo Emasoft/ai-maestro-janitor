@@ -618,7 +618,7 @@ def test_the_chore_does_nothing_when_the_option_is_absent(
     )
 
 
-# The runaway guard reads memory via vm_stat/swapfiles (macOS only); on Linux the chore returns before the process scan.
+# macOS-only by current implementation (vm_stat/swapfiles).
 @pytest.mark.skipif(sys.platform != "darwin", reason="runaway guard host-pressure probes are macOS-only")
 def test_the_chore_acts_when_the_option_is_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

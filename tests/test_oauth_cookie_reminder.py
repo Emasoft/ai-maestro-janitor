@@ -177,6 +177,17 @@ def test_setup_token_near_expiry_records_setup_token_kind(tmp_path: Path) -> Non
     assert [(r["kind"], r["slot"]) for r in recs.values()] == [("setup-token", "s@example.com")]
 
 
+@pytest.fixture
+def notify_send_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # notify._deliver calls the runner on darwin OR when shutil.which finds notify-send; a never-executed stub makes the Linux tier selectable on any host.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "notify-send"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
 def _pass(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,9 +246,8 @@ def test_keychain_backed_refresh_slot_is_seen_healthy_no_plaintext(
     assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}
 
 
-# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
-@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_account_observed_fine_is_cleared_and_unreadable_one_is_kept(
+    notify_send_on_path: None,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """a and b both at risk; next pass a is fine (cookie 28d, observed) and b's slot facts are
@@ -274,9 +284,8 @@ def test_unreadable_cookie_db_is_neither_recorded_nor_cleared(
     assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 1
 
 
-# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
-@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_losing_all_healthy_oauth_adds_exactly_one_urgent_record_and_episode(
+    notify_send_on_path: None,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Three at-risk accounts, then every account's OAuth goes unhealthy: ONE new machine-wide

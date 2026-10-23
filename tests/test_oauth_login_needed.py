@@ -561,6 +561,17 @@ def _write_login_slot(
     (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
 
 
+@pytest.fixture
+def notify_send_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # notify._deliver calls the runner on darwin OR when shutil.which finds notify-send; a never-executed stub makes the Linux tier selectable on any host.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "notify-send"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
 def _run_inprocess(tmp_path: Path, home_name: str, monkeypatch, capsys, *, before) -> tuple[str, int]:
     """Same env shape as `_run`, but calls `det.main()` in-process so `det.notify.push`
     can be monkeypatched by the caller before invoking this."""
@@ -633,9 +644,8 @@ def _write_fine_slot(home: Path, email: str) -> None:
     (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
 
 
-# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
-@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_an_account_seen_fine_ends_its_episode_and_sparse_heartbeats_do_not_renotify(
+    notify_send_on_path: None,
     tmp_path, monkeypatch, capsys
 ) -> None:
     """Heartbeats hours apart are NOT a clear (an unchanged account notifies once); the detector
