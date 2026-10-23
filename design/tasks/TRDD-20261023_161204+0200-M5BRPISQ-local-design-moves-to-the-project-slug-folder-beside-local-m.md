@@ -1,10 +1,10 @@
 ---
 trdd-id: M5BRPISQ
 title: LOCAL design moves to the project slug folder beside LOCAL memory
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-23T16:13:15+0200
+updated: 2026-10-23T16:15:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,11 +17,11 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-23T16:12:04+0200
-blocked-by: [KLT5F93P]
-unblock-when: [decision:canonical-launch-path]
-pre-block-column: todo
-blocker-probe: [trddgrep, why, M5BRPISQ]
-blocker-holds-if: not-match:READY
+blocked-by: []
+unblock-when: []
+pre-block-column: 
+blocker-probe: []
+blocker-holds-if: 
 ---
 
 # LOCAL design moves to the project slug folder beside LOCAL memory
@@ -36,7 +36,7 @@ ORDER (our reading of the reviews, not an owner ruling): (1) release a janitor v
 
 RISK, INFERRED from the resolve_local_design_mirror_dir docstring (scripts/lib/memory_scopes.py:668), not measured: Claude Code's cleanupPeriodDays sweep covers ~/.claude/projects/<slug>/ and 2.1.228 exempted the memory folder but not design/; verify before step 3.
 
-BLOCKED ON: the owner's answer to which launch path is canonical for projects under the external volume, /Volumes/EmaUITEK4TBSSD/Code/... or ~/Code/... (a symlink to it); sessions must then always start from it, or two LOCAL corpora return. Also on ai-maestro's resolver change.
+NOT WORKABLE YET (kept in todo because no card blocks it, so blocked-by would be false; step 1 can ride TRDD-KLT5F93P's release): waits on the owner's answer to which launch path is canonical for projects under the external volume, /Volumes/EmaUITEK4TBSSD/Code/... or ~/Code/... (a symlink to it); sessions must then always start from it, or two LOCAL corpora return. Also on ai-maestro's resolver change.
 
 ## Approval log
 

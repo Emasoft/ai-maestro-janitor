@@ -4,7 +4,7 @@ title: Memory pages live directly in the memory folder with no wikimem subfolder
 column: todo
 status: tasked
 created: 2026-10-23T16:10:31+0200
-updated: 2026-10-23T16:12:35+0200
+updated: 2026-10-23T16:15:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -35,8 +35,12 @@ RISK and the launch-path question for part B: see TRDD-M5BRPISQ.
 
 OPEN, OWNER: the canonical launch path (asked on TRDD-M5BRPISQ). It blocks this card only for this repo's LOCAL memory folder, which already exists under both the ~/Code and the /Volumes slug.
 
-NEXT ACTION: write part A's code change through a worker now, except this repo's LOCAL folder under the ~/Code slug; do not move pages before the release; afterwards decide whether each emptied wikimem folder (with its stale .memgrep) moves to .trashcan.
+NEXT ACTION (ON HOLD since the owner's third message, section Owner messages): redesign around content-detected pages, a scope frontmatter field and one index per scope, then re-propose; the plan that follows is superseded until then: write part A's code change through a worker now, except this repo's LOCAL folder under the ~/Code slug; do not move pages before the release; afterwards decide whether each emptied wikimem folder (with its stale .memgrep) moves to .trashcan.
 
 ## Approval log
 
 - 2026-10-23T16:10:31+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Owner messages
+
+- 2026-10-23, third message, verbatim: "the memgrep should be smart enough to recognize a wikimem file anywhere. so it would not be an issue where actually is. but you must add to the wikimem frontmatter the field "scope", and let the indexer index everything in a folder (and subfolders recursively) searching for wikimem files, and saving the local scope memory index in the standard place. so we will get 3 different design folders paths, each one with its specific index (wm_local_index.db, wm_project_index.db, wm_user_index.db). the local scope indexes will be in the same slug folder of each project. the project scope index in each project design folder. and the user scope index in the ~/.claude/ memory folder (can't remember the name of the folder.. was it memory? user_memory? wikimem?)" This REDIRECTS part A: pages are found by content anywhere, a scope frontmatter field is added, and each scope gets one named index file; the flatten-and-move plan in the STATE is on hold until the redesign is written.
