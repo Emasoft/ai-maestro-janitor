@@ -1,3 +1,4 @@
+# cspell:words insmod
 """eBPF / kernel-module / LSM / kprobe misuse detection.
 
 Wave-19 deep-dive distillation round 5, angle J.

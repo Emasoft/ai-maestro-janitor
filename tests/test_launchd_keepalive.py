@@ -1,3 +1,4 @@
+# cspell:words launchagents launchdaemons
 """L0 OS-keepalive orchestrator + installer contract (TRDD-71ABD7V7, Phase 2b/4).
 
 Two things are proven here:

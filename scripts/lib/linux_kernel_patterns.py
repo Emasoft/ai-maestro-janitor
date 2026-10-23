@@ -1,3 +1,4 @@
+# cspell:words insmod
 """Linux kernel-modules / kernel-config / capability-surface patterns.
 
 Wave-23 distillation round 9 — Linux kernel hardening posture.

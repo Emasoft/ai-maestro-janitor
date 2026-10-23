@@ -1,3 +1,4 @@
+# cspell:words insmod
 """Tests for scripts/lib/ebpf_kernel_patterns.py.
 
 Pattern-coverage tests for the Wave-19 distillation round 5 angle J

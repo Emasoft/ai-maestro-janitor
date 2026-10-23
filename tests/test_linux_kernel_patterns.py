@@ -1,3 +1,4 @@
+# cspell:words insmod
 """Tests for scripts/lib/linux_kernel_patterns.py.
 
 Pattern-coverage tests for the Wave-23 distill-round-9 Linux

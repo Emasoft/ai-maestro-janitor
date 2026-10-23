@@ -30,7 +30,8 @@
     "**/spec/fixtures/**",
     "**/__fixtures__/**",
     "**/testdata/**",
-    "**/fixtures/**"
+    "**/fixtures/**",
+    "design/archived/**"
   ],
   "ignoreRegExpList": [
     "/\\b(?=[A-Z0-9]*\\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8}\\b/",
@@ -52,6 +53,10 @@
     "project-words"
   ],
   "overrides": [
+    {
+      "filename": ["scripts/**", "tests/**"],
+      "dictionaries": ["node"]
+    },
     {
       "filename": "design/**",
       "words": [

@@ -2,6 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
+# cspell:words requestbin
 """PreToolUse hook — bash-exfil, sensitive-write, and outbound-publication blocker.
 
 OPT-IN by default (set `CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED=true`

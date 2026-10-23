@@ -1,3 +1,4 @@
+# cspell:words insmod nsenter
 """Sandbox / container-escape detection — deeper than Dockerfile surface.
 
 Wave-18 deep-dive distillation round 4, angle H.

@@ -1,3 +1,4 @@
+# cspell:words requestbin
 """Agent-config / skill-content attack patterns.
 
 Wave 2 of the github-monitoring distillation. Patterns convergent across:

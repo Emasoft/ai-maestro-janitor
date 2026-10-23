@@ -1,3 +1,4 @@
+# cspell:words insmod pkexec
 """Linux user-space privilege escalation patterns.
 
 Wave-25 distillation round 11 — Linux USER-SPACE privesc primitives.

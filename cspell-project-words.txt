@@ -1231,7 +1231,6 @@ execnet
 execset
 execstack
 execstart
-execsync
 executability
 executemany
 executescript
@@ -1797,7 +1796,6 @@ inputtemplate
 inresponseto
 insens
 insertadjacenthtml
-insmod
 inspectable
 instabug
 instancer
@@ -2014,8 +2012,6 @@ lata
 latestest
 launchable
 launchagent
-launchagents
-launchdaemons
 launchmode
 lcall
 ldaps
@@ -2585,7 +2581,6 @@ nput
 nqwoiuqwoiuq
 nrtp
 nselct
-nsenter
 nserde
 nslookup
 nspawn
@@ -2799,7 +2794,6 @@ pipfile
 pizzimenti
 pjson
 pkce
-pkexec
 pkgname
 pkgpol
 pkla
@@ -3159,7 +3153,6 @@ reqbody
 reqs
 requarks
 requestauth
-requestbin
 requestdevice
 requestport
 requireauth
@@ -3408,7 +3401,6 @@ setdetails
 setdevice
 setex
 setext
-setgid
 setheader
 sethook
 setinterval
