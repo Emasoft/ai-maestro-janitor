@@ -1,0 +1,31 @@
+---
+trdd-id: JFPFN9VM
+title: Keep local pages in tracked trees out of git
+column: backburner
+status: tasked
+created: 2026-10-23T17:57:03+0200
+updated: 2026-10-23T17:57:03+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: feature
+min-approval-requirement: none
+scope: project
+project-id: ai-maestro-janitor
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-23T17:57:03+0200
+npt: [P1EOHL6A]
+relevant-rules: [13, 14, 18]
+spec: wikimem-layout-spec.md 0.2.3
+---
+
+# Keep local pages in tracked trees out of git
+
+Spec: design/specs/wikimem-layout-spec.md 0.2.3 (draft). Implements WL-12. A local page inside a git work tree is excluded by a memgrep-managed block in .git/info/exclude; before every write and in lint memgrep runs git check-ignore and refuses the write if git would track the page. Relies on VERIFY-8 for linked worktrees. Done when: the block is managed idempotently and a tracked local page is refused in a plain repository and a linked worktree.
+
+## Approval log
+
+- 2026-10-23T17:57:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
