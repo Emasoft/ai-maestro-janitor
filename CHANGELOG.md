@@ -782,6 +782,8 @@ All notable changes to this project will be documented in this file.
 - **release:** Top-level permissions {} on release.yml (TRDD-1J9B7MWO) (aeb7b88)
 - **security:** Narrow the trivy exception to the R6 comment line (TRDD-1J9B7MWO) (7b54e85)
 - **spell:** Make cspell clean over tracked files (TRDD-1J9B7MWO) (1551732)
+- Bump version to 3.8.12 (11b2f0c)
+- **spell:** Accept 4 words from the regenerated 3.8.12 CHANGELOG (TRDD-1J9B7MWO) (948c3dd)
 
 ### Performance
 
@@ -831,6 +833,7 @@ All notable changes to this project will be documented in this file.
 - **corpus:** Escape the >> in corpus line 129 as >> (TRDD-KCU6QCAP) (495c63e)
 - **corpus:** Drop the incidental shell-rc append step from sample git-hook-install-from-body-02 (TRDD-KCU6QCAP) (e7840b7)
 - **daemon:** Keep bulk-lane child A alive through the deferral check (TRDD-1J9B7MWO) (1250c7a)
+- **screenshot-purge:** Widen the boundary margin from 3.6 s to 6 min (TRDD-1J9B7MWO) (24bdfa0)
 
 ### YONEH3XC
 
