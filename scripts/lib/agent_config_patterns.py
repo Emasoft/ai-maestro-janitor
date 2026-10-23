@@ -362,7 +362,7 @@ _CROSS_SKILL_SHADOW = _re(
 # exfiltration in general, and COVERAGE.md says so rather than papering
 # over it.
 _EXFIL_WEBHOOK = _re(
-    # A spelling directive on this code line, not a header word list: CPV skillaudit
+    # The directive below covers only the next line (not a header word list): CPV skillaudit
     # flags any comment line that names the sink word itself (DATA_EXFIL).
     # cspell:disable-next-line
     r"\b(?:webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com"

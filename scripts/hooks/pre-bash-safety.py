@@ -92,7 +92,7 @@ _NETWORK_SINK_PATTERNS = (
     # SCP / SFTP / rsync — out-of-band copy
     re.compile(r"\b(?:scp|sftp|rsync)\b.*?:[^/\s]"),
     # Known exfil sinks the agent-context catalogue lists
-    # A spelling directive on this code line, not a header word list: CPV skillaudit
+    # The directive below covers only the next line (not a header word list): CPV skillaudit
     # flags any comment line that names the sink word itself (DATA_EXFIL).
     # cspell:disable-next-line
     re.compile(r"\b(?:webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com"
