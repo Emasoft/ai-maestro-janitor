@@ -831,6 +831,7 @@ cret
 crewai
 crio
 crip
+criticals
 critset
 crondelete
 cronlist
@@ -1264,6 +1265,7 @@ exxxxxxxxxxxxxxxxx
 exécuter
 exécutez
 facebookwkhpilnemxj
+facted
 failclosed
 failcount
 failon
@@ -2324,6 +2326,7 @@ monkeypatchable
 monkeypatched
 monkeypatches
 monkeypatching
+mootness
 mosquitto
 motw
 mountpoint
@@ -4033,6 +4036,7 @@ unretrievable
 unreviewable
 unrotated
 unroutable
+unrun
 unrunnable
 unsandboxed
 unscannable
