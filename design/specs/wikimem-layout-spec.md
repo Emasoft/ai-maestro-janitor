@@ -3,7 +3,7 @@ spec: wikimem-layout
 spec-version: 0.2.9
 status: draft
 created: 2026-10-23T17:20:00+0200
-updated: 2026-10-23T18:15:29+0200
+updated: 2026-10-23T20:25:39+0200
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner rulings PRRD G13-G26, 2026-10-23)
