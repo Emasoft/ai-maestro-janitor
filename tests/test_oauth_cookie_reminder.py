@@ -235,6 +235,8 @@ def test_keychain_backed_refresh_slot_is_seen_healthy_no_plaintext(
     assert _by_condition(tmp_path, "oauth-cookie-refresh-now") == {}
 
 
+# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
+@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_account_observed_fine_is_cleared_and_unreadable_one_is_kept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -272,6 +274,8 @@ def test_unreadable_cookie_db_is_neither_recorded_nor_cleared(
     assert len(_by_condition(tmp_path, "oauth-cookie-refresh")) == 1
 
 
+# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
+@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_losing_all_healthy_oauth_adds_exactly_one_urgent_record_and_episode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

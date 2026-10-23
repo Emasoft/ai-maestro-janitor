@@ -633,6 +633,8 @@ def _write_fine_slot(home: Path, email: str) -> None:
     (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
 
 
+# The runner is only invoked by notify._deliver on darwin (osascript) or with notify-send installed; CI ubuntu has neither.
+@pytest.mark.skipif(sys.platform != "darwin", reason="counts banners through the darwin osascript tier")
 def test_an_account_seen_fine_ends_its_episode_and_sparse_heartbeats_do_not_renotify(
     tmp_path, monkeypatch, capsys
 ) -> None:
