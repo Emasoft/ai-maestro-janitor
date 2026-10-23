@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-23T12:48:23+0200
+updated: 2026-10-23T15:31:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -54,3 +54,4 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-18 IN PROGRESS: the daemon now logs 'rotator tick slow: subprocess Ns, esc-pass Ns, rc=..., load L1 L5 L15' for every tick of 30 s or more (commit b1870adb). HIGH LOAD for this card's acceptance = load1 at or above the host's logical CPU core count (sysctl -n hw.ncpu on macOS). The line attributes a slow tick to the rotator subprocess or the ESC pass only; per-step timing inside rotator.py (keychain read, usage call, refresh) is the next step if the subprocess phase dominates. Reaches daemon.log only after a release and a local plugin update.
 - 2026-10-18T01:25:14+0200 — column → testing by main-agent@ai-maestro-janitor. slow-tick logging landed in b1870adb; acceptance judged from 'rotator tick slow:' lines after a release
 - 2026-10-23T12:48+0200 — FIELD CHECK, NOT MET (read by the main session): b1870adb is in the v3.8.12 and v3.8.13 tags; the daemon restarted 2026-10-23T08:14 after a staged newer version; of 272 oauth-rotator-tick runs since then (about 4.5 h) none took 30 s or more, where the earlier samples on this card (8 of 1313, 27 of 1514, 4 of 66) predict about 2 to 16 and the pooled rate of 39 of 2893 predicts about 4, a mild positive signal, weak against the 0.6% sample; daemon.log holds no 'rotator tick slow:' line, but the running daemon's version was not confirmed, so that absence is evidence only if it carries b1870adb. Load during the window is not logged (the slow line records load only on a slow tick); load1 was 7.32 against 14 logical cores at check time only, so the high-load case the acceptance names is not shown. Stays in testing.
+- 2026-10-23T15:31+0200 — FIELD CASE OBSERVED, ACCEPTANCE NOT MET (daemon.log read by the main session): at load1 136.03 on 14 logical cores the line '[2026-10-23T15:29:06+0200] rotator tick slow: subprocess 83s, esc-pass 0s, rc=0, load 136.03 60.22 30.22' was logged, and the tick before it took 8 s; the ticks before and after took 0 s. So the running daemon does carry b1870adb (this resolves the version caveat of the 12:48 line), and one tick at high load took 83 s against the 30 s target, all of it in the subprocess. One sample, at about ten times the core count. Open question for the next step: whether a 30 s target is reachable at that load, or the subprocess (not the daemon's priority) is what needs bounding.
