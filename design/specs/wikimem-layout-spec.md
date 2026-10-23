@@ -36,6 +36,7 @@ Notice for the owner: wikimem pages have no unique page id today (F8); G19's pre
 - F15. 3-pillars cards carry `project-id: <repo name>` (100 cards here: `ai-maestro-janitor`).
 - F16. Worktree slug folders (`<repo>--claude-worktrees-<name>`) record the main repo as cwd. Some slug folders hold more than one recorded cwd: report line 31 lists four, among them `-Users-USER-Code-EMASOFT-INTEGRATOR-AGENT`, which holds cwds of two DIFFERENT projects (claude-code-slug-facts report lines 12, 29-31).
 - F17. Claude Code notes carry a minimal frontmatter (name, description, metadata.type); the keys only wikimem writes are `node_type` and `tier` (memory_scopes.py:792-830, is_curated_wiki_page).
+- F18. VERIFY-4 (TRDD-W17F82DN, measured 2026-10-23 on 57 local git repos, reports/board/20261023_202139+0200-W17F82DN-verify4.md): without 3-pillars cards a project has no stored project-id. 14 of 57 repos have no `origin` remote and 5 have no commits (so no root commit). Copies and clones of one project share both the root commit and the remote URL (KEYBARD and "KEYBARD copy"; late-cli and late-cli-followup). One repo (ANIME2SVG) has 4 root commits. No PROJECT memory page here carries `project-id:`. Neither the remote URL (absent, or changed by a rename) nor the root commit (shared with forks, missing without commits, several per repo) is a unique identity on its own. Not measured: a real fork, and two different repos with the same name.
 
 ## WL-REQ — requirements
 
