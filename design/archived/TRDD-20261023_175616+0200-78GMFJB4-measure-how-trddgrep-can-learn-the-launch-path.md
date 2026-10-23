@@ -1,10 +1,10 @@
 ---
 trdd-id: 78GMFJB4
 title: Measure how trddgrep can learn the launch path
-column: backburner
-status: tasked
+column: complete
+status: archived
 created: 2026-10-23T17:56:16+0200
-updated: 2026-10-23T18:08:05+0200
+updated: 2026-10-23T22:52:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -28,3 +28,8 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). VERIFY-7 restated: trdd
 ## Approval log
 
 - 2026-10-23T17:56:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-23T22:52:07+0200 — COMPLETE by main-agent@ai-maestro-janitor. VERIFY-7 measured; spec WL-FACT F20.
+
+## Acceptance checklist
+
+- [x] Measured read-only how trddgrep finds its corpus (cwd realpath only, no CLAUDE_PROJECT_DIR read) and recorded it as spec WL-FACT F20, with the unmeasured hook and worktree case named.
