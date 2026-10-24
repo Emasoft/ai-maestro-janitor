@@ -4,7 +4,7 @@ title: The outside-publish finding must fit its own ledger cap and stay findable
 column: todo
 status: tasked
 created: 2026-10-20T18:17:06+0200
-updated: 2026-10-20T18:17:06+0200
+updated: 2026-10-24T05:13:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,3 +44,4 @@ MUTATION-VERIFY each new assertion: restore the buggy form and confirm the test 
 ## Approval log
 
 - 2026-10-20T18:17:06+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-24T05:20+0200 — VERIFY against e01c13da (read-only worker, reports/board/20261024_051252+0200-NPNXI430-verify.md; the main session re-read repo-state.py:136-185, 836-850, 920-942): H-1, H-2, M-1, M-2 and L-2 are fixed; 44 tests in tests/test_repo_state.py pass. STILL OPEN: L-1, the stdout line at repo-state.py:844 still says 'are NOT made through publish.py' (an authorship claim) while the ledger now reads 'N commit(s) on BRANCH since release TAG: <subjects>'; L-3, the state.log_line calls at :927 and :940 sit outside any try/except; acceptance (3) has no long-tag test case; acceptance (4), the comment near :848 that says the ledger holds the subjects 'in full' is stale (each is cut to 40 characters); the 'all five single-guard mutations survive' claim was not re-run. _ledger_msg cuts the tag at 40 characters, which its own comment frames as bounding, not as never-truncated; real tags are far shorter. Card stays in todo for those items.
