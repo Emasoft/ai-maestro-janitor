@@ -1,10 +1,10 @@
 ---
 trdd-id: A56E22AL
 title: The daily drift dedupe silences the ticket-dispatch NEEDS A HUMAN line
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-24T11:42:23+0200
-updated: 2026-10-24T11:46:27+0200
+updated: 2026-10-24T11:48:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-24T11:42:23+0200
+blocked-by: [5CGPEK4V]
+pre-block-column: todo
 ---
 
 # The daily drift dedupe silences the ticket-dispatch NEEDS A HUMAN line
@@ -26,3 +28,4 @@ Found by the TRDD-F3LVCQ39 census. ticket-dispatch.py:155 says the NEEDS A HUMAN
 ## Approval log
 
 - 2026-10-24T11:42:23+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-24T11:48:02+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on TRDD-5CGPEK4V, which owns the cadence of owner-only lines
