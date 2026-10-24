@@ -3556,6 +3556,9 @@ def _phase_guard_branch_protection() -> None:
     so this phase is near-free on every fire that doesn't actually
     need to act.
 
+    Its stdout is captured and re-emitted through `_defang_foreign_markers`
+    (stderr stays inherited); see the WHY comment at the call.
+
     The whole phase is wrapped defensively so a guard-side fault never
     crashes the heartbeat — RULE-0 baseline.
     """
@@ -3570,15 +3573,30 @@ def _phase_guard_branch_protection() -> None:
     script = _HERE / "guard" / "branch_protection_apply.py"
     if not script.is_file() or not os.access(script, os.X_OK):
         return
+    # WHY (TRDD-4DP942BO): stdout must NOT be inherited. The guard prints GitHub-sourced text (the API
+    # error message, the default branch, CI check names), and the heartbeat protocol acts on any bare
+    # `[janitor-...]` line on stdout, so a forged one in that text would be executed. Piping it lets us
+    # defang it. errors="replace": this phase catches only TimeoutExpired/OSError, so a non-UTF-8 byte
+    # would otherwise raise out of the heartbeat. Deliberately NOT routed through _quiet_filter,
+    # _dedupe_drift_text or _drop_suppressed_lines: dedupe would show a repeated "apply FAILED" or
+    # "not admin" security line once a day instead of on every run. This fix is the defang only.
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             [str(script)],
-            capture_output=False,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=60,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         state.log_line("dispatch", "guard branch-protection apply timed out")
+        partial_raw = exc.stdout
+        partial = partial_raw.decode("utf-8", "replace") if isinstance(partial_raw, bytes) else partial_raw
+        if partial:
+            sys.stdout.write(_defang_foreign_markers("guard-branch-protection", partial))
+            sys.stdout.flush()
         state.record_outcome("guard-branch-protection", "error:timeout")
         _track_detector_streak("guard-branch-protection", "error:timeout")
     except OSError as exc:
@@ -3586,6 +3604,9 @@ def _phase_guard_branch_protection() -> None:
         state.record_outcome("guard-branch-protection", "error:spawn-failed")
         _track_detector_streak("guard-branch-protection", "error:spawn-failed")
     else:
+        if proc.stdout:
+            sys.stdout.write(_defang_foreign_markers("guard-branch-protection", proc.stdout))
+            sys.stdout.flush()
         # WHY: a completed run with rc 0 is a pass; a non-zero rc is a crash, counted like
         # _run_detector's error:rc=N. The guard exits 0 on every decline path
         # (branch_protection_apply.py returns 0 at 143/261/303/353), so a non-zero rc only ever means
