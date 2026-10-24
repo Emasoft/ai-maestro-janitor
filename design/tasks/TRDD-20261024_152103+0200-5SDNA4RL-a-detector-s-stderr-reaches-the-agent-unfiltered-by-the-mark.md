@@ -1,10 +1,10 @@
 ---
 trdd-id: 5SDNA4RL
 title: A detector's stderr reaches the agent unfiltered by the marker defang
-column: dev
+column: testing
 status: tasked
 created: 2026-10-24T15:21:03+0200
-updated: 2026-10-24T15:44:24+0200
+updated: 2026-10-24T16:25:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-24T15:21:03+0200
+implementation-commits: [42d15d62]
 ---
 
 # A detector's stderr reaches the agent unfiltered by the marker defang
@@ -29,6 +30,7 @@ First step, before any fix: verify the premise. Does the Bash tool result of a h
 
 - 2026-10-24T15:21:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-24T15:35:58+0200 — column → dev by main-agent@ai-maestro-janitor. probe is concrete and safe; pulled under the S6GX1DHN drain mandate
+- 2026-10-24T16:25:48+0200 — column → testing by main-agent@ai-maestro-janitor. fix committed and tested; one live observation remains
 
 ## Method
 
@@ -40,3 +42,12 @@ Isolation and controls (review of 60629ae3): run the scratch copy's scripts/disp
 
 2026-10-24: isolated probe (scratch copy of scripts/, throwaway detector zz-stderr-probe, empty scratch CLAUDE_PROJECT_DIR and state dirs). CONTROL PASS: the stdout line came back defanged as ⟦janitor-reload⟧ positive-control. LEAK YES: the bare [janitor-resume] the detector wrote to stderr appeared raw as the first line of the Bash tool result; a second run with stdout and stderr split to files proved the raw line came from stderr. The ls -l --full-time listing of this repo's .janitor/state was identical before and after (names, sizes and mtimes; contents were not compared). The cron path is the same channel: dispatcher-stub.py hands over with os.execv (two grep hits in its version resolver), and fd 2 is not close-on-exec, so it is inherited; and the cron fire runs the stub inside a Bash tool call, as the probe did. That uv run --script leaves the stub's stderr inherited is inferred, not probed. Root cause: the subprocess.run calls in _run_detector (observed by the probe) and in _phase_guard_branch_protection (read in code, not probed) pipe stdout only, so a detector's stderr is inherited unfiltered. Evidence: reports/stderr-probe/20261024_153904+0200-stderr-probe.md (gitignored).
 Fix review (2026-10-24), verdict approve with three conditions. Review condition 1: pipe stderr with encoding utf-8 and errors replace, so a non-UTF-8 byte cannot crash a fire. Review condition 2: a lingering descendant that inherited stderr would hold the new pipe open and stall each fire on which that detector is due, for up to its timeout (default 120 s). A grep for Popen, start_new_session, nohup, setsid and os.fork/os.spawn in scripts/detectors, scripts/lib and scripts/guard found eight spawns, and every one redirects or pipes stderr; no shell=True spawn exists in those three directories. Self-daemonizing external binaries (git, gh, uv, claude, memgrep), non-Python helpers and other scripts/*.py modules were not audited. REJECTED from condition 2: the lingering-grandchild unit test, because the hazard is a property of individual detectors rather than of dispatch, and such a test would only demonstrate the stall. Replaced by an end-to-end check: a full dispatch fire on a scratch copy before and after the fix, comparing wall time and per-detector outcomes, where any new error:timeout names a detector with a lingering descendant. Review condition 3: correct this card's wording (done), widen the call-site audit (MEASURE found only the two spawn sites in dispatch.py), and add the timeout and owner-marker tests. Per MEASURE (not re-verified here): re-emit stderr defanged rather than dropping it, because state.py run_subprocess and branch_protection_lib.py:597 print real diagnostics there, the latter embedding gh stderr text (lines 619, 647 and 672). Limit: this narrows but does not close the gap in the heartbeat protocol, which acts on markers in the fire's stdout while the model sees stdout and stderr merged; dispatch.py's own stderr writes and the stub's are not filtered.
+
+## Fix
+
+2026-10-24, commit 42d15d62: _run_detector and _phase_guard_branch_protection pipe stderr (utf-8, errors replace) and re-emit it through _reemit_stderr, which defangs every reserved marker with allow_owner=False. Seven new tests in tests/test_dispatch_detector_streak.py and tests/test_dispatch_defang.py: the guard path, the detector path, the owner's own marker (bare on stdout, defanged on stderr), the timeout partial, non-UTF-8 bytes, plain pass-through, and the allow_owner unit test; the first four marker tests and the unit test failed before the fix. Full suite on the commit: 18867 passed, 2 skipped; ruff, mypy and pyright clean. A before/after full fire on an empty scratch project gave 80 identical detector outcomes and no timeouts. Not covered: the guard timeout branch has no test (its 60 s timeout is hardcoded), and external binaries that daemonize while keeping stderr were not audited.
+
+## Acceptance checklist
+
+- [x] A bare marker a detector or the guard writes to stderr reaches the model defanged (tests, commit 42d15d62)
+- [ ] Live observation: on this repo, no new error:timeout outcome and no longer heartbeat fires for a day after the fix is installed (a stall would name a detector with a lingering descendant holding stderr)
