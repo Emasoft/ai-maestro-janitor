@@ -1043,16 +1043,19 @@ def _drop_suppressed_lines(text: str) -> str:
     return "".join(kept)
 
 
-def _defang_foreign_markers(detector: str, text: str) -> str:
+def _defang_foreign_markers(detector: str, text: str, *, allow_owner: bool = True) -> str:
     """Defang reserved `[janitor-…]` markers a detector is not entitled to emit.
 
     An owner's marker survives ONLY as a bare whole line (the exact contract the
     cron clause executes); the same marker embedded in prose — even the owner's —
     is untrusted-shaped and gets defanged to `⟦janitor-…⟧` so it can't match.
+
+    `allow_owner=False` defangs EVERY reserved marker, the owner's bare line included:
+    stderr is never a legitimate marker channel, and the model cannot tell it apart from stdout in the Bash result.
     """
     if not text or "[janitor-" not in text:
         return text
-    own = _MARKER_OWNERS.get(detector)
+    own = _MARKER_OWNERS.get(detector) if allow_owner else None
     out: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -1064,6 +1067,16 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
             _RESERVED_MARKER_RE.sub(lambda m: "⟦" + m.group(0)[1:-1] + "⟧", line)
         )
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def _reemit_stderr(detector: str, text: str | bytes | None) -> None:
+    """Re-emit a child's captured stderr with every reserved marker defanged (TRDD-5SDNA4RL)."""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    if not text:
+        return
+    sys.stderr.write(_defang_foreign_markers(detector, text, allow_owner=False))
+    sys.stderr.flush()
 
 
 _DRIFT_DIGIT_RE = re.compile(r"\d+")
@@ -1552,7 +1565,13 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             [str(script), "--one-shot"],
             env={**os.environ, tickets.EMIT_ENV: "1"},
             stdout=subprocess.PIPE,
+            # WHY (TRDD-5SDNA4RL): stderr is piped too, so markers on it are defanged. An inherited stderr
+            # reaches the Bash tool result unfiltered and the model cannot tell stdout from stderr (probe-confirmed).
+            # errors="replace": a non-UTF-8 byte on stderr must not raise out of the heartbeat.
+            stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=timeout,
         )
@@ -1576,6 +1595,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
                 )
             )
             sys.stdout.flush()
+        _reemit_stderr(name, exc.stderr)
         _record_default_outcome(name, "error:timeout", started)
         _mark_detector_ran(name)
         return
@@ -1597,6 +1617,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             )
         )
         sys.stdout.flush()
+    _reemit_stderr(name, proc.stderr)
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector {name!r} exited non-zero")
         _record_default_outcome(name, f"error:rc={proc.returncode}", started)
@@ -3556,8 +3577,8 @@ def _phase_guard_branch_protection() -> None:
     so this phase is near-free on every fire that doesn't actually
     need to act.
 
-    Its stdout is captured and re-emitted through `_defang_foreign_markers`
-    (stderr stays inherited); see the WHY comment at the call.
+    Its stdout AND stderr are captured and re-emitted through `_defang_foreign_markers`
+    (stderr with `allow_owner=False`: it is never a marker channel); see the WHY comments at the call.
 
     The whole phase is wrapped defensively so a guard-side fault never
     crashes the heartbeat — RULE-0 baseline.
@@ -3584,6 +3605,10 @@ def _phase_guard_branch_protection() -> None:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             [str(script)],
             stdout=subprocess.PIPE,
+            # WHY (TRDD-5SDNA4RL): stderr is piped too, so markers on it are defanged. An inherited stderr
+            # reaches the Bash tool result unfiltered and the model cannot tell stdout from stderr
+            # (probe-confirmed on the detector path; the guard inherits stderr the same way).
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -3597,6 +3622,7 @@ def _phase_guard_branch_protection() -> None:
         if partial:
             sys.stdout.write(_defang_foreign_markers("guard-branch-protection", partial))
             sys.stdout.flush()
+        _reemit_stderr("guard-branch-protection", exc.stderr)
         state.record_outcome("guard-branch-protection", "error:timeout")
         _track_detector_streak("guard-branch-protection", "error:timeout")
     except OSError as exc:
@@ -3607,6 +3633,7 @@ def _phase_guard_branch_protection() -> None:
         if proc.stdout:
             sys.stdout.write(_defang_foreign_markers("guard-branch-protection", proc.stdout))
             sys.stdout.flush()
+        _reemit_stderr("guard-branch-protection", proc.stderr)
         # WHY: a completed run with rc 0 is a pass; a non-zero rc is a crash, counted like
         # _run_detector's error:rc=N. The guard exits 0 on every decline path
         # (branch_protection_apply.py returns 0 at 143/261/303/353), so a non-zero rc only ever means

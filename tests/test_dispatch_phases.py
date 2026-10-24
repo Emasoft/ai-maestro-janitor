@@ -5355,6 +5355,7 @@ def test_run_detector_filters_a_memory_chore_marker_when_cooldown_active(
     class _FakeCompleted:
         returncode = 0
         stdout = "[janitor-memory-consolidate]\n"
+        stderr = ""  # _run_detector now reads proc.stderr (TRDD-5SDNA4RL)
 
     def _fake_run(*args: object, **kwargs: object) -> _FakeCompleted:
         return _FakeCompleted()

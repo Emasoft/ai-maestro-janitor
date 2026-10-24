@@ -330,3 +330,10 @@ def test_host_load_ignored_end_to_end(tmp_path, monkeypatch):
             _clear_state_cache()
     assert "HOST-001" not in outs["ignored"]
     assert "HOST-001" in outs["plain"]
+
+
+def test_allow_owner_false_defangs_the_owners_bare_marker():
+    """With allow_owner=False even the owner's bare marker is defanged; the default keeps it (stderr is never a marker channel)."""
+    assert DEFANG("memory-maintenance", "[janitor-memory-split]\n") == "[janitor-memory-split]\n"
+    out = DEFANG("memory-maintenance", "[janitor-memory-split]\n", allow_owner=False)
+    assert out == "⟦janitor-memory-split⟧\n"

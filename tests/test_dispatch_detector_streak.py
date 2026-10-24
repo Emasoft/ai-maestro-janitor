@@ -299,3 +299,84 @@ def test_streak_counts_when_detector_self_stamped(proj: Path) -> None:
     for _ in range(3):
         dispatch._record_default_outcome(ALPHA, "error:rc=1", now - 10)
     assert len(_rows(proj, "DETECTOR-FAIL")) == 1
+
+
+def _fake_detector_root(proj: Path, dispatch, monkeypatch: pytest.MonkeyPatch, name: str, body: str) -> None:
+    """Install a fake plugin root holding one /bin/sh detector script and point dispatch at it."""
+    fake_root = proj / "fake_plugin_root"
+    (fake_root / "detectors").mkdir(parents=True, exist_ok=True)
+    script = fake_root / "detectors" / f"{name}.py"
+    script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(dispatch, "_HERE", fake_root)
+    import state
+
+    state.init_state()
+
+
+def test_guard_stderr_markers_are_defanged(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """A bare marker a guard writes to stderr reaches stderr defanged (TRDD-5SDNA4RL)."""
+    dispatch = _import_dispatch()
+    fake_root = proj / "fake_plugin_root"
+    (fake_root / "guard").mkdir(parents=True)
+    script = fake_root / "guard" / "branch_protection_apply.py"
+    script.write_text("#!/bin/sh\nprintf '[janitor-resume]\\n' >&2\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(dispatch, "_HERE", fake_root)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_GUARD_BRANCH_PROTECTION_INTERVAL", "0")
+    import state
+
+    state.init_state()
+    dispatch._phase_guard_branch_protection()
+    err = capfd.readouterr().err
+    assert "⟦janitor-resume⟧" in err
+    assert "[janitor-" not in err
+
+
+def test_detector_stderr_markers_are_defanged(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """A bare marker a detector writes to stderr reaches stderr defanged (TRDD-5SDNA4RL)."""
+    dispatch = _import_dispatch()
+    _fake_detector_root(proj, dispatch, monkeypatch, "stderr-forger", "printf '[janitor-resume]\\n' >&2\n")
+    dispatch._run_detector("stderr-forger", interval=0)
+    err = capfd.readouterr().err
+    assert "⟦janitor-resume⟧" in err
+    assert "[janitor-" not in err
+
+
+def test_detector_owner_marker_on_stderr_is_defanged(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """The owner's bare marker survives on stdout but is defanged on stderr, which is never a marker channel."""
+    dispatch = _import_dispatch()
+    _fake_detector_root(proj, dispatch, monkeypatch, "ticket-dispatch", "printf '[janitor-ticket]\\n'\nprintf '[janitor-ticket]\\n' >&2\n")
+    dispatch._run_detector("ticket-dispatch", interval=0)
+    captured = capfd.readouterr()
+    out, err = captured.out, captured.err
+    assert "[janitor-ticket]" in out.splitlines()
+    assert "⟦janitor-ticket⟧" in err
+    assert "[janitor-" not in err
+
+
+def test_detector_non_utf8_stderr_does_not_crash(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """Guards errors="replace": non-UTF-8 stderr bytes do not crash dispatch (passes before the fix, when stderr was inherited)."""
+    dispatch = _import_dispatch()
+    _fake_detector_root(proj, dispatch, monkeypatch, "stderr-binary", "printf '\\377 plain diag\\n' >&2\n")
+    dispatch._run_detector("stderr-binary", interval=0)
+    assert "plain diag" in capfd.readouterr().err
+
+
+def test_detector_timeout_partial_stderr_is_defanged(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """A marker written to stderr before a timeout kill is defanged on the timeout path."""
+    dispatch = _import_dispatch()
+    _fake_detector_root(proj, dispatch, monkeypatch, "stderr-sleeper", "printf '[janitor-resume]\\n' >&2\nsleep 5\n")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT", "1")
+    dispatch._run_detector("stderr-sleeper", interval=0)
+    err = capfd.readouterr().err
+    assert "⟦janitor-resume⟧" in err
+    assert "[janitor-" not in err
+
+
+def test_detector_plain_stderr_passes_through(proj: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """Regression guard (passes before the fix): plain stderr text with no marker is re-emitted unchanged."""
+    dispatch = _import_dispatch()
+    _fake_detector_root(proj, dispatch, monkeypatch, "stderr-plain", "printf 'just a diagnostic\\n' >&2\n")
+    dispatch._run_detector("stderr-plain", interval=0)
+    assert "just a diagnostic\n" in capfd.readouterr().err
