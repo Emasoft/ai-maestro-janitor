@@ -4,7 +4,7 @@ title: A detector's stderr reaches the agent unfiltered by the marker defang
 column: backburner
 status: tasked
 created: 2026-10-24T15:21:03+0200
-updated: 2026-10-24T15:21:03+0200
+updated: 2026-10-24T15:23:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -28,3 +28,8 @@ First step, before any fix: verify the premise. Does the Bash tool result of a h
 ## Approval log
 
 - 2026-10-24T15:21:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Method
+
+Probe: in a scratch copy of the plugin root (never the installed cache), add a throwaway detector, using the fake-script pattern from tests/test_dispatch_detector_streak.py, that writes a bare [janitor-resume] line to stderr and nothing to stdout. Run dispatch once through the Bash tool and check whether that line appears in the tool result.
+If it appears: in _run_detector and _phase_guard_branch_protection, capture stderr with stderr=subprocess.PIPE, pass it through _defang_foreign_markers like stdout, and re-emit it on stderr. Add a capfd test that asserts on err, failing before the fix.
