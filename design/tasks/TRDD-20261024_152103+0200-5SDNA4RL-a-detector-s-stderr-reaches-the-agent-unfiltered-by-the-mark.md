@@ -1,10 +1,10 @@
 ---
 trdd-id: 5SDNA4RL
 title: A detector's stderr reaches the agent unfiltered by the marker defang
-column: backburner
+column: dev
 status: tasked
 created: 2026-10-24T15:21:03+0200
-updated: 2026-10-24T15:24:50+0200
+updated: 2026-10-24T15:35:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -28,6 +28,7 @@ First step, before any fix: verify the premise. Does the Bash tool result of a h
 ## Approval log
 
 - 2026-10-24T15:21:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-24T15:35:58+0200 — column → dev by main-agent@ai-maestro-janitor. probe is concrete and safe; pulled under the S6GX1DHN drain mandate
 
 ## Method
 
