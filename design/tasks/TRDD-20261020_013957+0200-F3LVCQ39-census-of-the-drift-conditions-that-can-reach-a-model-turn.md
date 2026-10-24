@@ -4,7 +4,7 @@ title: Census of the drift conditions that can reach a model turn
 column: dev
 status: tasked
 created: 2026-10-20T01:39:57+0200
-updated: 2026-10-24T10:50:27+0200
+updated: 2026-10-24T10:58:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: audit
@@ -145,6 +145,7 @@ WHAT THE CENSUS MUST DELIVER, and what it must NOT decide. It must deliver, per 
 ACCEPTANCE. (1) Every one of the 78 registered detectors is listed with its class, and every distinct CONDITION reachable by the 47 agent-visible ones is listed with its line prefix, its repeat-while-unchanged behaviour, and its actionability classification with a reason. (2) The classification is recorded AS DATA in the code, not only in prose — a named set or a per-condition field that the dispatcher can read, so the escalation can consult it mechanically. (3) Every owner-only condition names the owner's remedy. (4) The unclassified bucket is explicitly non-empty or explicitly empty, with the reason either way. (5) A test asserts that a condition added without a classification is treated as agent-actionable (fail open). (6) The classification surface is a per-condition data structure the dispatcher reads, so a detector added after this census declares its own classification when it is added; one that is added without a classification is caught by the fail-open rule in (5) and surfaces as agent-actionable rather than silently unclassified.
 
 NEXT ACTION: classify the 47 agent-visible detectors' conditions one at a time, reading each detector's condition text and the state it fires on, and record the result in the census table above. This is mechanical and can be done in batches by a worker with the file set named. When the table is complete, TRDD-5CGPEK4V's design can be written against real numbers, and its "THE POPULATION IS NOT YET CENSUSED" paragraph can be replaced by them.
+2026-10-24 10:58 — CHANNELS B AND C MEASURED, NOT YET REVIEWED: reports/board/20261024_105742+0200-F3LVCQ39-census-channels-b-c.md (gitignored; 27 channel-B rows, 42 channel-C rows). New worker-reported findings, all ? until read here: (5) scripts/guard/branch_protection_apply.py runs with capture_output=False (dispatch.py:3574), so its prints reach heartbeat stdout with no defang, quiet filter or daily dedupe; (6) _quiet_filter runs before _dedupe_drift_text, so a repeating advisory line writes a new ADVISORY-* ledger row on every due run; (7) the iTerm alarm ledger rows (dispatch.py:3107, :3395) carry no actor=human although the stdout line carries the HUMAN-ONLY prefix; record() with project_dir=None writes the ledger surface_block(None) reads. NEXT: verify (5) to (7) in code, review the report, then mint the defect cards.
 
 
 ## Approval log
