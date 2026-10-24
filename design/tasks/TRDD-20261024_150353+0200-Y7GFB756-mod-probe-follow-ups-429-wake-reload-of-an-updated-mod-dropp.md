@@ -4,7 +4,7 @@ title: Mod probe follow-ups - 429 wake, reload of an updated mod, dropping promp
 column: backburner
 status: tasked
 created: 2026-10-24T15:03:53+0200
-updated: 2026-10-24T15:03:53+0200
+updated: 2026-10-24T15:04:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -34,3 +34,7 @@ Same method as M7RALXUW: a throwaway mod, a separate process outside the repo, t
 ## Approval log
 
 - 2026-10-24T15:03:53+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Also open
+
+6. The Desktop surface was never probed: M7RALXUW ran in the terminal only. Repeat the passing probes in Desktop.
