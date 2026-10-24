@@ -210,7 +210,7 @@ def test_outside_publish_commit_is_flagged(repo: Path, tmp_path: Path) -> None:
 
     out = _run(repo, tmp_path / "home5")
 
-    assert "NOT" in out and "publish.py" in out
+    assert "are in no release on this branch" in out and "publish.py" in out
     # The subject is NOT in the stdout line.
     assert "feat: sneaky direct commit" not in out, out
 
@@ -243,7 +243,7 @@ def test_a_commit_subject_cannot_promote_the_outside_line_past_quiet_mode(
 
     _commit(repo, "feat: FAIL unrelated prose")
     out = _run(repo, tmp_path / "homequiet")
-    line = next(ln for ln in out.splitlines() if "NOT made through publish.py" in ln)
+    line = next(ln for ln in out.splitlines() if "are in no release on this branch" in ln)
     assert "FAIL" not in line, line
 
     # The REAL filter, on the REAL line: it must be DROPPED, not promoted.
@@ -261,7 +261,7 @@ def test_a_commit_subject_cannot_promote_the_outside_line_past_quiet_mode(
     # is not SAFE, and the line's actionable content is the count.
     branchy = (
         "[repo-state] 5 commit(s) on fix-error-handling since release v1.0.0 "
-        "are NOT made through publish.py (not in any release, and not a version bump). "
+        "are in no release on this branch and are not version bumps. "
         "Run scripts/publish.py to cut a release."
     )
     assert dispatch._quiet_filter("repo-state", branchy) != "", (
@@ -270,7 +270,7 @@ def test_a_commit_subject_cannot_promote_the_outside_line_past_quiet_mode(
         "this assertion is no longer testing what it claims"
     )
     # And the EMITTED line carries no branch at all.
-    assert " on " not in line, line
+    assert "commit(s) on " not in line, line
     assert "main" not in line, line
 
 def test_the_outside_publish_subjects_reach_the_owner_through_the_ledger(
@@ -371,6 +371,23 @@ def test_the_ledger_message_fits_a_long_branch_and_long_subjects() -> None:
     # And the BRANCH is bounded: the full 198-character branch must NOT
     # be in the message, or the cap was only met by luck.
     assert long_branch not in msg, "the branch was not truncated"
+
+
+def test_the_ledger_message_keeps_count_tag_and_a_subject_for_an_oversized_tag() -> None:
+    """An oversized tag is cut at _TAG_MAX and still leaves room for a subject excerpt.
+
+    The fixed head text, the branch bound and the tag bound together must
+    leave room inside the 120-character ledger cap: with an uncut 200
+    character tag the head alone would exceed the cap and the subjects
+    (the actionable detail) would vanish.
+    """
+    tag = "v" + ("9" * 199)
+    subjects = ["feat: first subject line 1234567", "fix: second subject line 12345678"]
+    msg = rs._ledger_msg(count=12, branch="main", tag=tag, subjects=subjects)
+    assert len(msg) <= 120, f"message is {len(msg)} chars: {msg!r}"
+    assert msg.startswith("12 commit(s)"), msg
+    assert tag[:40] in msg, msg
+    assert "feat: first subject" in msg, msg
 
 
 def test_the_ledger_message_stays_bounded_for_every_input_size() -> None:
@@ -758,7 +775,7 @@ def test_release_gap_line_survives_the_real_quiet_filter(
         _commit(repo, f"feat: unreleased work {i}")
     out = _run(repo, tmp_path / "homeg8")
     gap_line = next(ln for ln in out.splitlines() if "GAP ESCALATION" in ln)
-    advisory_line = next(ln for ln in out.splitlines() if "NOT made through publish.py" in ln)
+    advisory_line = next(ln for ln in out.splitlines() if "are in no release on this branch" in ln)
 
     dispatch = _load_dispatch()
     # _quiet_filter RECORDS every line it drops (sev=LOW, code=ADVISORY-<DETECTOR>)

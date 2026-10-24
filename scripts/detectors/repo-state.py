@@ -20,8 +20,8 @@ advisory, the third severity-bearing:
    newer than the newest v* tag is unreleased work that never went through the
    publish gate. Deliberately conservative: an ordinary commit made BETWEEN
    releases is normal workflow, so this reports an informational count rather
-   than an alarm, and dedupes on (tag, count) so the same state does not
-   re-nag every hour.
+   than an alarm, and dedupes on (tag, count, UTC day) so the same state does
+   not re-nag every hour.
 
 3. release-gap escalation (TRDD-03G3CSUU): the OUT gap itself is a third
    finding, computed from this repo's OWN tag history rather than a fixed
@@ -156,19 +156,21 @@ def _ledger_msg(*, count: int, branch: str, tag: str, subjects: list[str]) -> st
     unbounded, and a commit subject is unbounded too (this repo's own
     history runs to 643 characters).
 
-    So the message is built to a FIXED budget, and the parts that must
-    stay exact — the COUNT and the TAG — are never the parts at risk:
-    the branch and each subject are truncated to their own explicit
-    widths, and the subject list is dropped entirely if what remains
-    will not fit. Every returned string is at most `_LEDGER_MSG_MAX`
-    characters, which is what makes the guarantee a guarantee rather
-    than an observation.
+    So the message is built to a FIXED budget. The COUNT comes first and
+    is never truncated: the head's fixed text (31 characters) plus
+    _BRANCH_MAX and _TAG_MAX (80) plus the count's digits stays under
+    _LEDGER_MSG_MAX (120) for any count below 10^9, and raising either
+    bound must keep that sum under 120. The TAG is cut at _TAG_MAX (40),
+    far above a plain v<major>.<minor>.<patch> tag. The branch and each
+    subject are truncated to their own explicit widths, and the subject
+    list is dropped entirely if what remains will not fit. Every
+    returned string is at most `_LEDGER_MSG_MAX` characters, which is
+    what makes the guarantee a guarantee rather than an observation.
     """
-    # The tag is the finding's SUBJECT, so it is bounded too — but a
-    # tag that is cut mid-string names a release that does not exist,
-    # which is the finding saying something false about itself. So the
-    # tag is bounded to a whole number of characters AND the head is
-    # only built once the tag is known to fit.
+    # The tag is cut at _TAG_MAX to keep the head inside the cap. A plain
+    # v<major>.<minor>.<patch> tag never reaches 40 characters; a longer
+    # tag (prerelease or build metadata) loses its tail, an accepted loss
+    # that keeps the bound.
     tag_text = tag[:_TAG_MAX]
     head = f"{count} commit(s) on {branch[:_BRANCH_MAX]} since release {tag_text}: "
     room = _LEDGER_MSG_MAX - len(head) - 2
@@ -841,7 +843,7 @@ def main() -> int:
                 # escalated line avoids the problem by carrying no branch
                 # name at all; this line now does the same, and the ledger
                 # keeps the branch.
-                msg = f"[repo-state] {len(outside)} commit(s) since release {tag} are NOT made through publish.py (not in any release, and not a version bump). Run scripts/publish.py to cut a release."
+                msg = f"[repo-state] {len(outside)} commit(s) since release {tag} are in no release on this branch and are not version bumps. Run scripts/publish.py to cut a release."
                 line = dedupe.emit_once(seen, key, msg)
                 if line:
                     lines.append(line)
@@ -854,7 +856,7 @@ def main() -> int:
                     # NOT `ref`: `ref` is capped at 24 characters and the
                     # ledger truncates HARD, mid-word, so the subjects (77
                     # characters here) would be reduced to a fragment. `msg`
-                    # is capped at 120 and holds them in full.
+                    # is capped at 120 and holds a bounded excerpt of them (see `_ledger_msg`).
                     try:
                         findings_ledger.record(
                             sev="LOW",
