@@ -1,10 +1,10 @@
 ---
 trdd-id: UP6VP41N
 title: Inventory every reader of the memgrep index file
-column: backburner
-status: tasked
+column: complete
+status: archived
 created: 2026-10-23T17:56:19+0200
-updated: 2026-10-23T18:08:08+0200
+updated: 2026-10-24T03:18:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -28,3 +28,8 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). VERIFY-11 restated: Lis
 ## Approval log
 
 - 2026-10-23T17:56:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-24T03:18:01+0200 — COMPLETE by main-agent@ai-maestro-janitor. measured; spec F23.
+
+## Acceptance criteria
+
+- [x] Every reader and writer of root/.memgrep/index.db listed (report 20261024_031731+0200); the USER mirror excludes .memgrep (memory_scopes.py:481, both copytree calls); no health check opens it with sqlite; recorded as spec F23. Open: auto-reindex by write verbs, WAL pragma location.
