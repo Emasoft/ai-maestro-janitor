@@ -4,7 +4,7 @@ title: Every quiet-dropped advisory line writes a new findings-ledger row on eac
 column: todo
 status: tasked
 created: 2026-10-24T11:42:25+0200
-updated: 2026-10-24T11:42:25+0200
+updated: 2026-10-24T11:46:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -21,7 +21,7 @@ approval-datetime: 2026-10-24T11:42:25+0200
 
 # Every quiet-dropped advisory line writes a new findings-ledger row on each run
 
-Found by the TRDD-F3LVCQ39 census. _quiet_filter is applied inside _dedupe_drift_text (dispatch.py:1590, and the timeout path at :1569), and records every dropped advisory line as a LOW ADVISORY-<DETECTOR> ledger row (:1012-1016) each time the detector runs, before the daily dedupe (read in code). Not verified: whether findings_ledger.record itself dedupes a repeated row. ACCEPTANCE: read record(); if it does not dedupe, decide the ledger contract for a repeating advisory line and enforce it with a test.
+Found by the TRDD-F3LVCQ39 census. _quiet_filter runs first, as the argument of _dedupe_drift_text (dispatch.py:1590, and the timeout path at :1569), and records every dropped advisory line as a LOW ADVISORY-<DETECTOR> ledger row (:1012-1016) each time the detector runs. findings_ledger.record does not dedupe the row: its docstring (findings_ledger.py:278-281) says the ledger entry is always appended and only the repeat print is suppressed (read in code). So a stable advisory condition adds one ledger row per detector run. The contract for repeating conditions is TRDD-5CGPEK4V's; this card fixes only the ledger growth. ACCEPTANCE: a repeated, unchanged advisory line adds no new ledger row (or the owner of 5CGPEK4V rules otherwise), with a test.
 
 ## Approval log
 

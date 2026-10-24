@@ -4,10 +4,10 @@ title: branch_protection_apply output reaches the heartbeat unfiltered
 column: todo
 status: tasked
 created: 2026-10-24T11:42:24+0200
-updated: 2026-10-24T11:42:24+0200
+updated: 2026-10-24T11:46:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
-task-type: bugfix
+task-type: security
 min-approval-requirement: none
 scope: project
 project-id: ai-maestro-janitor
@@ -21,7 +21,7 @@ approval-datetime: 2026-10-24T11:42:24+0200
 
 # branch_protection_apply output reaches the heartbeat unfiltered
 
-Found by the TRDD-F3LVCQ39 census. dispatch.py:3574-3576 runs scripts/guard/branch_protection_apply.py with capture_output=False, so the child inherits the dispatcher stdout: whatever it prints reaches the heartbeat output with no defang, quiet filter or daily dedupe (read in code). A worker reported four print sites in the script (not read here). ACCEPTANCE: capture its output and route it through the same pipeline as detector output, or prove each print is safe to pass raw, with a test.
+Found by the TRDD-F3LVCQ39 census. dispatch.py:3574-3576 runs scripts/guard/branch_protection_apply.py with capture_output=False, so the child inherits the dispatcher stdout (read in code); not verified that no phase-level redirect applies, so that this reaches the heartbeat output. An interval gate (last-run-guard-branch-protection.ts) bounds how often it runs. Captured output is defanged so a bare [janitor-...] token cannot act as a heartbeat marker; inherited output skips that, and the script handles remote GitHub data. A worker reported four print sites in the script (not read here). ACCEPTANCE: capture its output and route it through the detector pipeline (defang included), with a test that a forged marker in its output is defanged.
 
 ## Approval log
 
