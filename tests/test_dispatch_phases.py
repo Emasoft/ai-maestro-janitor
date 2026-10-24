@@ -2932,6 +2932,25 @@ def _iterm_resolution_entries() -> list[dict]:
     return [e for e in _iterm_ledger_entries() if e.get("msg") == _ITERM_RESOLVED_MSG]
 
 
+def test_iterm_alarm_unreachable_row_is_human_only(env_isolation: dict, capsys: pytest.CaptureFixture) -> None:
+    """The recorded unreachable row carries actor human and renders with the HUMAN-ONLY directive (TRDD-HCPGY099)."""
+    import findings_ledger
+
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    capsys.readouterr()
+
+    rows = _iterm_alert_entries()
+    assert len(rows) == 1, rows
+    assert rows[0].get("actor") == findings_ledger.HUMAN_ONLY_ACTOR, rows[0]
+    rendered = findings_ledger.render_line(rows[0]).split("): ", 1)[1]
+    assert rendered.startswith(findings_ledger.HUMAN_ONLY_DIRECTIVE), rendered
+
+
 def test_iterm_alarm_records_one_resolution_when_the_condition_clears(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:
@@ -2960,6 +2979,8 @@ def test_iterm_alarm_records_one_resolution_when_the_condition_clears(
     assert len(resolved) == 1, f"exactly one resolution, got {resolved}"
     assert resolved[0]["sev"] == "HIGH", "same severity as the alert so it sorts beside it"
     assert resolved[0]["code"] == before[0]["code"]
+    # Deliberately NOT human: a human actor re-stamps the surfaced flag this branch gates on and loops.
+    assert resolved[0].get("actor", "agent") == "agent"
     # The replay compares whole rendered lines: a resolution line longer than its alert line
     # could be folded while the alert is shown. The margin of 8 covers the longest plausible
     # age-text difference between the newer resolution and the older alert ("just now" vs "Nm ago").
@@ -3046,7 +3067,10 @@ def _iterm_replay_block(
     dispatch._phase_iterm_automation_alarm()
     if long_resolution:
         findings_ledger.record(
-            sev="HIGH", code="ITERM-AUTOMATION-TCC", src="iterm-automation-alarm", msg="r" * 147
+            # actor human: the control resolution must out-render the human-only alert (226 B),
+            # which a plain 120-char msg cannot (206 B); the human directive adds 98 B -> 304 B.
+            sev="HIGH", code="ITERM-AUTOMATION-TCC", src="iterm-automation-alarm", msg="r" * 147,
+            actor=findings_ledger.HUMAN_ONLY_ACTOR,
         )
     else:
         flag.unlink()
@@ -3057,7 +3081,12 @@ def _iterm_replay_block(
 
 
 _ITERM_REPLAY_CASES = pytest.mark.parametrize(
-    ("count", "msg_len"), [(5, 120), (7, 70)], ids=["five-long-highs", "seven-short-highs"]
+    # Sizes derived from render_line, budget 1024 B: other-HIGH line = 52 + msg_len; alert line 226 B
+    # (40-char msg + 98 B HUMAN-ONLY directive), short resolution 117 B, control resolution 304 B.
+    # The others must leave room for the alert but not the control: used in (720, 798], and used + 117
+    # must still crowd the alert out so the alert-implies-resolution test is not vacuous. 5*(52+100)=760,
+    # 7*(52+56)=756. (Were (5,120)=860 and (7,70)=854 when the alert line was 126 B.)
+    ("count", "msg_len"), [(5, 100), (7, 56)], ids=["five-long-highs", "seven-short-highs"]
 )
 
 

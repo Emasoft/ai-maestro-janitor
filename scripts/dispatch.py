@@ -3122,7 +3122,11 @@ def _phase_iterm_automation_alarm() -> None:
                 # that even with a longer age suffix on the newer resolution its rendered
                 # line is never longer than the alert's: surface_block skips a line that
                 # overflows its 1 KB budget and could otherwise show the alert without its
-                # resolution.
+                # resolution. It stays actor agent on purpose, because a human actor would re-stamp the
+                # surfaced-to-human flag this branch gates on and record a resolution on every fire
+                # (TRDD-HCPGY099). The alert also carries the human-only prefix and the resolution does
+                # not, which only widens the length margin; a resolution made human would lose that
+                # margin and loop (TRDD-HCPGY099).
                 # Gate = the surfaced stamp, not the ack file: the transient recent-rearm
                 # branch writes the ack but neither the stamp nor an alert.
                 findings_ledger.record(
@@ -3416,6 +3420,9 @@ def _phase_iterm_automation_alarm() -> None:
         findings_ledger.record(
             sev="HIGH", code=_ITERM_AUTOMATION_CODE, src="iterm-automation-alarm",
             msg=f"iTerm channel unreachable; evidence={rearm_epoch or 'none'}", ref="",
+            # WHY actor=human: the remedy is a GUI toggle only the owner can perform, so the
+            # row must carry the human-only directive at SessionStart too (TRDD-HCPGY099).
+            actor=findings_ledger.HUMAN_ONLY_ACTOR,
         )
     except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
         state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")
