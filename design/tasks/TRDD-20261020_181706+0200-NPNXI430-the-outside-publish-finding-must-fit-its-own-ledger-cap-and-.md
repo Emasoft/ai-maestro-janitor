@@ -1,10 +1,10 @@
 ---
 trdd-id: NPNXI430
 title: The outside-publish finding must fit its own ledger cap and stay findable
-column: todo
+column: testing
 status: tasked
 created: 2026-10-20T18:17:06+0200
-updated: 2026-10-24T05:16:36+0200
+updated: 2026-10-24T07:00:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: manager
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T18:17:06+0200
+implementation-commits: [e01c13da, 07293454]
 ---
 
 # The outside-publish finding must fit its own ledger cap and stay findable
@@ -47,3 +48,5 @@ MUTATION-VERIFY each new assertion: restore the buggy form and confirm the test 
 2026-10-24T05:20+0200 — VERIFY against e01c13da (read-only worker, reports/board/20261024_051252+0200-NPNXI430-verify.md; the main session re-read repo-state.py:136-185, 836-850, 920-942): H-1, H-2, M-1, M-2 and L-2 are fixed; 44 tests in tests/test_repo_state.py pass. STILL OPEN: L-1, the stdout line at repo-state.py:844 still says 'are NOT made through publish.py' (an authorship claim) while the ledger now reads 'N commit(s) on BRANCH since release TAG: <subjects>'; L-3, the state.log_line calls at :927 and :940 sit outside any try/except; acceptance (3) has no long-tag test case; acceptance (4), the comment near :848 that says the ledger holds the subjects 'in full' is stale (each is cut to 40 characters); the 'all five single-guard mutations survive' claim was not re-run. _ledger_msg cuts the tag at 40 characters, which its own comment frames as bounding, not as never-truncated; real tags are far shorter. Card stays in todo for those items.
 2026-10-24T05:35+0200 — CORRECTION to the 05:20 line (review of a6f9612b; the main session re-read the code): (a) the stale comment is at repo-state.py:857, not :848, and it says the ledger msg 'holds them in full'; it is stale, because _ledger_msg cuts each subject to 40 characters. (b) '44 tests pass' was reported by the worker; the main session did not run the tests. (c) the tag cut is OPEN, not benign: the _ledger_msg docstring says the COUNT and the TAG 'are never the parts at risk', but the code does tag[:_TAG_MAX] with _TAG_MAX 40, so the docstring and the code contradict each other. (d) H-2 is shown fixed in the detector comment (:936); in tests/test_repo_state.py the 'unbounded' lines (292, 342, 1165, 1185) are about branch names, subjects or repeats, not about the log, so no false copy was found there; the card's own copy was not edited. (e) L-2 is fixed: the subject log write (:940) sits inside the 'if line:' block after dedupe.emit_once, so it runs once per episode. (f) L-1 has shifted: the ledger msg no longer makes the reachability claim the card called accurate, so the fix is to make the stdout line describe the measurement (commits since the release TAG that are in no release) without claiming who made them.
 2026-10-24T05:50+0200 — SECOND CORRECTION (review of b8f414d8; read by the main session): (d) H-2 is PARTIAL, not fixed: the detector comment (:936) is fixed, the card's own copy was not edited, and the test file was checked only by a grep for the word 'unbounded' (line 1185, read in full at 1183-1186, is about a repeat loop, not the log). (e) the subject log write (:940) is inside the 'if line:' gate of dedupe.emit_once, whose key at :814 joins the word outside, the tag, the count and the day number (emit_once returns the message the first time a key is seen, scripts/lib/dedupe.py:65-66), so the subjects are logged once per tag, count and day, not once per episode; L-2's ask (once per tag and count) is met only up to the daily bucket. (f) the stdout fix must describe the whole measurement, including the version-bump exclusion, with no authorship claim. (c) the tag mismatch can be fixed in the docstring rather than the code: the inline comment already describes the 40-character bound.
+2026-10-24T07:10+0200 — LANDED 07293454 (worker change, re-read and test-run by the main session: 45 passed): L-1, the stdout line now says the commits 'are in no release on this branch and are not version bumps' (no urgent-filter word; the quiet-mode test still passes); the _ledger_msg docstring and the inline tag comment now state that the COUNT leads and is never cut (counts below 10^9, bounds summing to 80) and that a tag past 40 characters loses its tail; the :857 'in full' comment and the module docstring's dedupe key (tag, count, UTC day) are corrected; new test test_the_ledger_message_keeps_count_tag_and_a_subject_for_an_oversized_tag fails on its subject assertion when the tag bound is removed (mutation run by the worker, arithmetic checked by review). NOT DONE, with reason: L-3 (try/except around the two state.log_line calls) is rejected, because the fail-fast rule forbids error handling that hides a failure and the detector runs as a subprocess, so an unwritable log dir already fails visibly; the card's own 'unbounded' text quotes the false claim as the defect, so it was left. The finding text reaches this machine only after a release and a local plugin update.
+- 2026-10-24T07:00:42+0200 — column → testing by main-agent@ai-maestro-janitor. code landed in 07293454; the new text is observable only after a release
