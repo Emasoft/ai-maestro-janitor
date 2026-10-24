@@ -4,7 +4,7 @@ title: Index-reader inventory and migration
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:01+0200
-updated: 2026-10-23T18:10:18+0200
+updated: 2026-10-24T03:19:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-10 with V
 
 - 2026-10-23T17:57:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:43+0200 — column → blocked. waits on UXIL77GB
+- 2026-10-24T03:19:28+0200 — VERIFY-11 measured (spec F23): today's _MIRROR_IGNORE (memory_scopes.py:481) skips only .memgrep, so wm_*_index.db and its journals placed beside the pages WOULD be mirrored; this card must extend the filter and remove the old index. Other copy/move/delete paths were not enumerated; list them here before the move.
