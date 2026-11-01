@@ -4,7 +4,7 @@ title: the janitor never types clear on its own, compaction belongs to the user'
 column: dev
 status: tasked
 created: 2026-11-01T02:44:19+0100
-updated: 2026-11-01T02:54:25+0100
+updated: 2026-11-01T03:13:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-01T02:44:19+0100
+implementation-commits: [64768ab7]
 ---
 
 # the janitor never types clear on its own, compaction belongs to the user's compaction mod

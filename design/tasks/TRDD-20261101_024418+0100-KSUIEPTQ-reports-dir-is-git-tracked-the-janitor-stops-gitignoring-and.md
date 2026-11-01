@@ -4,7 +4,7 @@ title: reports dir is git-tracked, the janitor stops gitignoring and purging it
 column: dev
 status: tasked
 created: 2026-11-01T02:44:18+0100
-updated: 2026-11-01T02:58:38+0100
+updated: 2026-11-01T03:13:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-01T02:44:18+0100
+implementation-commits: [010be429, 64768ab7]
 ---
 
 # reports dir is git-tracked, the janitor stops gitignoring and purging it
