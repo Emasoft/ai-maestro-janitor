@@ -428,7 +428,7 @@ def _response(
         if enforce and tool_name in _SPAWNER_TOOLS:
             return _deny(f"[token-guard] STOP — token runaway ({signals}). Do NOT spawn another subagent (the biggest token multiplier). End this step, TaskStop any background subagents, and /compact before continuing. (Disable: CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)")
         if has_output:
-            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest. If bounded work remains, delegate it to a lean-worker subagent instead of continuing in this expensive turn."
+            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact. Sustained output burns subscription usage fastest. If bounded work remains, delegate it to a lean-worker subagent instead of continuing in this expensive turn."
             if has_cache_miss:
                 msg += f" {_CACHE_MISS_NOTE}"
             return _context(msg)

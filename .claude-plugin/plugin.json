@@ -334,14 +334,14 @@
     },
     "screenshot_purge_enabled": {
       "title": "Screenshot auto-purge enabled",
-      "description": "When true (default), the screenshot-purge detector removes browser-UI test screenshots from <project_root>/reports/screenshots/ that exceed screenshot_max_age_hours, AND when free disk space drops below screenshot_lowdisk_min_free_gb it deletes the oldest screenshots first until free space recovers above screenshot_lowdisk_target_free_gb. Only files with screenshot extensions (.png .jpg .jpeg .webp .gif) inside reports/screenshots/ are touched \u2014 anything else (including .gitkeep, README files, and the directory itself) is left alone. The folder is gitignored per the reports rule, so screenshots are short-lived cache; bypassing safe-delete is correct here.",
+      "description": "When true (default), the screenshot-purge detector removes browser-UI test screenshots from <project_root>/reports_dev/<component>/screenshots/ that exceed screenshot_max_age_hours, AND when free disk space drops below screenshot_lowdisk_min_free_gb it deletes the oldest screenshots first until free space recovers above screenshot_lowdisk_target_free_gb. Only files with screenshot extensions (.png .jpg .jpeg .webp .gif) inside reports_dev/<component>/screenshots/ are touched \u2014 anything else (including .gitkeep, README files, and the directory itself) is left alone. reports_dev/ is gitignored while reports/ is git-tracked and is never purged, so screenshots there are short-lived cache; bypassing safe-delete is correct here.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "screenshot_max_age_hours": {
       "title": "Screenshot Max Age (hours)",
-      "description": "Hours a screenshot can live in reports/screenshots/ before screenshot-purge removes it. Default: 72 (3 days). Age is computed from file mtime \u2014 test runners that re-screenshot the same name reset the clock automatically.",
+      "description": "Hours a screenshot can live in reports_dev/<component>/screenshots/ before screenshot-purge removes it. Default: 72 (3 days). Age is computed from file mtime \u2014 test runners that re-screenshot the same name reset the clock automatically.",
       "type": "number",
       "default": 72,
       "sensitive": false
@@ -355,7 +355,7 @@
     },
     "screenshot_lowdisk_min_free_gb": {
       "title": "Screenshot Low-Disk Trigger (GiB)",
-      "description": "When free space on the disk holding reports/screenshots/ drops below this many GiB, screenshot-purge enters low-disk mode and deletes oldest screenshots first (regardless of age) until free space recovers above screenshot_lowdisk_target_free_gb. Default: 5. Set to 0 to disable low-disk override (age-only mode).",
+      "description": "When free space on the disk holding reports_dev/<component>/screenshots/ drops below this many GiB, screenshot-purge enters low-disk mode and deletes oldest screenshots first (regardless of age) until free space recovers above screenshot_lowdisk_target_free_gb. Default: 5. Set to 0 to disable low-disk override (age-only mode).",
       "type": "number",
       "default": 5,
       "sensitive": false
@@ -780,16 +780,23 @@
       "default": 0,
       "sensitive": false
     },
+    "auto_clear_enabled": {
+      "title": "Automatic /clear Enabled",
+      "description": "When false (DEFAULT) the janitor never types /clear on its own: no idle clear, no Stop-boundary clear, no shrink-before-reload (reloads still run, just without the shrink). Compaction belongs to the compaction mod you installed. The manual /janitor-handoff-and-clear still works. This is the MASTER switch: when false it also disables the per-lever idle-clear options (external_idle_clear_enabled, the cold-cache clear), whatever they are set to. Set true only if no compaction mod is installed (TRDD-HM8WOCOO).",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
+    },
     "context_watchdog_enabled": {
       "title": "Context-Size Runaway Guard Enabled",
-      "description": "When true (DEFAULT), the `pre-tool-context-usage` PreToolUse hook fires on every tool call and guards the per-turn CONTEXT-SIZE token bleed \u2014 two-tiered. ADVISORY (at/above context_compact_suggest_pct): injects the % + a /janitor-compact-context nudge via additionalContext, without altering the tool's permission flow. ENFORCEMENT (at/above context_hardstop_pct, gated by context_autocompact_enabled): queues a compaction on this pane and DENIES the tool call so the turn ends cleanly for /compact, after which post-compact-resume continues the work at a reduced context. Occupancy is read from the statusline snapshot at <project>/.claude/janitor/context-usage.<session>.json, or (no statusline) falls back to the transcript's latest assistant input+cache occupancy (token_meter.latest_context_size) over context_window_tokens. Every path FAILS OPEN: a read error or no automatable terminal degrades to the advisory, never a stuck deny. DEFAULT-ON because the per-turn context bleed it prevents cost the user a month of tokens (every turn re-reads the WHOLE context, so a session near the 1M cap burns ~its size in tokens per turn); set false to disable both tiers, or context_autocompact_enabled=false to keep only the advisory. Part of the context watchdog (TRDD-31095269, TRDD-SMZFJVZ3); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill.",
+      "description": "When true (DEFAULT), the `pre-tool-context-usage` PreToolUse hook fires on every tool call and guards the per-turn CONTEXT-SIZE token bleed \u2014 two-tiered. ADVISORY (at/above context_compact_suggest_pct): injects the % + a /janitor-write-handoff suggestion via additionalContext, without altering the tool's permission flow. ENFORCEMENT (at/above context_hardstop_pct, gated by context_autocompact_enabled): queues a compaction on this pane and DENIES the tool call so the turn ends cleanly for /compact, after which post-compact-resume continues the work at a reduced context. Occupancy is read from the statusline snapshot at <project>/.claude/janitor/context-usage.<session>.json, or (no statusline) falls back to the transcript's latest assistant input+cache occupancy (token_meter.latest_context_size) over context_window_tokens. Every path FAILS OPEN: a read error or no automatable terminal degrades to the advisory, never a stuck deny. DEFAULT-ON because the per-turn context bleed it prevents cost the user a month of tokens (every turn re-reads the WHOLE context, so a session near the 1M cap burns ~its size in tokens per turn); set false to disable both tiers, or context_autocompact_enabled=false to keep only the advisory. Part of the context watchdog (TRDD-31095269, TRDD-SMZFJVZ3); pairs with the post-compact-resume PostCompact hook.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "context_compact_suggest_pct": {
       "title": "Context-Size Guard - Advisory (Warn) Threshold (%)",
-      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-compact-context. Default 60 \u2014 leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). This is the soft WARN level; the hard ENFORCE level is context_hardstop_pct. Only consulted when context_watchdog_enabled is true.",
+      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-write-handoff. Default 60 \u2014 leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). This is the soft WARN level; the hard ENFORCE level is context_hardstop_pct. Only consulted when context_watchdog_enabled is true.",
       "type": "number",
       "default": 60,
       "sensitive": false
@@ -803,7 +810,7 @@
     },
     "context_autocompact_enabled": {
       "title": "Context-Size Guard - Auto-Compact Enforcement Enabled",
-      "description": "When true (DEFAULT), the guard's ENFORCEMENT tier is active: at or above context_hardstop_pct it auto-queues /compact on this pane and denies the tool call to end the turn (auto-resumed afterward). When false, the guard is advisory-only - it still injects the context % and the /janitor-compact-context nudge at context_compact_suggest_pct, but NEVER denies a tool call (the agent decides when to compact). Set false if you do not want the guard to ever interrupt a turn. Only consulted when context_watchdog_enabled is true.",
+      "description": "When true (DEFAULT), the guard's ENFORCEMENT tier is active: at or above context_hardstop_pct it auto-queues /compact on this pane and denies the tool call to end the turn (auto-resumed afterward). When false, the guard is advisory-only - it still injects the context % and the /janitor-write-handoff suggestion at context_compact_suggest_pct, but NEVER denies a tool call (the agent decides when to compact). Set false if you do not want the guard to ever interrupt a turn. Only consulted when context_watchdog_enabled is true.",
       "type": "boolean",
       "default": true,
       "sensitive": false

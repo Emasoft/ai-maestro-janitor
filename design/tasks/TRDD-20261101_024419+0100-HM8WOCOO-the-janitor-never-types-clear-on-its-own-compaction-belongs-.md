@@ -4,7 +4,7 @@ title: the janitor never types clear on its own, compaction belongs to the user'
 column: dev
 status: tasked
 created: 2026-11-01T02:44:19+0100
-updated: 2026-11-01T02:44:19+0100
+updated: 2026-11-01T02:54:25+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -28,3 +28,7 @@ Every automatic /clear funnels through scripts/clear_trigger.py::spawn_shrink_ch
 ## Approval log
 
 - 2026-11-01T02:44:19+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Correction 2026-11-01
+
+The body's claim that every automatic /clear funnels through spawn_shrink_chain is FALSE: external_clear.enabled() separately gates the daemon _fire path (external_handoff_clear.py), cold_cache_clear_task.py and the on-session-start-cold-cache-clear hook, and this machine sets CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED=true, so that path was live. auto_clear_enabled is therefore a MASTER switch: off makes both spawn_shrink_chain and external_clear.enabled() refuse, whatever the per-lever knobs say. The manual /janitor-compact-context goes through external_handoff_clear and is off with it; /janitor-handoff-and-clear (clear_trigger.main) stays manual. Whether these levers produced the /clear clear session title is inferred, not traced.

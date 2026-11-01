@@ -1056,6 +1056,11 @@ def spawn_shrink_chain(
 ) -> tuple[bool, str]:
     """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
 
+    OFF BY DEFAULT (TRDD-HM8WOCOO): unless plugin option `auto_clear_enabled` is true
+    (env CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED) this returns (False, reason) at once and
+    launches nothing, because a compaction mod now owns compaction. The manual
+    `main()` path (/janitor-handoff-and-clear) does not call this and is unaffected.
+
     The public seam for other triggers that need to SHRINK before doing something expensive —
     today `reload_trigger.py --shrink`, whose `/reload-plugins` breaks the prompt-cache prefix
     and so should land on a near-floor context rather than a 500k one (owner directive
@@ -1117,6 +1122,15 @@ def spawn_shrink_chain(
     path in `external_handoff_clear.py` is untouched: it stamps at spawn deliberately, per
     the advisor's D12 spawn-storm reasoning, and is not a caller of this function.)
     """
+    # TRDD-HM8WOCOO: the owner installed a compaction mod (2026-11-01), so the janitor must
+    # never type /clear on its own. This is the ONE funnel for every automatic /clear (idle
+    # clear, Stop-boundary clear, shrink-before-reload); gating here, before any pane read or
+    # spawn, keeps a second sender from sneaking past a per-caller check. Default OFF.
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", False):
+        return False, (
+            "automatic /clear is off (auto_clear_enabled=false): "
+            "compaction belongs to the compaction mod"
+        )
     terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
         return False, f"channel {terminal.get('kind', '?')!r} cannot be read back"

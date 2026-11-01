@@ -12,7 +12,7 @@ hook reads the live context occupancy on every tool call and FORCES one near the
 
 Two tiers:
   * ADVISORY (≥ SUGGEST_PCT, default 80%) — inject the context % + a nudge to run
-    /janitor-compact-context while there's still headroom. additionalContext only, NO
+    /janitor-write-handoff while there's still headroom. additionalContext only, NO
     permissionDecision, so the tool's normal permission flow is untouched. Default 80
     (was 60) per the token-quietness audit (ARCHITECTURE.md §3, ratified 2026-07-17):
     the Claude Code harness already warns near-full, so the janitor's routine mid-band
@@ -180,7 +180,8 @@ def _format_line(pct: int, tokens, window, stale: bool, suggest_pct: int) -> str
     if stale:
         line += " (snapshot may lag)"
     if pct >= suggest_pct:
-        line += f" ⚠ At/above {suggest_pct}% — run /janitor-compact-context to compact now while there's headroom: every turn re-reads the WHOLE context, so a bloated session burns ~its size in tokens PER TURN (native auto-compact is unreliable on this window; wait too long and /compact itself can fail)."
+        # TRDD-HM8WOCOO: no /janitor-compact-context nudge any more -- a compaction mod owns compaction.
+        line += f" ⚠ At/above {suggest_pct}% — every turn re-reads the WHOLE context, so a bloated session burns ~its size in tokens PER TURN. Consider /janitor-write-handoff so the plan survives compaction."
     return line
 
 
@@ -202,8 +203,8 @@ def _format_prepare_line(pct: int, pred: token_meter.CompactPrediction) -> str:
     return (
         f"Context window: {_bucket_pct(pct)} used. {head} "
         f"(point = CLAUDE_CODE_AUTO_COMPACT_WINDOW {_bucket_tokens(pred.auto_window)} − {_bucket_tokens(pred.overhead)} summary cost.) "
-        "Finish the current step and run /janitor-write-handoff (or /janitor-compact-context to "
-        "compact NOW on your terms) so the compaction summary captures your plan."
+        # TRDD-HM8WOCOO: /janitor-compact-context no longer recommended (compaction mod).
+        "Finish the current step and run /janitor-write-handoff so the compaction summary captures your plan."
     )
 
 

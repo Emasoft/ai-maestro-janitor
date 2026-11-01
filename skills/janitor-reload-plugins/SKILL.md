@@ -5,6 +5,8 @@ description: Run /reload-plugins --force for this Claude Code session so freshly
 
 # Janitor reload-plugins
 
+> **The shrink-before-reload is off by default (TRDD-HM8WOCOO).** The automatic `/clear` and the shrink chain described below only run when `auto_clear_enabled=true`; by default the reload runs WITHOUT the shrink (`spawn_shrink_chain` refuses and the reload proceeds directly). The cache-invalidation cost described below therefore applies at whatever the current context size is.
+
 ## Overview
 
 After the global janitor daemon auto-updates the plugin (a new GitHub release),

@@ -185,7 +185,7 @@ class TestClearPreservesLiveSubagent(unittest.TestCase):
         fake_state = _FakeState()
         tm = _FakeTokenMeter(850_000)
         with (
-            unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}),
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000", "CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED": "true"}),  # TRDD-HM8WOCOO
             unittest.mock.patch.object(clear_trigger, "spawn_shrink_chain", side_effect=self._record_spawn_call),
             unittest.mock.patch.object(clear_trigger, "_spawn_chain", side_effect=self._record_fork_call),
         ):

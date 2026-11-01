@@ -1319,3 +1319,12 @@ def _isolate_terminal_pane_env(monkeypatch):
     """
     for name in _PANE_ID_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _auto_clear_master_on(monkeypatch: "pytest.MonkeyPatch") -> None:
+    """TRDD-HM8WOCOO: `auto_clear_enabled` is the master switch for every automatic /clear and
+    defaults OFF in production. The pre-existing clear-path tests exercise the clear machinery
+    itself, so they run with the master on; default-off behaviour is pinned by tests that
+    `delenv` it explicitly."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")

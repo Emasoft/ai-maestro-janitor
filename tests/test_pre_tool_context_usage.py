@@ -125,7 +125,9 @@ def test_build_line_at_or_above_threshold_suggests() -> None:
     hook = _import_hook()
     line = hook._format_line(60, 600_000, 1_000_000, False, 60)
     assert "60%" in line
-    assert "/janitor-compact-context" in line, "must suggest the skill at the threshold"
+    # TRDD-HM8WOCOO: the nudge no longer names /janitor-compact-context (a compaction mod owns compaction).
+    assert "/janitor-compact-context" not in line
+    assert "/janitor-write-handoff" in line, "must still suggest a handoff at the threshold"
 
 
 def test_build_line_stale_marks_lag() -> None:
@@ -184,7 +186,7 @@ def test_enabled_high_injects_suggestion(tmp_path: Path) -> None:
     proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 82, "tokens": 820_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     ctx = _ctx(proc)
     assert ctx is not None and "80%" in ctx  # the advisory renders the 10-point BAND label
-    assert "/janitor-compact-context" in ctx
+    assert "/janitor-compact-context" not in ctx and "/janitor-write-handoff" in ctx  # TRDD-HM8WOCOO
 
 
 def test_mid_band_is_silent_by_default(tmp_path: Path) -> None:
@@ -214,7 +216,7 @@ def test_threshold_env_override(tmp_path: Path) -> None:
     # pct=50 is below default 60 (no nudge) but at/above an override of 50.
     proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 50, "tokens": 500_000, "window": 1_000_000, "ts": int(time.time())}, project=p, extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT": "50"})
     ctx = _ctx(proc)
-    assert ctx is not None and "/janitor-compact-context" in ctx
+    assert ctx is not None and "/janitor-write-handoff" in ctx and "/janitor-compact-context" not in ctx  # TRDD-HM8WOCOO
 
 
 def test_no_permission_decision_emitted(tmp_path: Path) -> None:

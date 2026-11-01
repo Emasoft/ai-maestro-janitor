@@ -63,6 +63,7 @@ import transcript_roles  # noqa: E402  -- sibling lib
 
 # --- config knobs (userConfig → env; read via the shared coercers) ----------
 ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED"
+MASTER_ENV = "CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED"  # TRDD-HM8WOCOO master switch, default off
 MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
 HEADROOM_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_HEADROOM_SECONDS"
 
@@ -183,6 +184,12 @@ __all__ = [
 
 
 def enabled() -> bool:
+    # TRDD-HM8WOCOO: `auto_clear_enabled` is the MASTER switch for every automatic /clear. It is
+    # checked here, not only in clear_trigger.spawn_shrink_chain, because the daemon `_fire`
+    # path, the cold-cache clear task and the SessionStart hook all gate on this function and
+    # never reach spawn_shrink_chain. Master off wins over the per-lever knob.
+    if not state.is_truthy_env(MASTER_ENV, False):
+        return False
     return state.is_truthy_env(ENABLED_ENV, DEFAULT_ENABLED)
 
 

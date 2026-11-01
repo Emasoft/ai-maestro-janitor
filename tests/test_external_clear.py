@@ -1749,3 +1749,23 @@ def test_classified_tail_lines_of_a_missing_file_is_empty(tmp_path):
     """An unreadable transcript yields no lines instead of raising (SessionStart injection path)."""
     assert ec._classified_tail_lines(tmp_path / "nope.jsonl", 1000) == []
     assert ec.recent_messages(str(tmp_path / "nope.jsonl")) == [ec._NO_HUMAN_IN_WINDOW]
+
+
+def test_master_switch_off_beats_the_per_lever_knob(monkeypatch):
+    """TRDD-HM8WOCOO: auto_clear_enabled=false makes enabled() False even when the per-lever
+    external_idle_clear_enabled knob is true -- this is what stops the daemon, the cold-cache
+    task and the SessionStart hook, none of which go through spawn_shrink_chain."""
+    monkeypatch.setenv(ec.ENABLED_ENV, "true")
+    monkeypatch.setenv(ec.MASTER_ENV, "false")
+    assert ec.enabled() is False
+    monkeypatch.delenv(ec.MASTER_ENV)  # unset = default off
+    assert ec.enabled() is False
+
+
+def test_master_on_defers_to_the_per_lever_knob(monkeypatch):
+    """With the master on, the per-lever knob still decides (on and off)."""
+    monkeypatch.setenv(ec.MASTER_ENV, "true")
+    monkeypatch.setenv(ec.ENABLED_ENV, "true")
+    assert ec.enabled() is True
+    monkeypatch.setenv(ec.ENABLED_ENV, "false")
+    assert ec.enabled() is False

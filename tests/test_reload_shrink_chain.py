@@ -192,10 +192,28 @@ def test_settle_defaults_to_no_pause(monkeypatch) -> None:
 
 # --- 4. the shrink path refuses rather than clearing blind ---------------------------
 
+def test_spawn_shrink_chain_off_by_default_launches_nothing(monkeypatch) -> None:
+    """TRDD-HM8WOCOO: with auto_clear_enabled unset (default false) spawn_shrink_chain returns
+    (False, reason) before touching the pane and spawns no child."""
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", raising=False)
+    spawned_calls: list[dict] = []
+    monkeypatch.setattr(ct, "_spawn_chain", lambda payload, **kw: spawned_calls.append(payload))
+
+    spawned, why = ct.spawn_shrink_chain(then=["/reload-plugins --force"], directive="x")
+
+    assert spawned is False
+    assert why == (
+        "automatic /clear is off (auto_clear_enabled=false): "
+        "compaction belongs to the compaction mod"
+    )
+    assert spawned_calls == []
+
+
 def test_spawn_shrink_chain_refuses_an_unreadable_channel(monkeypatch) -> None:
     """A pane that cannot be read back cannot verify its own /clear, so spawn_shrink_chain
     reports (False, why) and the caller falls back to a direct reload. Clearing blind is the
     one unrecoverable failure in this system — an expensive reload is merely expensive."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO
     monkeypatch.setattr(terminal_trigger, "self_terminal", lambda *a, **kw: {"kind": "unknown"})
     monkeypatch.setattr(terminal_trigger, "channel_is_readable", lambda t: False)
     spawned_calls: list[dict] = []
@@ -215,6 +233,7 @@ def test_spawn_shrink_chain_passes_settle_and_then_through(monkeypatch, tmp_path
         terminal_trigger, "self_terminal", lambda *a, **kw: {"kind": "tmux", "pane": "%1"}
     )
     monkeypatch.setattr(terminal_trigger, "channel_is_readable", lambda t: True)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO
     monkeypatch.setattr(ct, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(ct, "_read_handoff", lambda: "handoff citing TRDD-ABCD1234")
     monkeypatch.setattr(ct, "_gate_baseline", lambda: 7)

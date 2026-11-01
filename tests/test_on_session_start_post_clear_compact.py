@@ -137,6 +137,36 @@ def test_consumes_fresh_sidecar_and_injects_real_compacted_context(tmp_path, mon
     assert group and "pointers expand with:" in group[0].read_text(encoding="utf-8")
 
 
+def test_post_clear_compose_still_runs_with_the_auto_clear_master_off(tmp_path, monkeypatch):
+    """TRDD-HM8WOCOO: auto_clear_enabled gates only SENDING an automatic /clear. The post-clear
+    compose+inject that a manual /janitor-handoff-and-clear resume depends on must still run
+    with the master switch off."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "false")
+    monkeypatch.setenv("TMUX_PANE", "%4")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%4"}, transcript=str(transcript))
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert "[janitor-handoff] Post-clear handoff, ALREADY IN CONTEXT below" in buf.getvalue()
 def test_hook_records_blocked_and_malformed_from_a_real_compact_success(
     tmp_path, monkeypatch,
 ) -> None:

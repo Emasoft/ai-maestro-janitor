@@ -5,6 +5,8 @@ description: Jev-compact this session RIGHT NOW — a zero-model-turn clear-and-
 
 # Janitor compact-context
 
+> **Off by default (TRDD-HM8WOCOO).** Every `/clear` the janitor types is gated by the master option `auto_clear_enabled` (default false), because a compaction mod now owns compaction. With it false, the automatic idle clear, the Stop-boundary clear and this skill's `external_handoff_clear.py` path (it checks `external_clear.enabled()`) all refuse and print `DISABLED`; set `auto_clear_enabled=true` (and `external_idle_clear_enabled=true`) only if no compaction mod is installed. The manual `/janitor-handoff-and-clear` is unaffected.
+
 ## Overview
 
 Jev compaction is the janitor's ONLY automatic shrink (TRDD-RAEGS1D5): decide, `/clear`, then

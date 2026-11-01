@@ -294,10 +294,10 @@ def test_format_line_below_suggest_no_nudge() -> None:
 
 
 def test_format_line_at_suggest_has_nudge() -> None:
-    """At/above the advisory threshold -> append the /janitor-compact-context nudge."""
+    """At/above the advisory threshold -> append the /janitor-write-handoff nudge (TRDD-HM8WOCOO)."""
     mod = _import_hook()
     line = mod._format_line(72, 720000, 1_000_000, False, 60)
-    assert "~70%" in line and "/janitor-compact-context" in line  # 72 floored to the 5-pt band (TRDD-YRPUSIFY)
+    assert "~70%" in line and "/janitor-write-handoff" in line and "/janitor-compact-context" not in line  # 72 floored to the 5-pt band (TRDD-YRPUSIFY)
 
 
 def test_format_line_stale_suffix() -> None:

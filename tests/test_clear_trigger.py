@@ -1160,6 +1160,7 @@ def test_spawn_shrink_chain_carries_transcript_path_into_the_payload(
     payload dict (not just the `JANITOR_TRANSCRIPT_PATH` env var) -- that dict key is what
     `_persist_resume_state` reads to decide whether to write a sidecar at all."""
     mod = _import()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO master switch
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%5"})
@@ -1185,6 +1186,7 @@ def test_spawn_shrink_chain_transcript_path_defaults_to_none(tmp_path: Path, mon
     default to `None`, not be silently omitted (which would read the same to a `.get()`
     caller, but this pins the CONTRACT explicitly)."""
     mod = _import()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO master switch
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%6"})
@@ -1210,6 +1212,7 @@ def test_spawn_shrink_chain_never_stamps_the_cooldown_itself(tmp_path: Path, mon
     import cold_cache_compact
 
     mod = _import()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO master switch
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%9"})
@@ -1227,6 +1230,7 @@ def test_spawn_shrink_chain_carries_count_toward_cooldown_into_the_payload(tmp_p
     """The flag must reach `_spawn_chain`'s payload dict so the CHILD can act on it -- this is
     the seam the regression fix moved the stamp to."""
     mod = _import()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")  # TRDD-HM8WOCOO master switch
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%9"})

@@ -4,7 +4,7 @@ title: reports dir is git-tracked, the janitor stops gitignoring and purging it
 column: dev
 status: tasked
 created: 2026-11-01T02:44:18+0100
-updated: 2026-11-01T02:44:18+0100
+updated: 2026-11-01T02:58:38+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,3 +35,11 @@ Changes:
 ## Approval log
 
 - 2026-11-01T02:44:18+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Correction 2026-11-01
+
+Item 1's fleet-wide undo is DROPPED (review finding): other projects' reports/ hold content written under the private regime, so removing the janitor's ignore line there would expose it as untracked and leave a dirty .gitignore in every repo. The detector now only stops requiring reports/ and never edits an existing /reports/ line; removing the old lines elsewhere is the owner's call. Added item 8: the janitor's own generated output (a worker is enumerating which scripts and skills write machine, harness, security or memory state under reports/; the first grep was polluted by pattern files, so no count is claimed) moves to reports_dev/<component>/, or every project would collect untracked private files. Screenshot purge stays retargeted to reports_dev/<component>/screenshots/ because the owner's testing rule says those are auto-purged; the reports age purge is retired because reports/ is tracked and *_dev contents are never deleted. Moving this repo's old reports means card citations of reports/<x>/ now resolve under reports_dev/<x>/.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-01
+
+Release in flight (owner: publish asap and install). Covers this card and TRDD-HM8WOCOO. Workers (lean-worker, background): reports-code (reports_gitignore/detector/gitignore_coverage/reports-purge/screenshot-purge/doctor/dispatch comment/report-to-trdd-drift + tests) STILL RUNNING; auto-clear master switch (clear_trigger, external_clear senders, plugin.json, pre-tool-context-usage, pre-tool-token-budget, post-compact-resume, transcript_roles, user_intent, compact-context + reload-plugins skills) STILL RUNNING; docs + this repo's reports move DONE (reports_dev/lean-worker/20261101_024735+0100-ksuieptq-docs-move.md); janitor writers moved to reports_dev DONE but resumed with follow-ups (reports_dev/lean-worker/20261101_025808+0100-ksuieptq-writers.md). Card corrections staged, NOT committed (pre-commit real-state guard trips while workers edit). NEXT: when all workers report, verify each report, check agents/ still writing reports/janitor-memory-* and report-to-trdd-drift readers, confirm .gitignore has no re-appended janitor /reports/ block (old 3.8.x detector may re-add it), commit by name, run uv run scripts/publish.py --minor in background with LLM_EXT_OUTPUT_DIR pointing at reports_dev, then the user-scope claude plugin update of ai-maestro-janitor from the ai-maestro-plugins marketplace. Four dev cards (JY0OBQZ4, FQVEILVK, S6GX1DHN, F3LVCQ39) stay open; publish proceeds anyway under the owner's asap. OPEN USER DECISIONS: compaction ownership (janitor context_autocompact/cold_cache_compact/PreCompact handoff vs context-harness), the EXTERNAL_IDLE_CLEAR_ENABLED=true line in settings, removing janitor /reports/ lines in other projects, jr-pkg-guard vs janitor pkg guard.
