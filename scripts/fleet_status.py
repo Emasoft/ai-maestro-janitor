@@ -1275,7 +1275,8 @@ def _write_report(content: str, *, out_override: str = "") -> str:
         path = Path(out_override).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        out_dir = Path(state.project_root()) / "reports" / "fleet-status"
+        # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+        out_dir = Path(state.project_root()) / "reports_dev" / "fleet-status"
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"janitor-global-status-{time.strftime('%Y%m%d_%H%M%S%z')}.html"
     # Exclusive-create at 0600: never widen an existing file's mode, and never clobber a

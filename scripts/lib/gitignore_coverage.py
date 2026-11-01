@@ -47,7 +47,7 @@ class PrivateClass:
 # Table-driven, per TRDD-6WM4BFKF D1 — "a table of classes, not a regex pile". Extending this is
 # the intended way to add coverage; adding a branch elsewhere is not.
 #
-# `/reports/`, `/*_dev/` and `/.trashcan/` are ROOT-anchored on purpose: the rules that define
+# `/*_dev/` and `/.trashcan/` are ROOT-anchored on purpose: the rules that define
 # them put them at the project root, and nothing else. Unanchored, `reports/` named
 # `skills/<x>/templates/reports/*.md` — a skill's report TEMPLATES, tracked on purpose — in a
 # fleet repo on the 2026-09-02 sweep, and would have prescribed `git rm --cached` for them every
@@ -62,10 +62,8 @@ PRIVATE_CLASSES: tuple[PrivateClass, ...] = (
         "local-settings", ".claude/settings.local.json", ".claude/settings.local.json",
         "machine-local Claude settings, often carrying tokens and absolute home paths",
     ),
-    PrivateClass(
-        "reports", "reports/x.md", "/reports/",
-        "agent reports carry absolute paths, hostnames and quoted source",
-    ),
+    # TRDD-KSUIEPTQ: no `reports` class — reports/ is tracked project content (sanitized with
+    # `sanitize-reports` before commit); only reports_dev/ is private, and `/*_dev/` covers it.
     PrivateClass(
         "dev-dirs", "scripts_dev/x.py", "/*_dev/",
         "the _dev folders are the sanctioned home for unpublished work",
@@ -122,7 +120,7 @@ def matches_private_class(
     the review fork on the 2026-09-02 close: a seeded repo with a tracked `.env` and no ignore
     file printed no contamination line at all). The module docstring's ban on a gitignore
     parser is about the USER's file — its negations and precedence. This matches only the
-    thirteen patterns WE own, which have four fixed, simple shapes, each with git's meaning: a
+    twelve patterns WE own, which have four fixed, simple shapes, each with git's meaning: a
     bare name or glob matches the basename at any depth, a `dir/` pattern matches any directory
     component, a `/dir/` pattern matches ONLY the root directory (the 2026-09-02 fleet sweep:
     unanchored `reports/` named a skill's tracked `templates/reports/` as contamination), and a
@@ -151,7 +149,7 @@ def tracked_offenders(
     tracked: Iterable[str],
     is_negated: Callable[[str], bool] = lambda _: False,
 ) -> list[str]:
-    """Tracked paths in one of the thirteen private classes, by the class's OWN pattern.
+    """Tracked paths in one of the twelve private classes, by the class's OWN pattern.
 
     ONE way in: `matches_private_class` — the file is in a private class whether or not any
     `.gitignore` rule exists for it. This module used to ALSO report a path merely because git

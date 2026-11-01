@@ -10,7 +10,7 @@ to PROJECT scope, conservatively and privacy-first.
 PHASE 1 (this build) — the READ-ONLY classifier. `--dry-run` (the DEFAULT) scans
 every real note in `<local-mem-dir>`, classifies each PROJECT / LOCAL-stay (a hard
 PRIVACY gate forces any note with machine/user-private data to LOCAL), and writes a
-reviewable PLAN to `reports/migrate-memory-scope/<ts>-plan.md`. NO mutation.
+reviewable PLAN to `reports_dev/migrate-memory-scope/<ts>-plan.md`. NO mutation.
 
 PHASE 2 — `--apply --plan <plan.md>` — publishes the plan's PROJECT-bound notes into
 `<repo>/.claude/project/memory/`. It is run by the OWNING project's Claude, in its own
@@ -52,9 +52,10 @@ def _stamp() -> str:
 
 
 def _report_path(project_repo: Path, kind: str = "plan") -> Path:
-    """Where a report is written: the MAIN repo's `reports/migrate-memory-scope/`
+    """Where a report is written: the MAIN repo's `reports_dev/migrate-memory-scope/`
     (gitignored), timestamped local-time + GMT offset (the agent-reports rule)."""
-    out_dir = project_repo / "reports" / "migrate-memory-scope"
+    # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+    out_dir = project_repo / "reports_dev" / "migrate-memory-scope"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"{_stamp()}-{kind}.md"
 

@@ -1,8 +1,8 @@
-"""Tests for the reports-purge detector (S8, TRDD-LCO8229M).
+"""Tests for the reports-purge detector (S8, TRDD-LCO8229M; TRDD-KSUIEPTQ, issue #350).
 
-Same harness as the screenshot-purge tests: run the detector as a subprocess (the real
-dispatch invocation surface) with CLAUDE_PROJECT_DIR at a tmp tree; synthetic mtimes via
-os.utime keep age boundaries deterministic and the suite fast.
+Run the detector as a subprocess (the real dispatch invocation surface) with CLAUDE_PROJECT_DIR
+at a tmp tree. Since TRDD-KSUIEPTQ it only caps seen-files: reports/ is git-tracked project
+content and reports_dev/ contents are never deleted.
 """
 
 from __future__ import annotations
@@ -39,54 +39,38 @@ def _run(project: Path, **env_over: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_age_boundary_purges_only_old_files(tmp_path: Path) -> None:
-    """Files past the 30d default go; younger files and .gitkeep stay; empty dirs are
-    cleaned; the summary line reports the count."""
-    old = _mk(tmp_path / "reports" / "audit" / "old.md", age_days=31)
-    young = _mk(tmp_path / "reports" / "audit" / "young.md", age_days=29)
-    keep = _mk(tmp_path / "reports" / "lone" / ".gitkeep", age_days=90)
-    gone_dir = _mk(tmp_path / "reports" / "emptyme" / "stale.md", age_days=40).parent
-    res = _run(tmp_path)
+def test_old_reports_and_reports_dev_files_are_never_deleted(tmp_path: Path) -> None:
+    """Issue #350: reports/ is tracked work and reports_dev/ is never deleted — however old,
+    and even under the retired REPORTS_MAX_AGE_DAYS option."""
+    tracked = _mk(tmp_path / "reports" / "audit" / "old.md", age_days=365)
+    raw = _mk(tmp_path / "reports_dev" / "audit" / "old.md", age_days=365)
+    shot = _mk(tmp_path / "reports_dev" / "ui" / "screenshots" / "a.png", age_days=365)
+    res = _run(tmp_path, CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS="1")
     assert res.returncode == 0, res.stderr
-    assert not old.exists() and young.exists() and keep.exists()
-    assert not gone_dir.exists()  # emptied → removed
-    assert (tmp_path / "reports").is_dir()  # the root itself always survives
-    assert "removed 2 report file(s)" in res.stdout
-
-
-def test_screenshots_subtree_is_never_touched(tmp_path: Path) -> None:
-    """reports/screenshots/ belongs to screenshot-purge — even ancient files survive."""
-    shot = _mk(tmp_path / "reports" / "screenshots" / "ancient.png", age_days=365)
-    res = _run(tmp_path)
-    assert res.returncode == 0, res.stderr
-    assert shot.exists()
+    assert tracked.exists() and raw.exists() and shot.exists()
+    assert res.stdout == ""
 
 
 def test_opt_out_env_leaves_everything(tmp_path: Path) -> None:
-    """CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_ENABLED=false → full no-op."""
-    old = _mk(tmp_path / "reports" / "old.md", age_days=90)
-    res = _run(tmp_path, CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_ENABLED="false")
-    assert res.returncode == 0 and res.stdout == ""
-    assert old.exists()
-
-
-def test_max_age_zero_disables_reports_half_only(tmp_path: Path) -> None:
-    """REPORTS_MAX_AGE_DAYS=0 keeps every report but the seen-file cap still runs."""
-    old = _mk(tmp_path / "reports" / "old.md", age_days=90)
+    """CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_ENABLED=false → full no-op, seen-files included."""
     seen = _mk(
         tmp_path / ".janitor" / "state" / "dirty-tree-seen.txt",
         text="\n".join(f"k{i}" for i in range(600)) + "\n",
     )
-    res = _run(
-        tmp_path,
-        CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS="0",
-        CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES="500",
+    res = _run(tmp_path, CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_ENABLED="false")
+    assert res.returncode == 0 and res.stdout == ""
+    assert len(seen.read_text(encoding="utf-8").splitlines()) == 600
+
+
+def test_seen_cap_zero_disables_the_cap(tmp_path: Path) -> None:
+    """SEEN_FILE_MAX_LINES=0 keeps every seen-file line."""
+    seen = _mk(
+        tmp_path / ".janitor" / "state" / "dirty-tree-seen.txt",
+        text="\n".join(f"k{i}" for i in range(600)) + "\n",
     )
+    res = _run(tmp_path, CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES="0")
     assert res.returncode == 0, res.stderr
-    assert old.exists()
-    lines = seen.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 500
-    assert lines[-1] == "k599" and lines[0] == "k100"  # NEWEST tail preserved
+    assert len(seen.read_text(encoding="utf-8").splitlines()) == 600
 
 
 def test_seen_file_cap_preserves_newest_and_dedupe_still_works(tmp_path: Path) -> None:
@@ -99,7 +83,7 @@ def test_seen_file_cap_preserves_newest_and_dedupe_still_works(tmp_path: Path) -
     res = _run(tmp_path, CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES="500")
     assert res.returncode == 0, res.stderr
     lines = seen.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 500 and lines[-1] == "hash-509"
+    assert len(lines) == 500 and lines[0] == "hash-10" and lines[-1] == "hash-509"
     assert small.read_text(encoding="utf-8") == "a\nb\n"  # under cap → untouched
     assert "capped 1 seen-file(s)" in res.stdout
 

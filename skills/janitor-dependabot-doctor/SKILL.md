@@ -29,7 +29,7 @@ Audits `.github/dependabot.yml` (or `renovate.json`) against the hardened invari
    ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
    MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
    MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-   REPORT_DIR="$MAIN_ROOT/reports/janitor-dependabot-doctor"
+   REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-dependabot-doctor"
    mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"
    ```

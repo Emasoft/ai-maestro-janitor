@@ -4,9 +4,10 @@
 # ///
 """screenshot-purge — Age- and disk-pressure-based purge of UI test screenshots.
 
-Browser-UI test runs land screenshots in <project_root>/reports/screenshots/
-(per ~/.claude/rules/browser-ui-test-techniques.md §19). The folder is
-gitignored, so anything written there is short-lived cache — never user work.
+Browser-UI test runs land screenshots in <project_root>/reports_dev/<component>/screenshots/
+(per ~/.claude/rules/testing.md). The folder is gitignored, so anything written there is
+short-lived cache — never user work. TRDD-KSUIEPTQ: this used to be reports/screenshots/, but
+reports/ is git-tracked project content now (owner rule 2026-11-01) and is never purged.
 
 Two independent removal policies run on every fire:
 
@@ -15,7 +16,7 @@ Two independent removal policies run on every fire:
    `screenshot_max_age_hours` (default 72 h) is removed.
 
 2. **Low-disk override**:
-   If free space on the partition holding `reports/screenshots/` drops below
+   If free space on the partition holding `reports_dev/` drops below
    `screenshot_lowdisk_min_free_gb` (default 5 GiB), the oldest screenshots
    are removed first (regardless of the 72 h cap) until free space recovers
    above `screenshot_lowdisk_target_free_gb` (default 10 GiB) OR no
@@ -38,9 +39,9 @@ Why screenshots bypass safe-delete / .trashcan/:
 What this detector NEVER touches:
    - Any file whose extension is not a known screenshot type.
    - Symlinks (never followed, never unlinked).
-   - The `reports/screenshots/` directory itself (kept alive even when
+   - The `reports_dev/<component>/screenshots/` directories themselves (kept alive even when
      empty — the next test run expects it to exist).
-   - Anything outside `reports/screenshots/` (path traversal impossible —
+   - Anything outside `reports_dev/*/screenshots/` — notably `reports/` (path traversal impossible —
      the root is resolved via state.project_root() and we glob inside it).
 """
 
@@ -83,6 +84,22 @@ def _iter_screenshots(root: Path) -> Iterable[Path]:
     for p in sorted(root.rglob("*")):
         if _is_screenshot(p):
             yield p
+
+
+def _screenshot_dirs(reports_dev: Path) -> list[Path]:
+    """Every real `reports_dev/<component>/screenshots/` dir (symlinked dirs are skipped)."""
+    if reports_dev.is_symlink() or not reports_dev.is_dir():
+        return []
+    return [
+        d for d in sorted(reports_dev.glob("*/screenshots"))
+        if d.is_dir() and not d.is_symlink()
+    ]
+
+
+def _iter_all(dirs: list[Path]) -> Iterable[Path]:
+    """Yield every screenshot under all the given screenshot dirs."""
+    for d in dirs:
+        yield from _iter_screenshots(d)
 
 
 def _free_bytes(path: Path) -> int:
@@ -155,8 +172,11 @@ def main() -> int:
     lowdisk_target_bytes = lowdisk_target_gb * _GIB
 
     project_root = state.project_root()
-    screenshots_dir = project_root / "reports" / "screenshots"
-    if not screenshots_dir.is_dir():
+    # TRDD-KSUIEPTQ: reports/ is git-tracked project content and is never purged; screenshots
+    # live in reports_dev/<component>/screenshots/ (every component, one dir each).
+    reports_dev = project_root / "reports_dev"
+    screenshot_dirs = _screenshot_dirs(reports_dev)
+    if not screenshot_dirs:
         return 0
 
     now = int(time.time())
@@ -166,7 +186,7 @@ def main() -> int:
     age_removed_bytes = 0
     age_oldest_sec = 0
 
-    for shot in _iter_screenshots(screenshots_dir):
+    for shot in _iter_all(screenshot_dirs):
         try:
             mtime = int(shot.stat().st_mtime)
         except OSError:
@@ -189,13 +209,13 @@ def main() -> int:
     # ----- Phase 2: low-disk override --------------------------------------
     lowdisk_removed_count = 0
     lowdisk_removed_bytes = 0
-    free_before = _free_bytes(screenshots_dir)
+    free_before = _free_bytes(reports_dev)
     free_after = free_before
 
     if free_before >= 0 and free_before < lowdisk_min_bytes:
         # Build a list of remaining screenshots, oldest first by mtime.
         remaining: list[tuple[int, Path]] = []
-        for shot in _iter_screenshots(screenshots_dir):
+        for shot in _iter_all(screenshot_dirs):
             try:
                 remaining.append((int(shot.stat().st_mtime), shot))
             except OSError:
@@ -203,7 +223,7 @@ def main() -> int:
         remaining.sort(key=lambda t: t[0])  # oldest first
 
         for mtime, shot in remaining:
-            free_after = _free_bytes(screenshots_dir)
+            free_after = _free_bytes(reports_dev)
             if free_after < 0 or free_after >= lowdisk_target_bytes:
                 break
             age = now - mtime
@@ -217,13 +237,13 @@ def main() -> int:
                     f"(age: {_fmt_age(age)}, size: {_fmt_size(freed)})",
                 )
         # Refresh after the loop so the output line reports the post-state.
-        free_after = _free_bytes(screenshots_dir)
+        free_after = _free_bytes(reports_dev)
 
     # ----- Reporting --------------------------------------------------------
     if age_removed_count > 0:
         print(
             f"[screenshot-purge] removed {age_removed_count} screenshot(s) "
-            f"from reports/screenshots/ older than {max_age_hours}h "
+            f"from reports_dev/*/screenshots/ older than {max_age_hours}h "
             f"(oldest: {_fmt_age(age_oldest_sec)}, freed {_fmt_size(age_removed_bytes)})."
         )
 
@@ -240,7 +260,7 @@ def main() -> int:
             f"[screenshot-purge] LOW DISK: removed {lowdisk_removed_count} "
             f"oldest screenshot(s) to relieve pressure "
             f"(freed {_fmt_size(lowdisk_removed_bytes)}, {disk_note}; "
-            f"{dp.disk_pressure(screenshots_dir).label})."
+            f"{dp.disk_pressure(reports_dev).label})."
         )
 
     state.rotate_log_if_big("screenshot-purge")

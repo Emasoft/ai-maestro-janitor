@@ -119,7 +119,7 @@ over volume; the cadence and the next launch cover the rest.
 ## Output contract (you are a background agent)
 
 Do the WHOLE pass in your own context. Write the detailed report under
-`$MAIN_ROOT/reports/janitor-memory-subconscious-agent/`. Return to your caller ONLY one
+`$MAIN_ROOT/reports_dev/janitor-memory-subconscious-agent/` (it carries memory-corpus state, so it is private; a report meant for `reports/` is run through `sanitize-reports <file>` first). Return to your caller ONLY one
 line plus that report path — never page bodies, never the corpus.
 
 Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PASS`,
@@ -157,7 +157,7 @@ fi
 # both read-backs above, not the one to harden -- and paste the two header
 # lines below verbatim as its first content lines.
 if [ -z "$REPORT_FILE" ] || ! grep -q 'dispatch_id=' "$REPORT_FILE" 2>/dev/null; then
-  REPORT_FILE="${CLAUDE_PROJECT_DIR:-$PWD}/reports/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
+  REPORT_FILE="${CLAUDE_PROJECT_DIR:-$PWD}/reports_dev/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
   mkdir -p "$(dirname "$REPORT_FILE")"
   cat > "$REPORT_FILE" <<'HEADER'
 <PASTE THE TWO HEADER LINES YOUR CLAIM STEP PRINTED, VERBATIM, IN PLACE OF THIS LINE>

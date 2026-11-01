@@ -424,7 +424,7 @@ def _gather_plugins(*, online: bool) -> dict:
 
 
 def _save_json(info: dict) -> str:
-    """Write the FULL report as JSON to `<main-repo>/reports/identify-environment/
+    """Write the FULL report as JSON to `<main-repo>/reports_dev/identify-environment/
     <ts±tz>-env.json` and return the path, or '' on any failure (fail-open — a
     blocked/unavailable write must not sink the run)."""
     main_root = ""
@@ -434,7 +434,8 @@ def _save_json(info: dict) -> str:
     if not main_root:
         main_root = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
     try:
-        d = Path(main_root) / "reports" / "identify-environment"
+        # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+        d = Path(main_root) / "reports_dev" / "identify-environment"
         d.mkdir(parents=True, exist_ok=True)
         ts = _out(["date", "+%Y%m%d_%H%M%S%z"]) or "env"
         path = d / f"{ts}-env.json"

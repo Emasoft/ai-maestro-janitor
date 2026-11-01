@@ -2,22 +2,22 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""reports-gitignore — keep `reports/` and `reports_dev/` OUT of git (TRDD-WP7TCRME Rule 3).
+"""reports-gitignore — keep `reports_dev/` OUT of git (TRDD-KSUIEPTQ; TRDD-WP7TCRME Rule 3).
 
-Every agent, skill, hook and scan on this machine writes reports under `<repo>/reports/`, and
-those reports routinely carry absolute home paths, usernames, internal hostnames, proprietary
-source, and credentials caught in a pasted log. The invariant that both dirs are gitignored was
-a hard rule NOTHING enforced — each project was expected to remember two lines, and a project
-that forgets does not find out until the leak is already pushed.
+Owner rule 2026-11-01: `reports/` is git-tracked project content, sanitized with the
+`sanitize-reports` CLI before it is committed; `reports_dev/` holds raw and private material
+(absolute home paths, usernames, hostnames, credentials caught in a pasted log), must be
+gitignored, and its contents are never deleted. Earlier versions of this detector required
+`reports/` to be gitignored too; it no longer does. It also does NOT undo the lines it wrote
+before: it never edits or removes an existing `/reports/` line and says nothing about one —
+removing it would expose reports written under the old private regime as untracked files, one
+`git add -A` from a public push.
 
-This is a FIXING detector, not a reporting one (Rule 3): where the entries are missing it adds
-them, because "your report directory is not ignored" has exactly one defensible answer.
+It is a FIXING detector and surfaces a line only when:
 
-It surfaces a line in only two cases, and is silent otherwise:
-
-  * it CHANGED the user's `.gitignore` — reported once, because a silent edit to a tracked file
-    is worse than a noisy one, and they need to review and commit the diff;
-  * a report dir is unignored AND already has TRACKED files — the decision-margin case the
+  * it ADDED `/reports_dev/` to the user's `.gitignore` — reported once, because a silent edit
+    to a tracked file is worse than a noisy one, and they need to review and commit the diff;
+  * `reports_dev/` is unignored AND already has TRACKED files — the decision-margin case the
     library deliberately refuses to auto-resolve (a gitignore line would hide the finding
     without untracking anything, and a leak that already reached a public remote needs rotation,
     not an ignore rule).
@@ -55,9 +55,9 @@ def main() -> int:
         line = dedupe.emit_once(
             seen,
             f"added:{names}",
-            f"[{_NAME}] {names} was NOT gitignored — added the entries. Reports carry absolute "
-            "paths, usernames and secrets caught in logs, and a report pushed to a public repo "
-            "cannot be unpublished. Review the .gitignore diff and commit it.",
+            f"[{_NAME}] {names} was NOT gitignored — added the entries. Raw reports carry "
+            "absolute paths, usernames and secrets caught in logs, and a report pushed to a "
+            "public repo cannot be unpublished. Review the .gitignore diff and commit it.",
         )
         if line is not None:
             print(line)

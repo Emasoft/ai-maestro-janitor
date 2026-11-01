@@ -514,8 +514,8 @@ happens with current Read-tool behavior).
 ## Reports are evidence; decisions become TRDDs
 
 Carried over from v1. A **report** (audit, research synthesis, option
-benchmark) presents DATA. It lives under `reports/` — gitignored and
-ephemeral. The moment a report leads to a DECISION, that decision MUST
+benchmark) presents DATA. It lives under `reports/` (git-tracked, succinct, sanitized; raw or private in gitignored `reports_dev/`) and is
+not a plan. The moment a report leads to a DECISION, that decision MUST
 be written into a TRDD — a NEW TRDD, or by EXTENDING an existing TRDD's
 STATE block / plan steps.
 

@@ -415,7 +415,8 @@ def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: fl
     # time, from whatever session fired it). A cross-project mismatch means this
     # gate finds nothing and fails OPEN — the safe direction: it never wrongly
     # suppresses, it can only fail to suppress a genuine same-project repeat.
-    reports_dir = state.project_root() / "reports" / f"janitor-memory-{chore}"
+    # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+    reports_dir = state.project_root() / "reports_dev" / f"janitor-memory-{chore}"
     if not reports_dir.is_dir():
         return True
     candidates = list(reports_dir.glob(f"*-{chore}-{scope.lower()}.md"))

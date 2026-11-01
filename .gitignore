@@ -92,7 +92,6 @@ reports_dev/
 .tldr/
 .tldrignore
 llm_externalizer_output/
-/reports/
 /INPUT_DEV/
 
 # git-cliff scratch — ephemeral release notes between bump and push

@@ -127,14 +127,15 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("subagent-report", 3600, "CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL"),
     ("version-update", 300, "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
     ("trashcan-purge", 86400, "CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL"),
-    # reports-purge runs daily (S8, TRDD-LCO8229M): a 30d retention window
-    # doesn't need a tighter cadence, and the seen-file caps only matter at
-    # hundreds of lines. Silent no-op when reports/ is absent.
+    # reports-purge runs daily (S8, TRDD-LCO8229M): it only caps the seen-files, which matter at
+    # hundreds of lines. TRDD-KSUIEPTQ: it no longer touches reports/ (git-tracked project
+    # content) or reports_dev/.
     ("reports-purge", 86400, "CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_INTERVAL"),
     # screenshot-purge runs hourly: 72h is the default age threshold so a
     # 1h cadence catches expiries promptly AND re-probes free disk while
-    # the user is mid-task. Skipped silently when reports/screenshots/ is
-    # absent, which is the common case on non-UI projects.
+    # the user is mid-task. TRDD-KSUIEPTQ: it purges reports_dev/<component>/screenshots/ only,
+    # never reports/. Skipped silently when no such dir exists, which is the common case on
+    # non-UI projects.
     ("screenshot-purge", 3600, "CLAUDE_PLUGIN_OPTION_SCREENSHOT_PURGE_INTERVAL"),
     # runaway-file-growth runs hourly (TRDD-XM3FPJC0): a balloon takes hours or days to
     # matter, and the detector walks a filesystem tree — a tighter cadence would make it
@@ -434,8 +435,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # Daily cadence — .gitignore changes rarely and the probe is one cheap
     # `git check-ignore`, so unchanged fires are near-free.
     ("project-memory-tracked", 86400, "CLAUDE_PLUGIN_OPTION_PROJECT_MEMORY_TRACKED_INTERVAL"),
-    # reports-gitignore is project-memory-tracked's exact mirror image: that one keeps a
-    # directory IN git, this one keeps two OUT. Same daily cadence, same fix-don't-nag posture,
+    # reports-gitignore is project-memory-tracked's mirror image: that one keeps a directory
+    # IN git, this one keeps the raw `reports_dev/` OUT (reports/ is tracked since TRDD-KSUIEPTQ and
+    # it never touches an existing /reports/ line). Same daily cadence, same fix-don't-nag posture,
     # and the same reason for a long interval — the answer only changes when someone edits
     # `.gitignore`, which is rare, and the cost of noticing an hour later is nil. Not on the
     # advisory list: when it speaks, it is either reporting that it edited a tracked file or

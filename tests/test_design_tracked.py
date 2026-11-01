@@ -12,6 +12,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 _DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "design-tracked.py"
 _REPORTS = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "reports-gitignore.py"
 
@@ -130,11 +132,39 @@ def test_no_design_dir_is_silent(tmp_path: Path) -> None:
     assert _run(_DETECTOR, _repo(tmp_path, with_design=False)) == []
 
 
-def test_reports_dirs_not_ignored_get_their_lines_appended(tmp_path: Path) -> None:
-    """The existing reports-gitignore detector already enforces reports/ and reports_dev/."""
+
+@pytest.fixture(autouse=True)
+def _isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep `git check-ignore` off the machine's global excludes/config, so no test here can
+    pass or fail by machine (TRDD-KSUIEPTQ review)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def test_reports_dev_not_ignored_gets_its_line_appended_and_reports_is_not_required(
+    tmp_path: Path,
+) -> None:
+    """TRDD-KSUIEPTQ: the reports-gitignore detector requires reports_dev/ ONLY; reports/ is tracked."""
     repo = _repo(tmp_path)
     lines = _run(_REPORTS, repo)
     text = (repo / ".gitignore").read_text()
-    assert "/reports/\n" in text and "/reports_dev/\n" in text
-    assert _ignored(repo, "reports/x.md") and _ignored(repo, "reports_dev/x.md")
+    assert "/reports_dev/\n" in text and "/reports/" not in text
+    assert _ignored(repo, "reports_dev/x.md") and not _ignored(repo, "reports/x.md")
     assert len(lines) == 1
+
+
+def test_an_existing_reports_ignore_line_is_never_edited_and_never_advised_about(
+    tmp_path: Path,
+) -> None:
+    """Other projects hold reports written under the old private regime: removing their ignore
+    line would expose them as untracked. The detector leaves any /reports/ line byte-identical
+    and says nothing about it."""
+    repo = _repo(tmp_path)
+    header = "# janitor: report dirs carry private data (paths, hostnames, pasted secrets)"
+    original = f"# mine\n/reports/\n\n{header}\n/reports/\n/reports_dev/\n"
+    (repo / ".gitignore").write_text(original)
+    assert _run(_REPORTS, repo) == []
+    assert (repo / ".gitignore").read_text() == original

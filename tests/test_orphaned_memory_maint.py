@@ -557,7 +557,7 @@ def test_an_old_claimed_record_with_a_finished_report_is_closed_not_expired(tmp_
     claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
     claimed.write_text(json.dumps(payload), encoding="utf-8")
     _stamp_last_run(gstate, "repair", "LOCAL", root, old)
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True, exist_ok=True)
     report = reports_dir / "20260916_120000+0000-repair-local.md"
     report.write_text(

@@ -1,20 +1,21 @@
-"""Keep `reports/` and `reports_dev/` out of git — check, and FIX (TRDD-WP7TCRME Rule 3).
+"""Keep `reports_dev/` out of git — and let `reports/` be tracked (TRDD-KSUIEPTQ).
 
-Agents, skills, hooks and scans all write reports under `<repo>/reports/`. Those reports
-routinely contain absolute home paths, usernames, internal hostnames, proprietary source, and
-credentials caught in a pasted log. Committing one is a data leak, and on a public repo it is
-an irreversible one — a later `git rm` does not remove it from history, from forks, or from
-whatever already mirrored it.
+Owner rule 2026-11-01: `reports/` is git-tracked PROJECT content — the final, succinct,
+user-facing reports — and is sanitized with the `sanitize-reports` CLI before it is committed.
+`reports_dev/` holds raw and private material (home paths, usernames, hostnames, credentials
+caught in a pasted log), MUST be gitignored, and its contents are never deleted.
 
-The invariant is therefore a hard rule, and it was a rule NOTHING enforced: every project was
-expected to remember two `.gitignore` lines. This checks them, and where they are missing it
-ADDS them, because there is exactly one defensible answer to "your report directory is not
-ignored" and narrating it at the reader is not it.
+An earlier version (TRDD-WP7TCRME Rule 3) required BOTH dirs ignored and wrote `/reports/` into
+every project's `.gitignore`, which hid the project's real reports. This module now ADDS only
+`/reports_dev/` where it is missing. It never requires `reports/` to be ignored, and it NEVER
+edits or removes an existing `/reports/` line anywhere: other projects hold reports written under
+the old private regime, and removing their ignore line would expose them as untracked files, one
+`git add -A` from a public push. Whoever owns such a project removes the line when they choose.
 
-WHAT IT DELIBERATELY DOES NOT DO. If `reports/` already contains TRACKED files, it reports and
-stops. Untracking has two defensible answers — `git rm --cached` (keep the files, stop tracking)
-or leave them (they may have been committed on purpose) — and choosing between them can lose
-work or rewrite intent. Worse, if the content is already public, untracking creates a false
+WHAT IT DELIBERATELY DOES NOT DO. If `reports_dev/` already contains TRACKED files, it reports
+and stops. Untracking has two defensible answers — `git rm --cached` (keep the files, stop
+tracking) or leave them (they may have been committed on purpose) — and choosing between them can
+lose work or rewrite intent. Worse, if the content is already public, untracking creates a false
 sense of remedy: the leak needs rotation and history surgery, not a gitignore line. That is a
 human's call, so it stays one.
 
@@ -36,10 +37,10 @@ import state  # noqa: E402
 
 __all__ = ["REQUIRED_DIRS", "ensure_ignored", "is_ignored", "tracked_under"]
 
-# `reports/` is the canonical home for a FINAL artefact; `reports_dev/` is dev-only scratch.
-# Both leak the same things, so both are required — a project that ignores one and not the
-# other is one careless `--output` flag away from the same incident.
-REQUIRED_DIRS = ("reports", "reports_dev")
+# TRDD-KSUIEPTQ: only `reports_dev/` (raw/private scratch) is required to be ignored.
+# `reports/` is tracked project content and must NOT be listed here — listing it is exactly the
+# bug that put `/reports/` into every project's `.gitignore`.
+REQUIRED_DIRS = ("reports_dev",)
 
 _BLOCK_HEADER = "# janitor: report dirs carry private data (paths, hostnames, pasted secrets)"
 
@@ -73,7 +74,7 @@ def tracked_under(root: Path, directory: str) -> list[str]:
 
 
 def ensure_ignored(root: Path) -> tuple[list[str], list[str], list[str]]:
-    """Ensure both report dirs are ignored. Returns `(added, already_ok, needs_human)`.
+    """Ensure the required dirs are ignored. Returns `(added, already_ok, needs_human)`.
 
     `needs_human` names the dirs that are unignored AND already have tracked files — the
     decision-margin case. They are NOT added to `.gitignore` here: a gitignore line does not

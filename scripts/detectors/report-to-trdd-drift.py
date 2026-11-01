@@ -5,8 +5,8 @@
 """report-to-trdd-drift — nudge when a DECISION report has no TRDD.
 
 Enforces the "reports are evidence; decisions become TRDDs" rule
-(`~/.claude/rules/trdd-design-tasks.md`). A report under `reports/` is gitignored
-and ephemeral; a DECISION that lives only in a report is invisible to the next
+(`~/.claude/rules/trdd-design-tasks.md`). A report under `reports/` is evidence (tracked since
+TRDD-KSUIEPTQ, but still not the decision record); a DECISION that lives only in a report is invisible to the next
 session (this is exactly how a recommended STACK in a consolidated audit report
 got re-derived from scratch). This detector scans `reports/` for decision/synthesis
 -class reports that NO TRDD references and reminds the agent to convert each into
@@ -258,7 +258,12 @@ def main() -> int:
     )
 
     root = state.project_root()
-    reports_dir = root / "reports"
+    # TRDD-KSUIEPTQ: reports/ (tracked) AND reports_dev/ (raw: the janitor's own agent and curator
+    # reports now land there) are both scanned, with the same curator exclusions in each tree.
+    scan_dirs = [
+        d for d in (root / "reports", root / "reports_dev")
+        if d.is_dir() and _contained(d, root)
+    ]
 
     # Gate: only projects that USE TRDDs (in EITHER design scope) and HAVE a reports/ tree.
     # `trdd_common` owns the board resolution and the containment check that used to be a
@@ -266,21 +271,23 @@ def main() -> int:
     trdds = trdd_common.trdd_files("tasks", str(root))
     if not trdds:
         return 0
-    if not (reports_dir.is_dir() and _contained(reports_dir, root)):
+    if not scan_dirs:
         return 0
 
     corpus = _trdd_corpus([p for _scope, p in trdds])
     now = int(time.time())
 
     unconverted: list[str] = []
-    for rep in sorted(reports_dir.rglob("*.md")):
+    for scan_dir, rep in sorted(
+        ((d, r) for d in scan_dirs for r in d.rglob("*.md")), key=lambda t: str(t[1])
+    ):
         if not _DECISION_RE.search(rep.name):
             continue
         mtime = state.file_mtime(rep)
         if mtime > 0 and (now - mtime) < _FRESH_GRACE_S:
             continue  # too fresh — may still be writing
         # Memory-curator ABSTAIN / no-op pass report → no decision to convert (issue #63).
-        if _is_memory_noop_report(rep, reports_dir):
+        if _is_memory_noop_report(rep, scan_dir):
             continue
         # Referenced by any TRDD (cited by basename) → already converted.
         if rep.name in corpus:
@@ -308,7 +315,7 @@ def main() -> int:
     seen = state.state_dir() / f"report-to-trdd-session-{_session_key()}.txt"
     msg = (
         f"[report-to-trdd] {len(unconverted)} decision/synthesis report(s) not yet "
-        f"converted to a TRDD: {', '.join(listed)}{more}. Reports are gitignored/ephemeral "
+        f"converted to a TRDD: {', '.join(listed)}{more}. A report is evidence, not a decision "
         f"— write each decision into a TRDD (new, or extend an existing STATE block) and "
         f"cite the report, so the plan survives the next resume."
     )

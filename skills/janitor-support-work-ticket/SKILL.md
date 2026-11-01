@@ -110,9 +110,9 @@ ticket that was fixed. Every one of the three above is honest; silence is not.
 
 ## 6. Report
 
-Write the report to `<repo>/reports/janitor-repair-agent/<ts±tz>-<slug>.md`
+Write the report to `<repo>/reports_dev/janitor-repair-agent/<ts±tz>-<slug>.md`
 (`~/.claude/rules/agent-reports-location.md`): what the ticket claimed, what you actually observed,
-what you changed, what you verified, and what you deliberately did NOT do (and why).
+what you changed, what you verified, and what you deliberately did NOT do (and why). A report meant for `reports/` (tracked, shared) is run through `sanitize-reports <file>` first.
 
 Return exactly ONE line plus the report path. Never the report's contents — running in your own
 context is the entire point, and pasting it back defeats it.

@@ -152,7 +152,7 @@ def test_shipped_and_clean_is_closeable_candidate(repo: Path):
 
     out = _run(repo)
     assert "closeable" not in out
-    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    assert not (repo / "reports_dev" / "trdd-reconciliation").exists()
     notes = _closeable_notes(repo)
     assert [n["ref"] for n in notes] == [f"TRDD-{uid}"]
 
@@ -335,7 +335,7 @@ def test_shipped_unreleased_review_names_weaker_evidence_in_report(repo: Path):
     _commit_all(repo, f"feat: ship it (TRDD-{uid})")
 
     _run(repo)
-    report_dir = repo / "reports" / "trdd-reconciliation"
+    report_dir = repo / "reports_dev" / "trdd-reconciliation"
     reports = list(report_dir.glob("*-board.md"))
     assert reports, "a candidate report must be written"
     text = reports[0].read_text()
@@ -396,13 +396,13 @@ def test_surface_only_mutates_zero_trdd_files(repo: Path):
 
 def test_writes_a_candidate_report(repo: Path):
     """A run with at least one candidate writes a board report under
-    reports/trdd-reconciliation/ naming the flagged TRDD + its verdict."""
+    reports_dev/trdd-reconciliation/ naming the flagged TRDD + its verdict."""
     uid = "aaaaaaaa"
     _write_trdd(repo, uid, column="dev", body="\n# body\nshipped.\n")
     _commit_all(repo, f"feat: ship (TRDD-{uid})")  # untagged → shipped-unreleased-review
 
     _run(repo)
-    report_dir = repo / "reports" / "trdd-reconciliation"
+    report_dir = repo / "reports_dev" / "trdd-reconciliation"
     reports = list(report_dir.glob("*-board.md"))
     assert reports, "a candidate report must be written"
     text = reports[0].read_text()
@@ -437,7 +437,7 @@ def test_prose_blocked_card_is_a_ledger_note_not_a_row(repo: Path):
 
     out = _run(repo)
     assert out.strip() == ""
-    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    assert not (repo / "reports_dev" / "trdd-reconciliation").exists()
     assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{uid}"]
 
 def test_prose_blocked_second_run_records_nothing(repo: Path):
@@ -467,7 +467,7 @@ def test_prose_blocked_plus_partially_shipped_reports_only_partially_shipped(rep
     assert "partially-shipped-review" in out
     assert "prose-frontmatter-mismatch" not in out
     assert "closeable-candidate" not in out
-    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
+    report = next((repo / "reports_dev" / "trdd-reconciliation").glob("*-board.md")).read_text()
     assert f"TRDD-{uid}" in report
     assert "partially-shipped-review" in report
     assert "prose-frontmatter-mismatch" not in report
@@ -487,13 +487,13 @@ def test_closeable_and_prose_blocked_card_is_two_notes_and_no_row(repo: Path):
 
     out = _run(repo)
     assert out.strip() == ""
-    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    assert not (repo / "reports_dev" / "trdd-reconciliation").exists()
     assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
     assert [n["ref"] for n in _notes(repo, "TRDD-PROSE-BLOCKED")] == [f"TRDD-{uid}"]
 
 
 def test_only_closeable_cards_write_no_closeable_text_to_reports(repo: Path):
-    """With only closeable cards on the board, reports/trdd-reconciliation/ holds no
+    """With only closeable cards on the board, reports_dev/trdd-reconciliation/ holds no
     closeable-candidate text (it does not exist at all), while each card gets a note."""
     for uid in ("aaaaaaaa", "bbbbbbbb"):
         _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
@@ -501,7 +501,7 @@ def test_only_closeable_cards_write_no_closeable_text_to_reports(repo: Path):
     _tag(repo, "v0.1.0")
 
     _run(repo)
-    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    assert not (repo / "reports_dev" / "trdd-reconciliation").exists()
     assert len(_closeable_notes(repo)) == 2
 
 
@@ -733,7 +733,7 @@ def test_field_and_prose_stale_blockers_report_only_the_field_id(repo: Path):
 
     out = _run(repo)
     assert f"TRDD-{dependent}" in out
-    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
+    report = next((repo / "reports_dev" / "trdd-reconciliation").glob("*-board.md")).read_text()
     assert f"stale blocker(s): {field_id}" in report
     assert prose_id not in report
     notes = _notes(repo, "TRDD-PROSE-STALE-BLOCKER")

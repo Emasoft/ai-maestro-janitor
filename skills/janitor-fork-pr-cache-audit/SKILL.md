@@ -36,7 +36,7 @@ Attack class detail in references/fork-pr-attack-vectors.md. Surgical YAML fixes
    ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
    MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
    MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-   REPORT_DIR="$MAIN_ROOT/reports/janitor-fork-pr-cache-audit"
+   REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-fork-pr-cache-audit"
    mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"
    REPORT_FILE="$REPORT_DIR/$TIMESTAMP-audit.md"
@@ -103,7 +103,7 @@ Never suppress a finding to pass a gate. Never force-push.
 
 ## Scope
 
-ONLY reads `.github/workflows/*.yml` and writes a report under `$MAIN_ROOT/reports/janitor-fork-pr-cache-audit/`. Does NOT modify workflows, commit, push, or call zizmor. For mechanical fixes use `/janitor-github-workflow-doctor`.
+ONLY reads `.github/workflows/*.yml` and writes a report under `$MAIN_ROOT/reports_dev/janitor-fork-pr-cache-audit/`. Does NOT modify workflows, commit, push, or call zizmor. For mechanical fixes use `/janitor-github-workflow-doctor`.
 
 ## Resources
 

@@ -121,7 +121,7 @@ def test_no_override_still_lands_in_the_project_reports_dir(tmp_path: Path, monk
     """The default path is unchanged by janitor#197 — it must NOT regress to the temp dir."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     got = Path(fstat._write_report("<html>x</html>"))
-    assert got.parent == tmp_path / "reports" / "fleet-status"
+    assert got.parent == tmp_path / "reports_dev" / "fleet-status"
     assert stat.S_IMODE(got.stat().st_mode) == 0o600
 
 

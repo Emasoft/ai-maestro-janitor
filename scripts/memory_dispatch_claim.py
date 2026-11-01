@@ -268,7 +268,8 @@ def _reports_dir_candidates(state_dir: Path) -> list[Path]:
     return [main_reports, grandparent]
 
 
-_REPORT_SUBDIR = ("reports", "janitor-memory-subconscious-agent")
+# TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+_REPORT_SUBDIR = ("reports_dev", "janitor-memory-subconscious-agent")
 _HEADER_SCAN_LINES = 20
 _OUTCOME_RE = re.compile(r"<!--\s*janitor-outcome:\s*(mutation|noop[^>]*)\s*-->")
 

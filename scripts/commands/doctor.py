@@ -36,6 +36,7 @@ _HERE = Path(__file__).resolve().parent
 _PLUGIN_ROOT = _HERE.parent.parent
 sys.path.insert(0, str(_PLUGIN_ROOT / "scripts" / "lib"))
 
+import reports_gitignore  # noqa: E402
 import state  # noqa: E402
 
 CheckResult = tuple[str, str, str, str]  # (name, status, detail, fix)
@@ -216,22 +217,27 @@ def _check_uv_available() -> CheckResult:
 
 
 def _check_gitignore_reports() -> CheckResult:
-    gi = state.project_root() / ".gitignore"
-    if not gi.is_file():
+    # TRDD-KSUIEPTQ: reports_dev/ (raw/private) must be ignored; reports/ is git-tracked project
+    # content and must NOT be. Ask git (as reports_gitignore.is_ignored does), never parse the file:
+    # negations, global excludes and nested ignore files all change the answer.
+    dev = reports_gitignore.is_ignored(state.project_root(), "reports_dev/probe")
+    rep = reports_gitignore.is_ignored(state.project_root(), "reports/probe")
+    if dev is None or rep is None:
         return (
-            "gitignore-reports", "FAIL", ".gitignore missing at project root",
-            "Create .gitignore and add /reports/ + /reports_dev/",
+            "gitignore-reports", "WARN", "git could not answer (not a repo, or git missing)",
+            "Run the doctor inside a git repository",
         )
-    try:
-        lines = set(gi.read_text().splitlines())
-    except OSError:
-        lines = set()
-    missing = [r for r in ("/reports/", "/reports_dev/") if r not in lines]
-    if not missing:
-        return ("gitignore-reports", "PASS", "/reports/ and /reports_dev/ both gitignored", "")
+    problems = []
+    if not dev:
+        problems.append("reports_dev/ is NOT ignored")
+    if rep:
+        problems.append("reports/ IS ignored")
+    if not problems:
+        return ("gitignore-reports", "PASS", "reports_dev/ ignored, reports/ tracked", "")
     return (
-        "gitignore-reports", "FAIL", f"missing in .gitignore: {', '.join(missing)}",
-        "Add the missing entries to .gitignore — agents write reports there and they may contain private data",
+        "gitignore-reports", "FAIL", "; ".join(problems),
+        "Add /reports_dev/ to .gitignore (raw reports may contain private data); remove any rule "
+        "ignoring reports/ (it is tracked project content — run sanitize-reports before committing)",
     )
 
 

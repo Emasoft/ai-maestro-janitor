@@ -348,4 +348,4 @@ Per resolved pair, ONE line: `demoted <obsolete> into <survivor> (superseded by
 <sha>/<TRDD>): <WHY>` / `deleted <false>, history folded into <survivor> (vote 3/3,
 no trace)` / `skipped <pair> (<not-a-conflict|dirty-tree|no-provenance|ambiguous-repo|
 retry-exhausted>)`. Never echo bodies; detailed report:
-`$MAIN_ROOT/reports/janitor-memory-conflict/<ts>-<slug>.md`.
+`$MAIN_ROOT/reports_dev/janitor-memory-conflict/<ts>-<slug>.md`.

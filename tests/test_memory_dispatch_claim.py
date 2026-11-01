@@ -485,7 +485,7 @@ def test_expire_stale_claims_never_looks_at_reports_anymore(tmp_path, monkeypatc
     epoch = 1_000_000
     p = _claimed(state_dir, epoch, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     ts = datetime.fromtimestamp(epoch + 100, tz=timezone.utc).strftime("%Y%m%d_%H%M%S+0000")
     (reports_dir / f"{ts}-repair-local.md").write_text("done", encoding="utf-8")
@@ -524,7 +524,7 @@ def test_expire_stale_claims_closes_from_a_finished_but_unchecked_report(tmp_pat
     epoch = 1_000_000
     p = _claimed(state_dir, epoch, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     report = reports_dir / "20260916_120000+0000-repair-local.md"
     report.write_text(
@@ -556,7 +556,7 @@ def test_expire_stale_claims_ignores_a_report_naming_a_different_dispatch(tmp_pa
     epoch = 1_000_000
     p = _claimed(state_dir, epoch, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     report = reports_dir / "20260916_120000+0000-repair-local.md"
     report.write_text(
@@ -585,7 +585,7 @@ def test_expire_stale_claims_in_flight_report_does_not_close_early(tmp_path, mon
     epoch = 1_000_000
     p = _claimed(state_dir, epoch, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     report = reports_dir / "20260916_120000+0000-repair-local.md"
     report.write_text(
@@ -771,7 +771,7 @@ def test_find_completion_report_matches_an_indented_claim_header(tmp_path):
     project_root = tmp_path
     state_dir = project_root / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = project_root / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project_root / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     report = reports_dir / "repair-pass.md"
     report.write_text(
@@ -1150,7 +1150,7 @@ def test_claim_cli_creates_report_skeleton_with_header(tmp_path):
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
 
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     files = sorted(reports_dir.glob("*-repair-local.md"))
     assert len(files) == 1, files
     text = files[0].read_text(encoding="utf-8")
@@ -1174,7 +1174,7 @@ def test_claim_cli_records_skeleton_path_on_claimed_record(tmp_path):
     claimed = json.loads(
         (state_dir / f"{mdc.CLAIMED_PREFIX}1000000-abcd1234.json").read_text(encoding="utf-8")
     )
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     expected = next(reports_dir.glob("*-repair-local.md"))
     assert claimed["report"] == str(expected)
 
@@ -1204,7 +1204,7 @@ def test_claim_cli_peek_creates_no_report_file(tmp_path):
 
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir), "--peek"])
     assert proc.returncode == 0, proc.stderr
-    assert not (project / "reports").exists()
+    assert not (project / "reports_dev").exists()
 
 
 def test_find_completion_report_matches_claim_skeleton_only_after_outcome_marker(tmp_path):
@@ -1220,7 +1220,7 @@ def test_find_completion_report_matches_claim_skeleton_only_after_outcome_marker
 
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     skeleton = next(reports_dir.glob("*-repair-local.md"))
 
     before = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
@@ -1244,7 +1244,7 @@ def test_find_completion_report_prefers_the_marked_report_when_two_match(tmp_pat
     project = tmp_path / "proj"
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     marked = reports_dir / "a-finished.md"
     marked.write_text(
@@ -1264,7 +1264,7 @@ def test_find_completion_report_two_matches_neither_marked_is_ambiguous(tmp_path
     project = tmp_path / "proj"
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     (reports_dir / "a.md").write_text(
         "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n", encoding="utf-8"
@@ -1282,7 +1282,7 @@ def test_find_completion_report_two_matches_both_marked_is_ambiguous(tmp_path):
     project = tmp_path / "proj"
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     (reports_dir / "a.md").write_text(
         "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n<!-- janitor-outcome: mutation -->\n",
@@ -1312,7 +1312,7 @@ def test_claim_cli_with_a_bare_state_dir_creates_no_report_skeleton(tmp_path):
     assert "REPORT HEADER" in proc.stdout
     assert "REPORT_FILE=" not in proc.stdout
     assert "is not <project>/.janitor/state; no report skeleton created" in proc.stderr
-    assert not any(tmp_path.rglob("reports"))
+    assert not any(tmp_path.rglob("reports_dev"))
 
 def test_reports_dir_candidates_resolves_via_git_worktree_list(tmp_path):
     """(j) A plain git repo with no linked worktrees: `git worktree list` names the repo
@@ -1324,7 +1324,7 @@ def test_reports_dir_candidates_resolves_via_git_worktree_list(tmp_path):
     subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
 
     result = mdc._reports_dir_candidates(state_dir)
-    assert result == [project / "reports" / "janitor-memory-subconscious-agent"]
+    assert result == [project / "reports_dev" / "janitor-memory-subconscious-agent"]
 
 
 def test_reports_dir_candidates_falls_back_when_git_unavailable(tmp_path, monkeypatch):
@@ -1341,7 +1341,7 @@ def test_reports_dir_candidates_falls_back_when_git_unavailable(tmp_path, monkey
     monkeypatch.setattr(mdc.subprocess, "run", _boom)
 
     result = mdc._reports_dir_candidates(state_dir)
-    assert result == [project / "reports" / "janitor-memory-subconscious-agent"]
+    assert result == [project / "reports_dev" / "janitor-memory-subconscious-agent"]
 
 
 def test_skeleton_lands_at_main_checkout_when_state_dir_is_a_linked_worktree(tmp_path):
@@ -1371,8 +1371,8 @@ def test_skeleton_lands_at_main_checkout_when_state_dir_is_a_linked_worktree(tmp
 
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
-    main_reports = main_repo / "reports" / "janitor-memory-subconscious-agent"
-    worktree_reports = worktree / "reports" / "janitor-memory-subconscious-agent"
+    main_reports = main_repo / "reports_dev" / "janitor-memory-subconscious-agent"
+    worktree_reports = worktree / "reports_dev" / "janitor-memory-subconscious-agent"
     assert next(main_reports.glob("*-repair-local.md"), None) is not None
     assert not worktree_reports.exists()
 
@@ -1396,7 +1396,7 @@ def test_find_completion_report_survives_matcher_git_failure_same_root(tmp_path,
 
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = project / "reports_dev" / "janitor-memory-subconscious-agent"
     skeleton = next(reports_dir.glob("*-repair-local.md"))
 
     def _boom(*a, **k):
@@ -1525,7 +1525,7 @@ def test_find_completion_report_dedupes_a_symlinked_project_root(tmp_path, monke
 
     state_dir = symlink_project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = real_project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = real_project / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
     skeleton = reports_dir / "20260916_000000+0000-repair-local.md"
     skeleton.write_text("Claim: dispatch_id=1000000-abcd1234\n", encoding="utf-8")

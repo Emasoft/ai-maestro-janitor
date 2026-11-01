@@ -198,8 +198,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("1 → PROJECT", proc.stdout)
             self.assertIn("1 privacy-flagged", proc.stdout)
 
-            # The plan was written under reports/migrate-memory-scope/ (gitignored).
-            plans = list((root / "reports" / "migrate-memory-scope").glob("*-plan.md"))
+            # The plan was written under reports_dev/migrate-memory-scope/ (gitignored).
+            plans = list((root / "reports_dev" / "migrate-memory-scope").glob("*-plan.md"))
             self.assertEqual(1, len(plans))
             # The corpus was not mutated.
             after = {p: p.read_bytes() for p in memdir.iterdir()}

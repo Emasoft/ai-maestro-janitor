@@ -37,7 +37,7 @@ Repo-side detail in references/repo-side-checks.md. Env-name regexes in referenc
    ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
    MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
    MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-   REPORT_DIR="$MAIN_ROOT/reports/janitor-credential-window-audit"
+   REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-credential-window-audit"
    mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"
    REPORT_FILE="$REPORT_DIR/$TIMESTAMP-audit.md"

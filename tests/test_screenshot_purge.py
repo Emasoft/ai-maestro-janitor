@@ -81,15 +81,15 @@ def _list_dir(dir_: Path) -> set[str]:
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    """Build a minimal fake project layout: <tmp>/reports/screenshots/."""
-    shots = tmp_path / "reports" / "screenshots"
+    """Build a minimal fake project layout: <tmp>/reports_dev/ui-test/screenshots/ (TRDD-KSUIEPTQ)."""
+    shots = tmp_path / "reports_dev" / "ui-test" / "screenshots"
     shots.mkdir(parents=True)
     return tmp_path
 
 
 @pytest.fixture
 def shots_dir(project_root: Path) -> Path:
-    return project_root / "reports" / "screenshots"
+    return project_root / "reports_dev" / "ui-test" / "screenshots"
 
 
 # ---------------------------------------------------------------------------
@@ -273,9 +273,9 @@ def test_recursive_subdir_traversal(project_root: Path, shots_dir: Path) -> None
 # ---------------------------------------------------------------------------
 
 def test_missing_screenshots_dir_is_silent_noop(project_root: Path) -> None:
-    """When reports/screenshots/ does not exist at all, exit 0 silently."""
-    shutil.rmtree(project_root / "reports" / "screenshots")
-    assert not (project_root / "reports" / "screenshots").exists()
+    """When reports_dev/<component>/screenshots/ does not exist at all, exit 0 silently."""
+    shutil.rmtree(project_root / "reports_dev" / "ui-test" / "screenshots")
+    assert not (project_root / "reports_dev" / "ui-test" / "screenshots").exists()
 
     result = _run_detector(project_root)
     assert result.returncode == 0, result.stderr
@@ -284,7 +284,7 @@ def test_missing_screenshots_dir_is_silent_noop(project_root: Path) -> None:
 
 def test_empty_screenshots_dir_is_silent_noop(project_root: Path) -> None:
     """Empty dir: no-op, exit 0, silent. The project_root fixture creates an
-    empty reports/screenshots/ — no further setup needed."""
+    empty reports_dev/ui-test/screenshots/ — no further setup needed."""
     result = _run_detector(project_root)
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
@@ -478,3 +478,21 @@ def test_log_file_created_on_first_purge(project_root: Path, shots_dir: Path) ->
     log_text = log_path.read_text()
     assert "age-purged" in log_text
     assert "old.png" in log_text
+
+
+def test_every_component_is_purged_and_reports_is_never_touched(project_root: Path) -> None:
+    """TRDD-KSUIEPTQ: old screenshots under ANY reports_dev/<component>/screenshots/ are purged;
+    an old image under tracked reports/ (even reports/screenshots/) is never touched."""
+    other = project_root / "reports_dev" / "other-agent" / "screenshots"
+    _make_screenshot(other, "old.png", age_hours=100)
+    tracked = _make_screenshot(project_root / "reports" / "screenshots", "old.png", age_hours=1000)
+    tracked2 = _make_screenshot(project_root / "reports" / "x", "old.png", age_hours=1000)
+    nonshot = _make_screenshot(project_root / "reports_dev" / "ui-test", "old.png", age_hours=1000)
+
+    result = _run_detector(project_root)
+    assert result.returncode == 0, result.stderr
+
+    assert not (other / "old.png").exists()
+    assert tracked.exists() and tracked2.exists()
+    assert nonshot.exists(), "only <component>/screenshots/ is a purge target"
+    assert "reports_dev/*/screenshots/" in result.stdout

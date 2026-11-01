@@ -1174,7 +1174,7 @@ def _write_report(project_root: Path, chore: str, scope: str, outcome: str, mtim
     """Write a report file shaped like the janitor-memory-subconscious-agent's own
     output (`<ts>-<chore>-<scope>.md`, ending in the `janitor-outcome` marker) and
     force its mtime, so age comparisons in the gate are deterministic."""
-    report_dir = project_root / "reports" / f"janitor-memory-{chore}"
+    report_dir = project_root / "reports_dev" / f"janitor-memory-{chore}"
     report_dir.mkdir(parents=True, exist_ok=True)
     report = report_dir / f"20260101_000000+0000-{chore}-{scope.lower()}.md"
     report.write_text(
@@ -1267,7 +1267,7 @@ def test_no_recent_noop_allows_a_report_missing_the_outcome_marker(tmp_path, mon
     project_root.mkdir()
     monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
     now = 100_000
-    report_dir = project_root / "reports" / "janitor-memory-consolidate"
+    report_dir = project_root / "reports_dev" / "janitor-memory-consolidate"
     report_dir.mkdir(parents=True, exist_ok=True)
     report = report_dir / "20260101_000000+0000-consolidate-local.md"
     report.write_text("# consolidate pass\n\nno marker here\n", encoding="utf-8")
@@ -1289,7 +1289,7 @@ def test_no_recent_noop_last_marker_wins_when_two_fall_in_the_512_byte_tail(tmp_
     project_root.mkdir()
     monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
     now = 100_000
-    report_dir = project_root / "reports" / "janitor-memory-consolidate"
+    report_dir = project_root / "reports_dev" / "janitor-memory-consolidate"
     report_dir.mkdir(parents=True, exist_ok=True)
     report = report_dir / "20260101_000000+0000-consolidate-local.md"
     report.write_text(

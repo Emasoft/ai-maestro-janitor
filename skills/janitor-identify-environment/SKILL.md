@@ -8,7 +8,7 @@ description: Report this Claude Code session's full runtime environment — term
 ## Overview
 
 Pure observation of THIS session's runtime. It writes the full report to
-`<repo>/reports/identify-environment/<timestamp>-env.json` and prints only a compact digest + that
+`<repo>/reports_dev/identify-environment/<timestamp>-env.json` and prints only a compact digest + that
 path — so the caller's context holds the summary, not the whole object.
 
 ## When to use

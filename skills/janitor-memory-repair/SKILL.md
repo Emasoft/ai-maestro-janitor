@@ -197,7 +197,7 @@ SUCCESS, retry bound, idempotency and the disable levers; full contract:
 Per repaired page, ONE line: `repaired <slug> (backfilled <fields>; tier <t>;
 +Notes)` / `re-tagged <slug> aspect→component (governed nothing)` / `skipped <slug>
 (<well-formed|cross-scope-rehome-surfaced|retry-exhausted>)`. Never echo bodies;
-report: `$MAIN_ROOT/reports/janitor-memory-repair/<ts>-<slug>.md`.
+report: `$MAIN_ROOT/reports_dev/janitor-memory-repair/<ts>-<slug>.md`.
 
 ## Scope
 

@@ -35,7 +35,7 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
    ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
    MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
    MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-   REPORT_DIR="$MAIN_ROOT/reports/janitor-github-workflow-doctor"
+   REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-github-workflow-doctor"
    mkdir -p "$REPORT_DIR"
    TS="$(date +%Y%m%d_%H%M%S%z)"
    zizmor .github/workflows --format sarif --output "$REPORT_DIR/$TS-scan.sarif" 2>&1 | tee "$REPORT_DIR/$TS-scan.txt"

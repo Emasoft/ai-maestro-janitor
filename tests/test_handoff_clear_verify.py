@@ -329,8 +329,8 @@ def test_phase_after_proves_cron_recreated_and_writes_report(tmp_path: Path) -> 
     assert "VERIFY_AFTER" in proc.stdout
     assert "[PASS] cron_recreated" in proc.stdout
     assert "[PASS] resume_flag_consumed" in proc.stdout
-    # A PASS/FAIL report was written under reports/continuity-build/ of the tmp project.
-    reports = list((p / "reports" / "continuity-build").glob("*-handoff-clear-verify.md"))
+    # A PASS/FAIL report was written under reports_dev/continuity-build/ of the tmp project.
+    reports = list((p / "reports_dev" / "continuity-build").glob("*-handoff-clear-verify.md"))
     assert reports, "a verification report must be written"
     body = reports[0].read_text(encoding="utf-8")
     assert "cross-/clear verification" in body

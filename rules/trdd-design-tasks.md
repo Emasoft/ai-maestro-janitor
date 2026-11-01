@@ -96,7 +96,7 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
     Single source of truth, kept current on every edit, and it WINS on disagreement with the
     frontmatter. Full contents (NEXT ACTION, gotchas, SUPERSEDED list): the reference.
 11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents DATA
-    and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision goes
+    and lives in `reports/` (git-tracked, succinct, run through `sanitize-reports`; raw or private material goes to gitignored `reports_dev/`). The moment it leads to a DECISION, that decision goes
     into a TRDD — a new one, or an existing TRDD's STATE block.
 12. **Terminal columns are frozen — AFTER the transition that made them terminal.** No body
     edits on `complete`/`failed`/`superseded`/`published`/`live`; new work = new TRDD. Only

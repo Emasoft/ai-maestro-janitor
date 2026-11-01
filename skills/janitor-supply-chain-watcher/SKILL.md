@@ -31,7 +31,7 @@ Protects against the published-then-discovered-malicious shape (Shai-Hulud npm/P
    ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
    MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
    MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-   REPORT_DIR="$MAIN_ROOT/reports/janitor-supply-chain-watcher"; mkdir -p "$REPORT_DIR"
+   REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-supply-chain-watcher"; mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"
    STATE_DIR="$MAIN_ROOT/.janitor/state"; mkdir -p "$STATE_DIR"
    CURSOR_FILE="$STATE_DIR/sca-cursor.json"
@@ -128,4 +128,4 @@ ONLY scans lock files. Does NOT modify manifests or lock files, run package-mana
   - [Per-fire API budget math](references/cursor-cache-protocol.md#per-fire-api-budget-math)
   - [Failure recovery and invalidation](references/cursor-cache-protocol.md#failure-recovery-and-invalidation)
 - `$MAIN_ROOT/.janitor/state/sca-cursor.json` — cursor cache.
-- `$MAIN_ROOT/reports/janitor-supply-chain-watcher/<TS>-findings.md` — per-run findings.
+- `$MAIN_ROOT/reports_dev/janitor-supply-chain-watcher/<TS>-findings.md` — per-run findings.

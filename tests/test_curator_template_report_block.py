@@ -75,7 +75,7 @@ def _run(tmp_path: Path, *, stub_mode: str, precreate: bool, fill_placeholder: b
 
     state_dir = tmp_path / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    reports_dir = tmp_path / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = tmp_path / "reports_dev" / "janitor-memory-subconscious-agent"
     reports_dir.mkdir(parents=True)
 
     plugin_root = tmp_path / "plugin"
@@ -131,7 +131,7 @@ def test_none_falls_back_to_created_file(tmp_path):
     """Both read-backs fail: the fallback creates exactly one report with the pasted header."""
     result = _run(tmp_path, stub_mode="none", precreate=False, fill_placeholder=True)
     assert result.returncode == 0, result.stderr
-    reports_dir = tmp_path / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir = tmp_path / "reports_dev" / "janitor-memory-subconscious-agent"
     created = list(reports_dir.glob("*.md"))
     assert len(created) == 1
     content = created[0].read_text()

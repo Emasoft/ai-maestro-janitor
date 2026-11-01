@@ -181,7 +181,7 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
    consume a resume for a clear that has not happened yet.
 3. The directive's FIRST instruction runs `handoff_clear_verify.py --phase after`,
    which reads the `before` snapshot (it survived `/clear`) and emits a PASS/FAIL table
-   to `reports/continuity-build/` — proving the heartbeat cron is healthy (survived
+   to `reports_dev/continuity-build/` — proving the heartbeat cron is healthy (survived
    unchanged or was destroyed+recreated, whichever this build does), the context
    collapsed, and every handoff link resolves.
 4. The fresh session reads the newest `.janitor/state/agent-handoff-*.md` and

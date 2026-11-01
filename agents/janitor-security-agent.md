@@ -98,7 +98,7 @@ or one full-sweep, the skills' caps. Quality over volume; the next dispatch cove
 ## Output contract (you are a background/sub agent)
 
 Do the WHOLE pass in your own context. Write the detailed report to
-`$MAIN_ROOT/reports/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md`
+`$MAIN_ROOT/reports_dev/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md` (it carries machine and harness state, so it is private; a report meant for `reports/` is run through `sanitize-reports <file>` first)
 (resolve `$MAIN_ROOT` with the anchored block below — never a bare `git worktree list`, which
 resolves against the CWD and so splits one chore's reports across two trees). Return to your
 caller ONLY one line plus that report path — never raw findings, never file bodies, never a
@@ -117,7 +117,7 @@ SLUG=audit                  # short subject
 ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
 MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
 MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-REPORT_DIR="$MAIN_ROOT/reports/janitor-security-agent"; mkdir -p "$REPORT_DIR"
+REPORT_DIR="$MAIN_ROOT/reports_dev/janitor-security-agent"; mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$DOMAIN-$SLUG.md"
 printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
 echo "$REPORT_FILE"         # use THIS path verbatim; never retype the timestamp
@@ -125,7 +125,7 @@ echo "$REPORT_FILE"         # use THIS path verbatim; never retype the timestamp
 
 The one-line return states: domain, counts `fixed=N flagged=M` (and `(autofix-off: proposed)`
 when the gate suppressed application), and the report path. Example:
-`[security] workflow: fixed=3 flagged=1 (1 needs admin) — report: reports/janitor-security-agent/…md`.
+`[security] workflow: fixed=3 flagged=1 (1 needs admin) — report: reports_dev/janitor-security-agent/…md`.
 
 ## The quality bar — leave the posture provably better
 

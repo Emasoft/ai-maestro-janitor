@@ -594,5 +594,49 @@ class TestRenamedCuratorDir(unittest.TestCase):
             self.assertEqual(_run(root).strip(), "")
 
 
+class TestReportsDevTree(unittest.TestCase):
+    """TRDD-KSUIEPTQ: the janitor's own agent/curator reports land in reports_dev/<component>/,
+    so the detector scans reports_dev/ as well as reports/, with the same curator exclusions."""
+
+    def _proj(self, tmp: str, subdir: str) -> Path:
+        root = Path(tmp)
+        (root / "design" / "tasks").mkdir(parents=True)
+        (root / "reports_dev" / subdir).mkdir(parents=True)
+        (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+            _trdd("in-progress", "Active"))
+        return root
+
+    def test_decision_report_in_reports_dev_is_flagged(self):
+        """An unconverted decision report under reports_dev/ is flagged, path shown."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp, "audit")
+            rep = root / "reports_dev/audit/20260530_120000+0200-CONSOLIDATED.md"
+            rep.write_text("# decision\nrecommended stack")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("reports_dev/audit/", out)
+            self.assertIn("CONSOLIDATED.md", out)
+
+    def test_curator_abstain_in_reports_dev_is_not_flagged(self):
+        """The curator exclusion applies in the reports_dev/ tree too."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports_dev/janitor-memory-consolidate"
+                   / "20260801_040000+0200-consolidation-plan.md")
+            rep.write_text("# CONSOLIDATE pass\n\n## Outcome\n\nABSTAINED — nothing mutated.\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_curator_mutation_in_reports_dev_is_still_flagged(self):
+        """Widening WHERE must not silence WHAT: a mutating pass has no no-op marker."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports_dev/janitor-memory-consolidate"
+                   / "20260801_040000+0200-consolidation-plan.md")
+            rep.write_text("# CONSOLIDATE pass\n\nMerged two pages; follow-up recommended.\n")
+            _aged(rep)
+            self.assertIn("consolidation-plan.md", _run(root))
+
+
 if __name__ == "__main__":
     unittest.main()

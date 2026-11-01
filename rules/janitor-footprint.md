@@ -33,7 +33,8 @@ the plugin DATA dir**; regeneratable caches are safe to remove.
 |---|---|---|
 | `.janitor/state/`, `.janitor/logs/` | per-session detector state (stamps, seen-files, flags) + logs | **yes** — regenerated; gitignore it |
 | `.claude/project/memory/` | **PROJECT**-scope wiki memory — git-**tracked + PUSHED**, shared | **NO** — real shared knowledge |
-| `reports/`, `reports_dev/` | agent reports (may hold private data) — **gitignored** | yes — ephemeral |
+| `reports/` | succinct final agent reports, each run through `sanitize-reports <file>` before commit — git-**TRACKED**, shared | **NO** — tracked deliverables; the janitor never purges it |
+| `reports_dev/` | raw, intermediate and private agent output (machine, harness, memory-corpus state, local config) — **gitignored** | **NO** — never purged by the janitor (only UI-test screenshots under `reports_dev/<component>/screenshots/` are auto-purged) |
 | `.trashcan/` | `/janitor-safe-delete` staging — gitignored, purged after ~90d | recover here; else auto-purged |
 
 ## Global (under `~/.claude/`)
@@ -49,6 +50,6 @@ the plugin DATA dir**; regeneratable caches are safe to remove.
 | `~/.claude/janitor-global-state/` | LEGACY daemon-state dir — **RETIRED (TRDD-ULEGRT01)**: no resolver rung, no reads; the daemon copies leftovers to DATA on first run (README-MOVED.txt) | yes, once `DATA/global-state/migrated-from-legacy.ts` exists |
 
 **Rule of thumb:** any `…/memory/…` dir and the plugin **DATA** dir hold real
-state — never delete them. `.janitor/state`, `.janitor/logs`, `reports*`, and
+state — never delete them (`reports/` and `reports_dev/` included). `.janitor/state`, `.janitor/logs`, and
 `.trashcan` are regeneratable. Memory scopes + per-file inventory:
 `markdown-memory-recall.md`.

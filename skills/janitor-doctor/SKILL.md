@@ -12,7 +12,7 @@ Runs a series of named pass/fail checks against the project and the plugin insta
 The checks cover three layers:
 
 1. **Plugin install** — dispatch.py executable, detectors executable, plugin.json valid.
-2. **Project state** — `.janitor/state/` and `.janitor/logs/` writable, project is a git repo, `/reports/` and `/reports_dev/` are gitignored.
+2. **Project state** — `.janitor/state/` and `.janitor/logs/` writable, project is a git repo, `/reports_dev/` is gitignored and `/reports/` is NOT gitignored (it is git-tracked).
 3. **External dependencies** — `uv` (required — every detector uses `uv run --script`), `git`, `gh` (authenticated). `jq` is informational only.
 
 Use this when the heartbeat seems silent for too long, when `pr-reconciler` or `task-pr-mismatch` keep skipping, or as the first step of any "the janitor is broken" investigation.

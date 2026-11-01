@@ -136,7 +136,7 @@ The refusal is page-granular, re-arms when the page's bytes change, and expires 
 
 ## Report
 
-Write the report under `<main-repo>/reports/janitor-memory/<timestamp>-relocate.md`:
+Write the report under `<main-repo>/reports_dev/janitor-memory/<timestamp>-relocate.md`:
 candidates seen, the verdict per candidate (move/link/refuse) and its evidence, pages touched,
 and any refusals. Then close your claim (`complete --state-dir "$STATE_DIR" --chore relocate
 --scope <scope>`) and return ONE line: what moved where, what linked, abstains — plus the

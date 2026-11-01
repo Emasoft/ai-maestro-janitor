@@ -84,7 +84,7 @@ def test_a_tracked_file_in_an_uncovered_class_is_an_offender_even_with_no_rule()
     """
     private = [
         ".env", "conf/.env.local", "keys/id_rsa.pub", "certs/server.pem", "signing.key",
-        ".claude/settings.local.json", "reports/x.md", "scripts_dev/x.py", ".venv/pyvenv.cfg",
+        ".claude/settings.local.json", "reports_dev/x.md", "scripts_dev/x.py", ".venv/pyvenv.cfg",
         "node_modules/x.js", "assets/.DS_Store", "logs/debug.log", ".trashcan/x",
     ]
     plain = ["src/app.py", "README.md", "environment.md"]
@@ -103,8 +103,10 @@ def test_class_matcher_shapes_follow_the_canonical_pattern_not_a_loose_substring
     m = gc.matches_private_class
     assert m("a/b/.env.local") and not m("a/b/env.local")      # bare glob: basename, any depth
     assert m("x/node_modules/y.js") and not m("x/node_modules")  # `dir/`: a dir component, any depth
-    assert m("reports/r.md") and not m("reports")               # `/dir/`: the ROOT directory only …
-    assert not m("skills/x/templates/reports/r.md")             # … never a nested one
+    assert m("scripts_dev/r.md") and not m("scripts_dev")       # `/dir/`: the ROOT directory only …
+    # TRDD-KSUIEPTQ: reports/ is tracked project content, not a private class.
+    assert not m("reports/r.md")
+    assert not m("skills/x/templates/scripts_dev/r.md")         # … never a nested one
     assert m("scripts_dev/x.py") and not m("pkg/scripts_dev/x.py")
     assert m(".claude/settings.local.json")                     # inner slash: anchored at the root
     assert not m("pkg/.claude/settings.local.json")
@@ -191,7 +193,7 @@ def test_a_tracked_file_covered_by_an_ordinary_rule_is_not_this_detectors_findin
 ) -> None:
     """TRDD-IEAZQ9MK: a plain repo rule (`ccpm/**`), no private-class match — `tracked-ignored`
     owns this, not `gitignore-coverage`. Before the fix this fired here too, wrongly worded
-    "in a private class" for a file in none of the thirteen.
+    "in a private class" for a file in none of the twelve.
     """
     repo = tmp_path / "seed"
     git = _seed(repo)

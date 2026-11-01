@@ -155,7 +155,7 @@ verb, ABSTAIN and report the gap — never hand-edit the page.
 
 ## Report
 
-One line + a report path under `reports/janitor-memory-enrich/`. Name the scope, pages
+One line + a report path under `reports_dev/janitor-memory-enrich/`. Name the scope, pages
 touched, phrases added, duplicates removed, and any refusals. End the report with
 `<!-- janitor-outcome: mutation -->` (or `noop`).
 

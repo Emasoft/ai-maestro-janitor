@@ -464,9 +464,10 @@ def _write_report(main_root: Path, rows: list[dict]) -> Path | None:
 
     One row per flagged TRDD: id, column, which checks fired, the evidence
     (shipped commits/tags, stale blockers). Lands under the MAIN-repo
-    `reports/trdd-reconciliation/` with a local-time + GMT-offset timestamp.
+    `reports_dev/trdd-reconciliation/` with a local-time + GMT-offset timestamp.
     """
-    report_dir = main_root / "reports" / "trdd-reconciliation"
+    # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+    report_dir = main_root / "reports_dev" / "trdd-reconciliation"
     ts = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
     report_path = report_dir / f"{ts}-board.md"
     iso = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")

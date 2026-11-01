@@ -105,7 +105,7 @@ already in lesson form; only body ATOM markers count.
    breaks parsing is a defect, not a completion.
 4. **Report.** Write the detailed report (converted atoms, lesson ids, WHY sources,
    FLAGGED atoms with what a human must supply) to
-   `$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`,
+   `$MAIN_ROOT/reports_dev/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`,
    ending it with `<!-- janitor-outcome: mutation -->` (or `noop`).
 5. **Close the claim (MANDATORY — a pass that returns without this leaves an orphaned
    claim).** `set-report` runs in the SAME Bash call that just wrote `$REPORT_FILE` (its

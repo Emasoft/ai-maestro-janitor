@@ -40,7 +40,7 @@ state):
       context size (« before ⇒ collapse proven), resolve EACH persisted link via memgrep (all
       resolve ⇒ handoff recoverable), confirm the resume flag was consumed, and
       confirm a re-arm happened after the snapshot (⇒ SessionStart ran on clear).
-      Emits a PASS/FAIL table to reports/continuity-build/.
+      Emits a PASS/FAIL table to reports_dev/continuity-build/.
 
 FAIL-OPEN throughout: this is a DIAGNOSTIC. A fault here must NEVER break the
 resume — every gather is best-effort and a missing signal degrades a check to SKIP,
@@ -1015,11 +1015,12 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _report_dir() -> Path:
-    """<project>/reports/continuity-build/ — anchored on CLAUDE_PROJECT_DIR (the project
+    """<project>/reports_dev/continuity-build/ — anchored on CLAUDE_PROJECT_DIR (the project
     being cleared), NOT the process cwd. Deliberately no `git` call: this is a
     per-project diagnostic, project_root() is its correct home, and shelling out to git
     from an arbitrary cwd is both fragile and how a wrong-repo report gets written."""
-    d = _project_root() / "reports" / "continuity-build"
+    # TRDD-KSUIEPTQ: reports/ is git-tracked now; janitor-generated output goes to the gitignored reports_dev/ so it never shows as untracked.
+    d = _project_root() / "reports_dev" / "continuity-build"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
