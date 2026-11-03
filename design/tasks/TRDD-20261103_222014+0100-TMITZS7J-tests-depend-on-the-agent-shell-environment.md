@@ -1,10 +1,10 @@
 ---
 trdd-id: TMITZS7J
 title: Tests depend on the agent shell environment
-column: todo
+column: design
 status: tasked
 created: 2026-11-03T22:20:14+0100
-updated: 2026-11-03T22:22:19+0100
+updated: 2026-11-03T22:24:01+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,3 +37,4 @@ uv run pytest passes with the owner's settings env and the agent GIT_CONFIG vari
 ## Approval log
 
 - 2026-11-03T22:20:14+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-03T22:24:01+0100 — column → design. the fix is a candidate, not yet designed; todo asserts approved and designed (3.0.0 columns)
