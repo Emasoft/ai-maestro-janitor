@@ -68,33 +68,33 @@ test('secret_shield_block_files keeps Claude out of .env and keys, not .env.exam
   expect(toasts).toEqual(['secret-shield kept Claude out of .env.local', 'secret-shield kept Claude out of id_ed25519'])
 })
 
-test('/secret-shield test dry-runs a text', async ($, on) => {
-  const dry = await $.command.run({ command: 'secret-shield', args: `test token=${TOKEN}`, ...TYPED })
+test('/janitor-secret-shield test dry-runs a text', async ($, on) => {
+  const dry = await $.command.run({ command: 'janitor-secret-shield', args: `test token=${TOKEN}`, ...TYPED })
   expect(dry.text).toMatch(/would hide 1 GitHub token/)
   expect(dry.text).toContain('[JANITOR-REDACTED:github-token]')
 
-  const clean = await $.command.run({ command: 'secret-shield', args: 'test hello world', ...TYPED })
+  const clean = await $.command.run({ command: 'janitor-secret-shield', args: 'test hello world', ...TYPED })
   expect(clean.text).toBe('secret-shield: nothing to hide in that text.')
 })
 
-test('/secret-shield reports the all-time tally from the store', async ($, on) => {
+test('/janitor-secret-shield reports the all-time tally from the store', async ($, on) => {
   mock.store(on, { totals: { 'github-token': 4, 'aws-access-key': 1 } })
 
-  const status = await $.command.run({ command: 'secret-shield', args: '', ...TYPED })
+  const status = await $.command.run({ command: 'janitor-secret-shield', args: '', ...TYPED })
 
   expect(status.text).toMatch(/^secret-shield is on\./)
   expect(status.text).toMatch(/Hidden this session \(0\):\n {2}nothing yet/)
   expect(status.text).toMatch(/Hidden all time \(5\):\n {2}4 GitHub tokens\n {2}1 AWS access key/)
 })
 
-test('the session.start hook registers /secret-shield', async ($, on) => {
+test('the session.start hook registers /janitor-secret-shield', async ($, on) => {
   const names: string[] = []
   on('command.register', ($, e) => (names.push(e.name), { value: { command: e.name } }))
   on('session.start', () => ({ cwd: '/work' }))
 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
-  expect(names).toEqual(['secret-shield'])
+  expect(names).toEqual(['janitor-secret-shield'])
 })
 
 test('a tool\'s own result is redacted too, so the display copy keeps no secret', async ($, on) => {
@@ -130,13 +130,13 @@ test('nested results (Read) are walked and keep their shape', async ($, on) => {
   expect(out.result).toEqual({ type: 'text', file: { filePath: '/w/a.txt', content: 'KEY=[JANITOR-REDACTED:aws-access-key]\n', numLines: 1, startLine: 1, totalLines: 1 } })
 })
 
-test('/secret-shield counts what this session hid', async ($, on) => {
+test('/janitor-secret-shield counts what this session hid', async ($, on) => {
   mock.store(on, { totals: { 'github-token': 4 } })
   on('ui.toast', () => ({ value: undefined }))
   on('tool.call', () => ({ result: { stdout: TOKEN, stderr: '', interrupted: false } }))
 
   await $.tool.call({ tool: 'Bash', command: 'env' })
-  const status = await $.command.run({ command: 'secret-shield', args: '', ...TYPED })
+  const status = await $.command.run({ command: 'janitor-secret-shield', args: '', ...TYPED })
 
   expect(status.text).toMatch(/Hidden this session \(1\):\n {2}1 GitHub token/)
   expect(status.text).toMatch(/Hidden all time \(5\):\n {2}5 GitHub tokens/)

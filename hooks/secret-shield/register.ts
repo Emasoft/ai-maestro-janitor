@@ -41,8 +41,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'secret-shield',
-      description: 'What secret-shield has hidden from Claude, or dry-run it: /secret-shield test <text>',
+      name: 'janitor-secret-shield',
+      description: 'What secret-shield has hidden from Claude, or dry-run it: /janitor-secret-shield test <text>',
       argumentHint: '[test <text>]',
     })
     return next(e)
@@ -96,11 +96,11 @@ export const register: Register = (on, options) => {
     return ran.context === undefined ? { result: value as typeof ran.result } : { result: value as typeof ran.result, context: ran.context }
   })
 
-  on('command.run', { command: 'secret-shield' }, async ($, e) => {
+  on('command.run', { command: 'janitor-secret-shield' }, async ($, e) => {
     const args = e.args.trim()
     if (args.startsWith('test')) {
       const sample = args.slice(4).trim()
-      if (sample === '') return { text: 'Usage: /secret-shield test <text to scan>' }
+      if (sample === '') return { text: 'Usage: /janitor-secret-shield test <text to scan>' }
       const { text, hits } = redact(sample)
       return {
         text: countOf(hits) === 0

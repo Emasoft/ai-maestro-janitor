@@ -9,5 +9,6 @@ under the MIT licence in LICENSE. The janitor's modifications are recorded in TR
 - `MARK` is anchored, so a value counts as a marker only when it is one whole. A global `MARKS` pattern is used to judge the rest of a partly redacted value.
 - The URL password rule allows a slash in the password. A value of up to 5 digits followed by `/`, or by a `?` query with an `=`, is skipped as a port. The user part may contain whole markers but no other `[`. A password cannot contain `://`.
 - The tests in `tests/patterns.test.ts` are changed to match these, and extended.
+- The slash command is renamed to /janitor-secret-shield.
 
 A future upstream sync is a manual merge. The sed file at `reports_dev/secret-shield/upstream-sync.sed.txt` covers only the marker rename.
