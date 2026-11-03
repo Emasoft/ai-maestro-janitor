@@ -482,6 +482,43 @@ def test_try_unblock_restores_when_blocked_by_is_terminal(drift, tmp_path):
     assert "pre-block-column:" not in out
 
 
+@pytest.mark.parametrize("column", ["failed", "cancelled", "superseded", "refused"])
+def test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done(drift, tmp_path, column):
+    """A blocker that is terminal but never shipped satisfies a trdd:<id> terminal predicate yet still holds the card."""
+    f = tmp_path / "TRDD-20260101_000000+0000-ABCDEFGH-x.md"
+    text = _blocked_card_with(
+        "unblock-when: [trdd:ZZZZZZZZ terminal]",
+        "blocked-by: [TRDD-ZZZZZZZZ]",
+        "pre-block-column: dev",
+    )
+    f.write_text(text, encoding="utf-8")
+    column_by_uid = {"ZZZZZZZZ": column}
+    now = int(time.time())
+    assert drift.evaluate_unblock_when(
+        ["trdd:ZZZZZZZZ terminal"],
+        column_by_uid=column_by_uid,
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=now,
+    ) == (True, [])
+    drift._try_unblock(
+        f,
+        text,
+        column_by_uid=column_by_uid,
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=now,
+        seen=tmp_path / "seen.txt",
+    )
+    out = f.read_text(encoding="utf-8")
+    # A cancelled guard must not release a card wired to it (TRDD-2V7OAUPE): only a DONE blocker clears blocked-by.
+    assert "column: blocked" in out
+    assert "blocked-by: [TRDD-ZZZZZZZZ]" in out
+    assert "pre-block-column: dev" in out
+
+
 def test_try_unblock_holds_on_an_illegal_pre_block_column(drift, tmp_path):
     """A corrupted/typo'd `pre-block-column:` must never be written verbatim as `column:` —
     advisor finding B4."""
