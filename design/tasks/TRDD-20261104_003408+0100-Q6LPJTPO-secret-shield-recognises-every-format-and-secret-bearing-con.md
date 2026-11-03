@@ -1,10 +1,10 @@
 ---
 trdd-id: Q6LPJTPO
-title: secret-shield recognises every known secret format and secret-bearing context
+title: secret-shield recognises every format and secret-bearing context in its catalog
 column: design
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T00:51:10+0100
+updated: 2026-11-04T00:56:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -20,7 +20,7 @@ approval-datetime: 2026-11-04T00:34:08+0100
 npt: []
 ---
 
-# secret-shield recognises every known secret format and secret-bearing context
+# secret-shield recognises every format and secret-bearing context in its catalog
 
 ## User request (verbatim, 2026-11-04)
 
@@ -38,25 +38,28 @@ On 2026-11-03 a pm2 process dump put two PyPI tokens and a Dropbox app secret in
 - Mods run in Bun, on JavaScriptCore. A pattern with a leading `(?i)` throws there; the scoped `(?i:...)` group, lookbehind, and `\p{L}` with the u flag all compile.
 - Speed: 5 MB takes about 130 ms today, and an estimated 250 to 400 ms with about 200 rules. The hook limit is 10 s, so a prefilter is optional, and it may gate only prefix rules, never context rules.
 - gitleaks and trufflehog are installed locally.
+- These figures come from a simplified env object, from local bun 1.3.14 rather than the 1.4.4 inside Claude Code, and from clean input only; the raw pm2 shape and adversarial input were not measured.
 
 ## Today (hooks/secret-shield/patterns.ts, 267 lines)
 
 Token rules: private-key, anthropic-key, openai-key, stripe-key, github-token, aws-access-key, aws-secret-key, aws-session-token, slack-token, slack-webhook, google-api-key, jwt, sendgrid-key, pypi-token, npm-token, huggingface-token, bearer-token. Context rules: assignment by key name, url-password.
 
-## Target catalog (from memory; each prefix verified by its own per-rule test)
+## Target catalog (from memory; each prefix is checked against the gitleaks rule set or the provider's documentation before its rule lands, because a per-rule test proves only that the regex matches what was written down)
 
 Each rule gets a fake-value test. Fixtures use the real prefixes and are built at run time by concatenation, so no whole fake token sits in the source. The expected output comes from mark(kind), the shield's marker for that kind, never a hand-written marker. No rule may fire on the false-positive corpus.
 
-Left out of the catalog: OpenAI sk-admin- and sk-svcacct- and Stripe whsec_ and rk_, which the current rules already cover; Twilio AC + 32 hex, which is an Account SID and not a secret; bare Notion secret_ and Okta 00 + 40.
+Left out of the catalog: OpenAI sk-admin- and sk-svcacct- and Stripe whsec_ and rk_, which the current rules already cover; Twilio AC + 32 hex, which is an Account SID and not a secret; a Twilio API key SID (SK + 32 hex), which is an identifier, because Twilio secrets are caught by key name; bare Notion secret_, because it matches ordinary identifiers such as secret_key; and Okta 00 + 40, because it is too generic.
 
 - AI providers: Anthropic admin (sk-ant-admin01-), OpenRouter sk-or-v1-, Groq gsk_, xAI xai-, Perplexity pplx-, Replicate r8_, Fireworks fw_, LangSmith lsv2_pt_ and lsv2_sk_, Pinecone pcsk_, Tavily tvly-.
 - Google: OAuth access token ya29., OAuth client secret GOCSPX-, refresh token 1//0, service-account JSON private_key (PEM).
 - Code hosts and registries: GitLab glpat-, gldt-, glrt-, glptt-, glcbt-, glimt-, glagent-, runner GR1348941; Bitbucket ATBB; Atlassian ATATT3 and ATCTT3; RubyGems rubygems_; NuGet oy2 + 43; Docker Hub dckr_pat_; crates.io cio; JFrog AKC; SonarQube squ_, sqp_, sqa_; Buildkite bkua_.
 - Cloud and hosting: Azure storage AccountKey= and SharedAccessKey= in connection strings, SAS sig=, Azure AD client secret (the 8Q~ shape); DigitalOcean dop_v1_, doo_v1_, dor_v1_; Heroku HRKU-; Fly.io fo1_ and FlyV1; Vercel vcp_, vci_, vca_, vcr_, vck_; Netlify nfp_ and nfc_; Cloudflare origin CA v1.0-; Alibaba LTAI; Tencent AKID; Supabase sbp_ and sb_secret_; Render rnd_; Pulumi pul-; Terraform Cloud .atlasv1.; HashiCorp Vault hvs., hvb., hvr.; Doppler dp.st., dp.pt., dp.ct., dp.sa.; 1Password ops_; age AGE-SECRET-KEY-1.
-- Messaging and payments: Slack xapp-; Discord bot token and webhook URL; Telegram bot token (digits:AA + 33); Microsoft Teams webhook URL; Twilio SK + 32 hex; Mailgun key- + 32 hex; Mailchimp 32 hex -us N; Square sq0atp-, sq0csp-, EAAA; Braintree access_token$production$; Shopify shpat_, shpss_, shpca_, shppa_; Facebook EAA long tokens; X/Twitter bearer (run of A then key); Dropbox short-lived sl. and sl.u.
+- Messaging and payments: Slack xapp-; Discord bot token and webhook URL; Telegram bot token (digits:AA + 33); Microsoft Teams webhook URL; Mailgun key- + 32 hex; Mailchimp 32 hex -us N; Square sq0atp-, sq0csp-, EAAA; Braintree access_token$production$; Shopify shpat_, shpss_, shpca_, shppa_; Facebook EAA long tokens; X/Twitter bearer (run of A then key); Dropbox short-lived sl. and sl.u.
 - Dev services: Linear lin_api_; Notion ntn_; Airtable pat + 14 . 64 hex; Figma figd_; Postman PMAK-; Sentry sntrys_, sntryu_, sntrya_; New Relic NRAK-, NRII-, NRJS-; Grafana glc_ and glsa_; Contentful CFPAT-; Mapbox secret sk.eyJ.
 - Key material: PGP PRIVATE KEY BLOCK, PuTTY private key files, kubeconfig client-key-data and token:, JWK private members, wallet private keys (0x + 64 hex) in key-name context.
 - Structural contexts: Authorization headers (Bearer, Basic, Token, Digest) and X-Api-Key, Api-Key, X-Auth-Token headers; credentials in any URL scheme; secret query parameters, matched only by secret-looking names (token, access_token, api_key, key, sig, signature, password, client_secret, X-Amz-Signature, X-Goog-Signature) and never by pagination or continuation tokens; CLI flags (--password, --token, --secret, -p for mysql, curl -u user:pass, sshpass -p, docker login -p); ADO.NET Password= and Pwd=; netrc password lines; .pgpass lines; .git-credentials URLs; docker config.json auth; .npmrc _authToken and _auth; .pypirc password; AWS credentials file keys; Cookie and Set-Cookie values, only under secret-looking cookie names, excluding pagination and continuation tokens.
+  - Escaped JSON: the assignment rule accepts `\"KEY\":\"value\"` and the doubly escaped form with `\\\"` quotes, which is the fix for the measured gap.
+  - Multi-line values: a YAML block scalar (`key: |` or `key: >`) under a secret-looking key name, and a value continued with a trailing backslash; any form not covered goes into the known-misses file.
 - PEM inside JSON: a private key whose line breaks are written as escaped `\n` inside a JSON string.
 - Base64 contexts: Kubernetes Secret `data:` values, Docker config.json `auth`, and `Authorization: Basic` headers.
 - Key-name rule: extend SECRET_NAME with client_secret, private_key, signing_key, encryption_key, master_key, access_key, secret_key, session_key, cookie_secret, jwt_secret, webhook_secret, credentials, otp, totp_seed, mnemonic, seed_phrase, keystore_password, connection_string, auth_token; cover env, export, YAML, JSON, TOML, INI, XML elements, properties, PHP arrays and Python dicts. dsn is left out on purpose, because Sentry's client DSN is public.
@@ -73,11 +76,12 @@ Git SHAs, UUIDs outside a secret key name, lockfile integrity hashes (sha256-, s
 
 ## Acceptance criterion
 
-Done means the shield removes every format in this card's catalog and every context rule in it, each proven by its own test. Known misses are listed in a tracked file. This card never claims to catch every possible secret.
+Done means the shield removes every format in this card's catalog and every context rule in it, each proven by its own test. Known misses are listed in hooks/secret-shield/KNOWN-MISSES.md, tracked. This card never claims to catch every possible secret.
 
 ## Prerequisite
 
 TRDD-337UVA3J (error results are not redacted) must land before this card reaches dev. It is not listed in npt because it is already an EHT of TRDD-M1218EMH, and a derived card may have only one parent. Until it lands, a secret printed inside an error result bypasses every rule this card adds.
+At the move from design to todo, set blocked-by: [337UVA3J], so trddgrep next and why see the dependency.
 
 ## Incident test
 
@@ -95,15 +99,19 @@ The rules move into files under rules/ and are assembled into one explicitly ord
 
 ## Self-scan gate
 
-A test runs the redactor over this repo's tracked sources, its tests and the Python scanner tests. Every hit goes into a frozen expected list, and any new hit fails the test. An adversarial timing test feeds `password=` followed by 1 MB of one repeated character with no terminator, and a long URL with no `@`, and asserts that each finishes inside a generous time budget.
+A test runs the redactor over this repo's tracked sources, its tests and the Python scanner tests. Each seeded hit is classified by review as a fake fixture or a false positive. Fake fixtures go into a frozen expected list, false positives fail and are fixed, and any new hit fails the test. An adversarial timing test feeds `password=` followed by 1 MB of one repeated character with no terminator, and a long URL with no `@`, and asserts that each finishes inside a runner timeout well under the 10 s hook limit, because a backtracking regex hangs instead of failing.
 
 ## gitleaks check
 
-When gitleaks is installed, a test runs it over the same fixtures as the shield, writes its report to reports_dev/, and fails on any gitleaks finding the shield misses that is not in a frozen accepted-miss list. Porting a gitleaks rule rewrites only its leading `(?i)`, into the scoped `(?i:...)` form; the rest of the rule is kept as it is.
+When gitleaks is installed, a test writes gitleaks' own positive examples, or samples generated from its rules, to a temp directory. It runs gitleaks over them and over the false-positive corpus, writes its report to reports_dev/, and fails on any gitleaks positive the shield misses that is not in KNOWN-MISSES.md.
+
+Porting a gitleaks rule rewrites its leading `(?i)` into the scoped `(?i:...)` form. It also translates RE2-only syntax, such as POSIX classes, `(?P<name>...)`, `\z` and `\Q...\E`, and any entropy filter. A rule that still does not compile, or whose filter cannot be kept, is listed in KNOWN-MISSES.md and never silently dropped.
 
 ## Out of scope
 
 A Bash guard against pm2 commands that print process environments is a separate follow-up.
+None of this protects live sessions until TRDD-2V7OAUPE wires the mod into hooks.json.
+Keeping the Python secret scanners' rules in step with the shield is a separate follow-up.
 
 ## Found during
 
