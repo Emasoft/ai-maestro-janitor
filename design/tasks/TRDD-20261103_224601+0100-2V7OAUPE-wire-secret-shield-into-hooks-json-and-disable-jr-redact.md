@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-03T22:59:00+0100
+updated: 2026-11-03T23:10:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,7 +20,7 @@ approval-datetime: 2026-11-03T22:46:01+0100
 blocked-by: [0Y3UW1NF, TEP6F3A3]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal]
 pre-block-column: design
-blocker-probe: for i in 0Y3UW1NF TEP6F3A3; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|completed|published|live)$'
+blocker-probe: for i in 0Y3UW1NF TEP6F3A3; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
 blocker-holds-if: not-match:^2$
 ---
 
@@ -33,6 +33,7 @@ Add "modules": ["./secret-shield/register.ts"] to hooks/hooks.json (path to be c
 TRDD-0Y3UW1NF (write-back guard) and TRDD-TEP6F3A3 (checks before wiring). TRDD-337UVA3J does not block it: upstream ships without error-result redaction.
 
 Split out of TRDD-M1218EMH.
+- Why the trdd:<id> terminal predicates cannot release this card on a failed, cancelled, superseded or refused blocker: trdd-drift _try_unblock (scripts/detectors/trdd-drift.py) restores a blocked card only when the predicate holds (TERMINAL_COLUMNS) and every blocked-by id is in DONE_COLUMNS, so only complete, published or live releases it, and blocker-probe counts those three. A blocker that ends at completed keeps this card blocked (see TRDD-OEEH2W28). Covered by test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done in tests/test_trdd_drift_unblock_when.py. Still open: if blocked-by is emptied by hand, the predicates alone would release the card.
 
 ## Approval log
 
