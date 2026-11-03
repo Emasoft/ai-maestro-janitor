@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T22:39:26+0100
+updated: 2026-11-03T22:42:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T19:19:08+0100
-implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b]
+implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b, 8b57bb1a]
+eht: [0Y3UW1NF, 337UVA3J, TEP6F3A3]
 ---
 
 # secret-shield redaction of secrets in tool output, vendored into the janitor
