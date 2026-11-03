@@ -1041,21 +1041,21 @@
     },
     "secret_shield_enabled": {
       "title": "Secret shield",
-      "description": "Hide API keys, tokens, private keys and passwords in tool output before Claude or the transcript sees them. Set with /plugin config (pluginConfigs).",
+      "description": "Hide API keys, tokens, private keys and passwords in known formats in tool output before Claude or the transcript sees them; error output is not covered yet. Not active yet. Set with /plugin configure (pluginConfigs); a value in the settings env block is untested and may have no effect.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "secret_shield_block_files": {
       "title": "Secret shield: block secret files",
-      "description": "Also refuse Read, Edit, Write and NotebookEdit on files that usually hold secrets (.env, *.pem, id_rsa, ~/.aws/credentials, .npmrc...). .env.example and friends stay readable. Bash can still read these files, so this is not complete protection. Set with /plugin config (pluginConfigs).",
+      "description": "Also refuse Read, Edit, Write and NotebookEdit on files that usually hold secrets (.env, *.pem, id_rsa, ~/.aws/credentials, .npmrc...). .env.example and friends stay readable. Bash can still read these files, so this is not complete protection. Not active yet. Set with /plugin configure (pluginConfigs); a value in the settings env block is untested and may have no effect.",
       "type": "boolean",
       "default": false,
       "sensitive": false
     },
     "secret_shield_redact_prompts": {
       "title": "Secret shield: redact prompts",
-      "description": "Also redact secrets you paste into your own prompts. Off by default, since a pasted key is usually meant for Claude. Set with /plugin config (pluginConfigs).",
+      "description": "Also redact secrets you paste into your own prompts. Off by default, since a pasted key is usually meant for Claude. Not active yet. Set with /plugin configure (pluginConfigs); a value in the settings env block is untested and may have no effect.",
       "type": "boolean",
       "default": false,
       "sensitive": false

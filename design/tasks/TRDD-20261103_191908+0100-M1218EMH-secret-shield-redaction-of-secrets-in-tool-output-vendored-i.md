@@ -44,7 +44,7 @@ Plan (one bounded increment per commit, each done by a worker and verified befor
 
 Known risk (adversarial review, 2026-11-03): while it is on, Read shows the placeholder, and a later Write or Edit that restates that line can write the placeholder over the real value. This repository's own scripts/lib/*_patterns.py files and tests hold fake tokens on purpose. That is why the default is off.
 
-NEXT ACTION: rename the command to /janitor-secret-shield, then error-result redaction and the write-back guard on their own cards, then wire hooks.json modules together with disabling jr-redact. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (this step).
+NEXT ACTION: (1) rename the command to /janitor-secret-shield; (2) cards for the write-back guard, error-result redaction, and pre-wiring checks (older Claude Code with a modules key, tool.call order against PostToolUse updatedToolOutput, a Python warning when the env block sets CLAUDE_PLUGIN_OPTION_SECRET_SHIELD_*); (3) a test that fails the gate if hooks/hooks.json has modules before the write-back guard card is complete; (4) CPV --strict on the vendored folder; (5) README and memory page; (6) at wiring, with jr-redact disabled in the same step, remove "Not active yet." from the three option descriptions. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (this step). Wording: 2be1783d, 31f1f65c, 4de9deb8 and this step.
 
 ## Approval log
 
