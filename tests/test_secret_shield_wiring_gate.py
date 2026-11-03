@@ -122,7 +122,7 @@ def test_card_lists_the_gate_blockers_while_blocked() -> None:
     """While TRDD-2V7OAUPE is blocked, its blocked-by names every id in BLOCKERS, so the two lists cannot drift apart."""
     columns = _repo_columns(_REPO)
     if columns.get(WIRING_CARD) != "blocked":
-        pytest.skip(f"TRDD-{WIRING_CARD} left blocked (column {columns.get(WIRING_CARD, '')!r}): trdd-drift empties blocked-by when it releases a card, so only BLOCKERS still applies")
+        pytest.skip(f"TRDD-{WIRING_CARD} left blocked (column {columns.get(WIRING_CARD, '')!r}); drift's release empties blocked-by, so only BLOCKERS still applies")
     card_blockers = set(_card_blockers(_REPO))
     assert set(BLOCKERS) <= card_blockers, f"TRDD-{WIRING_CARD} is blocked but its blocked-by lacks {sorted(set(BLOCKERS) - card_blockers)}: add them to the card or drop them from BLOCKERS so the two lists agree"
 
@@ -158,6 +158,13 @@ def test_gate_refuses_a_blocker_only_the_card_lists() -> None:
     assert refusal is not None
     assert "TRDD-ZZZZZZZZ" in refusal
     assert not any(f"TRDD-{uid}" in refusal for uid in BLOCKERS)
+
+
+def test_gate_keeps_blockers_when_the_card_lists_none() -> None:
+    """An emptied blocked-by does not open the gate, because BLOCKERS still counts."""
+    refusal = wiring_refusal({"hooks": {}, "modules": {}}, {}, _gate_blockers(()))
+    assert refusal is not None
+    assert all(f"TRDD-{uid}" in refusal for uid in BLOCKERS)
 
 
 def test_plugin_json_declares_no_other_hooks_file() -> None:
