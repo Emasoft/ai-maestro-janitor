@@ -4,7 +4,7 @@ title: Secret-shield checks before wiring the mod
 column: design
 status: tasked
 created: 2026-11-03T22:42:41+0100
-updated: 2026-11-03T22:46:29+0100
+updated: 2026-11-03T23:40:53+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -32,6 +32,7 @@ Disabling jr-redact belongs to the wiring card, not here.
 ## Done when
 Each question has a measured answer recorded here, and the option descriptions and the usage text match it.
 Found during TRDD-M1218EMH.
+If any check finds a blocker for wiring (for example an older Claude Code rejects a hooks.json with a modules key, or tool.call runs after the Python PostToolUse rewrite in a way that breaks redaction), end this card at failed or cancelled, never complete, so TRDD-2V7OAUPE stays blocked and the wiring gate test keeps refusing; record the finding and decide with the owner.
 
 ## Approval log
 

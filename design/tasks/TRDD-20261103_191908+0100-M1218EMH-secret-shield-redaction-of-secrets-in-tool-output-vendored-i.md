@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T23:27:35+0100
+updated: 2026-11-03T23:40:47+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T19:19:08+0100
-implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b, 8b57bb1a, 842a8835, 5722ca3c]
+implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b, 8b57bb1a, 842a8835, 5722ca3c, 4cc1c5c3]
 eht: [0Y3UW1NF, 337UVA3J, TEP6F3A3, 2V7OAUPE]
 ---
 
@@ -45,7 +45,7 @@ Plan (one bounded increment per commit, each done by a worker and verified befor
 
 Known risk (adversarial review, 2026-11-03): while it is on, Read shows the placeholder, and a later Write or Edit that restates that line can write the placeholder over the real value. This repository's own scripts/lib/*_patterns.py files and tests hold fake tokens on purpose. That is why the default is off.
 
-NEXT ACTION: (1) rename the command to /janitor-secret-shield; (2) cards for the write-back guard, error-result redaction, and pre-wiring checks (older Claude Code with a modules key, tool.call order against PostToolUse updatedToolOutput, a Python warning when the env block sets CLAUDE_PLUGIN_OPTION_SECRET_SHIELD_*); (3) DONE: tests/test_secret_shield_wiring_gate.py (5722ca3c) refuses a hooks.json "modules" key unless TRDD-0Y3UW1NF and TRDD-TEP6F3A3 are in a column that is terminal AND done (the same condition trdd-drift applies to TRDD-2V7OAUPE), plus test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done (842a8835) pins drift's hold; (4) CPV --strict on the vendored folder; (5) README and memory page; (6) wiring, jr-redact off and removing "Not active yet." are on TRDD-2V7OAUPE, blocked by TRDD-0Y3UW1NF and TRDD-TEP6F3A3; the gate test in (3) must read those two cards. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (4a25880b). Wording: 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b.
+NEXT ACTION: (1) rename the command to /janitor-secret-shield; (2) cards for the write-back guard, error-result redaction, and pre-wiring checks (older Claude Code with a modules key, tool.call order against PostToolUse updatedToolOutput, a Python warning when the env block sets CLAUDE_PLUGIN_OPTION_SECRET_SHIELD_*); (3) DONE: tests/test_secret_shield_wiring_gate.py (5722ca3c, 4cc1c5c3, and the follow-up commit) refuses a hooks.json "modules" key unless every blocker of TRDD-2V7OAUPE (the test's BLOCKERS plus the card's blocked-by) is in a column that is terminal AND done, the condition trdd-drift applies, and fails if plugin.json declares its own hooks; test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done (842a8835) pins drift's hold; (4) CPV --strict on the vendored folder; (5) README and memory page; (6) wiring, jr-redact off and removing "Not active yet." are on TRDD-2V7OAUPE, blocked by TRDD-0Y3UW1NF and TRDD-TEP6F3A3; the gate test in (3) must read those two cards. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (4a25880b). Wording: 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b.
 
 ## Approval log
 
