@@ -4,7 +4,7 @@ title: Hand the 3-pillars rules, detectors and hook over to the 3-pillars plugin
 column: backburner
 status: tasked
 created: 2026-11-04T00:00:42+0100
-updated: 2026-11-04T00:27:50+0100
+updated: 2026-11-04T00:50:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -55,4 +55,4 @@ approval-datetime: 2026-11-04T00:00:42+0100
 - Stand-down (only if decision D2 moves the detectors to the 3-pillars plugin): while the plugin named 3-pillars-tasks-management (from any marketplace) is enabled in any enabledPlugins scope, the five TRDD detectors and on-session-start-trdd-state.py stand down (release N). Expected marketplace emasoft-plugins, not verified until it is published.
 - Order: janitor release N, then the 3-pillars publish and user-scope install, then janitor release N+1. Nothing is published on either side without the owner's word, and release N is not built before the owner approves the migration plan.
 - PROVISIONAL (depends on where trddgrep is installed): CI: once the gate test calls trddgrep, it fails loudly when trddgrep is missing, and the janitor CI installs the 3-pillars plugin's trddgrep (not the copy in ai-maestro).
-- Answered by the 3-pillars session on 2026-11-04 (see the plan): the references go to the user rules-reference dir under the same file names, each carrying the 3-pillars marker; its installer takes over a janitor-stamped file once and never touches any other file that lacks its marker; version= is the plugin semver, and an installed copy is replaced only by a newer one; uninstall removes only files carrying the 3-pillars marker, through a command that plugin ships.
+- Answered by the 3-pillars session on 2026-11-04 (see the plan): the references go to the user rules-reference dir under the same file names, each carrying the 3-pillars marker; its installer takes over a janitor-stamped file once; it also takes over two owner-written rules that carry no marker, governance-trdd-kanban.md and trdd-read-whole-card.md, once each after saving a .bak copy (the owner has not yet agreed to this); it never touches any other file that lacks its marker; version= is the plugin semver, and an installed copy is replaced only by a newer one; uninstall removes only files carrying the 3-pillars marker, through a command that plugin ships.
