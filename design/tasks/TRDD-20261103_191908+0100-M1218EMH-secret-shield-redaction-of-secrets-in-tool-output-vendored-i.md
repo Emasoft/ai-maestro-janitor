@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T22:27:40+0100
+updated: 2026-11-03T22:29:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -69,3 +69,4 @@ NEXT ACTION: rename the command to /janitor-secret-shield, then error-result red
 2026-11-03 options: secret_shield_enabled (default true), secret_shield_block_files and secret_shield_redact_prompts (default false) in the janitor userConfig; off registers no hook. Probe result: a mod sees no settings env block value through $.env.get. Commit aaec9c68 message corrections: four review rounds, not three; the mutation count 7 was measured at 121 tests. Result: 125/125.
 2026-11-03 full gate at 4a25880b: ruff, mypy, pyright clean; pytest 5 failed and 31 errors, all present before this card (same ids at d011ee75) and caused by the agent shell environment, not by this card: see TRDD-TMITZS7J. Planned next (reviewed): wording of the two companion options from upstream, no reload claim; off/on test pair with one token builder; new cards for the write-back guard, error-result redaction, and pre-wiring checks (older Claude Code with a modules key, tool.call order against PostToolUse updatedToolOutput, a Python warning when the env block sets CLAUDE_PLUGIN_OPTION_SECRET_SHIELD_*); a Python test that fails when hooks/hooks.json has modules while the write-back guard card is not complete; default true is the main agent inference from the owner quote.
 2026-11-03 options wording: the two companion options use the upstream text (tool list matched to register.ts), the unverified reload sentence is removed, and the off/on tests share one token builder (mutation: removing the early return fails the off test). Result: 125/125.
+2026-11-03 correction to the options note: the probe session loaded no settings env block at all, so "a mod does not see the env block" is not proven for a normal session. The design rests on the documented options contract (a mod gets its own userConfig values), and the option descriptions now say only that the env block does not set these options. The deny path was checked at register.ts:71-72: Read, Edit, Write and NotebookEdit.
