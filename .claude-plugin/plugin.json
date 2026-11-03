@@ -1038,6 +1038,27 @@
       "type": "number",
       "default": 21600,
       "sensitive": false
+    },
+    "secret_shield_enabled": {
+      "title": "Secret shield",
+      "description": "Hide API keys, tokens, private keys and passwords in tool output before Claude or the transcript sees them. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "secret_shield_block_files": {
+      "title": "Secret shield: block secret files",
+      "description": "When true, secret-shield keeps Claude out of secret files: Read, Edit, Write and NotebookEdit on a .env file (not .env.example) or a private key is denied before it runs. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
+    },
+    "secret_shield_redact_prompts": {
+      "title": "Secret shield: redact prompts",
+      "description": "When true, secret-shield also hides secrets in the prompts you type before the transcript stores them. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
     }
   },
   "cpv": {

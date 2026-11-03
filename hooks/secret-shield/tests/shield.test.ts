@@ -50,7 +50,7 @@ test('secret files are readable by default', async ($, on) => {
   expect(out.deny).toBeUndefined()
 })
 
-test('blockSecretFiles keeps Claude out of .env and keys, not .env.example', { options: { blockSecretFiles: true } }, async ($, on) => {
+test('secret_shield_block_files keeps Claude out of .env and keys, not .env.example', { options: { secret_shield_block_files: true } }, async ($, on) => {
   const toasts: string[] = []
   on('ui.toast', ($, e) => (toasts.push(e.text), { value: undefined }))
   on('tool.call', () => ({ result: { type: 'text', file: { filePath: 'x', content: '', numLines: 0, startLine: 1, totalLines: 0 } } }))
@@ -137,4 +137,17 @@ test('/secret-shield counts what this session hid', async ($, on) => {
 
   expect(status.text).toMatch(/Hidden this session \(1\):\n {2}1 GitHub token/)
   expect(status.text).toMatch(/Hidden all time \(5\):\n {2}5 GitHub tokens/)
+})
+
+test('secret_shield_enabled false registers no hook', { options: { secret_shield_enabled: false } }, async ($, on) => {
+  const names: string[] = []
+  on('command.register', ($, e) => (names.push(e.name), { value: { command: e.name } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('tool.call', () => ({ result: { stdout: TOKEN, stderr: '', interrupted: false } }))
+
+  const out = await $.tool.call({ tool: 'Bash', command: 'cat build.log' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  expect(out.result).toEqual({ stdout: TOKEN, stderr: '', interrupted: false })
+  expect(names).toEqual([])
 })

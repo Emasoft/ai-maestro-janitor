@@ -33,8 +33,11 @@ function report(hits: Hits): string {
 }
 
 export const register: Register = (on, options) => {
-  const blockFiles = options.blockSecretFiles === true
-  const scanPrompts = options.redactPrompts === true
+  // off means no hook is registered at all; anything other than an explicit false
+  // (the default true, or a missing value) keeps the shield on, so it fails closed.
+  if (options.secret_shield_enabled === false) return
+  const blockFiles = options.secret_shield_block_files === true
+  const scanPrompts = options.secret_shield_redact_prompts === true
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

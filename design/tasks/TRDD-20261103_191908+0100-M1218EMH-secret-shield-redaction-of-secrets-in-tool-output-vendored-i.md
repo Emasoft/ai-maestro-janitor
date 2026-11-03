@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T21:18:26+0100
+updated: 2026-11-03T21:30:52+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T19:19:08+0100
+implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68]
 ---
 
 # secret-shield redaction of secrets in tool output, vendored into the janitor
@@ -25,7 +26,7 @@ approval-datetime: 2026-11-03T19:19:08+0100
 
 User request, verbatim (2026-11-03): "integrate this mod into the janitor: https://github.com/Singh-AP/awesome-claude-mods/tree/main/mods/safety/secret-shield" and "replace the message placeholder with [JANITOR-REDACTED:<type>]".
 
-Decisions taken by the main agent while the owner was away (the AskUserQuestion prompt timed out after 300 s; the owner may overrule any of them): placement INSIDE the janitor (hooks/hooks.json gains "modules" beside the existing "hooks"); OFF by default (secret_shield_enabled=false); NO release from this card without the owner's explicit go-ahead. The auto_clear fix (commit 64768ab7, TRDD-HM8WOCOO) is a separate release decision and is still open.
+Decisions taken by the main agent while the owner was away (the AskUserQuestion prompt timed out after 300 s; the owner may overrule any of them): placement INSIDE the janitor (hooks/hooks.json gains "modules" beside the existing "hooks"); ON by default (secret_shield_enabled=true), owner decision 2026-11-03 that the janitor handles every secret itself; set with /plugin config, since a mod does not see the settings env block (measured by probe); NO release from this card without the owner's explicit go-ahead. The auto_clear fix (commit 64768ab7, TRDD-HM8WOCOO) is a separate release decision and is still open.
 
 Source: Singh-AP/awesome-claude-mods, folder mods/safety/secret-shield, version 1.0.0, MIT licence (repository-root LICENSE; the mod folder has none), last commit touching the folder 5bbf314ee1a8d3c5e519f4c28f070c308bd89da2 (2026-10-04). Pure TypeScript on the mods API: a tool.call hook rewrites every tool result, a session.append hook scrubs stored rows and withholds a row's text if scanning throws, a command.run hook serves /secret-shield, and $.store keeps all-time counts. Not installed on this machine, so there is no double redaction or command collision.
 
@@ -43,7 +44,7 @@ Plan (one bounded increment per commit, each done by a worker and verified befor
 
 Known risk (adversarial review, 2026-11-03): while it is on, Read shows the placeholder, and a later Write or Edit that restates that line can write the placeholder over the real value. This repository's own scripts/lib/*_patterns.py files and tests hold fake tokens on purpose. That is why the default is off.
 
-NEXT ACTION: step 1.
+NEXT ACTION: rename the command to /janitor-secret-shield, then error-result redaction and the write-back guard on their own cards, then wire hooks.json modules together with disabling jr-redact. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (this step).
 
 ## Approval log
 
@@ -65,3 +66,4 @@ NEXT ACTION: step 1.
 2026-11-03 review fixes: marker guard anchored (a secret next to a hidden token is now hidden; it leaked before, upstream too); URL rule no longer reads a bracketed IPv6 host, a port then ? or #, or a second URL as a password. Known false positive kept: the scp-like ssh form (host, colon, path, at-sign, ref). Known miss kept: a password starting with digits then a slash. Result: 113/113.
 2026-11-03 final review fixes: a marker in the URL user part no longer hides the password from the rule; a port is at most 5 digits and a ? counts as a query only with an =, so a password like 2024#Spring is hidden; localhost:3000#a@b is now a known false positive. Accepted: a value with a token and extra text counts twice (token and assignment). Coverage limit kept from upstream: free text, CLI flags and other headers are not checked for a secret next to a hidden token. Result: 121/121.
 2026-11-03 URL regex now built from MARK_BODY (one marker grammar). Known URL false positives, pinned: the scp-like ssh form (host, colon, path, at-sign, ref), localhost:3000#a@b, hash routes such as localhost:8080#/users/@x, and a ? query with no = before the at-sign. Pending: measure the false-positive rate on a real corpus of URLs, and the size and time test (use a long dotted or hyphenated token with no ://). Result: 124/124.
+2026-11-03 options: secret_shield_enabled (default true), secret_shield_block_files and secret_shield_redact_prompts (default false) in the janitor userConfig; off registers no hook. Probe result: a mod sees no settings env block value through $.env.get. Commit aaec9c68 message corrections: four review rounds, not three; the mutation count 7 was measured at 121 tests. Result: 125/125.
