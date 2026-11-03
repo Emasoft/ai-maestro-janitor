@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T20:50:51+0100
+updated: 2026-11-03T21:18:26+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -62,3 +62,6 @@ NEXT ACTION: step 1.
 2026-11-03 live probe design: build the fake token from pieces with printf inside the probe, never whole in a prompt; take the session .jsonl byte counts inside the probe as a Bash step printing counts only; include an MCP-result case (order against post-mcp-response-sanitizer.py is unverified); assert jr-redact is absent. Older Claude Code: declare a minimum version if the manifest supports one, otherwise probe an older binary before wiring.
 2026-11-03 step 2 marker: mark() and MARK now use the janitor marker form only (no old-form compatibility); existing test expectations changed by sed only; 3 new tests (exact github-token marker, no upstream form emitted, janitor marker untouched in assignment, JSON, bearer and URL-password positions). Result: 99/99.
 2026-11-03 step 3: a URL password may now contain a slash; a captured password that starts with digits then a slash is treated as a port and path and left alone. 3 new tests. Result: 102/102.
+2026-11-03 review fixes: marker guard anchored (a secret next to a hidden token is now hidden; it leaked before, upstream too); URL rule no longer reads a bracketed IPv6 host, a port then ? or #, or a second URL as a password. Known false positive kept: the scp-like ssh form (host, colon, path, at-sign, ref). Known miss kept: a password starting with digits then a slash. Result: 113/113.
+2026-11-03 final review fixes: a marker in the URL user part no longer hides the password from the rule; a port is at most 5 digits and a ? counts as a query only with an =, so a password like 2024#Spring is hidden; localhost:3000#a@b is now a known false positive. Accepted: a value with a token and extra text counts twice (token and assignment). Coverage limit kept from upstream: free text, CLI flags and other headers are not checked for a secret next to a hidden token. Result: 121/121.
+2026-11-03 URL regex now built from MARK_BODY (one marker grammar). Known URL false positives, pinned: the scp-like ssh form (host, colon, path, at-sign, ref), localhost:3000#a@b, hash routes such as localhost:8080#/users/@x, and a ? query with no = before the at-sign. Pending: measure the false-positive rate on a real corpus of URLs, and the size and time test (use a long dotted or hyphenated token with no ://). Result: 124/124.

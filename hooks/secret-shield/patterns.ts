@@ -12,7 +12,15 @@ type Rule = {
 /** What a redacted secret is replaced with. */
 export const mark = (kind: string): string => `[JANITOR-REDACTED:${kind}]`
 
-const MARK = /\[JANITOR-REDACTED:[a-z0-9-]+\]/
+const MARK_BODY = String.raw`\[JANITOR-REDACTED:[A-Za-z0-9_-]+\]`
+/** A value that IS a marker, whole. Anchored: a value that only contains one is judged on the rest. */
+const MARK = new RegExp('^' + MARK_BODY + '$')
+const MARKS = new RegExp(MARK_BODY, 'g')
+// Built from MARK_BODY so the marker grammar has one source.
+const URL_PASSWORD = new RegExp(
+  String.raw`\b([a-z][a-z0-9+.-]*:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?[^\s@#]*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
+  'gi',
+)
 
 // Specific, high-confidence token formats. Order matters: the more specific
 // prefix (sk-ant-) runs before the more general one (sk-).
@@ -57,6 +65,9 @@ function isSecretName(name: string): boolean {
 
 function looksSecret(value: string, isQuoted: boolean): boolean {
   if (value === '' || MARK.test(value) || PLACEHOLDER.test(value)) return false
+  // A value partly made of markers (a token inside it was hidden first) is judged on what is left, so a secret written next to a token is not shown just because the token was hidden.
+  const rest = value.replace(MARKS, '')
+  if (rest !== value) return looksSecret(rest, isQuoted)
   if (/^\d{1,7}$/.test(value)) return false
   if (isQuoted) return value.length >= 3 && !/\s/.test(value)
   // Unquoted: a code expression (`get_token()`, `self.token`) is not a secret.
@@ -78,10 +89,16 @@ function applyRule(text: string, rule: Rule, hits: Hits): string {
 
 /** A password in a URL's userinfo part: keeps the scheme, user and host, hides the password. */
 function redactUrlPasswords(text: string, hits: Hits): string {
-  // The password may contain a slash. A password that starts with digits then a slash is a
-  // host:port followed by a path (`host:8080/pkg/@scope`), not a password, so the lookahead skips it.
-  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@'"`]+):((?!\d+\/)[^\s@'"`]+)@/gi, (match, scheme: string, user: string, password: string) => {
-    if (MARK.test(password) || PLACEHOLDER.test(password)) return match
+  // The password may contain a slash. A value of up to 5 digits followed by / is a port followed by a
+  // path, and up to 5 digits followed by a ? query with an = before the at-sign is a port followed by a
+  // query (`host:8080/pkg/@scope`, `localhost:3000?email=a@b`), so the lookahead skips both. Other digits
+  // (`2024#Spring`, `12?abc`) are a password and are hidden. The user part may contain whole markers
+  // (a token hidden first, such as an AWS access key used as the user name) but no other [,
+  // so a bracketed IPv6 host is never read as a user. A password cannot contain :// so it never runs
+  // into a second URL. Known false positive: `localhost:3000#a@b` reads its fragment as a password.
+  return text.replace(URL_PASSWORD, (match, scheme: string, user: string, password: string) => {
+    const rest = password.replace(MARKS, '')
+    if (rest === '' || PLACEHOLDER.test(rest)) return match
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
     return `${scheme}${user}:${mark('url-password')}@`
   })

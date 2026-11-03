@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { isSecretFile, label, redact, redactBlocks, redactDeep, withhold } from '../patterns'
+import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, withhold } from '../patterns'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -169,24 +169,128 @@ describe('janitor marker', () => {
   })
   test('no rule emits the upstream marker form', () => {
     const samples = ['API_KEY=' + j('abcd', '1234efgh'), j('ghp_', 'B2c3D4e5F6g7H8i9J0k1', 'L2m3N4o5P6q7R8s9'), 'DATABASE_URL=postgres://app:' + j('s3cret', 'Pass') + '@db.acme.io:5432/app']
-    for (const s of samples) expect(redact(s).text.includes('[' + 'REDACTED:')).toBe(false)
+    for (const s of samples) {
+      const { text, hits } = redact(s)
+      expect(text.includes('[' + 'REDACTED:')).toBe(false)
+      expect(text.includes('[JANITOR-' + 'REDACTED:')).toBe(true)
+      expect(countOf(hits)).toBeGreaterThan(0)
+    }
   })
-  test('an existing janitor marker is left untouched in every captured position', () => {
-    const m = '[JANITOR-REDACTED:x]'
-    for (const s of ['API_KEY=' + m, '{"password":"' + m + '"}', 'Authorization: Bearer ' + m, 'postgres://app:' + m + '@db.acme.io:5432/app']) expect(redact(s).text).toBe(s)
+  test('an existing janitor marker is left untouched in an assignment', () => {
+    const m = '[JANITOR-' + 'REDACTED:x]'
+    const { text, hits } = redact('API_KEY=' + m)
+    expect(text).toBe('API_KEY=' + m)
+    expect(countOf(hits)).toBe(0)
+  })
+  test('an existing janitor marker is left untouched in JSON', () => {
+    const m = '[JANITOR-' + 'REDACTED:x]'
+    const { text, hits } = redact('{"password":"' + m + '"}')
+    expect(text).toBe('{"password":"' + m + '"}')
+    expect(countOf(hits)).toBe(0)
+  })
+  test('an existing janitor marker is left untouched in a bearer header', () => {
+    const m = '[JANITOR-' + 'REDACTED:x]'
+    const { text, hits } = redact('Authorization: Bearer ' + m)
+    expect(text).toBe('Authorization: Bearer ' + m)
+    expect(countOf(hits)).toBe(0)
+  })
+  test('an existing janitor marker is left untouched in a URL password', () => {
+    const m = '[JANITOR-' + 'REDACTED:x]'
+    const { text, hits } = redact('postgres://app:' + m + '@db.acme.io:5432/app')
+    expect(text).toBe('postgres://app:' + m + '@db.acme.io:5432/app')
+    expect(countOf(hits)).toBe(0)
+  })
+  test('a marker kind with capitals or underscores is still recognised', () => {
+    const v = 'API_KEY="' + mark('Some_Kind') + '"'
+    const r = redact(v)
+    expect(r.text).toBe(v)
+    expect(countOf(r.hits)).toBe(0)
   })
 })
 
 describe('URL passwords containing a slash', () => {
   const marker = '[JANITOR-' + 'REDACTED:url-password]'
+  test('a password whose digits are followed by # is hidden, not read as a port', () => {
+    expect(redact('postgres://app:' + j('2024#', 'Spring') + '@db.acme.io/app').text).toBe('postgres://app:' + marker + '@db.acme.io/app')
+  })
+  test('a password whose digits are followed by ? with no = is hidden', () => {
+    expect(redact('redis://app:' + j('12?', 'abc') + '@cache.acme.io').text).toBe('redis://app:' + marker + '@cache.acme.io')
+  })
   test('a slash in the password is still hidden, the user and host are kept', () => {
     expect(redact('postgres://app:' + j('ab/', 'cdefgh') + '@db.acme.io:5432/app').text).toBe('postgres://app:' + marker + '@db.acme.io:5432/app')
   })
   test('a port followed by a path with an at-sign is not a password', () => {
     const url = 'https://cdn.acme.io:8080/pkg/' + '@scope/name'
     expect(redact(url).text).toBe(url)
+    expect(redact(url).hits['url-password']).toBeUndefined()
   })
   test('an all-digit password is still hidden', () => {
     expect(redact('redis://app:' + j('1234', '5678') + '@cache.acme.io:6379').text).toBe('redis://app:' + marker + '@cache.acme.io:6379')
+  })
+  test('a bracketed IPv6 host is not read as a user', () => {
+    for (const url of ['http://[::1]:4873/@scope/pkg', 'http://[fe80::1]/a@b']) {
+      const { text, hits } = redact(url)
+      expect(text).toBe(url)
+      expect(hits).toEqual({})
+    }
+  })
+  test('a port followed by a query with an at-sign is not a password', () => {
+    const url = 'http://localhost:3000?email=a' + '@' + 'b.com'
+    expect(redact(url).text).toBe(url)
+  })
+  test('localhost:3000#a@b is a known false positive, the fragment is read as a password', () => {
+    expect(redact('http://localhost:3000#a@b').hits['url-password']).toBe(1)
+  })
+  test('a second URL after a password is not read into it', () => {
+    expect(redact('redis://h1:abc/0,redis://u:' + j('pw', '99x') + '@h2').text).toBe('redis://h1:abc/0,redis://u:' + marker + '@h2')
+  })
+  test('a password starting with digits then a slash is not hidden (known miss, kept)', () => {
+    const url = 'postgres://u:' + j('9/', 'Kxq7') + '@db.acme.io/app'
+    expect(redact(url).text).toBe(url)
+  })
+  test('an scp-like ssh host:path read as a password (known false positive, kept)', () => {
+    expect(redact('ssh://github.com:org/repo.git@v1.2').hits['url-password']).toBe(1)
+  })
+  test('a known false positive: a fragment with an at-sign is read as a password', () => {
+    expect(redact('http://localhost:8080#/users/' + '@alice').hits['url-password']).toBe(1)
+  })
+  test('a value of 6 or more digits then a slash is not a port, so it is hidden', () => {
+    expect(redact('http://h:123456/x' + '@y').hits['url-password']).toBe(1)
+  })
+  test('a marker followed by more user text still hides the password', () => {
+    expect(redact('https://' + mark('github-token') + 'abc:' + j('pw', '99x') + '@h.acme.io').text).toBe('https://' + mark('github-token') + 'abc:' + marker + '@h.acme.io')
+  })
+})
+
+describe('redacting twice changes nothing', () => {
+  const cases: Array<[string, string]> = [
+    ['an AWS key in the user part', 'https://' + j('AKIA', 'IOSFODNN7EXAMPLE') + ':' + j('secret', 'pw123') + '@host.acme.io'],
+    ['a secret after a token in an assignment', 'API_TOKEN="' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8') + ':' + j('hunter', '2pass') + '"'],
+    ['a secret after a token in a URL password', 'postgres://app:' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8') + '.extra9' + '@' + 'db.acme.io/app'],
+    ['two comma-joined redis URLs', 'redis://h1:abc/0,redis://u:' + j('pw', '99x') + '@h2'],
+  ]
+  for (const [name, input] of cases) {
+    test(name, () => {
+      const once = redact(input)
+      expect(countOf(once.hits)).toBeGreaterThan(0)
+      const twice = redact(once.text)
+      expect(twice.text).toBe(once.text)
+      expect(countOf(twice.hits)).toBe(0)
+    })
+  }
+})
+
+describe('a secret next to a hidden token', () => {
+  test('a password after an AWS key in the user part is hidden', () => {
+    const r = redact('https://' + j('AKIA', 'IOSFODNN7EXAMPLE') + ':' + j('secret', 'pw123') + '@host.acme.io')
+    expect(r.text).not.toContain('secretpw123')
+    expect(r.hits['url-password']).toBe(1)
+    expect(r.hits['aws-access-key']).toBe(1)
+  })
+  test('a secret written after a hidden token in an assignment is hidden', () => {
+    expect(redact('API_TOKEN="' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8') + ':' + j('hunter', '2pass') + '"').text).toBe('API_TOKEN="' + '[JANITOR-' + 'REDACTED:assignment]' + '"')
+  })
+  test('a secret written after a hidden token in a URL password is hidden', () => {
+    expect(redact('postgres://app:' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8') + '.extra9' + '@' + 'db.acme.io/app').text).toBe('postgres://app:' + '[JANITOR-' + 'REDACTED:url-password]' + '@db.acme.io/app')
   })
 })
