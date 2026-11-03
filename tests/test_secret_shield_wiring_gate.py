@@ -86,21 +86,25 @@ def _card_blockers(root: Path) -> tuple[str, ...]:
     pytest.fail(f"TRDD-{WIRING_CARD} is not on the board (renamed or deleted), so the gate cannot read its blocked-by")
 
 
+def _gate_blockers(card_blockers: Iterable[str]) -> list[str]:
+    """Every id the gate checks: BLOCKERS plus the ids TRDD-2V7OAUPE's blocked-by lists."""
+    # Both lists count: BLOCKERS alone misses a blocker added to the card, and blocked-by alone lets the wiring through once someone empties it by hand.
+    return sorted(set(BLOCKERS) | set(card_blockers))
+
+
 def _other(blocker: str) -> str:
     return next(uid for uid in BLOCKERS if uid != blocker)
 
 
 # trdd_common.trdd_files resolves the LOCAL design root through _main_checkout_root, which runs
 # `git worktree list --porcelain`: read-only, but the sandbox classes the `worktree` verb as
-# mutating. The test itself spawns nothing. Both real-board tests carry the marker because
+# mutating. The test itself spawns nothing. Every real-board test carries the marker because
 # _main_checkout_root is lru_cached: an unmarked one would pass only after a marked one ran.
 @pytest.mark.real_subprocess("git")
 def test_real_hooks_json_respects_the_wiring_gate() -> None:
     """The shipped hooks.json loads the mod only if every blocker of TRDD-2V7OAUPE has shipped."""
     hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
-    # Both lists count: BLOCKERS alone would miss a blocker added to the card later, and the
-    # card's blocked-by alone would let the wiring through once someone empties it by hand.
-    blockers = sorted(set(BLOCKERS) | set(_card_blockers(_REPO)))
+    blockers = _gate_blockers(_card_blockers(_REPO))
     refusal = wiring_refusal(hooks, _repo_columns(_REPO), blockers)
     assert refusal is None, refusal
 
@@ -111,6 +115,16 @@ def test_both_blocker_cards_exist() -> None:
     columns = _repo_columns(_REPO)
     missing = [uid for uid in BLOCKERS if uid not in columns]
     assert missing == [], f"blocker card(s) renamed or deleted: {missing} — the wiring gate would refuse forever without explanation"
+
+
+@pytest.mark.real_subprocess("git")  # same LOCAL-root git probe as the tests above
+def test_card_lists_the_gate_blockers_while_blocked() -> None:
+    """While TRDD-2V7OAUPE is blocked, its blocked-by names every id in BLOCKERS, so the two lists cannot drift apart."""
+    columns = _repo_columns(_REPO)
+    if columns.get(WIRING_CARD) != "blocked":
+        pytest.skip(f"TRDD-{WIRING_CARD} left blocked (column {columns.get(WIRING_CARD, '')!r}): trdd-drift empties blocked-by when it releases a card, so only BLOCKERS still applies")
+    card_blockers = set(_card_blockers(_REPO))
+    assert set(BLOCKERS) <= card_blockers, f"TRDD-{WIRING_CARD} is blocked but its blocked-by lacks {sorted(set(BLOCKERS) - card_blockers)}: add them to the card or drop them from BLOCKERS so the two lists agree"
 
 
 @pytest.mark.parametrize("blocker", BLOCKERS)
@@ -140,7 +154,7 @@ def test_gate_ignores_hooks_json_without_modules() -> None:
 def test_gate_refuses_a_blocker_only_the_card_lists() -> None:
     """A blocker named only in the card's blocked-by keeps the mod unwired even with both BLOCKERS shipped."""
     columns = {**dict.fromkeys(BLOCKERS, "complete"), "ZZZZZZZZ": "design"}
-    refusal = wiring_refusal({"hooks": {}, "modules": {}}, columns, sorted(set(BLOCKERS) | {"ZZZZZZZZ"}))
+    refusal = wiring_refusal({"hooks": {}, "modules": {}}, columns, _gate_blockers(("ZZZZZZZZ",)))
     assert refusal is not None
     assert "TRDD-ZZZZZZZZ" in refusal
     assert not any(f"TRDD-{uid}" in refusal for uid in BLOCKERS)
