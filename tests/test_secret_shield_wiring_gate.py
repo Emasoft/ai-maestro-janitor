@@ -2,15 +2,16 @@
 and TRDD-TEP6F3A3 shipped (TRDD-2V7OAUPE, TRDD-M1218EMH).
 
 TRDD-2V7OAUPE is the card that wires the mod, and it is `blocked-by: [0Y3UW1NF, TEP6F3A3]`.
-trdd-drift releases it only when each blocker's column is terminal AND done. This guard applies
-the same condition to the file the wiring edits, so the mod cannot be switched on before both
-blockers ship, whatever column TRDD-2V7OAUPE itself is in.
+trdd-drift releases it only when each blocker's column is terminal AND done. This guard refuses
+the expected edit (a "modules" key in hooks/hooks.json, the only hooks file the plugin loads while
+plugin.json declares none) until each blocker has shipped; it cannot stop someone editing this test.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,10 @@ sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 import trdd_common  # noqa: E402
 
 HOOKS_JSON = _REPO / "hooks" / "hooks.json"
+PLUGIN_JSON = _REPO / ".claude-plugin" / "plugin.json"
 
 BLOCKERS = ("0Y3UW1NF", "TEP6F3A3")
+WIRING_CARD = "2V7OAUPE"  # the card whose blocked-by the gate also reads
 
 # Columns a blocker can sit in without having shipped: each one must keep the mod unwired.
 # "completed" is left out of this list and of _SHIPPED below: it is done but not terminal
@@ -41,12 +44,12 @@ def _releases(column: str) -> bool:
     return trdd_common.is_terminal_column(column) and trdd_common.is_done_column(column)
 
 
-def wiring_refusal(hooks: dict[str, Any], columns: dict[str, str]) -> str | None:
+def wiring_refusal(hooks: dict[str, Any], columns: dict[str, str], blockers: Iterable[str]) -> str | None:
     """Why `hooks` may not load the secret-shield mod yet, or None when it may."""
     if "modules" not in hooks:
         return None
     # A blocker id absent from the board reads as column "": never assume a card shipped.
-    pending = [f"TRDD-{uid} (column {columns.get(uid, '')!r})" for uid in BLOCKERS if not _releases(columns.get(uid, ""))]
+    pending = [f"TRDD-{uid} (column {columns.get(uid, '')!r})" for uid in blockers if not _releases(columns.get(uid, ""))]
     if not pending:
         return None
     return f"hooks/hooks.json has a 'modules' key, which loads the secret-shield mod, but these blockers of TRDD-2V7OAUPE have not shipped (each needs a column that is both terminal and done): {', '.join(pending)}"
@@ -64,6 +67,25 @@ def _repo_columns(root: Path) -> dict[str, str]:
     return column_by_uid
 
 
+def _card_blockers(root: Path) -> tuple[str, ...]:
+    """The ids in TRDD-2V7OAUPE's frontmatter `blocked-by:`, or () when that field is absent or empty."""
+    for folder in trdd_common.DESIGN_FOLDERS:
+        for _scope, card in trdd_common.trdd_files(folder, str(root)):
+            if trdd_common.extract_uid(card.name) != WIRING_CARD:
+                continue
+            # The same head read as parse_trdd_state, and the same blocked_by_ids trdd-drift's
+            # hold uses: it keeps TRDD-shaped ids only, so a non-card blocker is not checked here.
+            with card.open("r", encoding="utf-8", errors="replace") as f:
+                head = f.read(trdd_common.HEAD_BYTES)
+            fm = trdd_common.FRONTMATTER_RE.match(head)
+            if fm is None:
+                pytest.fail(f"TRDD-{WIRING_CARD} has no frontmatter block, so the gate cannot read its blocked-by")
+            bm = trdd_common.FM_BLOCKED_BY_RE.search(fm.group(1))
+            return tuple(trdd_common.blocked_by_ids(bm.group(1))) if bm else ()
+    # Fail rather than return (): a renamed or deleted card would silently shrink the gate to BLOCKERS.
+    pytest.fail(f"TRDD-{WIRING_CARD} is not on the board (renamed or deleted), so the gate cannot read its blocked-by")
+
+
 def _other(blocker: str) -> str:
     return next(uid for uid in BLOCKERS if uid != blocker)
 
@@ -74,9 +96,12 @@ def _other(blocker: str) -> str:
 # _main_checkout_root is lru_cached: an unmarked one would pass only after a marked one ran.
 @pytest.mark.real_subprocess("git")
 def test_real_hooks_json_respects_the_wiring_gate() -> None:
-    """The shipped hooks.json loads the mod only if both blockers have shipped."""
+    """The shipped hooks.json loads the mod only if every blocker of TRDD-2V7OAUPE has shipped."""
     hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
-    refusal = wiring_refusal(hooks, _repo_columns(_REPO))
+    # Both lists count: BLOCKERS alone would miss a blocker added to the card later, and the
+    # card's blocked-by alone would let the wiring through once someone empties it by hand.
+    blockers = sorted(set(BLOCKERS) | set(_card_blockers(_REPO)))
+    refusal = wiring_refusal(hooks, _repo_columns(_REPO), blockers)
     assert refusal is None, refusal
 
 
@@ -95,7 +120,7 @@ def test_gate_refuses_modules_until_both_blockers_ship(blocker: str, column: str
     columns = {_other(blocker): "complete"}
     if column is not None:  # None = the blocker's card is not on the board at all
         columns[blocker] = column
-    refusal = wiring_refusal({"hooks": {}, "modules": {}}, columns)
+    refusal = wiring_refusal({"hooks": {}, "modules": {}}, columns, BLOCKERS)
     assert refusal is not None
     assert f"TRDD-{blocker}" in refusal
     assert f"TRDD-{_other(blocker)}" not in refusal
@@ -104,9 +129,24 @@ def test_gate_refuses_modules_until_both_blockers_ship(blocker: str, column: str
 @pytest.mark.parametrize("column", _SHIPPED)
 def test_gate_allows_modules_once_both_ship(column: str) -> None:
     """Once both blockers sit in a shipped column, hooks.json may load the mod."""
-    assert wiring_refusal({"hooks": {}, "modules": {}}, dict.fromkeys(BLOCKERS, column)) is None
+    assert wiring_refusal({"hooks": {}, "modules": {}}, dict.fromkeys(BLOCKERS, column), BLOCKERS) is None
 
 
 def test_gate_ignores_hooks_json_without_modules() -> None:
     """A hooks.json with no "modules" key loads no mod, so the blockers' columns do not matter."""
-    assert wiring_refusal({"hooks": {}}, dict.fromkeys(BLOCKERS, "design")) is None
+    assert wiring_refusal({"hooks": {}}, dict.fromkeys(BLOCKERS, "design"), BLOCKERS) is None
+
+
+def test_gate_refuses_a_blocker_only_the_card_lists() -> None:
+    """A blocker named only in the card's blocked-by keeps the mod unwired even with both BLOCKERS shipped."""
+    columns = {**dict.fromkeys(BLOCKERS, "complete"), "ZZZZZZZZ": "design"}
+    refusal = wiring_refusal({"hooks": {}, "modules": {}}, columns, sorted(set(BLOCKERS) | {"ZZZZZZZZ"}))
+    assert refusal is not None
+    assert "TRDD-ZZZZZZZZ" in refusal
+    assert not any(f"TRDD-{uid}" in refusal for uid in BLOCKERS)
+
+
+def test_plugin_json_declares_no_other_hooks_file() -> None:
+    """plugin.json declares no hooks of its own, so hooks/hooks.json is the only hooks file to guard."""
+    manifest = json.loads(PLUGIN_JSON.read_text(encoding="utf-8"))
+    assert "hooks" not in manifest, "plugin.json now declares its own hooks, which could load the mod from a file this gate does not read; extend the gate to that file"
