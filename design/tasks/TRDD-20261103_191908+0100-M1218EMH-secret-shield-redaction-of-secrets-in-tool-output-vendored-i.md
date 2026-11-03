@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T20:48:33+0100
+updated: 2026-11-03T20:50:51+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -61,3 +61,4 @@ NEXT ACTION: step 1.
 2026-11-03 build checks added: try/catch around tool.call that withholds output on a throw, plus a size and time test; tsc --noEmit and eslint over hooks/secret-shield; CPV --strict including the nested LICENSE; command renamed to /janitor-secret-shield; a cross-check test that every secret format the janitor Python scanners know is also redacted by the mod (one shared pattern source is a structural proposal for the owner, not part of this card).
 2026-11-03 live probe design: build the fake token from pieces with printf inside the probe, never whole in a prompt; take the session .jsonl byte counts inside the probe as a Bash step printing counts only; include an MCP-result case (order against post-mcp-response-sanitizer.py is unverified); assert jr-redact is absent. Older Claude Code: declare a minimum version if the manifest supports one, otherwise probe an older binary before wiring.
 2026-11-03 step 2 marker: mark() and MARK now use the janitor marker form only (no old-form compatibility); existing test expectations changed by sed only; 3 new tests (exact github-token marker, no upstream form emitted, janitor marker untouched in assignment, JSON, bearer and URL-password positions). Result: 99/99.
+2026-11-03 step 3: a URL password may now contain a slash; a captured password that starts with digits then a slash is treated as a port and path and left alone. 3 new tests. Result: 102/102.

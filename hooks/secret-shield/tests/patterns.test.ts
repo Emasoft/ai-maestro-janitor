@@ -176,3 +176,17 @@ describe('janitor marker', () => {
     for (const s of ['API_KEY=' + m, '{"password":"' + m + '"}', 'Authorization: Bearer ' + m, 'postgres://app:' + m + '@db.acme.io:5432/app']) expect(redact(s).text).toBe(s)
   })
 })
+
+describe('URL passwords containing a slash', () => {
+  const marker = '[JANITOR-' + 'REDACTED:url-password]'
+  test('a slash in the password is still hidden, the user and host are kept', () => {
+    expect(redact('postgres://app:' + j('ab/', 'cdefgh') + '@db.acme.io:5432/app').text).toBe('postgres://app:' + marker + '@db.acme.io:5432/app')
+  })
+  test('a port followed by a path with an at-sign is not a password', () => {
+    const url = 'https://cdn.acme.io:8080/pkg/' + '@scope/name'
+    expect(redact(url).text).toBe(url)
+  })
+  test('an all-digit password is still hidden', () => {
+    expect(redact('redis://app:' + j('1234', '5678') + '@cache.acme.io:6379').text).toBe('redis://app:' + marker + '@cache.acme.io:6379')
+  })
+})

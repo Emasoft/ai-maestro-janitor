@@ -78,7 +78,9 @@ function applyRule(text: string, rule: Rule, hits: Hits): string {
 
 /** A password in a URL's userinfo part: keeps the scheme, user and host, hides the password. */
 function redactUrlPasswords(text: string, hits: Hits): string {
-  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@'"`]+):([^\s@'"`/]+)@/gi, (match, scheme: string, user: string, password: string) => {
+  // The password may contain a slash. A password that starts with digits then a slash is a
+  // host:port followed by a path (`host:8080/pkg/@scope`), not a password, so the lookahead skips it.
+  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@'"`]+):((?!\d+\/)[^\s@'"`]+)@/gi, (match, scheme: string, user: string, password: string) => {
     if (MARK.test(password) || PLACEHOLDER.test(password)) return match
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
     return `${scheme}${user}:${mark('url-password')}@`
