@@ -32,7 +32,7 @@ describe('finds each kind of token', () => {
       const { text, hits } = redact(`value: ${secret} end`)
       expect(hits[kind]).toBe(1)
       expect(text).not.toContain(secret)
-      expect(text).toContain(`[REDACTED:${kind}]`)
+      expect(text).toContain(`[JANITOR-REDACTED:${kind}]`)
     })
   }
 })
@@ -41,14 +41,14 @@ test('a PEM private key is hidden whole, even when cut off', () => {
   const begin = j('-----BEGIN ', 'RSA PRIVATE KEY-----')
   const end = j('-----END ', 'RSA PRIVATE KEY-----')
   const whole = redact(`key:\n${begin}\nMIIEpAIBAAKCAQEA\nabc\n${end}\ndone`)
-  expect(whole.text).toBe('key:\n[REDACTED:private-key]\ndone')
+  expect(whole.text).toBe('key:\n[JANITOR-REDACTED:private-key]\ndone')
   const cut = redact(`${j('-----BEGIN ', 'OPENSSH PRIVATE KEY-----')}\nb3BlbnNzaC1rZXktdjEAAAAA`)
-  expect(cut.text).toBe('[REDACTED:private-key]')
+  expect(cut.text).toBe('[JANITOR-REDACTED:private-key]')
 })
 
 test('AWS secret keys and STS output', () => {
   const secret = j('wJalrXUtnFEMI/K7MDENG/', 'bPxRfiCYEXAMPLEKEY')
-  expect(redact(`aws_secret_access_key = ${secret}`).text).toBe('aws_secret_access_key = [REDACTED:aws-secret-key]')
+  expect(redact(`aws_secret_access_key = ${secret}`).text).toBe('aws_secret_access_key = [JANITOR-REDACTED:aws-secret-key]')
   const sts = `{"Credentials": {"SecretAccessKey": "${secret}", "SessionToken": "${'F'.repeat(120)}"}}`
   const done = redact(sts)
   expect(done.hits['aws-secret-key']).toBe(1)
@@ -60,7 +60,7 @@ const withPassword = (scheme: string, user: string, password: string, rest: stri
 
 test('a password in a URL is hidden, the user and host are kept', () => {
   expect(redact(`DATABASE_URL=${withPassword('postgres', 'app', 's3cret' + 'Pass', 'db.acme.io:5432/app')}`).text).toBe(
-    'DATABASE_URL=postgres://app:[REDACTED:url-password]@db.acme.io:5432/app',
+    'DATABASE_URL=postgres://app:[JANITOR-REDACTED:url-password]@db.acme.io:5432/app',
   )
   expect(redact(withPassword('mongodb+srv', 'u', 'p4' + 'ss', 'cluster0.x.example')).hits['url-password']).toBe(1)
   expect(redact('postgres://app:${DB_PASSWORD}@db/app').hits['url-password']).toBeUndefined()
@@ -69,18 +69,18 @@ test('a password in a URL is hidden, the user and host are kept', () => {
 
 describe('secret assignments are hidden, the name is kept', () => {
   const cases: Array<[string, string]> = [
-    ['API_KEY=abcd1234efgh', 'API_KEY=[REDACTED:assignment]'],
-    ['export GITHUB_TOKEN="xyz12345abc"', 'export GITHUB_TOKEN="[REDACTED:assignment]"'],
-    ['DB_PASSWORD=hunter2!x', 'DB_PASSWORD=[REDACTED:assignment]'],
-    ['password: hunter22', 'password: [REDACTED:assignment]'],
-    ['  client_secret: "abc123def"', '  client_secret: "[REDACTED:assignment]"'],
-    ['SECRET_KEY_BASE=3f9a8b7c6d5e4f3a2b1c', 'SECRET_KEY_BASE=[REDACTED:assignment]'],
-    ['const apiKey = "abc123def456";', 'const apiKey = "[REDACTED:assignment]";'],
-    ['const apiKey: string = "abc123def456"', 'const apiKey: string = "[REDACTED:assignment]"'],
-    ['  accessToken: \'q1w2e3r4t5\',', '  accessToken: \'[REDACTED:assignment]\','],
-    ['{"api_key": "q1w2e3r4t5y6"}', '{"api_key": "[REDACTED:assignment]"}'],
-    ['STRIPE_WEBHOOK_SECRET=abc#123def', 'STRIPE_WEBHOOK_SECRET=[REDACTED:assignment]'],
-    ['TOKEN=abc123def  # rotate monthly', 'TOKEN=[REDACTED:assignment]  # rotate monthly'],
+    ['API_KEY=abcd1234efgh', 'API_KEY=[JANITOR-REDACTED:assignment]'],
+    ['export GITHUB_TOKEN="xyz12345abc"', 'export GITHUB_TOKEN="[JANITOR-REDACTED:assignment]"'],
+    ['DB_PASSWORD=hunter2!x', 'DB_PASSWORD=[JANITOR-REDACTED:assignment]'],
+    ['password: hunter22', 'password: [JANITOR-REDACTED:assignment]'],
+    ['  client_secret: "abc123def"', '  client_secret: "[JANITOR-REDACTED:assignment]"'],
+    ['SECRET_KEY_BASE=3f9a8b7c6d5e4f3a2b1c', 'SECRET_KEY_BASE=[JANITOR-REDACTED:assignment]'],
+    ['const apiKey = "abc123def456";', 'const apiKey = "[JANITOR-REDACTED:assignment]";'],
+    ['const apiKey: string = "abc123def456"', 'const apiKey: string = "[JANITOR-REDACTED:assignment]"'],
+    ['  accessToken: \'q1w2e3r4t5\',', '  accessToken: \'[JANITOR-REDACTED:assignment]\','],
+    ['{"api_key": "q1w2e3r4t5y6"}', '{"api_key": "[JANITOR-REDACTED:assignment]"}'],
+    ['STRIPE_WEBHOOK_SECRET=abc#123def', 'STRIPE_WEBHOOK_SECRET=[JANITOR-REDACTED:assignment]'],
+    ['TOKEN=abc123def  # rotate monthly', 'TOKEN=[JANITOR-REDACTED:assignment]  # rotate monthly'],
   ]
   for (const [line, want] of cases) test(line, () => expect(redact(line).text).toBe(want))
 })
@@ -113,7 +113,7 @@ describe('leaves lookalikes alone', () => {
 
 test('a token already redacted is not counted twice', () => {
   const once = redact(`GITHUB_TOKEN=${j('gh', 'p_', A36)}`)
-  expect(once.text).toBe('GITHUB_TOKEN=[REDACTED:github-token]')
+  expect(once.text).toBe('GITHUB_TOKEN=[JANITOR-REDACTED:github-token]')
   expect(once.hits).toEqual({ 'github-token': 1 })
   expect(redact(once.text).hits).toEqual({})
 })
@@ -127,9 +127,9 @@ test('redactBlocks scrubs text blocks and tool results, nothing else', () => {
     { type: 'tool_use', id: 'u1', name: 'Bash', input: { command: token } },
   ])
   expect(hits['github-token']).toBe(3)
-  expect(content[0]).toEqual({ type: 'tool_result', tool_use_id: 't1', content: 'out [REDACTED:github-token]' })
-  expect(content[1]).toEqual({ type: 'tool_result', tool_use_id: 't2', content: [{ type: 'text', text: '[REDACTED:github-token]' }, { type: 'image', source: {} }] })
-  expect(content[2]).toEqual({ type: 'text', text: 'hi [REDACTED:github-token]' })
+  expect(content[0]).toEqual({ type: 'tool_result', tool_use_id: 't1', content: 'out [JANITOR-REDACTED:github-token]' })
+  expect(content[1]).toEqual({ type: 'tool_result', tool_use_id: 't2', content: [{ type: 'text', text: '[JANITOR-REDACTED:github-token]' }, { type: 'image', source: {} }] })
+  expect(content[2]).toEqual({ type: 'text', text: 'hi [JANITOR-REDACTED:github-token]' })
   expect(content[3]).toEqual({ type: 'tool_use', id: 'u1', name: 'Bash', input: { command: token } })
 })
 
@@ -158,7 +158,21 @@ test('redactDeep walks a JSON value and returns it untouched when clean', () => 
   expect(redactDeep(clean).value).toBe(clean)
   const token = j('gh', 'p_', A36)
   expect(redactDeep({ a: [token, { b: `x ${token}` }], n: 1 })).toEqual({
-    value: { a: ['[REDACTED:github-token]', { b: 'x [REDACTED:github-token]' }], n: 1 },
+    value: { a: ['[JANITOR-REDACTED:github-token]', { b: 'x [JANITOR-REDACTED:github-token]' }], n: 1 },
     hits: { 'github-token': 2 },
+  })
+})
+
+describe('janitor marker', () => {
+  test('a GitHub token becomes the exact janitor marker', () => {
+    expect(redact('token ' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8')).text).toBe('token [JANITOR-REDACTED:github-token]')
+  })
+  test('no rule emits the upstream marker form', () => {
+    const samples = ['API_KEY=' + j('abcd', '1234efgh'), j('ghp_', 'B2c3D4e5F6g7H8i9J0k1', 'L2m3N4o5P6q7R8s9'), 'DATABASE_URL=postgres://app:' + j('s3cret', 'Pass') + '@db.acme.io:5432/app']
+    for (const s of samples) expect(redact(s).text.includes('[' + 'REDACTED:')).toBe(false)
+  })
+  test('an existing janitor marker is left untouched in every captured position', () => {
+    const m = '[JANITOR-REDACTED:x]'
+    for (const s of ['API_KEY=' + m, '{"password":"' + m + '"}', 'Authorization: Bearer ' + m, 'postgres://app:' + m + '@db.acme.io:5432/app']) expect(redact(s).text).toBe(s)
   })
 })

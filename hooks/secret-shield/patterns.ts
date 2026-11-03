@@ -10,9 +10,9 @@ type Rule = {
 }
 
 /** What a redacted secret is replaced with. */
-export const mark = (kind: string): string => `[REDACTED:${kind}]`
+export const mark = (kind: string): string => `[JANITOR-REDACTED:${kind}]`
 
-const MARK = /\[REDACTED:[a-z0-9-]+\]/
+const MARK = /\[JANITOR-REDACTED:[a-z0-9-]+\]/
 
 // Specific, high-confidence token formats. Order matters: the more specific
 // prefix (sk-ant-) runs before the more general one (sk-).

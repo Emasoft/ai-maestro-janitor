@@ -19,7 +19,7 @@ const bashRow = (text: string) => ({
 test('a token in Bash output comes back redacted, with what was hidden', () => {
   const shielded = shieldRow(bashRow(`GH=${TOKEN}\nKEY=${AWS}`), false)
   expect(shielded?.content).toEqual([
-    { type: 'tool_result', tool_use_id: 'toolu_1', content: 'GH=[REDACTED:github-token]\nKEY=[REDACTED:aws-access-key]' },
+    { type: 'tool_result', tool_use_id: 'toolu_1', content: 'GH=[JANITOR-REDACTED:github-token]\nKEY=[JANITOR-REDACTED:aws-access-key]' },
   ])
   expect(shielded?.hits).toEqual({ 'github-token': 1, 'aws-access-key': 1 })
 })
@@ -36,7 +36,7 @@ test('tool output, attachments and hook context are scanned; replies are not', (
 test('prompts are scanned only with redactPrompts', () => {
   const prompt = { door: 'prompt', message: { content: [{ type: 'text', text: `use ${TOKEN}` }] } }
   expect(shieldRow(prompt, false)).toBeUndefined()
-  expect(shieldRow(prompt, true)?.content).toEqual([{ type: 'text', text: 'use [REDACTED:github-token]' }])
+  expect(shieldRow(prompt, true)?.content).toEqual([{ type: 'text', text: 'use [JANITOR-REDACTED:github-token]' }])
 })
 
 test('a row that could not be scanned keeps its shape, not its text', () => {
@@ -70,7 +70,7 @@ test('blockSecretFiles keeps Claude out of .env and keys, not .env.example', { o
 test('/secret-shield test dry-runs a text', async ($, on) => {
   const dry = await $.command.run({ command: 'secret-shield', args: `test token=${TOKEN}`, ...TYPED })
   expect(dry.text).toMatch(/would hide 1 GitHub token/)
-  expect(dry.text).toContain('[REDACTED:github-token]')
+  expect(dry.text).toContain('[JANITOR-REDACTED:github-token]')
 
   const clean = await $.command.run({ command: 'secret-shield', args: 'test hello world', ...TYPED })
   expect(clean.text).toBe('secret-shield: nothing to hide in that text.')
@@ -104,7 +104,7 @@ test('a tool\'s own result is redacted too, so the display copy keeps no secret'
 
   const out = await $.tool.call({ tool: 'Bash', command: 'cat build.log' })
 
-  expect(out.result).toEqual({ stdout: 'pushed with [REDACTED:github-token]', stderr: '', interrupted: false })
+  expect(out.result).toEqual({ stdout: 'pushed with [JANITOR-REDACTED:github-token]', stderr: '', interrupted: false })
   expect(toasts).toEqual(['secret-shield hid 1 GitHub token from Bash output'])
 })
 
@@ -124,7 +124,7 @@ test('nested results (Read) are walked and keep their shape', async ($, on) => {
 
   const out = await $.tool.call({ tool: 'Read', file_path: '/w/a.txt' })
 
-  expect(out.result).toEqual({ type: 'text', file: { filePath: '/w/a.txt', content: 'KEY=[REDACTED:aws-access-key]\n', numLines: 1, startLine: 1, totalLines: 1 } })
+  expect(out.result).toEqual({ type: 'text', file: { filePath: '/w/a.txt', content: 'KEY=[JANITOR-REDACTED:aws-access-key]\n', numLines: 1, startLine: 1, totalLines: 1 } })
 })
 
 test('/secret-shield counts what this session hid', async ($, on) => {
