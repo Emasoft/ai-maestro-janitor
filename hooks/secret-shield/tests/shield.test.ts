@@ -7,7 +7,8 @@ import { isScanned, shieldRow, withheldRow, WITHHELD } from '../rows'
 // tested here as the pure function it calls, and end to end in a live run.
 
 const j = (...parts: string[]) => parts.join('')
-const TOKEN = j('gh', 'p_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+const fakeGithubToken = () => j('gh', 'p_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+const TOKEN = fakeGithubToken()
 const AWS = j('AKIA', 'Q3EGRVJ4Z7XWLP2N')
 const TYPED = { origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } } as const
 
@@ -100,10 +101,12 @@ test('a tool\'s own result is redacted too, so the display copy keeps no secret'
   mock.store(on)
   const toasts: string[] = []
   on('ui.toast', ($, e) => (toasts.push(e.text), { value: undefined }))
-  on('tool.call', () => ({ result: { stdout: `pushed with ${TOKEN}`, stderr: '', interrupted: false } }))
+  const stdout = `pushed with ${fakeGithubToken()}`
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
 
   const out = await $.tool.call({ tool: 'Bash', command: 'cat build.log' })
 
+  expect(out.result).not.toEqual({ stdout, stderr: '', interrupted: false })
   expect(out.result).toEqual({ stdout: 'pushed with [JANITOR-REDACTED:github-token]', stderr: '', interrupted: false })
   expect(toasts).toEqual(['secret-shield hid 1 GitHub token from Bash output'])
 })
@@ -143,11 +146,12 @@ test('secret_shield_enabled false registers no hook', { options: { secret_shield
   const names: string[] = []
   on('command.register', ($, e) => (names.push(e.name), { value: { command: e.name } }))
   on('session.start', () => ({ cwd: '/work' }))
-  on('tool.call', () => ({ result: { stdout: TOKEN, stderr: '', interrupted: false } }))
+  const stdout = `pushed with ${fakeGithubToken()}`
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
 
   const out = await $.tool.call({ tool: 'Bash', command: 'cat build.log' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
-  expect(out.result).toEqual({ stdout: TOKEN, stderr: '', interrupted: false })
+  expect(out.result).toEqual({ stdout, stderr: '', interrupted: false })
   expect(names).toEqual([])
 })

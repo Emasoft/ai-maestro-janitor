@@ -1041,21 +1041,21 @@
     },
     "secret_shield_enabled": {
       "title": "Secret shield",
-      "description": "Hide API keys, tokens, private keys and passwords in tool output before Claude or the transcript sees them. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "description": "Hide API keys, tokens, private keys and passwords in tool output before Claude or the transcript sees them. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "secret_shield_block_files": {
       "title": "Secret shield: block secret files",
-      "description": "When true, secret-shield keeps Claude out of secret files: Read, Edit, Write and NotebookEdit on a .env file (not .env.example) or a private key is denied before it runs. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "description": "Also refuse Read, Edit, Write and NotebookEdit on files that usually hold secrets (.env, *.pem, id_rsa, ~/.aws/credentials, .npmrc...). .env.example and friends stay readable. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block.",
       "type": "boolean",
       "default": false,
       "sensitive": false
     },
     "secret_shield_redact_prompts": {
       "title": "Secret shield: redact prompts",
-      "description": "When true, secret-shield also hides secrets in the prompts you type before the transcript stores them. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block. Takes effect after a plugin reload.",
+      "description": "Also redact secrets you paste into your own prompts. Off by default, since a pasted key is usually meant for Claude. Set with /plugin config (pluginConfigs), not the settings env block: a mod does not see that block.",
       "type": "boolean",
       "default": false,
       "sensitive": false
