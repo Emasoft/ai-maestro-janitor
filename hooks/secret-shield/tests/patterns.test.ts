@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, withhold } from '../patterns'
+import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKENS, withhold } from '../patterns'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -292,5 +292,46 @@ describe('a secret next to a hidden token', () => {
   })
   test('a secret written after a hidden token in a URL password is hidden', () => {
     expect(redact('postgres://app:' + j('ghp_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8') + '.extra9' + '@' + 'db.acme.io/app').text).toBe('postgres://app:' + '[JANITOR-' + 'REDACTED:url-password]' + '@db.acme.io/app')
+  })
+})
+
+describe('token rule order', () => {
+  // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
+  // This pins that order, so moving a rule between category files or reordering the list fails here.
+  test('the rules run in this exact order', () => {
+    expect(TOKENS.map(rule => rule.kind)).toEqual([
+      'private-key',
+      'aws-access-key',
+      'aws-secret-key',
+      'aws-secret-key',
+      'aws-session-token',
+      'github-token',
+      'github-token',
+      'anthropic-key',
+      'openai-key',
+      'openai-key',
+      'openai-key',
+      'slack-token',
+      'slack-webhook',
+      'stripe-key',
+      'stripe-key',
+      'google-api-key',
+      'jwt',
+      'npm-token',
+      'pypi-token',
+      'huggingface-token',
+      'sendgrid-key',
+      'bearer-token',
+    ])
+  })
+  test('the private-key rule comes first', () => {
+    expect(TOKENS[0]?.kind).toBe('private-key')
+  })
+  test('an sk-ant- key is reported as an Anthropic key, not an OpenAI key', () => {
+    const key = j('sk-', 'ant-', 'api03-', A36, 'abcd')
+    const { text, hits } = redact(`key ${key} end`)
+    expect(text).toBe(`key ${mark('anthropic-key')} end`)
+    expect(hits['anthropic-key']).toBe(1)
+    expect(hits['openai-key']).toBeUndefined()
   })
 })

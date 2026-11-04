@@ -1,13 +1,14 @@
 // Pure secret detection and redaction: no `$`, so tests and other mods can import it.
 
-export type Hits = Record<string, number>
+import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
+import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, googleApiKey } from './rules/cloud'
+import { githubTokenClassic, githubTokenFineGrained } from './rules/code-hosts'
+import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
+import { bearerToken, jwt, privateKey } from './rules/key-material'
+import { slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
+import type { Rule } from './rules/rule'
 
-type Rule = {
-  kind: string
-  pattern: RegExp
-  /** Which capture group is the secret; 0 (the default) is the whole match. */
-  group?: number
-}
+export type Hits = Record<string, number>
 
 /** What a redacted secret is replaced with. */
 export const mark = (kind: string): string => `[JANITOR-REDACTED:${kind}]`
@@ -22,31 +23,34 @@ const URL_PASSWORD = new RegExp(
   'gi',
 )
 
-// Specific, high-confidence token formats. Order matters: the more specific
-// prefix (sk-ant-) runs before the more general one (sk-).
-const TOKENS: Rule[] = [
-  { kind: 'private-key', pattern: /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g },
-  { kind: 'aws-access-key', pattern: /\b((?:AKIA|ASIA)[A-Z0-9]{16})\b/g, group: 1 },
-  { kind: 'aws-secret-key', pattern: /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi, group: 1 },
-  { kind: 'aws-secret-key', pattern: /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g, group: 1 },
-  { kind: 'aws-session-token', pattern: /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g, group: 1 },
-  { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g, group: 1 },
-  { kind: 'github-token', pattern: /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g, group: 1 },
-  { kind: 'anthropic-key', pattern: /\b(sk-ant-[A-Za-z0-9_-]{20,})/g, group: 1 },
-  { kind: 'openai-key', pattern: /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g, group: 1 },
-  { kind: 'openai-key', pattern: /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g, group: 1 },
-  { kind: 'openai-key', pattern: /\b(sk-[A-Za-z0-9]{48})\b/g, group: 1 },
-  { kind: 'slack-token', pattern: /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g, group: 1 },
-  { kind: 'slack-webhook', pattern: /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g, group: 1 },
-  { kind: 'stripe-key', pattern: /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g, group: 1 },
-  { kind: 'stripe-key', pattern: /\b(whsec_[A-Za-z0-9]{24,})\b/g, group: 1 },
-  { kind: 'google-api-key', pattern: /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g, group: 1 },
-  { kind: 'jwt', pattern: /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g, group: 1 },
-  { kind: 'npm-token', pattern: /\b(npm_[A-Za-z0-9]{36})\b/g, group: 1 },
-  { kind: 'pypi-token', pattern: /\b(pypi-AgE[A-Za-z0-9_-]{50,})/g, group: 1 },
-  { kind: 'huggingface-token', pattern: /\b(hf_[A-Za-z0-9]{34,})\b/g, group: 1 },
-  { kind: 'sendgrid-key', pattern: /\b(SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g, group: 1 },
-  { kind: 'bearer-token', pattern: /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g, group: 1 },
+// Specific, high-confidence token formats, defined by category under rules/ and listed here one by one.
+// The order is load-bearing: rules run in this order and the first match wins, because a hidden token is
+// skipped by every later rule. The private key runs first, so nothing inside a key block is matched on its
+// own, and the more specific prefix (sk-ant-) runs before the more general one (sk-). Never build this list by
+// concatenating the category files: their order is not this order. tests/patterns.test.ts pins it.
+export const TOKENS: readonly Rule[] = [
+  privateKey,
+  awsAccessKey,
+  awsSecretKeyAssignment,
+  awsSecretKeyJson,
+  awsSessionToken,
+  githubTokenClassic,
+  githubTokenFineGrained,
+  anthropicKey,
+  openaiProjectKey,
+  openaiLegacyKey,
+  openaiKey48,
+  slackToken,
+  slackWebhook,
+  stripeSecretKey,
+  stripeWebhookSecret,
+  googleApiKey,
+  jwt,
+  npmToken,
+  pypiToken,
+  huggingfaceToken,
+  sendgridKey,
+  bearerToken,
 ]
 
 // A value that is obviously not a real secret: a reference, a placeholder.
