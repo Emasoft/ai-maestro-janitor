@@ -27,8 +27,9 @@ const URL_PASSWORD = new RegExp(
 // The order is load-bearing: rules run in this order and the first match wins, because a hidden token is
 // skipped by every later rule. The private key runs first, so nothing inside a key block is matched on its
 // own, and the more specific prefix (sk-ant-) runs before the more general one (sk-). Never build this list by
-// concatenating the category files: their order is not this order. tests/patterns.test.ts pins it.
-export const TOKENS: readonly Rule[] = [
+// concatenating the category files: their order is not this order. tests/patterns.test.ts pins it through TOKEN_ORDER.
+// Never run these patterns directly: see rules/rule.ts.
+const TOKENS: readonly Rule[] = [
   privateKey,
   awsAccessKey,
   awsSecretKeyAssignment,
@@ -52,6 +53,9 @@ export const TOKENS: readonly Rule[] = [
   sendgridKey,
   bearerToken,
 ]
+
+/** Each rule's kind, pattern source and flags, in run order: the data tests/patterns.test.ts pins, without the RegExps. */
+export const TOKEN_ORDER: readonly (readonly [string, string, string])[] = TOKENS.map(rule => [rule.kind, rule.pattern.source, rule.pattern.flags] as const)
 
 // A value that is obviously not a real secret: a reference, a placeholder.
 const PLACEHOLDER = /^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(.*\)|\{\{.*\}\}|<[^>]*>|\*+|x+|X+|\.{3}|…|changeme|change_me|password|passwd|secret|token|your[-_ a-z]*|example|dummy|test|none|null|nil|undefined|true|false|empty|redacted|process\.env\.\w+|os\.environ.*|env\(.*\))$/i
@@ -82,6 +86,8 @@ function looksSecret(value: string, isQuoted: boolean): boolean {
 
 /** Replaces each match of `rule` with its mark, counting into `hits`. */
 function applyRule(text: string, rule: Rule, hits: Hits): string {
+  // String.prototype.replace with a /g pattern sets lastIndex to 0 before it starts, so a lastIndex left behind by
+  // anyone who ran .test() or .exec() on this shared RegExp cannot make it skip text. Keep it a replace (no exec loop).
   return text.replace(rule.pattern, (match: string, ...groups: unknown[]) => {
     const group = rule.group ?? 0
     const secret = group === 0 ? match : String(groups[group - 1] ?? '')

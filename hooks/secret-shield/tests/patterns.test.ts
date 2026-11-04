@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKENS, withhold } from '../patterns'
+import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, withhold } from '../patterns'
+import { pypiToken } from '../rules/dev-services'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -297,41 +298,70 @@ describe('a secret next to a hidden token', () => {
 
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
-  // This pins that order, so moving a rule between category files or reordering the list fails here.
+  // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
+  // the list, swapping two rules of the same kind (the three openai-key rules, say), or a rule losing its g
+  // flag or gaining i or u fails here. The expected values come from regex literals, so both sides are
+  // normalized by the same engine.
+  const id = (kind: string, pattern: RegExp) => [kind, pattern.source, pattern.flags]
   test('the rules run in this exact order', () => {
-    expect(TOKENS.map(rule => rule.kind)).toEqual([
-      'private-key',
-      'aws-access-key',
-      'aws-secret-key',
-      'aws-secret-key',
-      'aws-session-token',
-      'github-token',
-      'github-token',
-      'anthropic-key',
-      'openai-key',
-      'openai-key',
-      'openai-key',
-      'slack-token',
-      'slack-webhook',
-      'stripe-key',
-      'stripe-key',
-      'google-api-key',
-      'jwt',
-      'npm-token',
-      'pypi-token',
-      'huggingface-token',
-      'sendgrid-key',
-      'bearer-token',
+    expect(TOKEN_ORDER).toEqual([
+      id('private-key', /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g),
+      id('aws-access-key', /\b((?:AKIA|ASIA)[A-Z0-9]{16})\b/g),
+      id('aws-secret-key', /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi),
+      id('aws-secret-key', /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g),
+      id('aws-session-token', /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g),
+      id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g),
+      id('github-token', /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g),
+      id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
+      id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
+      id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),
+      id('openai-key', /\b(sk-[A-Za-z0-9]{48})\b/g),
+      id('slack-token', /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g),
+      id('slack-webhook', /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g),
+      id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g),
+      id('stripe-key', /\b(whsec_[A-Za-z0-9]{24,})\b/g),
+      id('google-api-key', /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g),
+      id('jwt', /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),
+      id('npm-token', /\b(npm_[A-Za-z0-9]{36})\b/g),
+      id('pypi-token', /\b(pypi-AgE[A-Za-z0-9_-]{50,})/g),
+      id('huggingface-token', /\b(hf_[A-Za-z0-9]{34,})\b/g),
+      id('sendgrid-key', /\b(SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g),
+      id('bearer-token', /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g),
     ])
   })
-  test('the private-key rule comes first', () => {
-    expect(TOKENS[0]?.kind).toBe('private-key')
+  test('a PEM private key whose body holds an AWS access key is one private-key hit', () => {
+    // Order-dependent: the private-key rule runs first, so the block is hidden before the AWS rule sees it.
+    // Moved below the AWS rule, the key inside would be counted as an aws-access-key hit too; the text
+    // alone cannot tell, because the private-key rule then swallows the marker with the rest of the block.
+    const begin = j('-----BEGIN ', 'RSA PRIVATE KEY-----')
+    const end = j('-----END ', 'RSA PRIVATE KEY-----')
+    const awsKey = j('AKIA', 'Q3EGRVJ4Z7XWLP2N')
+    const { text, hits } = redact(`key:\n${begin}\nMIIEpAIBAAKCAQEA\n${awsKey}\nabc\n${end}\ndone`)
+    expect(text).toBe(`key:\n${mark('private-key')}\ndone`)
+    expect(hits).toEqual({ 'private-key': 1 })
   })
-  test('an sk-ant- key is reported as an Anthropic key, not an OpenAI key', () => {
+  test('an sk-ant- key is matched by the Anthropic rule', () => {
     const key = j('sk-', 'ant-', 'api03-', A36, 'abcd')
     const { text, hits } = redact(`key ${key} end`)
     expect(text).toBe(`key ${mark('anthropic-key')} end`)
     expect(hits['anthropic-key']).toBe(1)
     expect(hits['openai-key']).toBeUndefined()
+  })
+})
+
+describe('a rule pattern run directly does not break redact', () => {
+  // The rule files export each Rule, so an importer can run .test() on a shared /g pattern and leave its
+  // lastIndex mid-text. redact() must still find a token placed before that offset in a new text.
+  test('a token before a stale lastIndex is still hidden', () => {
+    const token = j('pypi-', 'AgE', A36, 'x'.repeat(20))
+    try {
+      expect(pypiToken.pattern.test(`${'filler '.repeat(10)}${token} end`)).toBe(true)
+      expect(pypiToken.pattern.lastIndex).toBeGreaterThan(token.length)
+      const { text, hits } = redact(`${token} end`)
+      expect(text).toBe(`${mark('pypi-token')} end`)
+      expect(hits).toEqual({ 'pypi-token': 1 })
+    } finally {
+      pypiToken.pattern.lastIndex = 0
+    }
   })
 })
