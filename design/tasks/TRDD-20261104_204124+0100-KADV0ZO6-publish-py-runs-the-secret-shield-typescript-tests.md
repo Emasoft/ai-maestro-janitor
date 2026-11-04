@@ -4,7 +4,7 @@ title: publish.py runs the secret shield TypeScript tests
 column: backburner
 status: tasked
 created: 2026-11-04T20:41:24+0100
-updated: 2026-11-04T21:00:47+0100
+updated: 2026-11-04T21:05:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T20:41:24+0100
+npt: [OD5Z90YL]
 ---
 
 # publish.py runs the secret shield TypeScript tests
@@ -35,4 +36,4 @@ The secret shield's TypeScript tests (hooks/secret-shield/tests) run in no autom
 
 - The exact claude plugin test invocation that runs hooks/secret-shield/tests is recorded on this card.
 - A publish.py stage before stage_bump runs that invocation and exits non-zero, blocking the publish, both when a shield test fails and when the claude CLI is missing or cannot run; each case is shown by a real run, including one where publish.py itself runs inside a Claude Code session.
-- Every regex in hooks/secret-shield is timed with only TRDD-Q6LPJTPO's ratio rule (under 12 across an 8x size step, or under 2 ms at the larger size), without that card's load precondition or absolute limit, using a warm-up run and the median of at least 5 runs per size; this includes the 133a766a tests. One test covers every such regex without a hand list: the rules/ exports plus the module-private regexes in patterns.ts (TOKENS, URL_PASSWORD, the assignment and setting rules, MARK), exposed for the test or listed in one table that the test asserts complete. It times each on a failing tail at two sizes and, at the larger size, also runs it on the long failing prefix followed by a separator and a short, self-contained real match, asserting at least one hit, so a regex that silently gives up fails. The positive samples live in a table under tests/, built from split strings like the existing tests, never as literal tokens in rules/.
+- The publish stage runs the ReDoS harness of TRDD-OD5Z90YL over every regex in hooks/secret-shield, and that card's Done-when is met.
