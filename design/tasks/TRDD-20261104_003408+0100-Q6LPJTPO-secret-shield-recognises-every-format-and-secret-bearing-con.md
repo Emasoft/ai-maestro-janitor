@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: design
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T00:56:13+0100
+updated: 2026-11-04T00:59:30+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -48,7 +48,7 @@ Token rules: private-key, anthropic-key, openai-key, stripe-key, github-token, a
 
 Each rule gets a fake-value test. Fixtures use the real prefixes and are built at run time by concatenation, so no whole fake token sits in the source. The expected output comes from mark(kind), the shield's marker for that kind, never a hand-written marker. No rule may fire on the false-positive corpus.
 
-Left out of the catalog: OpenAI sk-admin- and sk-svcacct- and Stripe whsec_ and rk_, which the current rules already cover; Twilio AC + 32 hex, which is an Account SID and not a secret; a Twilio API key SID (SK + 32 hex), which is an identifier, because Twilio secrets are caught by key name; bare Notion secret_, because it matches ordinary identifiers such as secret_key; and Okta 00 + 40, because it is too generic.
+Left out of the catalog: OpenAI sk-admin- and sk-svcacct- and Stripe whsec_ and rk_, which the current rules already cover; Twilio AC + 32 hex, which is an Account SID and not a secret; a Twilio API key SID (SK + 32 hex), which is an identifier, because Twilio secrets will be caught by the auth_token key name this card adds; bare Notion secret_, because it matches ordinary identifiers such as secret_key; and Okta 00 + 40, because it is too generic.
 
 - AI providers: Anthropic admin (sk-ant-admin01-), OpenRouter sk-or-v1-, Groq gsk_, xAI xai-, Perplexity pplx-, Replicate r8_, Fireworks fw_, LangSmith lsv2_pt_ and lsv2_sk_, Pinecone pcsk_, Tavily tvly-.
 - Google: OAuth access token ya29., OAuth client secret GOCSPX-, refresh token 1//0, service-account JSON private_key (PEM).
@@ -81,7 +81,7 @@ Done means the shield removes every format in this card's catalog and every cont
 ## Prerequisite
 
 TRDD-337UVA3J (error results are not redacted) must land before this card reaches dev. It is not listed in npt because it is already an EHT of TRDD-M1218EMH, and a derived card may have only one parent. Until it lands, a secret printed inside an error result bypasses every rule this card adds.
-At the move from design to todo, set blocked-by: [337UVA3J], so trddgrep next and why see the dependency.
+At the move from design to todo, set blocked-by: [337UVA3J], which puts the card in blocked with pre-block-column: todo, so trddgrep next and why see the dependency.
 
 ## Incident test
 
@@ -105,7 +105,7 @@ A test runs the redactor over this repo's tracked sources, its tests and the Pyt
 
 When gitleaks is installed, a test writes gitleaks' own positive examples, or samples generated from its rules, to a temp directory. It runs gitleaks over them and over the false-positive corpus, writes its report to reports_dev/, and fails on any gitleaks positive the shield misses that is not in KNOWN-MISSES.md.
 
-Porting a gitleaks rule rewrites its leading `(?i)` into the scoped `(?i:...)` form. It also translates RE2-only syntax, such as POSIX classes, `(?P<name>...)`, `\z` and `\Q...\E`, and any entropy filter. A rule that still does not compile, or whose filter cannot be kept, is listed in KNOWN-MISSES.md and never silently dropped.
+Porting a gitleaks rule rewrites its leading `(?i)` into the scoped `(?i:...)` form. It also translates RE2-only syntax, such as POSIX classes, `(?P<name>...)`, `\z` and `\Q...\E`, and any entropy filter. A rule that still does not compile, or whose filter cannot be kept, is listed in KNOWN-MISSES.md and never silently dropped. CI installs gitleaks, and anywhere it is missing the test reports a skip as a coverage gap, never as a pass. gitleaks keeps its positive examples in Go source, so the samples are extracted from there or generated from each rule's regex.
 
 ## Out of scope
 
