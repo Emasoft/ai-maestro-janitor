@@ -4,7 +4,7 @@ title: publish.py runs the secret shield TypeScript tests
 column: backburner
 status: tasked
 created: 2026-11-04T20:41:24+0100
-updated: 2026-11-04T21:05:59+0100
+updated: 2026-11-04T21:49:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -17,7 +17,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T20:41:24+0100
-npt: [OD5Z90YL]
+npt: []
+eht: [OD5Z90YL]
 ---
 
 # publish.py runs the secret shield TypeScript tests
