@@ -104,6 +104,14 @@ Hidden instead: The same word as an unspaced Password= pair between two other se
 Card: none
 Test: KNOWN MISS weak-word-value: a lowercase word of under 16 characters with no digit after password= stays visible, in a connection string it is hidden
 
+## unquoted-dotted-identifier
+
+Reason: (c) patterns.ts:135-137. An unquoted value shaped like a dotted identifier is read as a code expression (the comment at :135 names `self.token`), so password=<a dotted identifier> is not hidden. The documented dotted token forms (a JWT; a Google ya29. access token whose first segment meets the rule's 20-character floor, rules/cloud.ts:16, while a shorter one is on the TRDD-Q6LPJTPO backlog) are hidden first by their own token rules, which run before the assignment pass (redactInto, patterns.ts:303 token rules, :305 assignments).
+Shape: password= followed by an unquoted dotted identifier of 21 characters (two segments of 10 letters joined by a dot).
+Hidden instead: The same value in quotes, and an unquoted fake JWT after password=.
+Card: none
+Test: KNOWN MISS unquoted-dotted-identifier: an unquoted dotted identifier after password= stays visible, quoted it is hidden, an unquoted JWT is hidden
+
 ## prop-separate-call
 
 Reason: (c) deliberate scope of known-secret propagation (TRDD-Q6LPJTPO acceptance item on known-secret propagation): no state is kept between calls, so a copy in a second call is not known.
@@ -154,9 +162,9 @@ Test: KNOWN MISS prop-overlap: the part of a text that only the second of two ov
 
 ## prop-refused-shapes
 
-Reason: (c) propagates() at patterns.ts:148-165 refuses these shapes so that names, paths, slugs, emails and host:port are not hidden as secrets (comment at patterns.ts:141-147). Each is hidden at its defining line by the passes that found it; only copies are not hidden. Only refusals that can refuse a real credential are listed; the marker, placeholder and repeated-character refusals are not.
-Shape: Twelve shapes: a lowercase-word slug (four words of 8 letters joined by hyphens); a letters-only identifier of 20 letters; an email-shaped value; a host:port-shaped value (10 characters, a colon, 5 digits); base64-like with a slash and no digit; base64-like with a leading slash; a value containing ://; 16 digits; a value of 8 characters (under 10); a dotted domain-like value; a dotted identifier (two words of 10 letters); a value of 13 characters with no letter-digit pair (under 16). The last two are hidden at their defining line only when quoted.
-Hidden instead: The defining line alone, for each shape.
+Reason: (c) propagates() at patterns.ts:148-165 refuses these shapes so that names, paths, slugs, emails and host:port are not hidden as secrets (comment at patterns.ts:141-147). Each is hidden at its defining line by the passes that found it (the last two only when quoted); only copies are not hidden. Only refusals that can refuse a real credential are listed; the marker, placeholder and repeated-character refusals are not.
+Shape: Twelve shapes: a lowercase-word slug (four words of 8 letters joined by hyphens); a letters-only identifier of 20 letters; an email-shaped value; a host:port-shaped value (10 characters, a colon, 5 digits); base64-like with a slash and no digit; base64-like with a leading slash; a value containing ://; 16 digits; a value of 8 characters (under 10); a dotted domain-like value; a dotted identifier (two words of 10 letters); a value of 13 characters with no letter-digit pair (under 16). The last two are hidden at their defining line only when quoted. Unquoted, the defining line itself stays visible: the dotted identifier is entry unquoted-dotted-identifier; the 13-character value, with no digit and under 16 characters (patterns.ts:138), is on the TRDD-Q6LPJTPO backlog.
+Hidden instead: The defining line alone, for each shape; for the last two, only when quoted.
 Card: none
 Test: KNOWN MISS prop-refused-shapes: a copy of a hidden value of a shape the propagation refuses stays visible, the definition line is hidden
 

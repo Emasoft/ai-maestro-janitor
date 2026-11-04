@@ -147,6 +147,21 @@ describe('known misses: formats and names the shield does not hide on their own'
     // One digit makes it 6 or more characters with a digit, which the check accepts.
     expect(hidden(`password=${weak}7`, weak)).toBe(true)
   })
+
+  test('KNOWN MISS unquoted-dotted-identifier: an unquoted dotted identifier after password= stays visible, quoted it is hidden, an unquoted JWT is hidden', () => {
+    const dotted = fake('QwmzTnRpLk' + '.' + 'VbXcJdHsAf')
+    expect(/^[A-Za-z]{10}\.[A-Za-z]{10}$/.test(dotted)).toBe(true)
+    expect(dotted.length).toBe(21)
+    const unquoted = redact(`password=${dotted}`)
+    expect(unquoted.text.indexOf(dotted) !== -1).toBe(true)
+    expect(unquoted.hits.assignment ?? 0).toBe(0)
+    expect(hiddenAs(`password="${dotted}"`, dotted, 'assignment')).toBe(true)
+    // Control: a dotted token form is hidden by its own token rule, which runs before the assignment pass.
+    const token = fake(j('eyJ', 'Nk3vBq8WzXr2', '.', 'eyJ', 'Pd5LmT9cYh4s', '.', 'Gf7RtQ2nXw8KzB4vJd6M'))
+    const withToken = redact(`password=${token}`)
+    expect(withToken.text.indexOf(token)).toBe(-1)
+    expect(withToken.hits.jwt).toBe(1)
+  })
 })
 
 describe('known misses: copies of a hidden secret the shield does not follow', () => {
