@@ -209,7 +209,12 @@ def test_read_pane_text_end_to_end_via_a_stub_osascript_on_path(monkeypatch, tmp
 
     # Timeout path: a stub that outlives the (patched-down) budget must surface as None, not hang.
     monkeypatch.setattr(tt, "_ITERM_READ_TIMEOUT_S", 0.2)
-    stub.write_text("#!/bin/sh\nsleep 2\n")
+    # TRDD-90LAMQ8B: the sleep must outlive the SCALED budget by a wide margin. conftest multiplies this
+    # 0.2 s budget by SUBPROCESS_TIMEOUT_SCALE (10), i.e. 2.0 s; the stub used to sleep exactly 2 s, so
+    # on a loaded host it sometimes finished first, returned "" and failed `assert "" is None`
+    # (reproduced deterministically by raising the scale to 15). `exec` makes the sleep the killed
+    # process itself, so the timeout kill leaves no orphan holding the pipe for the whole 30 s.
+    stub.write_text("#!/bin/sh\nexec sleep 30\n")
     stub.chmod(0o755)
     monkeypatch.setattr(tt.state, "log_line", lambda *a, **k: None)
     assert tt.read_pane_text(terminal) is None

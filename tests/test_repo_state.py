@@ -99,8 +99,21 @@ def _commit(repo: Path, msg: str, filename: str = "f.txt", date: str | None = No
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A work repo cloned from a local bare `origin`, one release already published."""
+    # TRDD-90LAMQ8B: the Claude Code harness injects THREE git config entries through GIT_CONFIG_COUNT=3
+    # (safe.bareRepository=explicit, credential.interactive=never, core.fsmonitor=false); explicit
+    # safe.bareRepository refuses `git -C <bare>` below; CI has no such env, so the
+    # failure only appeared on harness hosts. Pin all three entries on EVERY host (COUNT=1 would make
+    # git ignore the host KEY_1/KEY_2 and leave core.fsmonitor to the global gitconfig), so the
+    # fixture is proven under it everywhere instead of depending on who runs the suite.
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "3")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "explicit")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "credential.interactive")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "never")
+    monkeypatch.setenv("GIT_CONFIG_KEY_2", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_2", "false")
     work = tmp_path / "work"
     origin = tmp_path / "origin.git"
     # cwd=tmp_path on every git call whose cwd would otherwise be the project
@@ -112,9 +125,13 @@ def repo(tmp_path: Path) -> Path:
     # non-fast-forward against a ref that does not even exist. Point HEAD at
     # main BEFORE cloning so the work clone starts on `main`.
     subprocess.run(
-        ["git", "-C", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"],
+        # TRDD-90LAMQ8B: `--git-dir`, not `-C`: safe.bareRepository=explicit refuses `-C <bare>`;
+        # cwd=tmp_path because the sandbox guard reads the calling cwd and does not understand
+        # `--git-dir`, so a project-root cwd would read as a mutation of the real repo.
+        ["git", "--git-dir", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"],
         check=True,
         capture_output=True,
+        cwd=tmp_path,
     )
     subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True, cwd=tmp_path)
     _git(work, "config", "user.email", "t@t.t")
