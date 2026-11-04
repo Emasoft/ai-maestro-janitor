@@ -114,6 +114,25 @@ function redactUrlPasswords(text: string, hits: Hits): string {
   })
 }
 
+// JSON pairs, `"api_key": "..."`. Group 1 is the run of backslashes written before every quote of the pair: none
+// in plain JSON, one when the JSON sits inside another JSON string (`\"api_key\":\"...\"`), three when it was
+// stringified twice (`\\\"api_key\\\":\\\"...\\\"`). A pm2 jlist dump nested that way leaked a Dropbox secret on
+// 2026-11-03 because the plain pattern needs a bare quote next to the name (TRDD-Q6LPJTPO). A value may also end
+// at the end of a line, with no closing quote or after any part of its closing escape (a cut between the
+// backslashes and the quote), which is how a truncated dump ends; JSON strings hold no raw line break, so such a
+// value never runs into the next line.
+// The values are written so no group repeats once per character: JavaScriptCore gives up on a long match of
+// `(?:a|b){3,}` (measured: no match at 500 KB, a silent miss), while a repeated character class runs 5 MB in
+// milliseconds. An escaped value holds no backslash, because there the closing `\"` would read as an escape;
+// a secret with an escape sequence inside escaped JSON is a known miss. A plain value is the unrolled form of
+// "any character but a quote, or an escape pair", which repeats per escape pair, not per character.
+const jsonPair = (escapes: string, value: string): RegExp =>
+  new RegExp(String.raw`(${escapes})"([A-Za-z0-9_.-]+)\1"(\s*:\s*)\1"(${value})(\1"|\\*$)`, 'gm')
+// Escaped pairs run first: a plain pair whose value is a whole escaped document (`"args": "{\"token\":...}"`)
+// is consumed as one match, so the pairs inside it would never be seen afterwards.
+const JSON_ESCAPED = jsonPair(String.raw`\\+`, String.raw`[^"\\\r\n]{3,}`)
+const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*)*`)
+
 /** `.env`, shell, YAML and TOML lines: `API_KEY=...`, `export TOKEN="..."`, `password: ...`. */
 function redactAssignments(text: string, hits: Hits): string {
   const line = /^([ \t]*(?:export[ \t]+)?(?:(?:const|let|var|readonly|final|static|private|public)[ \t]+)*["']?)([A-Za-z_][A-Za-z0-9_.-]*)(["']?[ \t]*(?::[ \t]*[A-Za-z<>[\]|]+[ \t]*)?[=:][ \t]*)(["'`]?)([^\n\r]*?)\4([,;]?(?:[ \t]+(?:#|\/\/).*)?[ \t]*)$/gm
@@ -125,12 +144,16 @@ function redactAssignments(text: string, hits: Hits): string {
     hits.assignment = (hits.assignment ?? 0) + 1
     return `${lead}${name}${sep}${quote}${mark('assignment')}${quote}${tail}`
   })
-  // JSON: `"api_key": "..."`.
-  out = out.replace(/"([A-Za-z0-9_.-]+)"(\s*:\s*)"((?:[^"\\]|\\.){3,})"/g, (match, name: string, sep: string, value: string) => {
-    if (!isSecretName(name) || !looksSecret(value, true)) return match
-    hits.assignment = (hits.assignment ?? 0) + 1
-    return `"${name}"${sep}"${mark('assignment')}"`
-  })
+  for (const pair of [JSON_ESCAPED, JSON_PLAIN]) {
+    out = out.replace(pair, (match, esc: string, name: string, sep: string, value: string, end: string) => {
+      // A value that never closed (it ran to the end of the line) is judged as unquoted: without its closing quote
+      // nothing says where it ends, so a short word such as `"password": "notasecret` is not hidden.
+      if (!isSecretName(name) || !looksSecret(value, end.endsWith('"'))) return match
+      hits.assignment = (hits.assignment ?? 0) + 1
+      // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
+      return `${esc}"${name}${esc}"${sep}${esc}"${mark('assignment')}${end}`
+    })
+  }
   return out
 }
 

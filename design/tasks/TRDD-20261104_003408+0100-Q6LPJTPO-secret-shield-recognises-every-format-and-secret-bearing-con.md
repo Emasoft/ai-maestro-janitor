@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: design
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T01:01:44+0100
+updated: 2026-11-04T02:12:52+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -33,7 +33,8 @@ On 2026-11-03 a pm2 process dump put two PyPI tokens and a Dropbox app secret in
 ## Measured on 2026-11-04 (current code, run in bun)
 
 - Plain JSON in the pm2 jlist shape, env lines and YAML: every fake value was removed. The PyPI tokens and the Dropbox secret were caught only by the key-name rule; the OpenAI key was caught by its own token rule.
-- JSON nested inside a string, with escaped quotes: both PyPI fakes and the 15-character Dropbox secret were not removed. This is the confirmed gap.
+- JSON nested in a string: the two PyPI fakes (built without the real pypi-AgE prefix, so no token rule applied) and the 15-character Dropbox secret were not removed by the key-name rule; with real-prefix fakes the pypi-token rule catches PyPI in every variant (incident test, 2026-11-04). This was the confirmed gap.
+- Fixed in the escaped-JSON change: the key-name rule hides secret-named pairs in plain JSON, in JSON escaped at any depth, and in a value cut at the end of a line, also when the cut falls inside the closing escape. Still missed, for the context-rules step: single-quoted keys (Python dict reprs), unquoted keys (one-line Node util.inspect, JSON5), quotes written as a Unicode escape (a backslash, the letter u, then 0022), an escape sequence inside an escaped value, and HTML-entity or URL-encoded JSON.
 - The PyPI token rule matches only a value with the real pypi-AgE prefix.
 - Mods run in Bun, on JavaScriptCore. A pattern with a leading `(?i)` throws there; the scoped `(?i:...)` group, lookbehind, and `\p{L}` with the u flag all compile.
 - Speed: 5 MB takes about 130 ms today, and an estimated 250 to 400 ms with about 200 rules. The hook limit is 10 s, so a prefilter is optional, and it may gate only prefix rules, never context rules.
