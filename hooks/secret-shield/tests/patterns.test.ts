@@ -417,7 +417,7 @@ describe('a port-skip query scan is linear up to 64 KB and still tells a port fr
   // and 1 MB under claude plugin test on this shape, about 360 KB in system Bun on a shape not re-checked. If the 1 MB half turns red with no fix
   // in this repo, a Claude Code update may have moved that size: check the runtime before flipping it; flip it to assert the hit only when
   // TRDD-AGOEWF2E is fixed here.
-  test('KNOWN DEFECT TRDD-AGOEWF2E: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is', () => {
+  test('KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is', () => {
     const oneUrl = (n: number) => 'https://u:' + 'aB3dE5fG7hJ9kL1m'.repeat(n / 16) + '@h'
     const quarter = redact(oneUrl(256 * 1024))
     expect(quarter.hits['url-password']).toBe(1)
