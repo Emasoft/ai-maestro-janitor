@@ -5,7 +5,7 @@ import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken
 import { githubTokenClassic, githubTokenFineGrained } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, privateKey } from './rules/key-material'
-import { slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
+import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
 
 export type Hits = Record<string, number>
@@ -43,6 +43,9 @@ const TOKENS: readonly Rule[] = [
   openaiProjectKey,
   openaiLegacyKey,
   openaiKey48,
+  slackAppToken,
+  slackConfigAccessToken,
+  slackConfigRefreshToken,
   slackToken,
   slackWebhook,
   stripeSecretKey,
@@ -452,6 +455,8 @@ const LABELS: Record<string, string> = {
   'anthropic-key': 'Anthropic API key',
   'openai-key': 'OpenAI API key',
   'slack-token': 'Slack token',
+  'slack-app-token': 'Slack app-level token',
+  'slack-config-token': 'Slack configuration token',
   'slack-webhook': 'Slack webhook',
   'stripe-key': 'Stripe key',
   'google-api-key': 'Google API key',
@@ -469,6 +474,8 @@ const LABELS: Record<string, string> = {
 const PLURALS: Record<string, string> = {
   'url-password': 'passwords in URLs',
   'bearer-token': 'bearer tokens',
+  'slack-app-token': 'Slack app-level tokens',
+  'slack-config-token': 'Slack configuration tokens',
   jwt: 'JWTs',
   'connection-string-key': 'secrets in connection strings',
 }

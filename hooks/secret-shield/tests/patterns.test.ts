@@ -296,6 +296,78 @@ describe('a secret next to a hidden token', () => {
   })
 })
 
+describe('Slack app-level and configuration tokens are hidden with no name before them', () => {
+  // Fixtures are built at run time: no whole fake token sits in this file.
+  const run = (n: number) => '7K3Q9ZM2X5'.repeat(Math.ceil(n / 10)).slice(0, n)
+  const appToken = j('xa', 'pp-', '1-', 'A0123456789-', '1234567890123-', 'abcdef0123456789abcdef')
+  const configAccess = (kind: 'b' | 'p', n: number) => j('xo', 'xe.', 'xo', 'x' + kind, '-1-', run(n))
+  const configRefresh = (n: number) => j('xo', 'xe-', '1-', run(n))
+  const APP = mark('slack-app-token')
+  const CONFIG = mark('slack-config-token')
+
+  test('slack-app-token: an app-level token is one marker, counted once', () => {
+    const done = redact(`see ${appToken} end`)
+    expect(done.text).toBe(`see ${APP} end`)
+    expect(done.hits).toEqual({ 'slack-app-token': 1 })
+  })
+
+  for (const kind of ['b', 'p'] as const) {
+    test(`slack-config-token: a whole xoxe.xox${kind}- config access token is ONE marker, no prefix or tail left`, () => {
+      for (const n of [163, 166]) {
+        const done = redact(`x ${configAccess(kind, n)} y`)
+        expect(done.text).toBe(`x ${CONFIG} y`)
+        expect(done.hits).toEqual({ 'slack-config-token': 1 })
+      }
+    })
+  }
+
+  test('slack-config-token: a refresh token is one marker', () => {
+    const done = redact(`refresh ${configRefresh(146)} end`)
+    expect(done.text).toBe(`refresh ${CONFIG} end`)
+    expect(done.hits).toEqual({ 'slack-config-token': 1 })
+  })
+
+  test('a config access token with a too-short tail is not a config token, the older Slack rule still hides the token inside it', () => {
+    const done = redact(`x ${configAccess('p', 162)} y`)
+    expect(done.hits['slack-config-token']).toBeUndefined()
+    expect(done.hits['slack-token']).toBe(1)
+  })
+
+  test('a refresh token with a too-short tail is left as it is', () => {
+    const input = `refresh ${configRefresh(145)} end`
+    const done = redact(input)
+    expect(done.text).toBe(input)
+    expect(done.hits).toEqual({})
+  })
+
+  test('an app-level token without its last segment is left as it is', () => {
+    const input = j('xa', 'pp-', '1-', 'A0123456789-', '1234567890123')
+    expect(redact(input).text).toBe(input)
+  })
+
+  test('the bare prefixes in prose are left as they are', () => {
+    const lines = [
+      'Slack app-level tokens start with xapp- and configuration tokens with xoxe- or xoxe.xoxp-.',
+      'xapp-1-A0123',
+      'the xoxe. prefix is followed by xoxb- or xoxp-',
+    ]
+    for (const line of lines) expect(redact(line).text).toBe(line)
+  })
+
+  test('the false-positive corpus is left as it is', () => {
+    const lines = [
+      'commit 4f2c1e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e',
+      'id 123e4567-e89b-12d3-a456-426614174000',
+      j('integrity sha512', '-', 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFy'),
+      j('data:image/png;base64,', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk'),
+      j('ssh-rsa ', 'AAAAB3NzaC1yc2EAAAADAQABAAABAQC7'),
+      j('pk', '_live_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7'),
+    ]
+    let changed = 0
+    for (const line of lines) if (redact(line).text !== line) changed++
+    expect(changed).toBe(0)
+  })
+})
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -316,6 +388,9 @@ describe('token rule order', () => {
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{48})\b/g),
+      id('slack-app-token', /(?i:xapp-\d-[A-Z0-9]+-\d+-[a-z0-9]+)/g),
+      id('slack-config-token', /(?i:xoxe.xox[bp]-\d-[A-Z0-9]{163,166})/g),
+      id('slack-config-token', /(?i:xoxe-\d-[A-Z0-9]{146})/g),
       id('slack-token', /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g),
       id('slack-webhook', /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g),
       id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g),

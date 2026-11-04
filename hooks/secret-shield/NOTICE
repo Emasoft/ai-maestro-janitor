@@ -13,3 +13,7 @@ under the MIT licence in LICENSE. The janitor's modifications are recorded in TR
 - The slash command is renamed to /janitor-secret-shield.
 
 A future upstream sync is a manual merge. The sed file at `reports_dev/secret-shield/upstream-sync.sed.txt` covers only the marker rename.
+
+## Rules taken from other projects
+
+- `slackAppToken`, `slackConfigAccessToken` and `slackConfigRefreshToken` in `rules/messaging-payments.ts` are taken word for word from the gitleaks rules slack-app-token, slack-config-access-token and slack-config-refresh-token (https://github.com/gitleaks/gitleaks, release v8.30.1, MIT licence, Copyright (c) 2019 Zachary Rice). The only change is that the leading `(?i)` is written as the scoped group `(?i:...)`.
