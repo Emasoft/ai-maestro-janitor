@@ -4,7 +4,7 @@ title: Hand the 3-pillars rules, detectors and hook over to the 3-pillars plugin
 column: todo
 status: tasked
 created: 2026-11-04T00:00:42+0100
-updated: 2026-11-04T17:33:38+0100
+updated: 2026-11-04T17:35:47+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -23,7 +23,7 @@ approval-datetime: 2026-11-04T00:00:42+0100
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-04
 
-- 2026-11-04, USER directive to this session, verbatim: "you are autonomous now. decide by yourself. just base all your decisions on verified facts and tests. do not assume anything. ask the advisor." Under it, with the advisor consulted, this session adopted the Release N scope proposal (below) as 3.9.0 scope; that meets the owner-approval gate for the janitor side only. The 3-pillars migration plan's own approval (D1 to D4, N+1, N+2) is not covered. The other gate stands: TRDD-90LAMQ8B, the full suite green, which publish.py re-runs before any push.
+- 2026-11-04, USER directive to this session, verbatim: "you are autonomous now. decide by yourself. just base all your decisions on verified facts and tests. do not assume anything. ask the advisor." Under it, with the advisor consulted, this session adopted the Release N scope proposal (below) as 3.9.0 scope; that meets the owner-approval gate for the janitor side only. The 3-pillars migration plan's own approval (D1 to D4, N+1, N+2) is not covered. The other gate stands: TRDD-90LAMQ8B, the full suite green, which publish.py re-runs before any push. Two more 3.9.0 build preconditions: the 3-pillars side committed, and both sides passing one shared parity fixture. Publishing 3.9.0 relies on this delegation as the authority for publication.
 - Status: release N (3.9.0) is not built. Building it no longer waits for an owner approval on the janitor side (first STATE bullet); the 3-pillars session reports its contracts frozen on 2026-11-04 (its commit 9140f89, not checked here; see the Provisional contract section; it still changed afterwards, exit 2 gaining a case the same day). The 3-pillars plan's own approval is not covered by that delegation. Publishing any janitor release also waits for TRDD-90LAMQ8B and the owner's word. N+1 also waits for that plan's P0b.
 - Release split: the 3-pillars session proposes (2026-11-04; its current version, superseding its first message's "both in N+1 after D2") a different split from this card's plan, pending owner review with the migration plan. N+1 stops INSTALLING the three rules and their three references where the 3-pillars plugin is PRESENT under the presence test (only on PRESENT, never on CANNOT TELL: after a Claude Code schema change the 3-pillars installer writes nothing, so the janitor's copies must keep being installed), re-evaluated on every SessionStart, harness sessions excluded until P0b, without waiting for its D2 port. N+1 keeps SHIPPING those six files, because ABSENT hosts and the take-back need them; removing them from the package is a later step, also for the owner. The release after the D2 port is installed stands down the five TRDD detectors and the STATE hook under the same PRESENT condition and harness exclusion. Until the owner decides, this card's N / N+1 / N+2 plan stands.
 - Reported by the 3-pillars session on 2026-11-04; these are not USER answers. That session took D1 to D4 as defaults under its goal, and the USER may veto them. D1: memgrep stays in the janitor. D2: the five TRDD detectors and on-session-start-trdd-state.py move to the 3-pillars plugin, ported to Node, so they are dropped from the janitor in N+2, not stood down in N. D7 (taking over three owner-written rule files) is OPEN, and that plugin's takeover list stays empty until the USER answers. D5 (replacing the ~/.local/bin launchers) waits for the USER. The detectors' project_is_ai_maestro() gate is being replaced on purpose by "a TRDD corpus exists", and the 3-pillars session will put that choice to the USER before its ports ship.
@@ -71,7 +71,7 @@ approval-datetime: 2026-11-04T00:00:42+0100
 ## Approval log
 
 - 2026-11-04T00:00:42+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-- 2026-11-04T17:35+0100 — USER delegated decisions to this session (verbatim in STATE); this session adopted the Release N scope proposal as 3.9.0 scope after consulting the advisor.
+- 2026-11-04T17:35:00+0100 — recorded (directive received before 17:27): USER delegated decisions to this session (verbatim in STATE); this session adopted the Release N scope proposal as 3.9.0 scope after consulting the advisor.
 
 ## Provisional contract with the 3-pillars session (pending USER review of the 3-pillars migration plan)
 
