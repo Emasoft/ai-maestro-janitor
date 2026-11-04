@@ -222,11 +222,67 @@ def _ensure_rel_inside(scope_root: Path, rel: str) -> None:
     p = Path(rel)
     if p.is_absolute():
         raise MemoryTxnError(f"rel path escapes the scope root: {rel!r}")
-    root = Path(scope_root).resolve()
+    # resolve() can raise on a crafted rel (NUL byte -> ValueError, symlink loop -> RuntimeError
+    # on Python 3.12, I/O error -> OSError); surface it as MemoryTxnError so a journal carrying
+    # one is reported as unreadable by resume_pending instead of wedging it (TRDD-C88OZANX).
+    try:
+        root = Path(scope_root).resolve()
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise MemoryTxnError(f"scope root cannot be resolved: {scope_root!s}: {exc}") from exc
+    try:
+        target = (root / p).resolve()
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise MemoryTxnError(f"rel path cannot be resolved: {rel!r}: {exc}") from exc
     # resolve() also collapses symlink hops, so a rel that tunnels OUT of the
     # scope through an in-scope symlink is rejected too.
-    if not (root / p).resolve().is_relative_to(root):
+    if not target.is_relative_to(root):
         raise MemoryTxnError(f"rel path escapes the scope root: {rel!r}")
+
+
+def _check_journal_shape(data: object, name: str) -> None:
+    """Commit A (TRDD-C88OZANX): refuse a journal whose shape `_persist` could not have
+    written, BEFORE any field is used. Raises MemoryTxnError (never KeyError / TypeError /
+    AttributeError), so a malformed journal is reported as unreadable by the caller instead
+    of escaping it. `started_at`, `owner_pid` and `write_hashes` stay optional: older
+    journals predate them."""
+    def bad(why: str) -> MemoryTxnError:
+        return MemoryTxnError(f"unreadable journal {name}: {why}")
+
+    def is_int(v: object) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    def is_str_dict(v: object) -> bool:
+        return isinstance(v, dict) and all(isinstance(k, str) and isinstance(x, str) for k, x in v.items())
+
+    def is_str_list(v: object) -> bool:
+        return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+    if not isinstance(data, dict):
+        raise bad("not a JSON object")
+    for key in ("scope_root", "txn_id", "op", "phase", "sources", "writes", "deletes"):
+        if key not in data:
+            raise bad(f"missing field {key!r}")
+    for key in ("scope_root", "txn_id", "op", "phase"):
+        if not isinstance(data[key], str):
+            raise bad(f"field {key!r} is not a string")
+    if data["phase"] not in (_PHASE_STAGING, _PHASE_COMMITTING, _PHASE_DONE):
+        raise bad(f"unknown phase {data['phase']!r}")
+    if not is_str_dict(data["sources"]):
+        raise bad("field 'sources' is not a mapping of strings to strings")
+    for key in ("writes", "deletes"):
+        if not is_str_list(data[key]):
+            raise bad(f"field {key!r} is not a list of strings")
+    for key in ("started_at", "owner_pid"):
+        if key in data and not is_int(data[key]):
+            raise bad(f"field {key!r} is not an integer")
+    # _pid_is_alive passes owner_pid to os.kill, which raises OverflowError (not an OSError)
+    # for a value too large for a C int; bound it here so that cannot escape resume_pending.
+    if "owner_pid" in data and not 0 <= data["owner_pid"] <= 2**31 - 1:
+        raise bad("field 'owner_pid' is out of range")
+    if data.get("write_hashes") is not None and not is_str_dict(data["write_hashes"]):
+        raise bad("field 'write_hashes' is not a mapping of strings to strings")
+    if any("\x00" in s for s in (data["scope_root"], *data["sources"], *data["writes"], *data["deletes"])):
+        raise bad("a path contains a NUL character")
 
 
 # --------------------------------------------------------------------------- #
@@ -364,7 +420,19 @@ class MemoryTxn:
 
     @classmethod
     def _load(cls, journal_path: Path) -> "MemoryTxn":
-        data = json.loads(Path(journal_path).read_text(encoding="utf-8"))
+        name = Path(journal_path).name
+        # Commit A (TRDD-C88OZANX), M-7: only the READ and PARSE are guarded, and only for the
+        # errors a corrupt file can produce. They become MemoryTxnError so every caller
+        # (resume_pending above all) reports ONE bad journal as unreadable and moves on to the
+        # next, instead of wedging on an uncaught exception. Nothing is swallowed: the error is
+        # re-raised with the file name and surfaced by the caller.
+        try:
+            data = json.loads(Path(journal_path).read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+            # RecursionError: a deeply nested document ("[[[[...") exhausts the parser stack;
+            # it is a RuntimeError, not a ValueError, so it would otherwise escape resume.
+            raise MemoryTxnError(f"unreadable journal {name}: {exc}") from exc
+        _check_journal_shape(data, name)
         scope_root = Path(data["scope_root"])
         # M-10: a hand-crafted/corrupted journal must not become an arbitrary
         # file write/unlink primitive — validate every recorded rel BEFORE any
@@ -674,10 +742,12 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
     for jp in sorted(staging_root.glob("*.json")):
         try:
             txn = MemoryTxn._load(jp)
-        except (json.JSONDecodeError, KeyError, OSError, MemoryTxnError):
-            # M-7: left in place for a human — but surfaced, never silently
-            # skipped. MemoryTxnError covers M-10's scope-escape validation: a
-            # hostile journal is refused here and NEVER rolled forward.
+        except (OSError, MemoryTxnError):
+            # M-7: one bad journal must never wedge resume. _load turns every parse or shape
+            # failure into MemoryTxnError, so nothing else can escape it. The journal is left in
+            # place for a human but SURFACED, never silently skipped; MemoryTxnError also covers
+            # M-10's scope-escape validation, so a hostile journal is NEVER rolled forward
+            # (TRDD-C88OZANX).
             acted.append(f"unreadable journal {jp.name}: left in place for a human")
             continue
         try:
@@ -731,7 +801,7 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                         try:
                             fresh = MemoryTxn._load(jp)
                             unchanged = int(jp.stat().st_mtime) <= fresh_ts
-                        except (json.JSONDecodeError, KeyError, OSError, MemoryTxnError):
+                        except (OSError, MemoryTxnError):
                             continue
                         still_reclaimable = unchanged and (
                             is_stale

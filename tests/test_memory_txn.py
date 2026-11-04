@@ -10,6 +10,7 @@ stale snapshot, and a held scope lock makes a second pass skip.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -222,6 +223,134 @@ def test_resume_surfaces_unreadable_journal(tmp_path):
     acted = memory_txn.resume_pending(scope)
     assert any("unreadable journal deadbeef.json" in a for a in acted), acted
     assert (staging_root / "deadbeef.json").exists()  # left for a human
+
+
+# Commit A (TRDD-C88OZANX): a malformed journal of ANY shape must be reported as
+# unreadable and left in place — never an uncaught exception that wedges resume.
+
+def _well_formed_journal(scope) -> dict:
+    """A real journal (as _persist wrote it) read back as a dict, for tampering."""
+    txn = MemoryTxn.begin(scope, "merge", ["a.md"])
+    data = json.loads(txn.journal_path.read_text(encoding="utf-8"))
+    txn.journal_path.unlink()
+    shutil.rmtree(txn.staging_dir, ignore_errors=True)
+    return data
+
+
+def _assert_reported_and_kept(scope, name: str) -> None:
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {name}" in a for a in acted), acted
+    assert (MemoryTxn._staging_root(scope) / name).exists()  # left for a human
+
+
+def test_resume_surfaces_non_utf8_journal(tmp_path):
+    """A journal that is not valid UTF-8 is reported as unreadable, not raised."""
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir()
+    (staging_root / "deadbeef.json").write_bytes(b"\xff\xfe{")
+    _assert_reported_and_kept(scope, "deadbeef.json")
+
+
+def test_resume_surfaces_non_object_journal(tmp_path):
+    """A journal whose JSON is a list, not an object, is reported as unreadable."""
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir()
+    (staging_root / "deadbeef.json").write_text("[]", encoding="utf-8")
+    _assert_reported_and_kept(scope, "deadbeef.json")
+
+
+def test_resume_surfaces_journal_with_unknown_phase(tmp_path):
+    """A well-formed journal whose phase is not one of the three is unreadable."""
+    scope = _scope(tmp_path)
+    data = _well_formed_journal(scope)
+    data["phase"] = "bogus"
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir(exist_ok=True)
+    tid = data["txn_id"]
+    name = f"{tid}.json"
+    (staging_root / name).write_text(json.dumps(data), encoding="utf-8")
+    _assert_reported_and_kept(scope, name)
+
+
+def test_resume_surfaces_journal_with_nul_in_rel(tmp_path):
+    """A journal whose writes hold a NUL-bearing path is unreadable, not a crash."""
+    scope = _scope(tmp_path)
+    data = _well_formed_journal(scope)
+    data["writes"] = ["c\x00.md"]
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir(exist_ok=True)
+    tid = data["txn_id"]
+    name = f"{tid}.json"
+    (staging_root / name).write_text(json.dumps(data), encoding="utf-8")
+    _assert_reported_and_kept(scope, name)
+
+
+def test_resume_corrupt_journal_does_not_wedge_a_later_one(tmp_path):
+    """M-7: an invalid-UTF-8 journal sorted FIRST must not stop resume from
+    cleaning the real done transaction that follows it."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md"])
+    txn.stage_write("a.md", "---\nname: a\n---\n\nedited\n")
+    txn.phase = "done"
+    txn._persist()
+    (MemoryTxn._staging_root(scope) / "00000000.json").write_bytes(b"\xff\xfe{")
+    acted = memory_txn.resume_pending(scope)
+    assert any("unreadable journal 00000000.json" in a for a in acted), acted
+    unreadable_at = next(i for i, a in enumerate(acted) if "unreadable journal 00000000.json" in a)
+    assert unreadable_at < acted.index(f"cleaned {txn.txn_id} (was done)"), acted
+    assert not txn.journal_path.exists()
+
+
+
+def test_resume_surfaces_deeply_nested_journal(tmp_path):
+    """A journal nested 100000 deep exhausts the JSON parser stack (RecursionError, a
+    RuntimeError) — it must be reported as unreadable, not escape resume."""
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir()
+    (staging_root / "deadbeef.json").write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
+    _assert_reported_and_kept(scope, "deadbeef.json")
+
+
+def test_resume_surfaces_staging_journal_with_oversized_owner_pid(tmp_path):
+    """owner_pid 2**64 would make os.kill raise OverflowError (not an OSError) in the
+    dead-owner check of a staging-phase journal — it must be reported as unreadable."""
+    scope = _scope(tmp_path)
+    data = _well_formed_journal(scope)
+    assert data["phase"] == "staging"
+    data["owner_pid"] = 2**64
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir(exist_ok=True)
+    name = f"{data['txn_id']}.json"
+    (staging_root / name).write_text(json.dumps(data), encoding="utf-8")
+    _assert_reported_and_kept(scope, name)
+
+
+def test_resume_surfaces_journal_whose_rel_cannot_be_resolved(tmp_path):
+    """A write rel that runs through a symlink loop makes resolve() raise (RuntimeError on
+    Python 3.12); _ensure_rel_inside turns that into MemoryTxnError, so the journal is
+    reported as unreadable and left in place."""
+    scope = _scope(tmp_path)
+    os.symlink("loop", scope / "loop")
+    data = _well_formed_journal(scope)
+    data["writes"] = ["loop/x.md"]
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir(exist_ok=True)
+    name = f"{data['txn_id']}.json"
+    (staging_root / name).write_text(json.dumps(data), encoding="utf-8")
+    _assert_reported_and_kept(scope, name)
+
+
+def test_begin_with_nul_in_source_rel_raises_and_leaves_no_staging_dir(tmp_path):
+    """begin() with a NUL-bearing source path raises MemoryTxnError (not ValueError) and
+    cleans the staging dir it had already created."""
+    scope = _scope(tmp_path)
+    with pytest.raises(MemoryTxnError):
+        MemoryTxn.begin(scope, "merge", ["c\x00.md"])
+    staging_root = MemoryTxn._staging_root(scope)
+    assert not staging_root.exists() or list(staging_root.iterdir()) == []
 
 
 def test_resume_one_failing_txn_does_not_wedge_the_next(tmp_path):
@@ -448,7 +577,6 @@ def test_stage_delete_rejects_absolute_path(tmp_path):
 def test_resume_refuses_hostile_journal_with_escaping_delete(tmp_path):
     """A hand-crafted committing journal whose deletes target an ABSOLUTE path
     is refused at _load (surfaced as unreadable) — resume never unlinks it."""
-    import json as _json
     scope = _scope(tmp_path)
     victim = tmp_path / "victim.md"
     victim.write_text("must survive", encoding="utf-8")
@@ -456,11 +584,16 @@ def test_resume_refuses_hostile_journal_with_escaping_delete(tmp_path):
     staging_root.mkdir()
     hostile_id = "aa" * 16
     (staging_root / hostile_id).mkdir()
-    (staging_root / f"{hostile_id}.json").write_text(_json.dumps({
+    journal = staging_root / f"{hostile_id}.json"
+    journal.write_text(json.dumps({
         "txn_id": hostile_id, "op": "merge", "scope_root": str(scope),
         "phase": "committing", "started_at": 0,
         "sources": {}, "writes": [], "deletes": [str(victim)],
     }), encoding="utf-8")
+    # The journal is well-formed, so this reaches the M-10 scope-escape check itself, not the
+    # shape check.
+    with pytest.raises(MemoryTxnError, match="escapes the scope root"):
+        MemoryTxn._load(journal)
     acted = memory_txn.resume_pending(scope)
     assert any("unreadable journal" in a for a in acted), acted
     assert victim.exists(), "resume must never roll a scope-escaping txn forward"
