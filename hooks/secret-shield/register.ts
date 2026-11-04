@@ -85,10 +85,16 @@ export const register: Register = (on, options) => {
     // maps it for the model and stores it as the call's result, so neither
     // the model nor the transcript's display copy keeps the secret.
     const ran = await next(e)
-    // Error results are redacted too (TRDD-337UVA3J): a secret printed in an error
-    // message leaks to Claude just the same, and the marker still names the kind of
-    // key, which is enough to debug the failure. A clean error comes back untouched.
-    if (ran.deny !== undefined) return ran
+    // An error result comes back exactly as core gave it (TRDD-337UVA3J). This
+    // reverts the tool.call error branch of b9207582: core validates a hook's
+    // `result` against the tool's output schema even when isError is set, so a
+    // hook-built `{ result: <text>, isError: true }` broke every Bash error with a
+    // secret in it (2.1.318: "does not match its output shape"). The error text that
+    // reaches the model is redacted by the session.append hook above, at door
+    // tool-result (proven for Bash on Claude Code 2.1.318 by the 2026-11-04 live
+    // probe). Unverified: whether the stored jsonl's structured toolUseResult field
+    // still keeps the raw text.
+    if (ran.deny !== undefined || ran.isError === true) return ran
     const { value, hits } = redactDeep(ran.result)
     if (countOf(hits) === 0) return ran
     try {
@@ -96,13 +102,6 @@ export const register: Register = (on, options) => {
     } catch {
       // The tally is a nicety.
     }
-    // An error with a secret is answered as a new object: only result is rewritten,
-    // isError and context are kept, and text and ref are left out. core sets both on
-    // what next(e) gives (ref makes core reuse its own messages verbatim, text is the
-    // unredacted error the model reads), and the types document both as absent on a
-    // hook's own answer. They do not say how core renders a hook's error from result;
-    // the live probe of TRDD-2V7OAUPE must confirm the model sees the marker.
-    if (ran.isError === true) return ran.context === undefined ? { result: value, isError: true } : { result: value, isError: true, context: ran.context }
     return ran.context === undefined ? { result: value as typeof ran.result } : { result: value as typeof ran.result, context: ran.context }
   })
 

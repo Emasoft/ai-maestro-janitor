@@ -131,61 +131,62 @@ test('nested results (Read) are walked and keep their shape', async ($, on) => {
   expect(out.result).toEqual({ type: 'text', file: { filePath: '/w/a.txt', content: 'KEY=[JANITOR-REDACTED:aws-access-key]\n', numLines: 1, startLine: 1, totalLines: 1 } })
 })
 
-test('a secret in a Bash error result is hidden, and the rest of the error is byte-identical', async ($, on) => {
-  mock.store(on)
-  on('ui.toast', () => ({ value: undefined }))
+// Pass-through guards: an error result must come back as core gave it. core checks
+// a hook's `result` against the tool's output schema even with isError set (2.1.318
+// live probe), so a rewritten error text breaks the call. The error text the model
+// reads is redacted at session.append instead (the two row tests below).
+test('tool.call returns a Bash error untouched (pass-through guard)', async ($, on) => {
   const error = `Exit code 128\nfatal: could not read from https://x:${TOKEN}@github.com/o/r.git\n  (check credentials)\n`
-  on('tool.call', () => ({ result: error, isError: true }))
-
-  const out = await $.tool.call({ tool: 'Bash', command: 'git fetch' })
-
-  expect(out.deny).toBeUndefined()
-  expect(out.isError).toBe(true)
-  expect(out.result).toBe(error.split(TOKEN).join(mark('github-token')))
-})
-
-test('a secret in an MCP tool error result is hidden, and the rest of the error is byte-identical', async ($, on) => {
-  mock.store(on)
-  on('ui.toast', () => ({ value: undefined }))
-  const error = `request failed: 403 for key ${AWS} (region eu-west-1)`
-  on('tool.call', () => ({ result: error, isError: true }))
-
-  const out = await $.tool.call({ tool: 'mcp__srv__run', query: 'x' })
-
-  expect(out.deny).toBeUndefined()
-  expect(out.isError).toBe(true)
-  expect(out.result).toBe(error.split(AWS).join(mark('aws-access-key')))
-})
-
-test('a redacted error keeps isError and context, and leaves out core\'s text and ref', async ($, on) => {
-  mock.store(on)
-  on('ui.toast', () => ({ value: undefined }))
-  const error = `auth failed for ${TOKEN}`
-  on('tool.call', () => ({ result: error, isError: true, text: error, ref: 3, context: ['retry later'] }))
-
-  const out = await $.tool.call({ tool: 'Bash', command: 'gh auth status' })
-
-  expect(out).toEqual({ result: error.split(TOKEN).join(mark('github-token')), isError: true, context: ['retry later'] })
-})
-
-test('an error with nothing to hide comes back as core gave it, text and ref included', async ($, on) => {
-  const given = { result: 'Exit code 1\nno such file', isError: true, text: 'Exit code 1\nno such file', ref: 5 } as const
+  const given = { result: error, isError: true, text: error, ref: 3 } as const
   on('tool.call', () => given)
 
-  const out = await $.tool.call({ tool: 'Bash', command: 'cat nope' })
+  const out = await $.tool.call({ tool: 'Bash', command: 'git fetch' })
 
   expect(out).toEqual(given)
 })
 
-test('a structured MCP error made of content blocks is redacted and keeps its shape', async ($, on) => {
-  mock.store(on)
-  on('ui.toast', () => ({ value: undefined }))
-  const blocks = [{ type: 'text', text: 'request failed' }, { type: 'text', text: `token ${TOKEN} was rejected` }]
-  on('tool.call', () => ({ result: blocks, isError: true }))
+test('tool.call returns an MCP tool error untouched, context included (pass-through guard)', async ($, on) => {
+  const error = `request failed: 403 for key ${AWS} (region eu-west-1)`
+  const given = { result: error, isError: true, text: error, ref: 4, context: ['retry later'] } as const
+  on('tool.call', () => given)
 
   const out = await $.tool.call({ tool: 'mcp__srv__run', query: 'x' })
 
-  expect(out).toEqual({ result: [{ type: 'text', text: 'request failed' }, { type: 'text', text: `token ${mark('github-token')} was rejected` }], isError: true })
+  expect(out).toEqual(given)
+})
+
+test('tool.call returns a structured MCP error made of content blocks untouched (pass-through guard)', async ($, on) => {
+  const blocks = [{ type: 'text', text: 'request failed' }, { type: 'text', text: `token ${TOKEN} was rejected` }]
+  const given = { result: blocks, isError: true, text: `request failed\ntoken ${TOKEN} was rejected`, ref: 6 } as const
+  on('tool.call', () => given)
+
+  const out = await $.tool.call({ tool: 'mcp__srv__run', query: 'x' })
+
+  expect(out).toEqual(given)
+})
+
+test('an error tool_result row is redacted where the model reads it, is_error and the rest kept', () => {
+  const row = {
+    door: 'tool-result',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_9', is_error: true, content: [{ type: 'text', text: `Exit code 3\ntoken=${TOKEN} (bad)` }] }] },
+  }
+  const shielded = shieldRow(row, false)
+  expect(shielded?.content).toEqual([
+    { type: 'tool_result', tool_use_id: 'toolu_9', is_error: true, content: [{ type: 'text', text: `Exit code 3\ntoken=${mark('github-token')} (bad)` }] },
+  ])
+  expect(shielded?.hits).toEqual({ 'github-token': 1 })
+})
+
+test('an error tool_result row with plain string content is redacted, is_error kept', () => {
+  const row = {
+    door: 'tool-result',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_10', is_error: true, content: `Exit code 3\nfatal: token ${TOKEN} rejected` }] },
+  }
+  const shielded = shieldRow(row, false)
+  expect(shielded?.content).toEqual([
+    { type: 'tool_result', tool_use_id: 'toolu_10', is_error: true, content: `Exit code 3\nfatal: token ${mark('github-token')} rejected` },
+  ])
+  expect(shielded?.hits).toEqual({ 'github-token': 1 })
 })
 
 test('/janitor-secret-shield counts what this session hid', async ($, on) => {
