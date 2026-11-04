@@ -1,10 +1,10 @@
 ---
 trdd-id: UVOYC2V7
 title: corpus-mined secret-pattern catalog for the secret-shield provider step
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-11-04T04:40:36+0100
-updated: 2026-11-04T04:54:19+0100
+updated: 2026-11-04T05:39:35+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -72,6 +72,7 @@ Turn the 132 corpus-mining reports into one machine-checked catalog of secret-de
 - 2026-11-04T04:40:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-04T04:48:09+0100 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-11-04 — main-agent@ai-maestro-janitor: this card was added in c502b553, whose commit message is a stale scratch-file error line, not a description; the WHY is in 5fc8d345. Whether to reword c502b553 (and 5fc8d345, which names it) before the next publish is the owner's decision, open.
+- 2026-11-04T05:39:35+0100 — COMPLETE by main-agent@ai-maestro-janitor. all five Done-when checks verified from the catalog outputs; follow-up work carried to TRDD-Q6LPJTPO.
 
 ## Corpus (reproducible)
 
@@ -217,8 +218,20 @@ owner/repo at the commit mined (first 12 hex):
 
 ## Done when
 
-- [ ] every report block maps to exactly one catalog row
-- [ ] every structured file's row count equals its recount
-- [ ] each extracted regex is recorded as compiling or not under Python re
-- [ ] miner_match=differs rows are listed by repo and block id
-- [ ] _catalog-summary.md written with the license breakdown
+- [x] every report block maps to exactly one catalog row
+- [x] every structured file's row count equals its recount
+- [x] each extracted regex is recorded as compiling or not under Python re
+- [x] miner_match=differs rows are listed by repo and block id
+- [x] _catalog-summary.md written with the license breakdown
+
+## Results
+
+2026-11-04, verified by the main agent from the output files: 14061 rows (13763 extracted, 298 needs-reconstruction); 8204 dedup keys (regex, normalised flags).
+Box 1: 2055 `### P` blocks across the 132 reports = 2055 embedded rows, 2055 distinct (repo, block) pairs.
+Box 2: rows == recount on every structured-file table row. sunglasses/patterns.py was fixed: its 1374 "regex" entries hold 1649 patterns, and the old recount counted entries. The recount now reads Python's token stream, independent of the AST extraction.
+Box 3: every extracted row records `compiles` under Python re: 13601 compile, 162 do not (RE2/POSIX 101 rows, PCRE/JS-only 53, extraction error or invalid everywhere 5, docs prose 3).
+Box 4: 11 miner_match=differs rows, listed by repo and block id in _catalog-summary.md; same 1767, none 12283.
+Box 5: _catalog-summary.md has the license breakdown.
+Independent verifier (verify_catalog.py, shares no extraction code with the builder): pass 13727, fail 0, unverifiable 36. JavaScriptCore (Bun 1.3.14) compiles 7982 of 8204 keys; 5899 keys are secret-category, 5838 of them compile under JSC.
+Output sha256 prefixes (reports_dev/secret-shield/corpus-mining/, gitignored): _catalog.jsonl 946502dee4cdee87, _catalog-dedup.jsonl 369247b2740f05ad, _catalog-summary.md 61632e769cdf3fad. Builder and verifier scripts are in scripts_dev/secret-mining/ (gitignored); evidence reports are reports_dev/secret-shield/20261104_052830+0100-catalog-review.md and 20261104_053630+0100-recount-fix.md.
+Carried to the TRDD-Q6LPJTPO gap analysis, not done here: ReDoS timing is noisy under machine load. The same 2547 keys gave ok 2501 / slow 18 / timeout 28, then ok 2479 / slow 36 / timeout 32, so slow and timeout keys must be re-timed in isolation before any rule is adopted. The 5 keys invalid in every engine are not examined. anubis CANDIDATE_PATTERNS.yaml is not extracted: the safe YAML loader refuses its unquoted *-glob values, 31 regex keys. The 2420 CC-BY-SA secret keys were not ReDoS-timed, pending the owner's license policy.
