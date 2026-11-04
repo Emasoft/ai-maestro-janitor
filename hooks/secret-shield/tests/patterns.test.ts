@@ -322,20 +322,21 @@ describe('a long run of scheme characters is redacted in linear time', () => {
 })
 
 // WHY: the port-skip lookahead of the URL password rule scanned its query with [^\s@#]*=, which does not stop at ://, so every :// whose password
-// starts with digits then ? scanned on to the end of the text. b://u:1? repeated k times and followed by n characters cost O(k*n). The growth
-// tests grow the URL count with the size (size/16 URLs, then size/2 characters): with a fixed URL count the old regex is linear in n and the test
-// proves nothing. They assert the ratio t(8s)/t(s), which is machine speed independent, never an absolute duration (the pinned 1 s test below is
-// only a bound against a catastrophic slowdown) (TRDD-Q6LPJTPO: linear means the ratio stays near 8, quadratic means near 64). The sizes are 8 KB
-// and 64 KB on purpose. Measured under claude plugin test on the grown() shape with a short password after the URLs (shape b), redact() took
-// medians of about 3 ms at 96 KB, 75 ms at 128 KB, 188 ms at 256 KB and 615 ms at 512 KB (5 runs per size in one probe, load about 67): a step
-// between 96 KB and 128 KB. On `b://u:` repeated then `x`, which both regex versions read the same way, URL_PASSWORD alone took medians of 0.7 and
-// 0.8 ms at 96 KB, 33 ms (previous regex) and 62 ms (corrected) at 128 KB, and 137 and 139 ms at 256 KB (load 80-104), so a step of similar size
-// predates the corrected regex on that shape; the previous regex was not measured on grown() past 64 KB. On grown() shapes a and b the password is
-// hidden at every size up to 1 MB, so on those shapes the step is not a give-up. One URL whose password alone is 1 MB is not hidden by either
-// version (the known-defect test below, TRDD-AGOEWF2E). The cause of the step is not found (TRDD-OD5Z90YL). A size pair that straddles the step
-// fails the ratio rule, so both sizes stay at or below 64 KB until it is diagnosed. The 2 ms escape is applied at the larger size of 64 KB, which
-// is looser than TRDD-Q6LPJTPO's 2 ms at 256 KB. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came
-// within 0.4 ms of the 2 ms escape while 8 KB took about 0.15 ms.
+// starts with digits then ? scanned on past every later :// up to the next whitespace, @, # or =, which on a long line without them is the end of
+// the text. b://u:1? repeated k times and followed by n characters cost O(k*n). The growth tests grow the URL count with the size (size/16 URLs,
+// then size/2 characters): with a fixed URL count the old regex is linear in n and the test proves nothing. They assert the ratio t(8s)/t(s),
+// which is machine speed independent, never an absolute duration (the pinned 1 s test below is only a bound against a catastrophic slowdown)
+// (TRDD-Q6LPJTPO: linear means the ratio stays near 8, quadratic means near 64). The sizes are 8 KB and 64 KB on purpose. Measured under claude
+// plugin test on the grown() shape with a short password after the URLs (shape b), redact() took medians of about 3 ms at 96 KB, 75 ms at 128 KB,
+// 188 ms at 256 KB and 615 ms at 512 KB (5 runs per size in one probe, load about 67): a step between 96 KB and 128 KB. On `b://u:` repeated then
+// `x`, which both regex versions read the same way, URL_PASSWORD alone took medians of 0.7 and 0.8 ms at 96 KB, 33 ms (previous regex) and 62 ms
+// (corrected) at 128 KB, and 137 and 139 ms at 256 KB (load 80-104), so a step of similar size predates the corrected regex on that shape; the
+// previous regex was not measured on grown() past 64 KB. On grown() shapes a and b the password is hidden at every measured size from 32 KB to
+// 1 MB, so on those shapes the step is not a give-up. One URL whose password alone is 1 MB is not hidden by either version (the known-defect test
+// below, TRDD-AGOEWF2E). The cause of the step is not found (TRDD-OD5Z90YL). A size pair that straddles the step fails the ratio rule, so both
+// sizes stay at or below 64 KB until it is diagnosed. The 2 ms escape is applied at the larger size of 64 KB, which is looser than TRDD-Q6LPJTPO's
+// 2 ms at 256 KB. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came within 0.4 ms of the 2 ms escape
+// (1.6 ms; 8 KB was not measured).
 describe('a port-skip query scan is linear up to 64 KB and still tells a port from a password', () => {
   const marker = '[JANITOR-' + 'REDACTED:url-password]'
   const SMALL = 8 * 1024
@@ -412,13 +413,14 @@ describe('a port-skip query scan is linear up to 64 KB and still tells a port fr
       expect(redact(url).text).toBe(hidden)
     }
   })
-  // WHY it asserts the miss: so the defect stays visible and this test turns red the day it is fixed; then flip it to assert the hit
-  // (TRDD-AGOEWF2E).
-  test('KNOWN DEFECT TRDD-AGOEWF2E: one URL whose password alone is 1 MB is not hidden today, while the same URL at 512 KB is', () => {
+  // WHY it asserts the miss: so the defect stays visible (TRDD-AGOEWF2E). The size where hiding stops depends on the runtime: between 512 KB and 1 MB
+  // under claude plugin test, from about 360 KB in system Bun. If the 1 MB half turns red with no fix in this repo, a Claude Code update moved
+  // that size: check the runtime before flipping it; flip it to assert the hit only when TRDD-AGOEWF2E is fixed here.
+  test('KNOWN DEFECT TRDD-AGOEWF2E: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is', () => {
     const oneUrl = (n: number) => 'https://u:' + 'aB3dE5fG7hJ9kL1m'.repeat(n / 16) + '@h'
-    const half = redact(oneUrl(512 * 1024))
-    expect(half.hits['url-password']).toBe(1)
-    expect(half.text.endsWith('https://u:' + marker + '@h')).toBe(true)
+    const quarter = redact(oneUrl(256 * 1024))
+    expect(quarter.hits['url-password']).toBe(1)
+    expect(quarter.text.endsWith('https://u:' + marker + '@h')).toBe(true)
     const full = oneUrl(1024 * 1024)
     const miss = redact(full)
     expect(miss.hits['url-password']).toBeUndefined()
