@@ -128,8 +128,10 @@ function redactUrlPasswords(text: string, hits: Hits): string {
 // "any character but a quote, or an escape pair", which repeats per escape pair, not per character.
 const jsonPair = (escapes: string, value: string): RegExp =>
   new RegExp(String.raw`(${escapes})"([A-Za-z0-9_.-]+)\1"(\s*:\s*)\1"(${value})(\1"|\\*$)`, 'gm')
-// Escaped pairs run first: a plain pair whose value is a whole escaped document (`"args": "{\"token\":...}"`)
-// is consumed as one match, so the pairs inside it would never be seen afterwards.
+// The two passes are independent: each is its own replace over the whole text, and a pair that is not secret is
+// returned unchanged, so the escaped pass still sees the pairs inside `"args": "{\"token\":...}"` whichever runs
+// first. The order does not decide what is hidden. Escaped pairs run first only to refine the count when the outer
+// key is itself secret-named: the inner secret is counted, then the outer value (swap measured 2026-11-04).
 const JSON_ESCAPED = jsonPair(String.raw`\\+`, String.raw`[^"\\\r\n]{3,}`)
 const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*)*`)
 

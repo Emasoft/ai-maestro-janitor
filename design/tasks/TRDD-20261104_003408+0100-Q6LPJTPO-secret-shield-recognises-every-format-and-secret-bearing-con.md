@@ -1,10 +1,10 @@
 ---
 trdd-id: Q6LPJTPO
 title: secret-shield recognises every format and secret-bearing context in its catalog
-column: design
+column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T02:12:52+0100
+updated: 2026-11-04T02:22:45+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T00:34:08+0100
 npt: []
+implementation-commits: [c0e1abcc]
 ---
 
 # secret-shield recognises every format and secret-bearing context in its catalog
@@ -121,3 +122,6 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 ## Approval log
 
 - 2026-11-04T00:34:08+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-04T02:22:44+0100 — column → dev by main-agent@ai-maestro-janitor.
+- 2026-11-04 — user (verbatim): "launch a bunch of haiku subagents to extract all the patterns for secrets from these github projects (and annotate good ideas and techniques for secrets leaks prevention and remediation). beware of malicious code"
+- 133 repositories cloned read-only into the gitignored corpus folder; one malware-lure repo quarantined; nested agent instruction files renamed inert; mining feeds the provider-catalog step.
