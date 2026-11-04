@@ -85,14 +85,19 @@ import sandbox_guard
 _dropped_host_options = sorted(k for k in os.environ if k.startswith("CLAUDE_PLUGIN_OPTION_"))
 for _host_option in _dropped_host_options:
     del os.environ[_host_option]
-if _dropped_host_options:
-    # Names only, never values: a developer who exported an option on the command line must not
-    # lose it silently (TRDD-90LAMQ8B), and a value could be a secret.
-    print(
-        "conftest: dropped host CLAUDE_PLUGIN_OPTION_* for a default-config run: "
-        + ", ".join(_dropped_host_options),
-        file=sys.stderr,
-    )
+
+
+# TRDD-90LAMQ8B: the notice is written from a terminal-summary hook, not printed at import. Output
+# written while the initial conftest loads is swallowed by pytest's fd capture, so an import-time
+# print never reached the terminal in a passing run; the terminal summary is shown even with -q.
+# Names only, never values: a developer who exported an option on the command line must not
+# lose it silently, and a value could be a secret.
+def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
+    if _dropped_host_options:
+        terminalreporter.write_line(
+            "conftest: dropped host CLAUDE_PLUGIN_OPTION_* for a default-config run: "
+            + ", ".join(_dropped_host_options)
+        )
 
 # `tests/jevctx/*.py` (the vendored jevctx suite) imports `jevctx.budget` etc. bare, the
 # same way `scripts/*.py` imports `lib.*` bare — put `scripts/lib` on sys.path here, once,
