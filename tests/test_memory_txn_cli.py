@@ -12,6 +12,7 @@ forward.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import cast
@@ -408,12 +409,35 @@ def test_cli_begin_owner_pid_survives_resume_from_a_live_process(tmp_path, monke
     txn_id = next(ln.split("=", 1)[1] for ln in proc.stdout.splitlines() if ln.startswith("txn_id="))
 
     journal = MemoryTxn._staging_root(scope) / f"{txn_id}.json"
-    reloaded = MemoryTxn._load(journal)
+    reloaded = MemoryTxn._load(journal, scope)
     assert reloaded.owner_pid == 0  # never a dead pid from the exited CLI process
 
     acted = memory_txn.resume_pending(scope, stale_seconds=99999)
     assert acted == []  # a live/fresh CLI-begun txn must survive a concurrent resume
     assert journal.exists()
+
+
+
+def test_cli_abort_refuses_a_path_shaped_txn_id(tmp_path):
+    """TRDD-C88OZANX: `abort ../evil` would join the argument into a path and load
+    <scope>/evil.json, outside the staging tree. A well-formed journal planted there that
+    would rmtree a directory under tmp_path must not run: exit 2, a clear message, and the
+    directory survives."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    (scope / "a.md").write_text(_note("a"), encoding="utf-8")
+    victim = tmp_path / "victim_dir"
+    victim.mkdir()
+    (victim / "keep.md").write_text("must survive", encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, "merge", "a.md")
+    staging_root = MemoryTxn._staging_root(scope)
+    data = json.loads((staging_root / f"{txn_id}.json").read_text(encoding="utf-8"))
+    data["txn_id"] = str(victim)
+    (scope / "evil.json").write_text(json.dumps(data), encoding="utf-8")
+    rc, err = _run_err("abort", scope, "../evil")
+    assert rc == 2, err
+    assert "invalid transaction id" in err, err
+    assert (victim / "keep.md").exists()
 
 
 def test_commit_with_no_staged_changes_errors(tmp_path):

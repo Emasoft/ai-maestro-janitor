@@ -195,10 +195,14 @@ def _authoring_gate(txn: MemoryTxn, writes: dict[str, str]) -> tuple[bool, list[
 def _load_txn(scope_root: Path, txn_id: str) -> MemoryTxn:
     """Reconstruct a transaction from its on-disk journal (begin and commit run in
     SEPARATE processes — the journal IS the cross-process handoff)."""
+    # Commit B (TRDD-C88OZANX): txn_id comes from the command line and is joined into a path;
+    # without this check "../evil" would load <scope>/evil.json, outside the staging tree.
+    if not memory_txn._TXN_ID_RE.fullmatch(txn_id):
+        raise MemoryTxnError(f"invalid transaction id {txn_id!r}")
     journal = MemoryTxn._staging_root(scope_root) / f"{txn_id}.json"
     if not journal.exists():
         raise MemoryTxnError(f"no transaction {txn_id} under {scope_root}")
-    return MemoryTxn._load(journal)
+    return MemoryTxn._load(journal, scope_root)
 
 
 def _verify_merge(txn, writes, deletes):

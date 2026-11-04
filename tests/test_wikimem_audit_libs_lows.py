@@ -146,7 +146,7 @@ def test_l7_op_mismatch_refused_without_destroying_the_txn(tmp_path):
     rc = cli.cmd_commit(args)
     assert rc == 2
     assert _journal(tmp_path, txn.txn_id).exists(), "op mismatch must NOT abort the txn"
-    memory_txn.MemoryTxn._load(_journal(tmp_path, txn.txn_id)).abort()  # cleanup
+    memory_txn.MemoryTxn._load(_journal(tmp_path, txn.txn_id), tmp_path).abort()  # cleanup
 
 
 def test_l10_shape_error_aborts_the_txn(tmp_path):

@@ -426,7 +426,7 @@ def test_begin_records_the_owner_pid(tmp_path):
     scope = _scope(tmp_path)
     txn = MemoryTxn.begin(scope, "merge", ["a.md"])
     assert txn.owner_pid == os.getpid()
-    reloaded = memory_txn.MemoryTxn._load(txn.journal_path)
+    reloaded = memory_txn.MemoryTxn._load(txn.journal_path, scope)
     assert reloaded.owner_pid == os.getpid()
     txn.abort()
 
@@ -593,10 +593,134 @@ def test_resume_refuses_hostile_journal_with_escaping_delete(tmp_path):
     # The journal is well-formed, so this reaches the M-10 scope-escape check itself, not the
     # shape check.
     with pytest.raises(MemoryTxnError, match="escapes the scope root"):
-        MemoryTxn._load(journal)
+        MemoryTxn._load(journal, scope)
     acted = memory_txn.resume_pending(scope)
     assert any("unreadable journal" in a for a in acted), acted
     assert victim.exists(), "resume must never roll a scope-escaping txn forward"
+
+
+
+# Commit B (TRDD-C88OZANX): the journal is untrusted input. Its txn_id and scope_root must be
+# checked against what the CALLER knows, because M-10 anchored containment on journal-supplied
+# values. Every victim below lives under tmp_path.
+
+def _plant_journal(scope: Path, file_stem: str | None = None, **overrides) -> Path:
+    """Write a well-formed journal for `scope`, with `overrides` applied, and return its path.
+    The file is named after the (possibly overridden) txn_id unless `file_stem` is given."""
+    data = _well_formed_journal(scope)
+    data.update(overrides)
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir(exist_ok=True)
+    journal = staging_root / f"{file_stem or data['txn_id']}.json"
+    journal.write_text(json.dumps(data), encoding="utf-8")
+    return journal
+
+
+def test_resume_refuses_journal_whose_txn_id_is_an_absolute_path(tmp_path):
+    """A done journal whose txn_id is an absolute path would make cleanup rmtree that path
+    (Path / <absolute> replaces the base). It must be refused and the directory must survive."""
+    scope = _scope(tmp_path)
+    victim = tmp_path / "victim_dir"
+    victim.mkdir()
+    (victim / "keep.md").write_text("must survive", encoding="utf-8")
+    journal = _plant_journal(scope, file_stem="deadbeef", txn_id=str(victim), phase="done")
+    acted = memory_txn.resume_pending(scope)
+    assert any("unreadable journal deadbeef.json" in a for a in acted), acted
+    assert (victim / "keep.md").exists(), "resume must never clean a path the journal supplied"
+    assert journal.exists()
+
+
+def test_resume_refuses_journal_whose_scope_root_is_the_parent_scope(tmp_path):
+    """A committing journal whose scope_root is the PARENT of its real scope would let its
+    deletes reach a sibling file outside the scope (it passes M-10 against its own root).
+    It must be refused and the file must survive."""
+    scope = _scope(tmp_path)
+    victim = tmp_path / "victim.md"
+    victim.write_text("must survive", encoding="utf-8")
+    journal = _plant_journal(
+        scope, scope_root=str(tmp_path), phase="committing", deletes=["victim.md"],
+    )
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {journal.name}" in a for a in acted), acted
+    assert victim.exists(), "a delete outside the scope must never run"
+    assert journal.exists()
+
+
+@pytest.mark.parametrize("bad_root", ["", "memory"], ids=["empty", "relative"])
+def test_resume_refuses_journal_with_non_absolute_scope_root(tmp_path, monkeypatch, bad_root):
+    """An empty or relative scope_root would be resolved against the process cwd; refuse it."""
+    monkeypatch.chdir(tmp_path)
+    scope = _scope(tmp_path)
+    journal = _plant_journal(scope, scope_root=bad_root, phase="done")
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {journal.name}" in a for a in acted), acted
+    assert journal.exists()
+
+
+def test_resume_refuses_journal_carrying_another_transactions_id(tmp_path):
+    """A done journal named a.json that carries a LIVE transaction's valid txn_id would make
+    cleanup rmtree that transaction's staging dir; the file name must match the txn_id."""
+    scope = _scope(tmp_path)
+    live = MemoryTxn.begin(scope, "merge", ["a.md"])
+    data = json.loads(live.journal_path.read_text(encoding="utf-8"))
+    data["phase"] = "done"
+    forged = MemoryTxn._staging_root(scope) / "a.json"
+    forged.write_text(json.dumps(data), encoding="utf-8")
+    acted = memory_txn.resume_pending(scope)
+    assert any("unreadable journal a.json" in a for a in acted), acted
+    assert live.staging_dir.exists(), "the live transaction's staging dir must survive"
+    assert forged.exists()
+    live.abort()
+
+
+def test_resume_refuses_journal_with_rel_inside_the_staging_dir(tmp_path):
+    """A rel that starts with .maint-staging would let commit overwrite or delete the staging
+    tree itself; both _load and the stage_* API refuse it."""
+    scope = _scope(tmp_path)
+    journal = _plant_journal(scope, phase="committing", deletes=[".maint-staging/x"])
+    with pytest.raises(MemoryTxnError, match="staging directory"):
+        MemoryTxn._load(journal, scope)
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {journal.name}" in a for a in acted), acted
+    txn = MemoryTxn.begin(scope, "merge", ["a.md"])
+    with pytest.raises(MemoryTxnError, match="staging directory"):
+        txn.stage_write(".maint-staging/x", "c")
+    txn.abort()
+
+
+
+def test_resume_refuses_journal_with_dotdot_rel_into_the_staging_dir(tmp_path):
+    """"a/../.maint-staging/x.json" resolves into the staging dir although its first path
+    component is "a"; the check must be made on the resolved target."""
+    scope = _scope(tmp_path)
+    (scope / "a").mkdir()
+    journal = _plant_journal(scope, phase="committing", deletes=["a/../.maint-staging/x.json"])
+    with pytest.raises(MemoryTxnError, match="points into the staging directory"):
+        MemoryTxn._load(journal, scope)
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {journal.name}" in a for a in acted), acted
+
+
+def test_resume_refuses_journal_with_differently_cased_staging_rel(tmp_path):
+    """On a case-insensitive volume ".MAINT-STAGING/x.json" names the staging dir; it is
+    refused by file identity, not by spelling. Skipped on a case-sensitive volume, where
+    that path is simply a different (non-existent) directory."""
+    scope = _scope(tmp_path)
+    journal = _plant_journal(scope, phase="committing", deletes=[".MAINT-STAGING/x.json"])
+    if not (scope / ".MAINT-STAGING").exists():
+        pytest.skip("tmp_path is on a case-sensitive filesystem")
+    with pytest.raises(MemoryTxnError, match="points into the staging directory"):
+        MemoryTxn._load(journal, scope)
+
+
+def test_resume_refuses_journal_whose_scope_root_does_not_exist(tmp_path):
+    """An absolute scope_root that does not exist cannot be compared with the real scope;
+    that is reported as an unreadable journal, not a crash."""
+    scope = _scope(tmp_path)
+    journal = _plant_journal(scope, scope_root=str(tmp_path / "gone"), phase="done")
+    acted = memory_txn.resume_pending(scope)
+    assert any(f"unreadable journal {journal.name}" in a for a in acted), acted
+    assert journal.exists()
 
 
 # M-1 regression (wikimem audit 2026-07-07): a roll-forward runs minutes-to-hours

@@ -27,6 +27,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import time
 import uuid
@@ -39,6 +40,8 @@ import memory_split_lineage
 import state
 
 _STAGING_DIRNAME = ".maint-staging"
+# A transaction id is `uuid.uuid4().hex`; anything else is not one of ours.
+_TXN_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 # The `op` value that marks a transaction as a SPLIT — the one operation whose writes carry a
 # lineage stamp (TRDD-3QIQ2E6J). Matches the `--op split` the split skill passes to
@@ -237,6 +240,19 @@ def _ensure_rel_inside(scope_root: Path, rel: str) -> None:
     # scope through an in-scope symlink is rejected too.
     if not target.is_relative_to(root):
         raise MemoryTxnError(f"rel path escapes the scope root: {rel!r}")
+    # Commit B (TRDD-C88OZANX): the staging tree holds the journals and staged copies that
+    # resume/abort rely on; a rel inside it could make commit overwrite or delete those. Tested
+    # on the RESOLVED target, not on the first component of `rel`, because "a/../.maint-staging/x"
+    # has a different first component. On a case-insensitive volume (macOS default) the resolved
+    # path keeps the caller's spelling, so ".MAINT-STAGING/x" is not a textual prefix match;
+    # the first component is therefore also compared by file identity (samefile) when it exists.
+    staging = root / _STAGING_DIRNAME
+    inside_staging = target.is_relative_to(staging)
+    if not inside_staging and target != root and staging.exists():
+        first = root / target.relative_to(root).parts[0]
+        inside_staging = first.exists() and first.samefile(staging)
+    if inside_staging:
+        raise MemoryTxnError(f"rel path points into the staging directory: {rel!r}")
 
 
 def _check_journal_shape(data: object, name: str) -> None:
@@ -419,7 +435,7 @@ class MemoryTxn:
             os.close(dir_fd)
 
     @classmethod
-    def _load(cls, journal_path: Path) -> "MemoryTxn":
+    def _load(cls, journal_path: Path, expected_scope: Path) -> "MemoryTxn":
         name = Path(journal_path).name
         # Commit A (TRDD-C88OZANX), M-7: only the READ and PARSE are guarded, and only for the
         # errors a corrupt file can produce. They become MemoryTxnError so every caller
@@ -433,7 +449,25 @@ class MemoryTxn:
             # it is a RuntimeError, not a ValueError, so it would otherwise escape resume.
             raise MemoryTxnError(f"unreadable journal {name}: {exc}") from exc
         _check_journal_shape(data, name)
-        scope_root = Path(data["scope_root"])
+        # Commit B (TRDD-C88OZANX): M-10 anchored its containment check on `scope_root`, a value
+        # the JOURNAL supplies, and `txn_id` (also journal-supplied) names the staging dir that
+        # abort/resume rmtree. A crafted journal could therefore pick both the anchor and the
+        # victim. The trusted scope now comes from the CALLER; the journal is only checked
+        # against it, and nothing downstream acts on a path the journal supplied.
+        if not _TXN_ID_RE.fullmatch(data["txn_id"]):
+            raise MemoryTxnError(f"unreadable journal {name}: txn_id is not 32 lowercase hex digits")
+        if Path(journal_path).stem != data["txn_id"]:
+            raise MemoryTxnError(f"unreadable journal {name}: file name does not match its txn_id")
+        journal_scope = Path(data["scope_root"])
+        if not journal_scope.is_absolute():
+            raise MemoryTxnError(f"unreadable journal {name}: scope_root is not an absolute path")
+        try:
+            same_scope = journal_scope.samefile(expected_scope)
+        except OSError as exc:
+            raise MemoryTxnError(f"unreadable journal {name}: scope_root cannot be compared: {exc}") from exc
+        if not same_scope:
+            raise MemoryTxnError(f"unreadable journal {name}: scope_root is not the scope being resumed")
+        scope_root = Path(expected_scope).resolve()
         # M-10: a hand-crafted/corrupted journal must not become an arbitrary
         # file write/unlink primitive — validate every recorded rel BEFORE any
         # caller can _apply it. resume_pending treats the raise as an unreadable
@@ -741,7 +775,7 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
     now = int(time.time())
     for jp in sorted(staging_root.glob("*.json")):
         try:
-            txn = MemoryTxn._load(jp)
+            txn = MemoryTxn._load(jp, Path(scope_root))
         except (OSError, MemoryTxnError):
             # M-7: one bad journal must never wedge resume. _load turns every parse or shape
             # failure into MemoryTxnError, so nothing else can escape it. The journal is left in
@@ -799,7 +833,7 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                         # the lock — that is what actually closes the TOCTOU, for EITHER
                         # reclaim reason.
                         try:
-                            fresh = MemoryTxn._load(jp)
+                            fresh = MemoryTxn._load(jp, Path(scope_root))
                             unchanged = int(jp.stat().st_mtime) <= fresh_ts
                         except (OSError, MemoryTxnError):
                             continue
