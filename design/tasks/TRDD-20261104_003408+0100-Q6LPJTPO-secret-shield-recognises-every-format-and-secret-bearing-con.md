@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-05T00:46:34+0100
+updated: 2026-11-05T00:51:35+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -206,7 +206,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - 2026-11-05 — Commit-message corrections:
   - 317d6a9e: part of its evidence was measured at 5ef604a1, not b39e8a8a; its "docs:" subject understates a commit that adds tests; its files were written by cp from scratch generators plus the plain Edit tool.
   - 0ff8f2e5: the JWT control shows that a dotted-identifier-shaped JWT is hidden by the jwt rule, not the order of the passes; that order comes from reading redactInto (patterns.ts:303 before :305). Its mutation replaced return false at patterns.ts:137 with {}, because deleting the statement broke 53 unrelated tests.
-  - The owner froze fastedit on 2026-10-06, so the repo files of these commits were not written with fastedit.
+  - The repo files of these commits were not written with fastedit.
 - 2026-11-05 — Open gaps:
   - No tsconfig covers hooks/secret-shield/tests, so the TypeScript tests are never type-checked.
   - The timing test "a port-skip query scan is linear up to 64 KB and still tells a port from a password > 8 times the text takes under 12 times as long, with a URL count that grows with the text" failed once during the 2026-11-04 mutation run of the deep-nesting-over-12 entry (file mut-m3); a worker labelled it load-sensitive; not re-run.

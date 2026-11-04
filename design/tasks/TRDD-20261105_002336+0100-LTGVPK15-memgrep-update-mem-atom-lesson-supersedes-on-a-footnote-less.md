@@ -4,7 +4,7 @@ title: memgrep update-mem-atom --lesson --supersedes on a footnote lesson record
 column: todo
 status: tasked
 created: 2026-11-05T00:23:36+0100
-updated: 2026-11-05T00:46:35+0100
+updated: 2026-11-05T00:51:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,7 +37,7 @@ Run on 2026-11-05 on a USER-scope wikimem page. The target of --atom was a footn
 
 `update-mem-atom --body-file` on a footnote lesson refuses. Reproduced on 2026-11-05 with --dry-run on [^5], page unchanged (sha256 prefix 3c2e44eb8185c636 before and after): "footnote-lesson with an EMPTY body span — there is no body to replace; edit its inline text directly (TRDD-XI10BA5D A3)". A footnote lesson's text is inline, so its body span is empty.
 
-Probable cause (inferred, crate not read): --supersedes copies the empty body span instead of the inline text, and does not fail closed the way --body-file does.
+Probable cause (inferred; the --supersedes code path was not read): --supersedes copies the empty body span instead of the inline text, and does not fail closed the way --body-file does.
 
 Cited: TRDD-XI10BA5D A3 (that card is in column verify_assumptions; its item A3 made the body replace explicit, via --body or --body-file).
 

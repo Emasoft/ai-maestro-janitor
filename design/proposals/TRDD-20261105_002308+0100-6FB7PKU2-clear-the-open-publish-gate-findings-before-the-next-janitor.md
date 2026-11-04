@@ -4,7 +4,7 @@ title: Clear the open publish-gate findings before the next janitor release
 column: proposal
 status: proposed
 created: 2026-11-05T00:23:08+0100
-updated: 2026-11-05T00:46:35+0100
+updated: 2026-11-05T00:51:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -27,7 +27,7 @@ State as of 2026-11-05, HEAD 0ff8f2e5. Done when every box below is ticked. PRRD
   - TRDD-5CGPEK4V: column blocked; in origin/main, count 1; the hit is a local absolute path inside this project.
   - TRDD-ZIKYQQY0: column todo; in origin/main, count 1; the hit is a system swap-file volume path.
 - [ ] CPV, run exactly as publish.py runs it, exits 0. publish.py does not set PLUGIN_SKIP_GITHUB_INTEGRITY: it only exempts that variable, and CPV_SKIP_GH_AUTH_CHECK, from its refusal of skip variables (scripts/publish.py:1625-1643; the other hits are the docstring and line 18), so the variable must come from the caller's environment. Worker-measured on 2026-11-04 on the 317d6a9e tree: exit 2. First: an integrity-manifest mismatch in CPV's own cache. With PLUGIN_SKIP_GITHUB_INTEGRITY=1: 0 CRITICAL, 2 MAJOR (patterns.ts:453 CREDENTIAL_DISCOVERY; an absolute path in a design card), 3 MINOR, 1 NIT, 42 WARNING. Take a baseline at HEAD first. Find out whether --strict fails on warnings. Clear the mismatch in CPV's regenerable cache (find where it lives before clearing anything). Setting PLUGIN_SKIP_GITHUB_INTEGRITY=1 in the caller's environment would instead turn off CPV's own cache-integrity check. That is not a plugin finding under S5.1, but it is a bypass, so use it only with the owner's yes.
-- [ ] trufflehog reports one SQLServer finding at hooks/secret-shield/tests/patterns.test.ts:942. It was present before 317d6a9e and that line is unchanged since. Check it against the publish gate's trufflehog scope.
+- [ ] trufflehog reports one SQLServer finding at hooks/secret-shield/tests/patterns.test.ts:942, marked unverified (Verified=false, checked 2026-11-05). It was present before 317d6a9e and that line is unchanged since. Check it against the publish gate's trufflehog scope.
 - [ ] The working tree carries an uncommitted .gitignore change, and publish.py step 1 refuses a dirty tree. Its git diff holds no local path (checked 2026-11-05):
 
       diff --git a/.gitignore b/.gitignore
@@ -37,7 +37,7 @@ State as of 2026-11-05, HEAD 0ff8f2e5. Done when every box below is ticked. PRRD
       +# janitor: report dirs carry private data (paths, hostnames, pasted secrets)
       +/reports/
 
-  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing. Run git restore -- .gitignore right before publish.py and check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
+  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing while the diff is exactly that hunk. Right before publish.py, check that git diff -- .gitignore shows only the quoted hunk, then run git restore -- .gitignore; if the diff holds anything else, remove only the two quoted lines. Check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
 - [ ] The tracked reports/ tree is swept with sanitize-reports.
 - [ ] The owner has said yes to the publish.
 
