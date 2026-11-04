@@ -248,9 +248,16 @@ def _ensure_rel_inside(scope_root: Path, rel: str) -> None:
     # the first component is therefore also compared by file identity (samefile) when it exists.
     staging = root / _STAGING_DIRNAME
     inside_staging = target.is_relative_to(staging)
-    if not inside_staging and target != root and staging.exists():
-        first = root / target.relative_to(root).parts[0]
-        inside_staging = first.exists() and first.samefile(staging)
+    # Every stat below can raise OSError (EACCES, ENAMETOOLONG, a component removed between calls).
+    # It must become MemoryTxnError: an unconverted OSError reopened the staging-dir leak that
+    # Commit A closed for resolve() failures (begin() cleans up only on MemoryTxnError; the CLI
+    # prints a traceback) (TRDD-C88OZANX).
+    try:
+        if not inside_staging and target != root and staging.exists():
+            first = root / target.relative_to(root).parts[0]
+            inside_staging = first.exists() and first.samefile(staging)
+    except OSError as exc:
+        raise MemoryTxnError(f"rel path cannot be checked against the staging directory: {rel!r}: {exc}") from exc
     if inside_staging:
         raise MemoryTxnError(f"rel path points into the staging directory: {rel!r}")
 

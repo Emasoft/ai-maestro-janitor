@@ -352,6 +352,16 @@ def test_begin_with_nul_in_source_rel_raises_and_leaves_no_staging_dir(tmp_path)
     staging_root = MemoryTxn._staging_root(scope)
     assert not staging_root.exists() or list(staging_root.iterdir()) == []
 
+def test_begin_with_unstattable_source_rel_raises_and_leaves_no_staging_dir(tmp_path):
+    """begin() with a source whose first path component exceeds NAME_MAX makes the staging-dir
+    check (first.exists()) raise a REAL OSError (ENAMETOOLONG); it must surface as
+    MemoryTxnError and the staging dir begin() had already created must be cleaned up."""
+    scope = _scope(tmp_path)
+    with pytest.raises(MemoryTxnError, match="cannot be checked against the staging directory"):
+        MemoryTxn.begin(scope, "merge", ["a" * 300 + "/x.md"])
+    staging_root = MemoryTxn._staging_root(scope)
+    assert not staging_root.exists() or list(staging_root.iterdir()) == []
+
 
 def test_resume_one_failing_txn_does_not_wedge_the_next(tmp_path):
     """Two committing txns; one fails its _apply with a REAL I/O error (its write
