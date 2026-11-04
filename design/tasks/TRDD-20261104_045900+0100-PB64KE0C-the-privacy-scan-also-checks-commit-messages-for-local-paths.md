@@ -4,7 +4,7 @@ title: the privacy scan also checks commit messages for local paths
 column: todo
 status: tasked
 created: 2026-11-04T04:59:00+0100
-updated: 2026-11-04T05:03:43+0100
+updated: 2026-11-04T09:09:24+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -31,7 +31,8 @@ Found 2026-11-04 during TRDD-Q6LPJTPO. Commit c502b553 landed with a stale scrat
 
 ## Notes
 
-The message check inherits the pre-commit scanner's plugin-and-marketplace id false positive tracked in TRDD-WQDCZEBT; fix or account for that first. The owner's decision on rewording c502b553 must come before item 4 lands, or the new gate refuses the next publish on that commit.
+The message check inherits the pre-commit scanner's plugin-and-marketplace id false positive tracked in TRDD-WQDCZEBT; fix or account for that first. The owner's decision on rewording c502b553 was made 2026-11-04 (leave it unchanged; see the dated note below), so item 4 must allow c502b553 by SHA or the new gate refuses the next publish on that commit.
+2026-11-04: the owner, asked whether to reword c502b553 or leave it, answered verbatim "do as you wish". Decided by the main agent: leave c502b553 unchanged. A reword would rewrite every later unpushed commit and leave a dangling SHA in the archived, immutable TRDD-UVOYC2V7; the correct account is already recorded in the body of 5fc8d345 and on UVOYC2V7. The pre-push check this card adds must allow c502b553 by SHA as an owner-accepted commit.
 
 ## Approval log
 
