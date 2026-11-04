@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-04T01:17:44+0100
+updated: 2026-11-04T01:19:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -28,7 +28,7 @@ blocker-holds-if: not-match:^2$
 
 ## Task
 Add "modules": ["./secret-shield/register.ts"] to hooks/hooks.json (path to be confirmed against how hooks.json resolves module paths), disable the jr-redact plugin in the same step, remove "Not active yet." from the three secret_shield_* option descriptions, then run a live probe: a fake token built with printf in Bash output and in an MCP tool result must reach the transcript as a janitor marker, with byte counts of the session .jsonl.
-Live probe: for both a normal and an error tool result containing a fake token, the model-facing transcript shows the marker and not the token (TRDD-337UVA3J).
+Acceptance gate (must pass before complete): live probe, for both a normal and an error tool result containing a fake token, the model-facing transcript shows the marker and not the token (TRDD-337UVA3J).
 
 ## Blocked by
 TRDD-0Y3UW1NF (write-back guard) and TRDD-TEP6F3A3 (checks before wiring). TRDD-337UVA3J does not block it: upstream ships without error-result redaction.
