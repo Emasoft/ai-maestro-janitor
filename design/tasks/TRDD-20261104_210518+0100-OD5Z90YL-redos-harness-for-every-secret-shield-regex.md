@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: backburner
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-04T21:49:26+0100
+updated: 2026-11-04T22:28:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -26,3 +26,7 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 ## Approval log
 
 - 2026-11-04T21:05:18+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes
+
+- 2026-11-04: veil's refresh-token regex (?<![\w/])1\/\/0[\w-]{40,512}, which the shipped rule extends with '+' in the lookbehind (not re-timed), grew linearly at load 7.7 to 12 on 14 cores (below the core count): on 1//0 plus 39 characters repeated (1 match at 64 KB; every later 1//0 is rejected by the lookbehind) 0.87, 3.51 and 6.82 ms at 64, 256 and 512 KB, ratio about 4.0 from 64 to 256 KB; on the near-miss variant with a space after each unit 1.08 and 4.11 ms at 64 and 256 KB, ratio 3.8. The URL_PASSWORD step stayed in place up to 256 KB, so a step of that size would have pushed these ratios far above 4: no such step for this lookbehind rule on these inputs at that load. URL_PASSWORD has not been measured at that load, so this does not tell a step specific to URL_PASSWORD from a step that depends on load.

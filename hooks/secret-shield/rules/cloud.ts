@@ -7,3 +7,12 @@ export const awsSecretKeyAssignment: Rule = { kind: 'aws-secret-key', pattern: /
 export const awsSecretKeyJson: Rule = { kind: 'aws-secret-key', pattern: /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g, group: 1 }
 export const awsSessionToken: Rule = { kind: 'aws-session-token', pattern: /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g, group: 1 }
 export const googleApiKey: Rule = { kind: 'google-api-key', pattern: /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g, group: 1 }
+
+// WHY: adapted from veil's /\bGOCSPX-[A-Za-z0-9_-]{28}(?![\w-])/ (NOTICE). The tail floor is 20 with no upper bound and no end guard,
+// because for a redactor a total miss on a tail that is not exactly 28 characters costs more than hiding a placeholder: a 36-character
+// corpus fixture was missed whole by veil's form.
+export const googleOAuthClientSecret: Rule = { kind: 'google-oauth-client-secret', pattern: /\bGOCSPX-[A-Za-z0-9_-]{20,}/g }
+// WHY: 2048 is Google's documented cap for a whole access token; veil applies it to the first segment and bounds each of up to 4 dotted segments at 512, its own choice.
+export const googleOAuthAccessToken: Rule = { kind: 'google-oauth-access-token', pattern: /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g }
+// WHY: adapted from veil's (?<![\w/])1\/\/0[\w-]{40,512} (NOTICE): '+' is added to the lookbehind. Inside standard base64, which has '+' and '/' but neither '-' nor '_', 1//0 can then start only at the first character of a base64 value (or right after its '=' padding). That makes a refresh-token match splitting an AWS SessionToken, or another base64 value a later rule hides whole, rare (about 2e-8 per value, estimated) instead of removing it, and removes almost all of veil's base64 over-hide (this rule runs before the AWS rules). A real refresh token right after '+' is not hidden. 512 is Google's documented refresh-token cap. The lookbehind keeps /path/1//0 and word1//0 visible.
+export const googleOAuthRefreshToken: Rule = { kind: 'google-oauth-refresh-token', pattern: /(?<![\w/+])1\/\/0[\w-]{40,512}/g }

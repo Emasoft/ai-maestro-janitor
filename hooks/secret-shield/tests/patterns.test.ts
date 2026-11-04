@@ -533,6 +533,92 @@ describe('Slack app-level and configuration tokens are hidden with no name befor
     expect(changed).toBe(0)
   })
 })
+
+describe('Google OAuth client secrets, access tokens and refresh tokens are hidden with no name before them', () => {
+  // Fixtures are built at run time: no whole fake token sits in this file.
+  const clientSecret = j('GOC', 'SPX-', 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9v')
+  const accessToken = j('ya', '29.', 'a0AfH6SMBx3Zq9LwT7kE2mN5pR8vY1cD4g')
+  const refreshToken = j('1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7')
+  const tokens: Array<[string, string]> = [
+    ['google-oauth-client-secret', clientSecret],
+    ['google-oauth-access-token', accessToken],
+    ['google-oauth-refresh-token', refreshToken],
+  ]
+
+  for (const [kind, secret] of tokens) {
+    test(`${kind}: a token alone is one marker, counted once`, () => {
+      const done = redact(`see ${secret} end`)
+      expect(done.text).toBe(`see ${mark(kind)} end`)
+      expect(done.hits).toEqual({ [kind]: 1 })
+    })
+    test(`${kind}: a JSON value under a neutral key and in an array is hidden`, () => {
+      const asValue = redact(JSON.stringify({ v: secret }))
+      expect(asValue.text).toBe(`{"v":"${mark(kind)}"}`)
+      expect(asValue.hits).toEqual({ [kind]: 1 })
+      const inArray = redact(JSON.stringify([secret]))
+      expect(inArray.text).toBe(`["${mark(kind)}"]`)
+      expect(inArray.hits).toEqual({ [kind]: 1 })
+    })
+  }
+
+  test('an access token after Authorization: Bearer is a google-oauth-access-token, not a bearer-token', () => {
+    const done = redact(`Authorization: Bearer ${accessToken}`)
+    expect(done.text).not.toContain(accessToken)
+    expect(done.hits['google-oauth-access-token']).toBe(1)
+    expect(done.hits['bearer-token']).toBeUndefined()
+  })
+
+  test('a client secret whose 28-character tail ends in - is hidden whole', () => {
+    const done = redact(`x ${j('GOC', 'SPX-', 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9', '-')} y`)
+    expect(done.text).toBe(`x ${mark('google-oauth-client-secret')} y`)
+  })
+
+  test('a client secret with a 36-character tail is hidden whole, no character of it left', () => {
+    const done = redact(`x ${j('GOC', 'SPX-', 'abcdefghijklmnopqrstuvwxyz1234567890')} y`)
+    expect(done.text).toBe(`x ${mark('google-oauth-client-secret')} y`)
+  })
+
+  const stayVisible: Array<[string, string]> = [
+    ['GOCSPX- plus a 5-character tail', j('GOC', 'SPX-', 'short')],
+    ['GOCSPX- plus 19 characters', j('GOC', 'SPX-', 'aB3dE5fG7hJ9kL1mN3p')],
+    ['ya29. plus 19 characters', j('ya', '29.', 'a0AfH6SMBx3Zq9LwT7k')],
+    ['1//0 plus 40 characters after a slash (/tmp/1//0...)', j('/tmp/1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5b')],
+    ['1//0 plus 40 characters after a word character (a1//0...)', j('a1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5b')],
+  ]
+  for (const [name, line] of stayVisible) test(`stays visible: ${name}`, () => expect(redact(line).text).toBe(line))
+
+  test('a base64 data URI with /1//0 and 44 characters is left as it is', () => {
+    const line = j('data:image/png;base64,', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk', '/1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7dE')
+    expect(redact(line).text).toBe(line)
+  })
+
+  test('a base64 data URI with +1//0 and 44 url-safe characters is left as it is', () => {
+    const line = j('data:image/png;base64,', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk', '+1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7dE')
+    expect(redact(line).text).toBe(line)
+  })
+
+  test('an AWS SessionToken with +1//0 and 40 or more alphanumerics inside is hidden whole as a session token', () => {
+    const value = j('dGhpcy9pcytz/b21lK2Jhc2U2NHZh/bHVl', '+1/', '/0', 'gDAbC3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7dE', '/Zm9v+YmFyYmF6cXV4/Y29ydGdyYXVsdAZm9v')
+    expect(value.length).toBe(120)
+    const done = redact(`"SessionToken":"${value}"`)
+    expect(done.text).not.toContain(value)
+    expect(done.hits['aws-session-token']).toBe(1)
+    expect(done.hits['google-oauth-refresh-token']).toBeUndefined()
+  })
+
+  test('a service-account JSON with an escaped \\n has its private key body hidden', () => {
+    const body = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7'
+    const json = `{"type":"service_account","private_key":"${j('-----BEGIN ', 'PRIVATE KEY-----')}\\n${body}\\n${j('-----END ', 'PRIVATE KEY-----')}\\n"}`
+    expect(redact(json).text).not.toContain(body)
+  })
+
+  // Pins that no part of the tail is visible on either path: today the token rule hides it before the assignment pass, so text after the token such as .x stays visible; without the token rule the assignment rule hides the whole value.
+  test('client_secret=GOCSPX- plus 20 characters has the 20-character tail hidden', () => {
+    const tail = 'aB3dE5fG7hJ9kL1mN3pQ'
+    expect(redact(`client_secret=${j('GOC', 'SPX-', tail)}.x`).text).not.toContain(tail)
+  })
+})
+
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -543,6 +629,9 @@ describe('token rule order', () => {
   test('the rules run in this exact order', () => {
     expect(TOKEN_ORDER).toEqual([
       id('private-key', /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g),
+      id('google-oauth-client-secret', /\bGOCSPX-[A-Za-z0-9_-]{20,}/g),
+      id('google-oauth-access-token', /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g),
+      id('google-oauth-refresh-token', /(?<![\w/+])1\/\/0[\w-]{40,512}/g),
       id('aws-access-key', /\b((?:AKIA|ASIA)[A-Z0-9]{16})\b/g),
       id('aws-secret-key', /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi),
       id('aws-secret-key', /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g),

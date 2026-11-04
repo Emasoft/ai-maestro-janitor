@@ -1,7 +1,7 @@
 // Pure secret detection and redaction: no `$`, so tests and other mods can import it.
 
 import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
-import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, googleApiKey } from './rules/cloud'
+import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, privateKey } from './rules/key-material'
@@ -52,6 +52,11 @@ const URL_PASSWORD = new RegExp(
 // Never run these patterns directly: see rules/rule.ts.
 const TOKENS: readonly Rule[] = [
   privateKey,
+  // The Google OAuth rules run before every family except privateKey: an earlier \b-led rule (sk-, ghp_, AKIA, ...) firing inside a ya29. or 1//0
+  // body after a dash would leave the rest of the Google token visible, the reason the Slack rules run before slackToken.
+  googleOAuthClientSecret,
+  googleOAuthAccessToken,
+  googleOAuthRefreshToken,
   awsAccessKey,
   awsSecretKeyAssignment,
   awsSecretKeyJson,
@@ -479,6 +484,9 @@ const LABELS: Record<string, string> = {
   'slack-webhook': 'Slack webhook',
   'stripe-key': 'Stripe key',
   'google-api-key': 'Google API key',
+  'google-oauth-client-secret': 'Google OAuth client secret',
+  'google-oauth-access-token': 'Google OAuth access token',
+  'google-oauth-refresh-token': 'Google OAuth refresh token',
   jwt: 'JWT',
   'npm-token': 'npm token',
   'pypi-token': 'PyPI token',
