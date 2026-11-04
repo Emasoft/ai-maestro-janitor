@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T09:13:54+0100
+updated: 2026-11-04T09:18:38+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -150,3 +150,4 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - Its independent verifier reuses no code from build_catalog.py. Both import check_transcriptions.py for read_text and resolve, and the verifier also uses its literal_span.
 - Its _catalog-dedup.jsonl and _catalog-summary.md hashes pin that one run (both files hold ReDoS timing fields that change on every build); only _catalog.jsonl stays stable across rebuilds. The ideas digest the user asked for is TRDD-IE8U6YRA.
 - UVOYC2V7's Goal says three reports captured a redaction marker in place of source text: the markers sit in ## Safety (jrlprost_claude-code-mods line 10, tarak-09_secret-sweeper line 7) and in composed block P14 (Aryan2vb_secretscan line 97), never inside a pattern fence; extraction re-reads the source files, not the reports, so the catalog does not depend on the miners' copies.
+- 2026-11-04: hooks/secret-shield/patterns.ts has never had a completed UBS taint pass (ubs's taint_js runs without end on it); the patterns.ts split must leave each part small enough to finish ubs's taint analysis, or record the file as unscanned.
