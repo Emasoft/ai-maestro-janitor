@@ -64,13 +64,35 @@ const PLACEHOLDER = /^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(.*\)|\{\{.*\}\}|<[^>]*
 
 // Names that say "this value is a secret", matched on the snake_case form
 // (`apiKey` reads `api_key`) so `tokenizer` and `max_tokens` do not count...
-const SECRET_NAME = /(^|[_.-])(secrets?|token|password|passwd|passphrase|pwd|pass|api_?key|apikey|private_?key|access_?key|auth_?key|auth_?token|client_?secret|credentials?|signing_?key|encryption_?key|session_?key|master_?key)([_.-]|$)/
+const SECRET_NAME = /(^|[_.-])(secrets?|token|password|passwd|passphrase|pwd|pass|api_?key|apikey|private_?key|access_?key|access_?token|auth_?key|auth_?token|client_?secret|secret_?key|credentials?|signing_?key|encryption_?key|session_?key|master_?key)([_.-]|$)/
 // ...unless they are about the secret rather than the secret itself.
 const NOT_SECRET_NAME = /[_.-](url|uri|endpoint|path|file|dir|name|type|expiry|expires|expires_at|ttl|length|header|id|count|limit|size|prefix|env|var|mode|enabled|required|policy|hint|prompt|label|placeholder|field|format)$/
 
+// Names that are secrets only when the value is long and key-shaped. WHY: `AZURE_STORAGE_KEY` holds an 88-character
+// Azure key, but `const STORAGE_KEY = 'todos-vuejs'` and `account_key: "acct_12345"` name a slot or an id in other
+// projects, so for these names looksSecret alone is not enough: strongValue must hold too (TRDD-Q6LPJTPO).
+const STRONG_NAME = /(^|_)(storage|account)_?key(_|$)/
+
+// The snake_case form a name is matched on. WHY: `-` and `.` read as `_`, so `api-key`, `X-Api-Key` and `ssl.private-key`
+// match like `api_key` (TRDD-Q6LPJTPO).
+function snakeName(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[-.]/g, '_')
+}
+
 function isSecretName(name: string): boolean {
-  const snake = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
-  return SECRET_NAME.test(snake) && !NOT_SECRET_NAME.test(snake)
+  const snake = snakeName(name)
+  return (SECRET_NAME.test(snake) || STRONG_NAME.test(snake)) && !NOT_SECRET_NAME.test(snake)
+}
+
+/** A name that is secret only through STRONG_NAME: its value must also pass strongValue. */
+function isStrongName(name: string): boolean {
+  const snake = snakeName(name)
+  return !SECRET_NAME.test(snake) && STRONG_NAME.test(snake)
+}
+
+/** A value long and key-shaped enough for a STRONG_NAME: 20 or more characters with a letter and a digit, or a base64 run of 40 or more (an Azure key is 88). */
+function strongValue(value: string): boolean {
+  return (value.length >= 20 && /[A-Za-z]/.test(value) && /\d/.test(value)) || /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value)
 }
 
 function looksSecret(value: string, isQuoted: boolean): boolean {
@@ -179,6 +201,8 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
     // `x == y` is a comparison, not an assignment.
     if (value.startsWith('=')) return match
     if (!looksSecret(value, quote !== '')) return match
+    // WHY: a STRONG_NAME (`STORAGE_KEY`) is hidden only for a key-shaped value, not for `'todos-vuejs'` (TRDD-Q6LPJTPO).
+    if (isStrongName(name) && !strongValue(value)) return match
     hits.assignment = (hits.assignment ?? 0) + 1
     if (propagates(value)) found.set(value, 'assignment')
     return `${lead}${name}${sep}${quote}${mark('assignment')}${quote}${tail}`
@@ -188,6 +212,8 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
       // A value that never closed (it ran to the end of the line) is judged as unquoted: without its closing quote
       // nothing says where it ends, so a short word such as `"password": "notasecret` is not hidden.
       if (!isSecretName(name) || !looksSecret(value, end.endsWith('"'))) return match
+      // WHY: the same STRONG_NAME gate as the line pass above (TRDD-Q6LPJTPO).
+      if (isStrongName(name) && !strongValue(value)) return match
       hits.assignment = (hits.assignment ?? 0) + 1
       if (propagates(value)) found.set(value, 'assignment')
       // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
@@ -197,12 +223,41 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
   return out
 }
 
+// A key in a `;`-delimited connection string (Azure, SQL Server, ODBC, Service Bus): `AccountKey=...;`, `;Password=...;`.
+// WHY: the assignment pass reads `Password=V;Server=h` as one value with a `;` in it and rejects it, and it never looks
+// inside `a=b;Password=<value>`, so these leaked (TRDD-Q6LPJTPO). The value stops at `;`, whitespace, a quote, a backtick or a backslash,
+// so it also works inside quoted and escaped JSON. The name must follow a `;` or start a line.
+const CONN = /(^|;)([ \t]*(?:AccountKey|SharedAccessKey|AccessKey|Password|Pwd)[ \t]*=[ \t]*)([^;\s"'`\\]+)/gim
+
+/** Keys in `;`-delimited connection strings: keeps the name, hides the value. */
+function redactConnectionStrings(text: string, hits: Hits, found: Map<string, string>): string {
+  const kind = 'connection-string-key'
+  return text.replace(CONN, (match: string, lead: string, prefix: string, value: string, offset: number, whole: string) => {
+    // WHY: at the start of a line the name needs a `;` after its value, or `password=abc` (a plain assignment) would
+    // be read as a connection string and keep today's behaviour only by luck.
+    if (lead === '' && whole[offset + match.length] !== ';') return match
+    // WHY: a value that holds a marker was hidden by an earlier rule, which already counted it; hiding it again would
+    // count it twice and swap its kind. Never MARKS.test(): MARKS has the g flag and keeps lastIndex between calls.
+    // A value that only partly holds a marker is a known miss.
+    if (value.replace(MARKS, '') !== value) return match
+    // WHY: `Password=changeme;` and `Password=<your-password>;` are placeholders, not credentials.
+    if (PLACEHOLDER.test(value)) return match
+    // WHY: `a=1;password=getPw()`, `x;password=input.value` and `Password=${DB_PASS}` are code, not a literal key.
+    if (/[(){}]/.test(value) || value.startsWith('$') || /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(value)) return match
+    hits[kind] = (hits[kind] ?? 0) + 1
+    // WHY: record the key so a copy of it written elsewhere in the same text, row or value is hidden too.
+    if (propagates(value)) found.set(value, kind)
+    return lead + prefix + mark(kind)
+  })
+}
+
 /** Every rule and pass over `text`, counting into `hits` and recording each hidden value that propagates() accepts in `found`. */
 function redactInto(text: string, hits: Hits, found: Map<string, string>): string {
   let out = text
   for (const rule of TOKENS) out = applyRule(out, rule, hits, found)
   out = redactUrlPasswords(out, hits, found)
   out = redactAssignments(out, hits, found)
+  out = redactConnectionStrings(out, hits, found)
   return out
 }
 
@@ -389,12 +444,14 @@ const LABELS: Record<string, string> = {
   'bearer-token': 'bearer token',
   'url-password': 'password in a URL',
   assignment: 'secret value',
+  'connection-string-key': 'secret in a connection string',
 }
 
 const PLURALS: Record<string, string> = {
   'url-password': 'passwords in URLs',
   'bearer-token': 'bearer tokens',
   jwt: 'JWTs',
+  'connection-string-key': 'secrets in connection strings',
 }
 
 /** A kind's name for people, with its count: `1 AWS access key`, `2 GitHub tokens`. */

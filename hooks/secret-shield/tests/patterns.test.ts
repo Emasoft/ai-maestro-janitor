@@ -514,3 +514,139 @@ describe('a rule pattern run directly does not break redact', () => {
     }
   })
 })
+
+
+// Run-together and kebab names, Azure keys and connection strings (TRDD-Q6LPJTPO). Fake values are made at run time
+// with an upper-case letter, a lower-case letter and a digit, and a DIFFERENT one on every call: a test cannot pass
+// because another value was hidden before it, and every positive uses its own redact() call so known-secret
+// propagation cannot hide a value the rules missed.
+const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+let fakeCount = 0
+const fake = (length = 32): string => {
+  fakeCount += 1
+  const tail = Array.from({ length }, () => ALNUM[Math.floor(Math.random() * ALNUM.length)]).join('')
+  return `Zq${String(fakeCount).padStart(3, '0')}${tail}`.slice(0, length)
+}
+// An Azure storage key: 88 base64 characters ending in ==.
+const fakeAzureKey = (): string => j(fake(86), '==')
+const ASSIGNED = mark('assignment')
+const CONN_KEY = mark('connection-string-key')
+// The quote of a pair stringified twice: three backslashes, then the quote.
+const Q3 = '\\'.repeat(3) + '"'
+
+// The three entry points, each a fresh call on the same text.
+const threeWays = (input: string): string[] => {
+  const viaRedact = redact(input).text
+  const viaDeep = (redactDeep({ k: input }).value as { k: string }).k
+  const viaBlocks = String(redactBlocks([{ type: 'text', text: input }]).content[0]?.text)
+  return [viaRedact, viaDeep, viaBlocks]
+}
+
+describe('run-together, kebab and header names are hidden, the name is kept', () => {
+  const cases: Array<[string, (v: string) => [string, string]]> = [
+    ['accesstoken=V', v => [`accesstoken=${v}`, `accesstoken=${ASSIGNED}`]],
+    ['accesstoken="V"', v => [`accesstoken="${v}"`, `accesstoken="${ASSIGNED}"`]],
+    ['secretkey=V', v => [`secretkey=${v}`, `secretkey=${ASSIGNED}`]],
+    ['secretkey: "V"', v => [`secretkey: "${v}"`, `secretkey: "${ASSIGNED}"`]],
+    ['YAML secretkey: V', v => [`secretkey: ${v}`, `secretkey: ${ASSIGNED}`]],
+    ['YAML accesstoken: V', v => [`accesstoken: ${v}`, `accesstoken: ${ASSIGNED}`]],
+    ['api-key: V', v => [`api-key: ${v}`, `api-key: ${ASSIGNED}`]],
+    ['"api-key": "V"', v => [`"api-key": "${v}"`, `"api-key": "${ASSIGNED}"`]],
+    ['escaped JSON \\"api-key\\":\\"V\\"', v => [`\\"api-key\\":\\"${v}\\"`, `\\"api-key\\":\\"${ASSIGNED}\\"`]],
+    ['header X-Api-Key: V', v => [`X-Api-Key: ${v}`, `X-Api-Key: ${ASSIGNED}`]],
+  ]
+  for (const [name, build] of cases) {
+    test(name, () => {
+      const [input, want] = build(fake())
+      for (const out of threeWays(input)) expect(out).toBe(want)
+    })
+  }
+
+  test('control: api_key=V is hidden, with or without the new rules', () => {
+    const [input, want] = [`api_key=${fake()}`, `api_key=${ASSIGNED}`]
+    for (const out of threeWays(input)) expect(out).toBe(want)
+  })
+})
+
+describe('Azure storage keys and connection strings are hidden', () => {
+  test('AZURE_STORAGE_KEY=K', () => {
+    const k = fakeAzureKey()
+    expect(k.length).toBe(88)
+    for (const out of threeWays(`AZURE_STORAGE_KEY=${k}`)) expect(out).toBe(`AZURE_STORAGE_KEY=${ASSIGNED}`)
+  })
+
+  test('"AccountKey": "K"', () => {
+    const k = fakeAzureKey()
+    for (const out of threeWays(`"AccountKey": "${k}"`)) expect(out).toBe(`"AccountKey": "${ASSIGNED}"`)
+  })
+
+  const azure = (k: string) => `DefaultEndpointsProtocol=https;AccountName=a;AccountKey=${k};EndpointSuffix=h.example`
+  const azureShapes: Array<[string, (k: string) => [string, string]]> = [
+    ['a bare Azure connection string', k => [azure(k), azure(CONN_KEY)]],
+    ['inside AZURE_STORAGE_CONNECTION_STRING="..."', k => [`AZURE_STORAGE_CONNECTION_STRING="${azure(k)}"`, `AZURE_STORAGE_CONNECTION_STRING="${azure(CONN_KEY)}"`]],
+    ['inside JSON escaped twice', k => [`{${Q3}AZURE_STORAGE_CONNECTION_STRING${Q3}:${Q3}${azure(k)}${Q3}}`, `{${Q3}AZURE_STORAGE_CONNECTION_STRING${Q3}:${Q3}${azure(CONN_KEY)}${Q3}}`]],
+  ]
+  for (const [name, build] of azureShapes) {
+    test(name, () => {
+      const [input, want] = build(fakeAzureKey())
+      for (const out of threeWays(input)) expect(out).toBe(want)
+      expect(redact(input).hits).toEqual({ 'connection-string-key': 1 })
+    })
+  }
+
+  test('a copy of the key elsewhere is hidden too, in a text, a structured value and a row', () => {
+    const k = fakeAzureKey()
+    const cs = azure(k)
+    const text = redact(`${cs}\necho ${k}`)
+    expect(text.text).toBe(`${azure(CONN_KEY)}\necho ${CONN_KEY}`)
+    expect(text.hits).toEqual({ 'connection-string-key': 1 })
+    const deep = redactDeep({ a: cs, b: [`echo ${k}`] }) as { value: { b: string[] } }
+    expect(deep.value.b[0]).toBe(`echo ${CONN_KEY}`)
+    const block = redactBlocks([{ type: 'text', text: cs }, { type: 'text', text: `echo ${k}` }])
+    expect(String(block.content[1]?.text)).toBe(`echo ${CONN_KEY}`)
+  })
+
+  const keys: Array<[string, (v: string) => [string, string]]> = [
+    ['SQL Server: Password=V; after other settings', v => [`Server=tcp:h,1433;Database=d;User ID=u;Password=${v};`, `Server=tcp:h,1433;Database=d;User ID=u;Password=${CONN_KEY};`]],
+    ['Password=V;Server=h at the start of a line', v => [`Password=${v};Server=h`, `Password=${CONN_KEY};Server=h`]],
+    ['ODBC: Pwd=V;', v => [`Driver={ODBC};Server=h;Uid=u;Pwd=${v};`, `Driver={ODBC};Server=h;Uid=u;Pwd=${CONN_KEY};`]],
+    ['endpoint=https://h/;accesskey=<value>', v => [`endpoint=https://h/;accesskey=${v}`, `endpoint=https://h/;accesskey=${CONN_KEY}`]],
+    [
+      'Service Bus: SharedAccessKey=V, the key name stays visible',
+      v => [`Endpoint=sb://h/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${v}`, `Endpoint=sb://h/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${CONN_KEY}`],
+    ],
+  ]
+  for (const [name, build] of keys) {
+    test(name, () => {
+      const [input, want] = build(fake())
+      for (const out of threeWays(input)) expect(out).toBe(want)
+    })
+  }
+
+  test('a token already hidden in a connection string is counted once, as a token', () => {
+    const { text, hits } = redact(`Server=h;Password=${j('gh', 'p_', fake(36))};`)
+    expect(text).toBe(`Server=h;Password=${mark('github-token')};`)
+    expect(hits).toEqual({ 'github-token': 1 })
+  })
+})
+
+describe('names and values that look like keys but are not stay visible', () => {
+  const guards = [
+    "const STORAGE_KEY = 'todos-vuejs'",
+    'account_key: "acct_12345"',
+    'primary_key: "user_id"',
+    'sort-key: "created_at"',
+    'cache.key: "user_prefs"',
+    'hotkey: "ctrl+k"',
+    'a=1;password=getPw()',
+    'x;password=input.value',
+    'Password=${DB_PASS};Server=h',
+    'Password=changeme;Server=h',
+    'password=abc',
+  ]
+  for (const line of guards) {
+    test(line, () => {
+      for (const out of threeWays(line)) expect(out).toBe(line)
+    })
+  }
+})
