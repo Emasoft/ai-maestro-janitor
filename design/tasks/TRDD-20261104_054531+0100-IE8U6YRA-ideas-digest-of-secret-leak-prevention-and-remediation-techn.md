@@ -4,7 +4,7 @@ title: ideas digest of secret-leak prevention and remediation techniques from th
 column: todo
 status: tasked
 created: 2026-11-04T05:45:31+0100
-updated: 2026-11-04T05:54:37+0100
+updated: 2026-11-04T09:45:11+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -46,3 +46,4 @@ Sources: the reproducible corpus list and mined commits recorded in TRDD-UVOYC2V
 ## Approval log
 
 - 2026-11-04T05:45:31+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-04: 24 mining reports of repos removed under the owner's decision 4 were moved to reports_dev/secret-shield/corpus-mining-removed/. The digest reads them too: their prevention and remediation ideas are text, not code, and decision 2 asks for everything from all projects.
