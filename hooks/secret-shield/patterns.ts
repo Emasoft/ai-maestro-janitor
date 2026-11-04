@@ -17,6 +17,8 @@ const MARK_BODY = String.raw`\[JANITOR-REDACTED:[A-Za-z0-9_-]+\]`
 /** A value that IS a marker, whole. Anchored: a value that only contains one is judged on the rest. */
 const MARK = new RegExp('^' + MARK_BODY + '$')
 const MARKS = new RegExp(MARK_BODY, 'g')
+// Cuts a text at its markers; the capture group keeps each marker as an odd entry. Not global: String.split ignores lastIndex.
+const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // Built from MARK_BODY so the marker grammar has one source.
 const URL_PASSWORD = new RegExp(
   String.raw`\b([a-z][a-z0-9+.-]*:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?[^\s@#]*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
@@ -84,8 +86,34 @@ function looksSecret(value: string, isQuoted: boolean): boolean {
   return (value.length >= 6 && /\d/.test(value)) || value.length >= 16
 }
 
-/** Replaces each match of `rule` with its mark, counting into `hits`. Exported so tests can drive a synthetic rule. */
-export function applyRule(text: string, rule: Rule, hits: Hits): string {
+// A value is worth hunting for elsewhere only when it is long and secret-shaped. WHY: the review of 2026-11-04
+// found that propagation spreads every false positive of the looksSecret heuristic (paths, env-var names,
+// identifiers, slugs, emails, host:port) over a whole row, and those values are usually 10 or more characters, so a
+// length floor alone does not stop it. Each shape rejected here is usually a name, a location or a reference. Shapes
+// of real credentials that are knowingly refused too: a diceware-style lowercase passphrase (slug rule), a password
+// shaped like an email (email rule), user:12345 (host:port rule), base64 with a slash but no digit (slash rule).
+// The defining line of such a value is always hidden by the passes that found it; only the spreading is refused.
+function propagates(value: string): boolean {
+  // Marker text is never a value to hunt for: hideKnown skips markers, and a value that holds one is not a secret.
+  if (value.replace(MARKS, '') !== value || value.includes('JANITOR-REDACTED')) return false
+  if (PLACEHOLDER.test(value) || value.length < 10) return false
+  if (/^\d+$/.test(value) || /^(.)\1*$/s.test(value)) return false
+  const hasDigit = /\d/.test(value)
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !hasDigit) return false
+  if (/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(value)) return false
+  // A lowercase-word slug (`my-app-db-credentials`, `secret/data/myapp`) names a thing.
+  if (/^[a-z]+([-_./][a-z]+)+$/.test(value)) return false
+  if (value.startsWith('/') || value.startsWith('~/') || value.startsWith('./') || value.startsWith('../')) return false
+  // A path or vault key (`prod/db/password`) holds a slash; a base64 secret does too, but only with all three kinds of character.
+  if (value.includes('/') && !(/[A-Z]/.test(value) && /[a-z]/.test(value) && hasDigit)) return false
+  if (value.includes('://')) return false
+  if (/^[^@\s]+@[A-Za-z0-9.-]+\.[A-Za-z]+$/.test(value)) return false
+  if (/^[A-Za-z0-9.-]+:\d{1,5}$/.test(value)) return false
+  if (/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(value) && /^[A-Za-z]+$/.test(value.slice(value.lastIndexOf('.') + 1))) return false
+  return (/[A-Za-z]/.test(value) && hasDigit) || value.length >= 16
+}
+/** Replaces each match of `rule` with its mark, counting into `hits`; a hidden value that propagates() accepts is recorded in `found`. Exported so tests can drive a synthetic rule. */
+export function applyRule(text: string, rule: Rule, hits: Hits, found?: Map<string, string>): string {
   // String.prototype.replace with a /g pattern sets lastIndex to 0 before it starts, so a lastIndex left behind by
   // anyone who ran .test() or .exec() on this shared RegExp cannot make it skip text. Keep it a replace (no exec loop).
   return text.replace(rule.pattern, (match: string, ...groups: unknown[]) => {
@@ -93,6 +121,7 @@ export function applyRule(text: string, rule: Rule, hits: Hits): string {
     const secret = group === 0 ? match : String(groups[group - 1] ?? '')
     if (secret === '' || MARK.test(secret)) return match
     hits[rule.kind] = (hits[rule.kind] ?? 0) + 1
+    if (found && propagates(secret)) found.set(secret, rule.kind)
     // Hide every non-overlapping copy of the captured text inside the match. A string replace hides the first copy
     // only, and the first copy can sit in the gap before the capture (key name, gap, then the quoted value), which
     // leaves the captured secret in view. Hiding the group by its index would leak the other copy instead (found
@@ -104,7 +133,7 @@ export function applyRule(text: string, rule: Rule, hits: Hits): string {
 }
 
 /** A password in a URL's userinfo part: keeps the scheme, user and host, hides the password. */
-function redactUrlPasswords(text: string, hits: Hits): string {
+function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>): string {
   // The password may contain a slash. A value of up to 5 digits followed by / is a port followed by a
   // path, and up to 5 digits followed by a ? query with an = before the at-sign is a port followed by a
   // query (`host:8080/pkg/@scope`, `localhost:3000?email=a@b`), so the lookahead skips both. Other digits
@@ -116,6 +145,7 @@ function redactUrlPasswords(text: string, hits: Hits): string {
     const rest = password.replace(MARKS, '')
     if (rest === '' || PLACEHOLDER.test(rest)) return match
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
+    if (propagates(password)) found.set(password, 'url-password')
     return `${scheme}${user}:${mark('url-password')}@`
   })
 }
@@ -142,7 +172,7 @@ const JSON_ESCAPED = jsonPair(String.raw`\\+`, String.raw`[^"\\\r\n]{3,}`)
 const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*)*`)
 
 /** `.env`, shell, YAML and TOML lines: `API_KEY=...`, `export TOKEN="..."`, `password: ...`. */
-function redactAssignments(text: string, hits: Hits): string {
+function redactAssignments(text: string, hits: Hits, found: Map<string, string>): string {
   const line = /^([ \t]*(?:export[ \t]+)?(?:(?:const|let|var|readonly|final|static|private|public)[ \t]+)*["']?)([A-Za-z_][A-Za-z0-9_.-]*)(["']?[ \t]*(?::[ \t]*[A-Za-z<>[\]|]+[ \t]*)?[=:][ \t]*)(["'`]?)([^\n\r]*?)\4([,;]?(?:[ \t]+(?:#|\/\/).*)?[ \t]*)$/gm
   let out = text.replace(line, (match, lead: string, name: string, sep: string, quote: string, value: string, tail: string) => {
     if (!isSecretName(name)) return match
@@ -150,6 +180,7 @@ function redactAssignments(text: string, hits: Hits): string {
     if (value.startsWith('=')) return match
     if (!looksSecret(value, quote !== '')) return match
     hits.assignment = (hits.assignment ?? 0) + 1
+    if (propagates(value)) found.set(value, 'assignment')
     return `${lead}${name}${sep}${quote}${mark('assignment')}${quote}${tail}`
   })
   for (const pair of [JSON_ESCAPED, JSON_PLAIN]) {
@@ -158,6 +189,7 @@ function redactAssignments(text: string, hits: Hits): string {
       // nothing says where it ends, so a short word such as `"password": "notasecret` is not hidden.
       if (!isSecretName(name) || !looksSecret(value, end.endsWith('"'))) return match
       hits.assignment = (hits.assignment ?? 0) + 1
+      if (propagates(value)) found.set(value, 'assignment')
       // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
       return `${esc}"${name}${esc}"${sep}${esc}"${mark('assignment')}${end}`
     })
@@ -165,13 +197,59 @@ function redactAssignments(text: string, hits: Hits): string {
   return out
 }
 
+/** Every rule and pass over `text`, counting into `hits` and recording each hidden value that propagates() accepts in `found`. */
+function redactInto(text: string, hits: Hits, found: Map<string, string>): string {
+  let out = text
+  for (const rule of TOKENS) out = applyRule(out, rule, hits, found)
+  out = redactUrlPasswords(out, hits, found)
+  out = redactAssignments(out, hits, found)
+  return out
+}
+
+// Hides every copy of an already hidden value that no rule matched on its own (a password written in an assignment,
+// then typed again in a command). `found` holds raw secrets, so it never leaves this module: no function returns or
+// stores it. The longest value goes first so a value that contains another is hidden whole. Each value is also
+// hidden in its JSON-escaped and URL-encoded forms. split/join was measured 2-3x faster than one alternation in
+// JavaScriptCore. WHY the text is cut at its markers first: a marker already in the text (or one this loop just
+// wrote) must never be split by a copy of a value, or the marker stops matching MARK and the kind is lost; a value
+// that equals marker text (`SOME_SECRET=JANITOR-REDACTED`) or a fragment of one would do exactly that. So copies are
+// hidden only in the stretches between markers, and a marker written here is never searched again. propagates() also
+// refuses such values. Known misses: copies in separate calls, copies split by a line break, truncated copies, base64
+// forms such as Basic auth, and the JSON-decoded form of a JSON_PLAIN value that contains an escape (never searched).
+// Copies are not counted in `hits`: they are the same secret, already counted once.
+function hideKnown(text: string, found: Map<string, string>): string {
+  if (found.size === 0) return text
+  // Even entries are plain text, odd entries are whole markers (the capture group of the split keeps them).
+  let pieces = text.split(MARK_SPLIT).map((piece, i) => ({ piece, hidden: i % 2 === 1 }))
+  for (const [secret, kind] of [...found].sort((a, b) => b[0].length - a[0].length)) {
+    const variants = new Set([secret, JSON.stringify(secret).slice(1, -1)])
+    // WHY: encodeURIComponent throws URIError on a lone surrogate, and redact must never throw. The raw and the
+    // JSON-escaped forms still hide such a value; only the URL-encoded form has no encoding to look for.
+    if (secret.isWellFormed()) variants.add(encodeURIComponent(secret))
+    for (const variant of variants) {
+      const next: typeof pieces = []
+      for (const part of pieces) {
+        const bits = part.hidden ? [part.piece] : part.piece.split(variant)
+        if (bits.length === 1) {
+          next.push(part)
+          continue
+        }
+        bits.forEach((bit, i) => {
+          if (i > 0) next.push({ piece: mark(kind), hidden: true })
+          next.push({ piece: bit, hidden: false })
+        })
+      }
+      pieces = next
+    }
+  }
+  return pieces.map(part => part.piece).join('')
+}
+
 /** Every secret in `text` replaced by its mark, and how many of each kind. */
 export function redact(text: string): { text: string; hits: Hits } {
   const hits: Hits = {}
-  let out = text
-  for (const rule of TOKENS) out = applyRule(out, rule, hits)
-  out = redactUrlPasswords(out, hits)
-  out = redactAssignments(out, hits)
+  const found = new Map<string, string>()
+  const out = hideKnown(redactInto(text, hits, found), found)
   return { text: out, hits }
 }
 
@@ -184,57 +262,75 @@ export function addHits(into: Hits, from: Hits): Hits {
   return into
 }
 
-/**
- * Redacts every string inside a plain JSON value (a tool's structured result),
- * keeping its shape; the value itself comes back when nothing was hidden.
- */
-export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
-  const hits: Hits = {}
+// Maps every string of a plain JSON value through `f`, keeping its shape (nodes deeper than 12 levels are left as they are).
+const mapStrings = (value: unknown, f: (text: string) => string): unknown => {
   const walk = (node: unknown, depth: number): unknown => {
-    if (typeof node === 'string') {
-      const done = redact(node)
-      if (countOf(done.hits) === 0) return node
-      addHits(hits, done.hits)
-      return done.text
-    }
+    if (typeof node === 'string') return f(node)
     if (depth > 12 || node === null || typeof node !== 'object') return node
     if (Array.isArray(node)) return node.map(item => walk(item, depth + 1))
     const out: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(node)) out[key] = walk(item, depth + 1)
     return out
   }
-  const out = walk(value, 0)
-  return { value: countOf(hits) === 0 ? value : out, hits }
+  return walk(value, 0)
+}
+
+/**
+ * Redacts every string inside a plain JSON value (a tool's structured result),
+ * keeping its shape; the value itself comes back when nothing was hidden.
+ * A value hidden in one string is hidden in every other string of the value too.
+ */
+export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
+  const hits: Hits = {}
+  const found = new Map<string, string>()
+  const first = mapStrings(value, node => {
+    const done: Hits = {}
+    const out = redactInto(node, done, found)
+    if (countOf(done) === 0) return node
+    addHits(hits, done)
+    return out
+  })
+  if (countOf(hits) === 0) return { value, hits }
+  // The second walk covers every string, also the ones that had no hit of their own.
+  return { value: mapStrings(first, node => hideKnown(node, found)), hits }
 }
 
 type Block = { type: string; [field: string]: unknown }
 
-/**
- * Redacts the text a row's blocks carry: text blocks and each tool_result's
- * content (a string or text blocks). Every other block is passed as it is.
- */
-export function redactBlocks(content: readonly Block[]): { content: Block[]; hits: Hits } {
-  const hits: Hits = {}
-  const scrub = (text: string): string => {
-    const done = redact(text)
-    addHits(hits, done.hits)
-    return done.text
-  }
-  const blocks = content.map((block): Block => {
-    if (block.type === 'text' && typeof block.text === 'string') return { ...block, text: scrub(block.text) }
+// Maps the text a row's blocks carry through `f`: text blocks and each tool_result's content (a string or text blocks).
+const mapBlockTexts = (content: readonly Block[], f: (text: string) => string): Block[] =>
+  content.map((block): Block => {
+    if (block.type === 'text' && typeof block.text === 'string') return { ...block, text: f(block.text) }
     if (block.type === 'tool_result') {
       const inner = block.content
-      if (typeof inner === 'string') return { ...block, content: scrub(inner) }
+      if (typeof inner === 'string') return { ...block, content: f(inner) }
       if (Array.isArray(inner)) {
         return {
           ...block,
-          content: inner.map((part: Block) => (part.type === 'text' && typeof part.text === 'string' ? { ...part, text: scrub(part.text) } : part)),
+          content: inner.map((part: Block) => (part.type === 'text' && typeof part.text === 'string' ? { ...part, text: f(part.text) } : part)),
         }
       }
     }
     return block
   })
-  return { content: blocks, hits }
+
+/**
+ * Redacts the text a row's blocks carry: text blocks and each tool_result's
+ * content (a string or text blocks). Every other block is passed as it is.
+ * A value hidden in one block is hidden in every other block of the row too.
+ */
+export function redactBlocks(content: readonly Block[]): { content: Block[]; hits: Hits } {
+  const hits: Hits = {}
+  const found = new Map<string, string>()
+  const first = mapBlockTexts(content, text => {
+    const done: Hits = {}
+    const out = redactInto(text, done, found)
+    addHits(hits, done)
+    return out
+  })
+  // Nothing propagates when nothing was recorded: skip the second walk, which would only copy every block again.
+  if (found.size === 0) return { content: first, hits }
+  return { content: mapBlockTexts(first, text => hideKnown(text, found)), hits }
 }
 
 /** The same blocks with every text they carry withheld: what a failed scan stores. */

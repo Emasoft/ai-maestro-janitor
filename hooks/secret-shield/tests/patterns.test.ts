@@ -370,6 +370,134 @@ describe('a rule whose secret is a capture group hides every copy of it inside t
   })
 })
 
+describe('a secret found once is hidden wherever it repeats', () => {
+  // No token shape: only the assignment rule can find it, so any other copy is hidden by propagation alone.
+  const v = j('q7Wm', 'X2Lp9Rt4Zk')
+  const input = `DB_PASSWORD=${v}\nconnecting with ${v} now`
+
+  test('a copy on another line of the same text is hidden, and counted once', () => {
+    const { text, hits } = redact(input)
+    expect(text).not.toContain(v)
+    expect(hits).toEqual({ assignment: 1 })
+  })
+
+  test('a copy in another block of the same row is hidden', () => {
+    expect(redact(`echo ${v}`).text).toContain(v)
+    const { content } = redactBlocks([
+      { type: 'text', text: `DB_PASSWORD=${v}` },
+      { type: 'text', text: `echo ${v}` },
+    ])
+    expect(String(content[1]?.text)).not.toContain(v)
+  })
+
+  test('a copy in another string of the same structured value is hidden', () => {
+    const { value } = redactDeep({ a: `DB_PASSWORD=${v}`, b: [`run ${v}`] }) as { value: { b: string[] } }
+    expect(value.b[0]).not.toContain(v)
+  })
+
+  test('a URL-encoded copy is hidden too', () => {
+    const w = j('p', '@ss/w0rd!', 'Zq9x')
+    const { text } = redact(`DB_PASSWORD="${w}"\nhttps://h.example/?pw=${encodeURIComponent(w)}`)
+    expect(text).not.toContain(w)
+    expect(text).not.toContain(encodeURIComponent(w))
+  })
+
+  // Guards: these pass on the code without propagation too, and must keep passing with it. Each first checks that
+  // line 1 (the defining line) was really hidden and counted, so the value WAS recorded and only propagates() can
+  // keep it off line 2; without that, a guard would pass even if propagates() accepted everything. Then they assert
+  // line 2 only, so they do not depend on how line 1 reads.
+  const guarded = (text: string, val: string): string => {
+    const { text: out, hits } = redact(text)
+    const lines = out.split('\n')
+    expect(hits).toEqual({ assignment: 1 })
+    expect(lines[0]).toContain(mark('assignment'))
+    expect(lines[0]).not.toContain(val)
+    return lines[1] ?? ''
+  }
+
+  test('guard: a path value is not hidden elsewhere', () => {
+    const val = '/run/secrets/db_password'
+    expect(guarded(`SECRET_KEY=${val}\ncat ${val}`, val)).toBe(`cat ${val}`)
+  })
+
+  test('guard: an env-var name used as a value is not hidden elsewhere', () => {
+    const val = 'MY_SERVICE_SECRET_KEY'
+    expect(guarded(`API_TOKEN = "${val}"\nos.environ["${val}"]`, val)).toBe(`os.environ["${val}"]`)
+  })
+
+  test('guard: a short value is not hidden elsewhere', () => {
+    expect(guarded('PASSWORD="ab12cd"\nab12cd', 'ab12cd')).toBe('ab12cd')
+  })
+
+  // A name-shaped value in a secret-named assignment is hidden where it is defined, but is not spread.
+  const nameShapes: Array<[string, string]> = [
+    ['a lowercase slug', 'my-app-db-credentials'],
+    ['a vault-style path', 'prod/db/password'],
+    ['a secrets-engine path', 'secret/data/myapp'],
+    // Not a slug (the digit), not an identifier, no leading slash, no upper case: only the slash rule refuses it.
+    ['a lowercase path with a digit', 'config/v2/settings'],
+    ['an email address', j('user@', 'example.com')],
+    ['a host and port', 'cache-01.example.com:6379'],
+  ]
+  for (const [shape, val] of nameShapes) {
+    test(`guard: ${shape} is not hidden elsewhere`, () => {
+      expect(guarded(`DB_PASSWORD=${val}\nconnect ${val}`, val)).toBe(`connect ${val}`)
+    })
+  }
+
+  test('redacting the output again changes nothing', () => {
+    const once = redact(input)
+    expect(once.text).not.toContain(v)
+    const again = redact(once.text)
+    expect(again.text).toBe(once.text)
+    expect(countOf(again.hits)).toBe(0)
+  })
+
+  test('a value that reads like a marker leaves every marker whole', () => {
+    // The value is the marker's own word, so a naive copy hider would split every marker of the text.
+    const token = j('gh', 'p_', A36)
+    const { text } = redact(`SOME_SECRET=JANITOR-REDACTED\nkey ${token} end\nSOME_SECRET=JANITOR-REDACTED`)
+    // Exact output: a split marker would leave a marker inside a marker, which no count of whole spans can tell from a good one.
+    expect(text).toBe(`SOME_SECRET=${mark('assignment')}\nkey ${mark('github-token')} end\nSOME_SECRET=${mark('assignment')}`)
+    expect(text).not.toContain('[[')
+    expect(text).not.toContain(token)
+  })
+
+  test('a value with a lone surrogate does not make redact throw, and its raw copy is hidden', () => {
+    const w = j('Ab3x', '\ud800', 'Kq9ZmWp2')
+    expect(w.isWellFormed()).toBe(false)
+    const { text } = redact(`DB_PASSWORD=${w}\nuse ${w}`)
+    expect(text.split(w).length - 1).toBe(0)
+    expect(text.split(mark('assignment')).length - 1).toBe(2)
+  })
+
+  test('1 MB with 50 secrets, each copied twice, finishes well under the hook limit and hides every copy', () => {
+    const values = Array.from({ length: 50 }, (_, i) => j('Vq', String(i).padStart(2, '0'), 'Lm8Rt', String((i * 7919) % 100000).padStart(5, '0')))
+    const filler = 'lorem ipsum dolor sit amet '.repeat(400)
+    const text = values.map((val, i) => `DB_PASSWORD_${i}=${val}\n${filler}${val}\n${filler}${val}\n`).join('')
+    expect(text.length).toBeGreaterThanOrEqual(1_000_000)
+    const started = performance.now()
+    const done = redact(text)
+    const ms = performance.now() - started
+    console.log(`propagation over ${text.length} characters and ${values.length} secrets took ${ms.toFixed(0)} ms`)
+    expect(ms).toBeLessThan(5000)
+    // Counts, not toContain on the whole text: a failure is reported by name instead of printing a megabyte.
+    const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
+    expect(values.reduce((sum, val) => sum + count(done.text, val), 0)).toBe(0)
+    expect(count(done.text, mark('assignment'))).toBe(values.length * 3)
+  })
+})
+
+describe('a name that says the value is a file or an env-var name is not a secret name', () => {
+  // The exclusion is in NOT_SECRET_NAME (_file, _env): the value is secret-shaped, the name says it is not one.
+  test('SECRET_FILE and TOKEN_ENV lines with secret-looking values are left as they are', () => {
+    const text = `SECRET_FILE=${j('Aq7Zk9', 'Lm2Xp4Rt8Vw')}\nTOKEN_ENV=${j('Bn3Yc5', 'Qd7Hs1Fg6Jk')}`
+    const { text: out, hits } = redact(text)
+    expect(out).toBe(text)
+    expect(hits).toEqual({})
+  })
+})
+
 describe('a rule pattern run directly does not break redact', () => {
   // The rule files export each Rule, so an importer can run .test() on a shared /g pattern and leave its
   // lastIndex mid-text. redact() must still find a token placed before that offset in a new text.
