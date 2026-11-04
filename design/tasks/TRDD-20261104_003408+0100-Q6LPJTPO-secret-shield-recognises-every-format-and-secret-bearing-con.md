@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: design
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T00:59:30+0100
+updated: 2026-11-04T01:01:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -70,7 +70,7 @@ Git SHAs, UUIDs outside a secret key name, lockfile integrity hashes (sha256-, s
 
 ## Open, for the design review
 
-- Hand-curated list (above) versus porting the gitleaks default rule set (about 200 rules, MIT, RE2 syntax mostly JS-compatible) with a generator script. Either way a test can report coverage gaps against gitleaks rule ids when gitleaks is installed.
+- Resolved 2026-11-04: the rule list is hand-curated, and gitleaks serves only as a failing check (see the gitleaks check section). A leading (?i) throws in Bun, so any ported rule is translated first.
 - Performance: see the measurement above. A combined prefilter is optional; if one is added it may gate only the prefix rules, never the context rules. A size-and-time test on a large tool result stays.
 - The Python janitor scanners (scripts/lib/*_patterns.py) hold other secret patterns; a cross-check test should keep the two in step.
 
