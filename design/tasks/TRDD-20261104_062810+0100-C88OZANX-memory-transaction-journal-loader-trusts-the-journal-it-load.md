@@ -28,7 +28,7 @@ pre-block-column: dev
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-04
 
 - 2026-11-04: Commit A (f3a2313d), Commit B (5480fc77) and the OSError follow-up of Commit B have landed; the card is blocked on TRDD-90LAMQ8B for box 3.
-- NEXT ACTION: when TRDD-90LAMQ8B closes, run the full suite; if it passes, tick box 3, add ae41166d to implementation-commits, and close this card. The 31 test_repo_state errors come from the session's git configuration and the 5 idle-clear failures are not yet root-caused; both have the same counts at bd6a7eca (verified to run bd6a7eca's own scripts), so this card did not cause them.
+- NEXT ACTION: when TRDD-90LAMQ8B closes, run the full suite, ruff, mypy and pyright; if all pass, tick box 3, add ae41166d to implementation-commits, and close this card. The 31 test_repo_state errors come from the session's git configuration (measured on their own) and the 5 idle-clear failures are not yet root-caused; both have the same counts at bd6a7eca, and the idle-clear run there imported bd6a7eca's own dispatch.py, so this card did not cause them.
 - Gotcha: a publish fails the full-suite gate until TRDD-90LAMQ8B is fixed: the test_repo_state errors appear when safe.bareRepository=explicit is set; the idle-clear failures are not yet understood.
 
 ## Problem
