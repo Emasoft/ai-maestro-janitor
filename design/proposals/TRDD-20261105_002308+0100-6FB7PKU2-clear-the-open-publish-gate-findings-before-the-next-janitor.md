@@ -4,7 +4,7 @@ title: Clear the open publish-gate findings before the next janitor release
 column: proposal
 status: proposed
 created: 2026-11-05T00:23:08+0100
-updated: 2026-11-05T00:51:32+0100
+updated: 2026-11-05T00:57:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -37,8 +37,8 @@ State as of 2026-11-05, HEAD 0ff8f2e5. Done when every box below is ticked. PRRD
       +# janitor: report dirs carry private data (paths, hostnames, pasted secrets)
       +/reports/
 
-  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing while the diff is exactly that hunk. Right before publish.py, check that git diff -- .gitignore shows only the quoted hunk, then run git restore -- .gitignore; if the diff holds anything else, remove only the two quoted lines. Check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
-- [ ] The tracked reports/ tree is swept with sanitize-reports.
+  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing while the diff is exactly that hunk. Right before publish.py, check that git diff -- .gitignore shows only the quoted hunk, then run git restore -- .gitignore; if the diff holds anything else, remove only the three added lines (the blank line, the header and /reports/). Check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
+- [ ] The reports/ tree is swept with sanitize-reports, including files that are untracked today only because the stray /reports/ line hides them.
 - [ ] The owner has said yes to the publish.
 
 ## Approval log
