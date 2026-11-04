@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T09:09:05+0100
+updated: 2026-11-04T09:13:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T00:34:08+0100
-npt: [UVOYC2V7]
+npt: [UVOYC2V7, IE8U6YRA]
 implementation-commits: [baeecd80, 536021a5, c0e1abcc, 82109786]
 ---
 
@@ -88,7 +88,7 @@ Git SHAs, UUIDs outside a secret key name, lockfile integrity hashes (sha256-, s
 ## Acceptance criterion
 
 Done means the shield removes every format in this card's catalog and every context rule in it, each proven by its own test. Known misses are listed in hooks/secret-shield/KNOWN-MISSES.md, tracked. This card never claims to catch every possible secret.
-- The gap analysis of the TRDD-UVOYC2V7 catalog's secret-category keys and of the TRDD-IE8U6YRA ideas digest against hooks/secret-shield/rules is written down: each catalog key AND each heuristic from the ideas digest is listed as adopted, already covered, or rejected with a reason; every adopted rule compiles under JavaScriptCore; and every adopted rule complies with the license policy decided 2026-11-04 (word for word only from MIT, Apache or BSD sources with NOTICE credit; otherwise re-derived).
+- The gap analysis against hooks/secret-shield/rules is written down and covers the whole corpus. Each secret-category key of the TRDD-UVOYC2V7 catalog, each of the 31 regex keys of anubis CANDIDATE_PATTERNS.yaml, each of the 298 needs-reconstruction rows, each of the 5 keys invalid in every engine, and each detection heuristic of the TRDD-IE8U6YRA ideas digest is listed as adopted, already covered, or rejected with a reason. The catalog's other categories are listed category by category, each judged out of scope or brought in with a reason. Prevention and remediation ideas in the digest are not detection rules and are out of this criterion. Every adopted rule compiles under JavaScriptCore and complies with the license policy decided 2026-11-04 (word for word only from MIT, Apache or BSD sources with NOTICE credit; otherwise re-derived).
 - ReDoS check: every adopted rule, run in Bun on inputs that end in a failing tail at 32 KB and 256 KB, stays under 100 ms at 256 KB and either grows no worse than linearly or stays under 10 ms at 256 KB, with the load average recorded; a slow or timed-out result is re-run before the rule is rejected.
 
 ## Prerequisite
@@ -144,7 +144,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - 2026-11-04: TRDD-UVOYC2V7 (the corpus catalog) is complete. Its outputs are reports_dev/secret-shield/corpus-mining/_catalog.jsonl, _catalog-dedup.jsonl and _catalog-summary.md (gitignored). This card's provider-catalog step owns what that card left open, listed below.
 - Gap analysis of the catalog's secret-category keys against hooks/secret-shield/rules: each adopted rule compiles under JavaScriptCore, passes the ReDoS check in the Acceptance criterion, and complies with the license policy decided 2026-11-04 (word for word only from MIT, Apache or BSD sources with NOTICE credit; otherwise re-derived).
 - Re-time the slow and timeout keys under the ReDoS check in the Acceptance criterion: the same 2547 keys gave slow 18 / timeout 28, then slow 36 / timeout 32, under machine load.
-- Still unexamined: the 5 keys invalid in every engine; anubis CANDIDATE_PATTERNS.yaml, not extracted (31 regex keys; the safe YAML loader refuses its unquoted *-glob values); the 2420 CC-BY-SA secret keys, not ReDoS-timed; under the license policy decided 2026-11-04 (CC-BY-SA is not MIT, Apache or BSD) they are re-derived, never copied word for word.
+- Still unexamined: the 5 keys invalid in every engine; anubis CANDIDATE_PATTERNS.yaml, not extracted (31 regex keys; the safe YAML loader refuses its unquoted *-glob values); the 2420 CC-BY-SA secret keys, not ReDoS-timed; under the license policy decided 2026-11-04 (CC-BY-SA is not MIT, Apache or BSD) they are re-derived, never copied word for word. Re-deriving a regex means writing a new pattern for the same documented token format from the provider's own documentation, not editing the copied text, and every re-derived rule passes the same ReDoS check.
 - Rules reach hooks/secret-shield/rules only through a script that generates them from the catalog, never through an agent that reads it (session tool output is redacted). Adoption follows the license policy decided 2026-11-04.
 - UVOYC2V7's Results, made precise (that card is archived and cannot be edited): Box 2's rows == recount holds on 120 of 120 parsed structured files; 3 of the 123 listed are not parsed (anubis CANDIDATE_PATTERNS.yaml, an accepted exception, and 2 report lines that name no file).
 - Its independent verifier reuses no code from build_catalog.py. Both import check_transcriptions.py for read_text and resolve, and the verifier also uses its literal_span.

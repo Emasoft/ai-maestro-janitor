@@ -4,7 +4,7 @@ title: the privacy scan also checks commit messages for local paths
 column: todo
 status: tasked
 created: 2026-11-04T04:59:00+0100
-updated: 2026-11-04T09:09:24+0100
+updated: 2026-11-04T09:13:55+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -32,7 +32,7 @@ Found 2026-11-04 during TRDD-Q6LPJTPO. Commit c502b553 landed with a stale scrat
 ## Notes
 
 The message check inherits the pre-commit scanner's plugin-and-marketplace id false positive tracked in TRDD-WQDCZEBT; fix or account for that first. The owner's decision on rewording c502b553 was made 2026-11-04 (leave it unchanged; see the dated note below), so item 4 must allow c502b553 by SHA or the new gate refuses the next publish on that commit.
-2026-11-04: the owner, asked whether to reword c502b553 or leave it, answered verbatim "do as you wish". Decided by the main agent: leave c502b553 unchanged. A reword would rewrite every later unpushed commit and leave a dangling SHA in the archived, immutable TRDD-UVOYC2V7; the correct account is already recorded in the body of 5fc8d345 and on UVOYC2V7. The pre-push check this card adds must allow c502b553 by SHA as an owner-accepted commit.
+2026-11-04: the owner, asked whether to reword c502b553 or leave it, answered verbatim "do as you wish". The main agent decided, under that answer, to leave c502b553 unchanged. A reword would change the SHAs of the 10 unpushed commits after it, which are cited in implementation-commits fields (TRDD-C88OZANX) and, for c502b553 itself, on line 74 of the archived, immutable TRDD-UVOYC2V7; the correct account of the commit is in the body of 5fc8d345 and on that line. Privacy cost, accepted knowingly: the subject of c502b553 carries a local scratchpad path (a volume name and a session id), which becomes public at the next publish. The owner was told on 2026-11-04 and can still order a reword before then. The pre-push check this card adds must allow c502b553 by SHA, recorded as accepted by the main agent under the owner's "do as you wish", not as an owner decision.
 
 ## Approval log
 
