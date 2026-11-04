@@ -4,7 +4,7 @@ title: Hand the 3-pillars rules, detectors and hook over to the 3-pillars plugin
 column: todo
 status: tasked
 created: 2026-11-04T00:00:42+0100
-updated: 2026-11-04T19:48:09+0100
+updated: 2026-11-04T19:54:57+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -72,6 +72,7 @@ approval-datetime: 2026-11-04T00:00:42+0100
 
 - 2026-11-04T00:00:42+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-04T17:35:00+0100 — recorded (directive received before 17:27): USER delegated decisions to this session (verbatim in STATE); this session adopted the Release N scope proposal as 3.9.0 scope after consulting the advisor.
+2026-11-04 main-agent: TRDD-C88OZANX is archived as complete with a stale STATE block (it still names TRDD-90LAMQ8B as pending); its card is frozen, so the correction lives here: 90LAMQ8B is complete (52c8f975, fd654580).
 
 ## Provisional contract with the 3-pillars session (pending USER review of the 3-pillars migration plan)
 
