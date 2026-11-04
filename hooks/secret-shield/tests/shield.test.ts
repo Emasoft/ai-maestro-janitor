@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { isScanned, shieldRow, withheldRow, WITHHELD } from '../rows'
+import { mark } from '../patterns'
 
 // This build's test kit cannot answer beneath `session.append` (a stub that
 // answers is skipped, and nothing else does), so the hook's row logic is
@@ -128,6 +129,63 @@ test('nested results (Read) are walked and keep their shape', async ($, on) => {
   const out = await $.tool.call({ tool: 'Read', file_path: '/w/a.txt' })
 
   expect(out.result).toEqual({ type: 'text', file: { filePath: '/w/a.txt', content: 'KEY=[JANITOR-REDACTED:aws-access-key]\n', numLines: 1, startLine: 1, totalLines: 1 } })
+})
+
+test('a secret in a Bash error result is hidden, and the rest of the error is byte-identical', async ($, on) => {
+  mock.store(on)
+  on('ui.toast', () => ({ value: undefined }))
+  const error = `Exit code 128\nfatal: could not read from https://x:${TOKEN}@github.com/o/r.git\n  (check credentials)\n`
+  on('tool.call', () => ({ result: error, isError: true }))
+
+  const out = await $.tool.call({ tool: 'Bash', command: 'git fetch' })
+
+  expect(out.deny).toBeUndefined()
+  expect(out.isError).toBe(true)
+  expect(out.result).toBe(error.split(TOKEN).join(mark('github-token')))
+})
+
+test('a secret in an MCP tool error result is hidden, and the rest of the error is byte-identical', async ($, on) => {
+  mock.store(on)
+  on('ui.toast', () => ({ value: undefined }))
+  const error = `request failed: 403 for key ${AWS} (region eu-west-1)`
+  on('tool.call', () => ({ result: error, isError: true }))
+
+  const out = await $.tool.call({ tool: 'mcp__srv__run', query: 'x' })
+
+  expect(out.deny).toBeUndefined()
+  expect(out.isError).toBe(true)
+  expect(out.result).toBe(error.split(AWS).join(mark('aws-access-key')))
+})
+
+test('a redacted error keeps isError and context, and leaves out core\'s text and ref', async ($, on) => {
+  mock.store(on)
+  on('ui.toast', () => ({ value: undefined }))
+  const error = `auth failed for ${TOKEN}`
+  on('tool.call', () => ({ result: error, isError: true, text: error, ref: 3, context: ['retry later'] }))
+
+  const out = await $.tool.call({ tool: 'Bash', command: 'gh auth status' })
+
+  expect(out).toEqual({ result: error.split(TOKEN).join(mark('github-token')), isError: true, context: ['retry later'] })
+})
+
+test('an error with nothing to hide comes back as core gave it, text and ref included', async ($, on) => {
+  const given = { result: 'Exit code 1\nno such file', isError: true, text: 'Exit code 1\nno such file', ref: 5 } as const
+  on('tool.call', () => given)
+
+  const out = await $.tool.call({ tool: 'Bash', command: 'cat nope' })
+
+  expect(out).toEqual(given)
+})
+
+test('a structured MCP error made of content blocks is redacted and keeps its shape', async ($, on) => {
+  mock.store(on)
+  on('ui.toast', () => ({ value: undefined }))
+  const blocks = [{ type: 'text', text: 'request failed' }, { type: 'text', text: `token ${TOKEN} was rejected` }]
+  on('tool.call', () => ({ result: blocks, isError: true }))
+
+  const out = await $.tool.call({ tool: 'mcp__srv__run', query: 'x' })
+
+  expect(out).toEqual({ result: [{ type: 'text', text: 'request failed' }, { type: 'text', text: `token ${mark('github-token')} was rejected` }], isError: true })
 })
 
 test('/janitor-secret-shield counts what this session hid', async ($, on) => {

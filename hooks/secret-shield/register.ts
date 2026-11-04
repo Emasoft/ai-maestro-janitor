@@ -85,7 +85,10 @@ export const register: Register = (on, options) => {
     // maps it for the model and stores it as the call's result, so neither
     // the model nor the transcript's display copy keeps the secret.
     const ran = await next(e)
-    if (ran.deny !== undefined || ran.isError === true) return ran
+    // Error results are redacted too (TRDD-337UVA3J): a secret printed in an error
+    // message leaks to Claude just the same, and the marker still names the kind of
+    // key, which is enough to debug the failure. A clean error comes back untouched.
+    if (ran.deny !== undefined) return ran
     const { value, hits } = redactDeep(ran.result)
     if (countOf(hits) === 0) return ran
     try {
@@ -93,6 +96,13 @@ export const register: Register = (on, options) => {
     } catch {
       // The tally is a nicety.
     }
+    // An error with a secret is answered as a new object: only result is rewritten,
+    // isError and context are kept, and text and ref are left out. core sets both on
+    // what next(e) gives (ref makes core reuse its own messages verbatim, text is the
+    // unredacted error the model reads), and the types document both as absent on a
+    // hook's own answer. They do not say how core renders a hook's error from result;
+    // the live probe of TRDD-2V7OAUPE must confirm the model sees the marker.
+    if (ran.isError === true) return ran.context === undefined ? { result: value, isError: true } : { result: value, isError: true, context: ran.context }
     return ran.context === undefined ? { result: value as typeof ran.result } : { result: value as typeof ran.result, context: ran.context }
   })
 
