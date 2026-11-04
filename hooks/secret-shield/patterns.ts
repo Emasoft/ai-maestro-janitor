@@ -90,9 +90,12 @@ function isStrongName(name: string): boolean {
   return !SECRET_NAME.test(snake) && STRONG_NAME.test(snake)
 }
 
-/** A value long and key-shaped enough for a STRONG_NAME: 20 or more characters with a letter and a digit, or a base64 run of 40 or more (an Azure key is 88). */
+/**
+ * A value key-shaped enough for a STRONG_NAME: a base64 run of 40 or more characters with an upper-case letter, a lower-case letter and a digit (an Azure key is 88).
+ * WHY no shorter branch: a "20 or more characters with a letter and a digit" rule hid `STORAGE_KEY = 'user-preferences-v2-2024'`, `account_key: "acct_1A2b3C4d5E6f7G8h"` and a lowercase hex SHA, which are slugs, ids and digests, not keys (TRDD-Q6LPJTPO).
+ */
 function strongValue(value: string): boolean {
-  return (value.length >= 20 && /[A-Za-z]/.test(value) && /\d/.test(value)) || /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value)
+  return /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value) && /[A-Z]/.test(value) && /[a-z]/.test(value) && /\d/.test(value)
 }
 
 function looksSecret(value: string, isQuoted: boolean): boolean {
@@ -229,13 +232,26 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
 // so it also works inside quoted and escaped JSON. The name must follow a `;` or start a line.
 const CONN = /(^|;)([ \t]*(?:AccountKey|SharedAccessKey|AccessKey|Password|Pwd)[ \t]*=[ \t]*)([^;\s"'`\\]+)/gim
 
+/**
+ * The text before the `;` at `offset`, back to the previous `;` or the start of its line.
+ * WHY the `;` is searched first: a newline search that ran first would scan back to the start of the text for every hit
+ * when the text has no newline, which is quadratic (measured: 667 ms for 512 KB of `;Password=abc`). The previous `;`
+ * bounds the slice, and each `;` is the bound of at most one hit. At offset 0 the search clamps to the `;` itself and
+ * the segment is empty (TRDD-Q6LPJTPO).
+ */
+function settingBefore(whole: string, offset: number): string {
+  const segment = whole.slice(whole.lastIndexOf(';', offset - 1) + 1, offset)
+  return segment.slice(segment.lastIndexOf('\n') + 1)
+}
+
 /** Keys in `;`-delimited connection strings: keeps the name, hides the value. */
 function redactConnectionStrings(text: string, hits: Hits, found: Map<string, string>): string {
   const kind = 'connection-string-key'
   return text.replace(CONN, (match: string, lead: string, prefix: string, value: string, offset: number, whole: string) => {
-    // WHY: at the start of a line the name needs a `;` after its value, or `password=abc` (a plain assignment) would
-    // be read as a connection string and keep today's behaviour only by luck.
-    if (lead === '' && whole[offset + match.length] !== ';') return match
+    // WHY: at the start of a line the value needs a `;` after it, and the text after that `;`, up to the next `;` or newline, must hold a word character right before an `=`. `password=abc` (a plain assignment) and `password=hashed;` (the end of a code statement) have no such setting after them; `Password=V;Server=h` does (TRDD-Q6LPJTPO).
+    if (lead === '' && !/^;[^;\n]*\w=/.test(whole.slice(offset + match.length))) return match
+    // WHY: after a `;` the neighbouring setting must be `Name=value` too: in code the segment before it is `a = 1` or `x`, not a connection-string pair. The segment runs back to the previous `;` or the start of the line; at offset 0 the search clamps to the match itself and the segment is empty (TRDD-Q6LPJTPO).
+    if (lead === ';' && !/\w=/.test(settingBefore(whole, offset))) return match
     // WHY: a value that holds a marker was hidden by an earlier rule, which already counted it; hiding it again would
     // count it twice and swap its kind. Never MARKS.test(): MARKS has the g flag and keeps lastIndex between calls.
     // A value that only partly holds a marker is a known miss.
@@ -244,6 +260,8 @@ function redactConnectionStrings(text: string, hits: Hits, found: Map<string, st
     if (PLACEHOLDER.test(value)) return match
     // WHY: `a=1;password=getPw()`, `x;password=input.value` and `Password=${DB_PASS}` are code, not a literal key.
     if (/[(){}]/.test(value) || value.startsWith('$') || /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(value)) return match
+    // WHY: a real connection string almost never spaces the `=`, a code statement does (`password = hashed;`, `a = 1; password = pw;`). With a space or tab next to the `=` the value must look like a secret on its own (TRDD-Q6LPJTPO).
+    if (/[ \t]=|=[ \t]/.test(prefix) && !looksSecret(value, false)) return match
     hits[kind] = (hits[kind] ?? 0) + 1
     // WHY: record the key so a copy of it written elsewhere in the same text, row or value is hidden too.
     if (propagates(value)) found.set(value, kind)

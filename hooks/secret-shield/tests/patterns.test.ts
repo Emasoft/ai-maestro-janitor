@@ -643,10 +643,43 @@ describe('names and values that look like keys but are not stay visible', () => 
     'Password=${DB_PASS};Server=h',
     'Password=changeme;Server=h',
     'password=abc',
+    // WHY (TRDD-Q6LPJTPO): code statements, slugs and ids that commit dd145aa4 hid by mistake; each must stay visible.
+    '    password = hashed;',
+    'a = 1; password = pw;',
+    'Pwd = encoded;',
+    "const STORAGE_KEY = 'user-preferences-v2-2024'",
+    'account_key: "acct_1A2b3C4d5E6f7G8h"',
+    // Line start with no key after the `;`: the end of a code statement. Only guard 2b keeps it visible.
+    'password=hashed;',
+    // No spaces in the second pair, so only guard 2c (the segment before the `;` holds no `Name=`) keeps it visible.
+    'a = 1;password=pw;',
+    // A `Name=value` pair before it, so guard 2c passes; the spaced `=` with a plain word is what only guard 2a keeps visible.
+    'x=1; password = hashed;',
   ]
   for (const line of guards) {
     test(line, () => {
       for (const out of threeWays(line)) expect(out).toBe(line)
     })
   }
+})
+
+
+// False-positive fixes for the name rules (TRDD-Q6LPJTPO). The values are made at run time, as above.
+describe('a STRONG_NAME needs a mixed-case base64 key; a spaced connection-string pair needs a secret-looking value', () => {
+  test('storage_key = "<40 lowercase hex>" (a SHA) stays visible', () => {
+    const hex = Array.from({ length: 40 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('')
+    const line = `storage_key = "${hex}"`
+    for (const out of threeWays(line)) expect(out).toBe(line)
+  })
+
+  test('storage_key = "<44 mixed-case base64 characters>" is hidden', () => {
+    const key = fake(44)
+    expect(key.length).toBe(44)
+    for (const out of threeWays(`storage_key = "${key}"`)) expect(out).toBe(`storage_key = "${ASSIGNED}"`)
+  })
+
+  test('Server=h; Password = V; with spaces around the = is hidden through looksSecret', () => {
+    const [input, want] = [`Server=h; Password = ${fake()};`, `Server=h; Password = ${CONN_KEY};`]
+    for (const out of threeWays(input)) expect(out).toBe(want)
+  })
 })
