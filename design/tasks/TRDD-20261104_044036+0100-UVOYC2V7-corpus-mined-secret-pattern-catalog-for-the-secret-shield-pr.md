@@ -4,7 +4,7 @@ title: corpus-mined secret-pattern catalog for the secret-shield provider step
 column: dev
 status: tasked
 created: 2026-11-04T04:40:36+0100
-updated: 2026-11-04T04:48:09+0100
+updated: 2026-11-04T04:54:19+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -71,6 +71,7 @@ Turn the 132 corpus-mining reports into one machine-checked catalog of secret-de
 
 - 2026-11-04T04:40:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-04T04:48:09+0100 — column → dev by main-agent@ai-maestro-janitor.
+- 2026-11-04 — main-agent@ai-maestro-janitor: this card was added in c502b553, whose commit message is a stale scratch-file error line, not a description; the WHY is in 5fc8d345. Whether to reword c502b553 (and 5fc8d345, which names it) before the next publish is the owner's decision, open.
 
 ## Corpus (reproducible)
 
