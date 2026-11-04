@@ -28,8 +28,18 @@ const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // scheme in front of the `://`, of any length, and the text kept is the same, because the scheme was never changed. Do not cap the
 // scheme length instead: a cap would stop hiding a scheme of more than N unbroken letters. Group 1 is `://` and the scheme stays
 // outside the match (TRDD-Q6LPJTPO).
+// WHY the port-skip lookahead scans its query with `(?:(?!:\/\/)[^\s@#])*=` and not `[^\s@#]*=`: the plain class does not stop at
+// `://`, so for every `://` whose password starts with up to 5 digits then `?` it scanned on to the end of the text looking for an
+// `=`. `b://u:1?` repeated k times and followed by n characters cost O(k*n) (k=4000, n=64 KB took 18.5 s in system Bun under
+// load). Stopping the scan at `://` changes no result: the old class `[^\s@#]` already stopped at the first `@`, so an `=` it
+// found past the next `://` means no `@` sits before that `://`. The password branch cannot cross `://`, so it cannot reach an `@`
+// either, and both versions hide nothing there. Each scan now ends at the next `://`, so the scans themselves are linear. Measured
+// under claude plugin test, URL_PASSWORD still slows by a step of tens to about 200 times between 96 KB and 128 KB on the grown()
+// shape of tests/patterns.test.ts, and the previous regex shows a step of similar size on `b://u:` repeated then `x` (it was not
+// measured on grown() past 64 KB, where its quadratic cost hides any step); the cause is not found (TRDD-OD5Z90YL). Do not cap the
+// scan length instead: a cap would read a port with a longer query as a password and hide it (TRDD-Q6LPJTPO).
 const URL_PASSWORD = new RegExp(
-  String.raw`(?=:\/\/)(?<=\b[a-z][a-z0-9+.-]*)(:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?[^\s@#]*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
+  String.raw`(?=:\/\/)(?<=\b[a-z][a-z0-9+.-]*)(:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?(?:(?!:\/\/)[^\s@#])*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
   'gi',
 )
 
