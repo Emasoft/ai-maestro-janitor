@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-04T21:50:52+0100
+updated: 2026-11-04T21:57:38+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,7 +35,7 @@ Blocked by TRDD-3GP0D06D: the shield is not turned on while its tests run outsid
 TRDD-0Y3UW1NF (write-back guard) and TRDD-TEP6F3A3 (checks before wiring). TRDD-337UVA3J does not block it: upstream ships without error-result redaction.
 
 Split out of TRDD-M1218EMH.
-- Why the trdd:<id> terminal predicates cannot release this card on a failed, cancelled, superseded or refused blocker: trdd-drift _try_unblock (scripts/detectors/trdd-drift.py) restores a blocked card only when the predicate holds (TERMINAL_COLUMNS) and every blocked-by id is in DONE_COLUMNS, so only complete, published or live releases it, and blocker-probe counts those three. A blocker that ends at completed keeps this card blocked (see TRDD-OEEH2W28). Covered by test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done in tests/test_trdd_drift_unblock_when.py. Still open: if blocked-by is emptied by hand, the predicates alone would release the card.
+- Why the trdd:<id> terminal predicates cannot release this card on a failed, cancelled, superseded or refused blocker: trdd-drift _try_unblock (scripts/detectors/trdd-drift.py) restores a blocked card only when the predicate holds (TERMINAL_COLUMNS) and every blocked-by id is in DONE_COLUMNS, so only complete, published or live releases it, and blocker-probe counts those three. A blocker that ends at completed keeps this card blocked (see TRDD-OEEH2W28). Covered by test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done in tests/test_trdd_drift_unblock_when.py. Since 2026-11-04 the predicate decision:owner-answers-TEP6F3A3-wiring-gate never clears on its own, so the predicates alone cannot release this card until it is removed once the owner has answered TRDD-TEP6F3A3's wiring questions; the wiring gate test (tests/test_secret_shield_wiring_gate.py) reads only blocked-by and does not check that predicate.
 
 ## Approval log
 
