@@ -1,10 +1,10 @@
 ---
 trdd-id: C88OZANX
 title: memory transaction journal loader trusts the journal it loads
-column: blocked
-status: tasked
+column: complete
+status: archived
 created: 2026-11-04T06:28:10+0100
-updated: 2026-11-04T07:32:34+0100
+updated: 2026-11-04T19:43:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,10 +17,10 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T06:28:10+0100
-implementation-commits: [f3a2313d, 5480fc77]
+implementation-commits: [f3a2313d, 5480fc77, ae41166d]
 unblock-when: [trdd:90LAMQ8B]
-blocked-by: [90LAMQ8B]
-pre-block-column: dev
+blocked-by: []
+pre-block-column: 
 ---
 
 # memory transaction journal loader trusts the journal it loads
@@ -44,12 +44,15 @@ Latent, manual trigger only. resume_pending, commit and abort run only through s
 ## Done when
 - [x] Commit A lands with tests that fail on the old code
 - [x] Commit B lands with tests that fail on the old code
-- [ ] the full test suite, ruff, mypy and pyright pass
+- [x] the full test suite, ruff, mypy and pyright pass
 
 ## Approval log
 
 - 2026-11-04T06:28:10+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-04T07:32:34+0100 — column → blocked by main-agent@ai-maestro-janitor. box 3 waits on TRDD-90LAMQ8B; no code work left on this card
+- 2026-11-04T19:43:29+0100 — column → dev by main-agent@ai-maestro-janitor. TRDD-90LAMQ8B is complete (52c8f975, fd654580) Cleared blocked-by (--clear-blocker override).
+- 2026-11-04T19:43+0100 — box 3 met: f3a2313d, 5480fc77 and ae41166d (committed 06:38 to 07:33) were all in the tree of the full-suite run started 18:22, which gave 18932 passed, 0 failed, 0 errors; no scripts/ commit since 18:00; ruff, mypy and pyright clean in the TRDD-90LAMQ8B follow-up runs.
+- 2026-11-04T19:43:54+0100 — COMPLETE by main-agent@ai-maestro-janitor. all Done-when items met; full suite and linters green.
 
 ## Notes
 
