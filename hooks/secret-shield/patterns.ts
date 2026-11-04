@@ -20,8 +20,16 @@ const MARKS = new RegExp(MARK_BODY, 'g')
 // Cuts a text at its markers; the capture group keeps each marker as an odd entry. Not global: String.split ignores lastIndex.
 const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // Built from MARK_BODY so the marker grammar has one source.
+// WHY the scheme is a lookbehind at the `://` and not a prefix `\b([a-z][a-z0-9+.-]*:\/\/)`: that prefix starts at every word
+// boundary and scans the whole run of scheme characters (letters, digits, `+`, `.`, `-`) looking for `://`, so a long run with
+// none (base64, hex, a hyphenated blob; 16 KB of `A1-` took 0.5-1.4 s, 64 KB did not finish in 10 minutes) was quadratic. Here the
+// lookahead `(?=:\/\/)` rejects every position that is not a `://` in O(1), and the lookbehind then reads back over the run once
+// per `://` (the runs before two `://` never overlap), so the cost is linear. It gives up nothing: a match needs the same
+// scheme in front of the `://`, of any length, and the text kept is the same, because the scheme was never changed. Do not cap the
+// scheme length instead: a cap would stop hiding a scheme of more than N unbroken letters. Group 1 is `://` and the scheme stays
+// outside the match (TRDD-Q6LPJTPO).
 const URL_PASSWORD = new RegExp(
-  String.raw`\b([a-z][a-z0-9+.-]*:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?[^\s@#]*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
+  String.raw`(?=:\/\/)(?<=\b[a-z][a-z0-9+.-]*)(:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?[^\s@#]*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
   'gi',
 )
 
@@ -169,12 +177,12 @@ function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>
   // (a token hidden first, such as an AWS access key used as the user name) but no other [,
   // so a bracketed IPv6 host is never read as a user. A password cannot contain :// so it never runs
   // into a second URL. Known false positive: `localhost:3000#a@b` reads its fragment as a password.
-  return text.replace(URL_PASSWORD, (match, scheme: string, user: string, password: string) => {
+  return text.replace(URL_PASSWORD, (match, separator: string, user: string, password: string) => {
     const rest = password.replace(MARKS, '')
     if (rest === '' || PLACEHOLDER.test(rest)) return match
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
     if (propagates(password)) found.set(password, 'url-password')
-    return `${scheme}${user}:${mark('url-password')}@`
+    return `${separator}${user}:${mark('url-password')}@`
   })
 }
 

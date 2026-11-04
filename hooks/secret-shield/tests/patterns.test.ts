@@ -263,6 +263,64 @@ describe('URL passwords containing a slash', () => {
   })
 })
 
+describe('URL passwords are hidden whatever comes before the scheme', () => {
+  const marker = '[JANITOR-' + 'REDACTED:url-password]'
+  const pw = j('s3cret', 'Pw1')
+  const cases: Array<[string, string, string]> = [
+    ['https with user and password', 'https://user:', '@host'],
+    ['postgres', 'postgres://u:', '@h/db'],
+    ['git+ssh, a plus in the scheme', 'git+ssh://u:', '@h'],
+    ['jdbc:postgresql, a colon before the scheme', 'jdbc:postgresql://u:', '@h'],
+    ['after a hyphen', '-https://u:', '@h'],
+    ['after two hyphens', '--url=https://u:', '@h'],
+    ['after an opening parenthesis', '(https://u:', '@h)'],
+    ['after a double quote', '"https://u:', '@h"'],
+    ['after an equals sign', 'url=https://u:', '@h'],
+    ['after a space', 'see https://u:', '@h'],
+    ['after a dot, a dotted scheme', 'foo.https://u:', '@h'],
+    ['a scheme 20 characters long', 'abcdefghijklmnopqrst://u:', '@h'],
+    ['40 letters glued to https', 'abcdefghijklmnopqrstuvwxyzabcdefghijklmnhttps://u:', '@h'],
+    ['a long scheme with hyphens', 'a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-https://u:', '@h'],
+  ]
+  for (const [name, head, tail] of cases) {
+    test(`${name}: the password is hidden, the rest is kept`, () => {
+      const { text, hits } = redact(head + pw + tail)
+      expect(text).toBe(head + marker + tail)
+      expect(hits['url-password']).toBe(1)
+    })
+  }
+})
+
+// WHY: the scheme used to be a prefix `\b([a-z][a-z0-9+.-]*:\/\/)` that started at every word boundary and scanned the whole run of
+// scheme characters, so a long run with no `://` was quadratic (16 KB of `A1-` took 0.5-1.4 s). These tests fail on that regex
+// because of time, and assert a count or a duration, never toContain on a big string.
+describe('a long run of scheme characters is redacted in linear time', () => {
+  const rep = (unit: string, length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length)
+  const timed = (text: string): number => {
+    const started = performance.now()
+    redact(text)
+    return performance.now() - started
+  }
+  test('32 KB of A1- finishes in under 200 ms', () => {
+    expect(timed(rep('A1-', 32 * 1024))).toBeLessThan(200)
+  })
+  test('https:// at the start, then 256 KB of A1- with no at-sign, finishes in under 1 s', () => {
+    expect(timed('https://' + rep('A1-', 256 * 1024))).toBeLessThan(1000)
+  })
+  test('256 KB of A1- and of base64-like text, each with one :// in the middle, finishes in under 1 s', () => {
+    for (const unit of ['A1-', 'aB3dE5fG7hJ9kL1mN3pQ+r/S7tU9vW1xY3z=']) {
+      const half = rep(unit, 128 * 1024)
+      expect(timed(half + 'https://u:' + j('s3cret', 'Pw1') + '@h ' + half)).toBeLessThan(1000)
+    }
+  })
+  test('the password in that one URL is still hidden', () => {
+    const half = rep('A1-', 32 * 1024)
+    const { text, hits } = redact(half + ' https://u:' + j('s3cret', 'Pw1') + '@h ' + half)
+    expect(hits['url-password']).toBe(1)
+    expect(text.split(j('s3cret', 'Pw1')).length - 1).toBe(0)
+  })
+})
+
 describe('redacting twice changes nothing', () => {
   const cases: Array<[string, string]> = [
     ['an AWS key in the user part', 'https://' + j('AKIA', 'IOSFODNN7EXAMPLE') + ':' + j('secret', 'pw123') + '@host.acme.io'],
