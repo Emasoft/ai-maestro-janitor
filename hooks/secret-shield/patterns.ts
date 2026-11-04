@@ -84,8 +84,8 @@ function looksSecret(value: string, isQuoted: boolean): boolean {
   return (value.length >= 6 && /\d/.test(value)) || value.length >= 16
 }
 
-/** Replaces each match of `rule` with its mark, counting into `hits`. */
-function applyRule(text: string, rule: Rule, hits: Hits): string {
+/** Replaces each match of `rule` with its mark, counting into `hits`. Exported so tests can drive a synthetic rule. */
+export function applyRule(text: string, rule: Rule, hits: Hits): string {
   // String.prototype.replace with a /g pattern sets lastIndex to 0 before it starts, so a lastIndex left behind by
   // anyone who ran .test() or .exec() on this shared RegExp cannot make it skip text. Keep it a replace (no exec loop).
   return text.replace(rule.pattern, (match: string, ...groups: unknown[]) => {
@@ -93,7 +93,13 @@ function applyRule(text: string, rule: Rule, hits: Hits): string {
     const secret = group === 0 ? match : String(groups[group - 1] ?? '')
     if (secret === '' || MARK.test(secret)) return match
     hits[rule.kind] = (hits[rule.kind] ?? 0) + 1
-    return group === 0 ? mark(rule.kind) : match.replace(secret, mark(rule.kind))
+    // Hide every non-overlapping copy of the captured text inside the match. A string replace hides the first copy
+    // only, and the first copy can sit in the gap before the capture (key name, gap, then the quoted value), which
+    // leaves the captured secret in view. Hiding the group by its index would leak the other copy instead (found
+    // during the UBS triage of 2026-11-04; UBS did not report it; TRDD-Q6LPJTPO). The hit is still counted once per
+    // match. The `secret === ''` guard above must stay before the split: `match.split('')` splits into single
+    // characters, and the join would put a marker between every pair.
+    return group === 0 ? mark(rule.kind) : match.split(secret).join(mark(rule.kind))
   })
 }
 

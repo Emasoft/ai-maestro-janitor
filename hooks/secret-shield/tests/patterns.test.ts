@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, withhold } from '../patterns'
+import { applyRule, countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, withhold } from '../patterns'
 import { pypiToken } from '../rules/dev-services'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
@@ -346,6 +346,27 @@ describe('token rule order', () => {
     expect(text).toBe(`key ${mark('anthropic-key')} end`)
     expect(hits['anthropic-key']).toBe(1)
     expect(hits['openai-key']).toBeUndefined()
+  })
+})
+
+describe('a rule whose secret is a capture group hides every copy of it inside the match', () => {
+  // Shape of a corpus rule: key name, a lazy gap of up to 40 characters, then a quoted captured value.
+  const rule = { kind: 'test-dup', pattern: /api_key[\s\S]{0,40}?"([A-Z0-9]{16,})"/g, group: 1 }
+  const value = j('ABCD1234', 'EFGH5678')
+
+  test('a copy in the gap before the capture is hidden too', () => {
+    const hits: Record<string, number> = {}
+    const out = applyRule(`api_key ${value} = "${value}"`, rule, hits)
+    expect(out).not.toContain(value)
+    expect(hits).toEqual({ 'test-dup': 1 })
+    expect(out).toBe(`api_key ${mark('test-dup')} = "${mark('test-dup')}"`)
+  })
+
+  test('a single copy is hidden and nothing else changes', () => {
+    const hits: Record<string, number> = {}
+    const out = applyRule(`api_key = "${value}" end`, rule, hits)
+    expect(out).toBe(`api_key = "${mark('test-dup')}" end`)
+    expect(hits).toEqual({ 'test-dup': 1 })
   })
 })
 
