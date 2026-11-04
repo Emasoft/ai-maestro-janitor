@@ -249,7 +249,8 @@ function redactConnectionStrings(text: string, hits: Hits, found: Map<string, st
   const kind = 'connection-string-key'
   return text.replace(CONN, (match: string, lead: string, prefix: string, value: string, offset: number, whole: string) => {
     // WHY: at the start of a line the value needs a `;` after it, and the text after that `;`, up to the next `;` or newline, must hold a word character right before an `=`. `password=abc` (a plain assignment) and `password=hashed;` (the end of a code statement) have no such setting after them; `Password=V;Server=h` does (TRDD-Q6LPJTPO).
-    if (lead === '' && !/^;[^;\n]*\w=/.test(whole.slice(offset + match.length))) return match
+    // Exception: a lone `AccountKey=<value>;` line, with no setting after the `;`, is also hidden when looksSecret accepts the value on its own. The assignment pass does not hide AccountKey for a value shorter than strongValue's 40 base64 characters, while Password, Pwd and SharedAccessKey it already hides (measured 2026-11-04); `password=hashed;` stays visible because looksSecret rejects a short word (TRDD-Q6LPJTPO).
+    if (lead === '' && !/^;[^;\n]*\w=/.test(whole.slice(offset + match.length)) && !(whole[offset + match.length] === ';' && looksSecret(value, false))) return match
     // WHY: after a `;` the neighbouring setting must be `Name=value` too: in code the segment before it is `a = 1` or `x`, not a connection-string pair. The segment runs back to the previous `;` or the start of the line; at offset 0 the search clamps to the match itself and the segment is empty (TRDD-Q6LPJTPO).
     if (lead === ';' && !/\w=/.test(settingBefore(whole, offset))) return match
     // WHY: a value that holds a marker was hidden by an earlier rule, which already counted it; hiding it again would

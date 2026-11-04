@@ -609,6 +609,8 @@ describe('Azure storage keys and connection strings are hidden', () => {
   const keys: Array<[string, (v: string) => [string, string]]> = [
     ['SQL Server: Password=V; after other settings', v => [`Server=tcp:h,1433;Database=d;User ID=u;Password=${v};`, `Server=tcp:h,1433;Database=d;User ID=u;Password=${CONN_KEY};`]],
     ['Password=V;Server=h at the start of a line', v => [`Password=${v};Server=h`, `Password=${CONN_KEY};Server=h`]],
+    // WHY (TRDD-Q6LPJTPO): a lone line with no setting after the `;` is hidden when the value looks like a secret on its own; 7c79e3c0 had made it visible. AccountKey is used because the assignment rule already hides a lone Password/Pwd/AccessKey/SharedAccessKey line (as 'assignment'), so only AccountKey reaches this branch.
+    ['AccountKey=V; alone on a line', v => [`AccountKey=${v};`, `AccountKey=${CONN_KEY};`]],
     ['ODBC: Pwd=V;', v => [`Driver={ODBC};Server=h;Uid=u;Pwd=${v};`, `Driver={ODBC};Server=h;Uid=u;Pwd=${CONN_KEY};`]],
     ['endpoint=https://h/;accesskey=<value>', v => [`endpoint=https://h/;accesskey=${v}`, `endpoint=https://h/;accesskey=${CONN_KEY}`]],
     [
@@ -655,6 +657,8 @@ describe('names and values that look like keys but are not stay visible', () => 
     'a = 1;password=pw;',
     // A `Name=value` pair before it, so guard 2c passes; the spaced `=` with a plain word is what only guard 2a keeps visible.
     'x=1; password = hashed;',
+    // WHY (TRDD-Q6LPJTPO): the segment before it, `Server=h`, holds a `\w=`, so guard 2c passes and the value has no spaced `=`; only the dotted-identifier check (a property access, not a literal) keeps it visible.
+    'Server=h;Password=cfg.dbPassword;',
   ]
   for (const line of guards) {
     test(line, () => {
