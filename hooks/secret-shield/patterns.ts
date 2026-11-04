@@ -30,12 +30,12 @@ const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // outside the match (TRDD-Q6LPJTPO).
 // WHY the port-skip lookahead scans its query with `(?:(?!:\/\/)[^\s@#])*=` and not `[^\s@#]*=`: the plain class does not stop at
 // `://`, so for every `://` whose password starts with up to 5 digits then `?` it scanned on past every later `://` looking for an
-// `=`, up to the next whitespace, `@` or `#`, which on a long line without them is the end of the text. `b://u:1?` repeated k
-// times and followed by n characters cost O(k*n) (k=4000, n=64 KB took 18.5 s in system Bun under load). Stopping the scan at
-// `://` changes no result: the old class `[^\s@#]` already stopped at the first `@`, so an `=` it found past the next `://` means
-// no `@` sits before that `://`. The password branch cannot cross `://`, so it cannot reach an `@` either, and both versions hide
-// nothing there. Each scan now ends at the next `://`, so the scans themselves are linear. Measured under claude plugin test,
-// URL_PASSWORD still slows by a step of tens to about 200 times between 96 KB and 128 KB on the grown() shape of
+// `=`, up to the next whitespace, `@` or `#`, which is the end of the line, and of the text when no newline follows. `b://u:1?`
+// repeated k times and followed by n characters cost O(k*n) (k=4000, n=64 KB took 18.5 s in system Bun under load). Stopping the
+// scan at `://` changes no result: the old class `[^\s@#]` already stopped at the first `@`, so an `=` it found past the next
+// `://` means no `@` sits before that `://`. The password branch cannot cross `://`, so it cannot reach an `@` either, and both
+// versions hide nothing there. Each scan now ends at the next `://`, so the scans themselves are linear. Measured under claude
+// plugin test, URL_PASSWORD still slows by a step of tens to about 200 times between 96 KB and 128 KB on the grown() shape of
 // tests/patterns.test.ts, and the previous regex shows a step of similar size on `b://u:` repeated then `x` (it was not measured
 // on grown() past 64 KB, where its quadratic cost hides any step); the cause is not found (TRDD-OD5Z90YL). Do not cap the scan
 // length instead: a cap would read a port with a longer query as a password and hide it (TRDD-Q6LPJTPO).
