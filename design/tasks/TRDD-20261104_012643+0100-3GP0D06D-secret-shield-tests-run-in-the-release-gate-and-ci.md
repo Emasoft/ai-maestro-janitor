@@ -4,7 +4,7 @@ title: secret-shield tests run in the release gate and CI
 column: todo
 status: tasked
 created: 2026-11-04T01:26:43+0100
-updated: 2026-11-04T01:33:53+0100
+updated: 2026-11-04T02:27:20+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -29,6 +29,7 @@ Open question: can a CI runner get the mods test kit (claude-code/testing) and i
 ## Done when
 A deliberate failing shield test makes the gate step fail when that step is run on its own, without publishing, and makes CI fail on a feature branch.
 Found during TRDD-Q6LPJTPO (review of commit baeecd80).
+- The runner names hooks/secret-shield/tests explicitly and never runs a root-level bun test: _corpus_dev/ holds about 130 cloned untrusted repos with their own *.test.ts and *.spec.* files, which a root discovery would run (review finding, 2026-11-04).
 
 ## Approval log
 
