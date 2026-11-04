@@ -4,7 +4,7 @@ title: ideas digest of secret-leak prevention and remediation techniques from th
 column: todo
 status: tasked
 created: 2026-11-04T05:45:31+0100
-updated: 2026-11-04T09:45:11+0100
+updated: 2026-11-04T09:48:25+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -27,7 +27,7 @@ approval-datetime: 2026-11-04T05:45:31+0100
 
 ## Goal
 
-One deduplicated digest of the prevention, detection and remediation ideas the miners recorded in the ## Ideas sections of the 132 reports under reports_dev/secret-shield/corpus-mining/. Each idea lists the repos it came from, and each is marked as either already done by the janitor (name the file) or not done.
+One deduplicated digest of the prevention, detection and remediation ideas the miners recorded in the ## Ideas sections of the mining reports: reports_dev/secret-shield/corpus-mining/*.md (108 reports) and reports_dev/secret-shield/corpus-mining-removed/*.md (24 reports of repos removed under decision 4). Each idea lists the repos it came from, and each is marked as either already done by the janitor (name the file) or not done.
 Sources: the reproducible corpus list and mined commits recorded in TRDD-UVOYC2V7 (archived).
 
 ## Constraints
@@ -38,7 +38,7 @@ Sources: the reproducible corpus list and mined commits recorded in TRDD-UVOYC2V
 
 ## Done when
 
-- [ ] every ## Ideas entry in the 132 reports is covered by exactly one digest item, or listed as dropped with a reason
+- [ ] every ## Ideas entry in the 132 mining reports (reports_dev/secret-shield/corpus-mining/*.md, 108 reports, and reports_dev/secret-shield/corpus-mining-removed/*.md, 24 reports) is covered by exactly one digest item, or listed as dropped with a reason
 - [ ] each digest item cites its source repos and says done or not done in the janitor
 - [ ] each ## Ideas entry gets an id (report name plus its position in that report), so coverage is checked by a script, not by eye
 - [ ] each "done in the janitor" claim cites a file:line and quotes that line, so a script can recheck it
