@@ -322,8 +322,8 @@ describe('a long run of scheme characters is redacted in linear time', () => {
 })
 
 // WHY: the port-skip lookahead of the URL password rule scanned its query with [^\s@#]*=, which does not stop at ://, so every :// whose password
-// starts with digits then ? scanned on past every later :// and past any =, up to the next whitespace, @ or #, which is the end of the line, and
-// of the text when no newline follows. b://u:1? repeated k times and followed by n characters cost O(k*n). The growth tests grow the URL count
+// starts with digits then ? scanned on past every later :// and past any =, up to the next whitespace, @ or #, at the latest the end of the line,
+// and of the text when no newline follows. b://u:1? repeated k times and followed by n characters cost O(k*n). The growth tests grow the URL count
 // with the size (size/16 URLs, then size/2 characters): with a fixed URL count the old regex is linear in n and the test proves nothing. They
 // assert the ratio t(8s)/t(s), which is machine speed independent, never an absolute duration (the pinned 1 s test below is only a bound against a
 // catastrophic slowdown) (TRDD-Q6LPJTPO: linear means the ratio stays near 8, quadratic means near 64). The sizes are 8 KB and 64 KB on purpose.
