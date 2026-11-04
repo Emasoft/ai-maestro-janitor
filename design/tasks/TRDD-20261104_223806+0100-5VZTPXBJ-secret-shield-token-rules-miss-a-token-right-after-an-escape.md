@@ -4,7 +4,7 @@ title: Secret-shield token rules miss a token right after an escaped newline, a 
 column: todo
 status: tasked
 created: 2026-11-04T22:38:06+0100
-updated: 2026-11-04T22:38:06+0100
+updated: 2026-11-05T00:46:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -49,3 +49,10 @@ Found during TRDD-Q6LPJTPO (Google family, d711e5f8).
 ## Approval log
 
 - 2026-11-04T22:38:06+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes
+
+- 2026-11-05 — Done-when item 1 is not ticked. The KNOWN DEFECT escape-boundary test in hooks/secret-shield/tests/known-misses.test.ts (317d6a9e) covers all three escapes (a literal backslash-n, %22 and a literal backslash-t) for each of 21 rules, and asserts that count. But this card measures five rules (AIza, ghp_, sk-ant-api03-, AKIA, xoxb-), not 21, and its Done-when items are numbered, not checkboxes, so there is no box to tick. To close item 1, the Problem section must state the 21-rule coverage, and the items must become checkboxes. (Withdrawn: see the correction of 2026-11-05 below.)
+- 2026-11-05 — The refresh-token rule's refusal of a start right after a plus sign is measured and admitted as KNOWN-MISSES entry google-refresh-after-plus. The URL-encoded form of a refresh token is on the TRDD-Q6LPJTPO backlog.
+- 2026-11-05 — The test is one loop over all rules. A partial fix turns it red and must split it per rule.
+- 2026-11-05 — Correction to the first note above: Done-when item 1 is met. That note wrongly treated the test's 21-rule coverage as a mismatch: item 1 needs the 5 measured rules, and the 21 include them (per the tokens record of the KNOWN DEFECT test in hooks/secret-shield/tests/known-misses.test.ts: AIza is googleApiKey, ghp_ is githubTokenClassic, sk-ant-api03- is anthropicKey, AKIA is awsAccessKey, xoxb- is slackToken). Its call to turn the items into checkboxes is withdrawn.
