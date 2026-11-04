@@ -50,7 +50,7 @@ Test: KNOWN MISS google-refresh-legacy-single-slash: a legacy Google refresh tok
 
 ## google-access-over-2048
 
-Reason: (c) Google documents a 2048-byte cap for an access token (https://developers.google.com/identity/protocols/oauth2, section "Token size"); the rule bounds the first segment at 2048 (hooks/secret-shield/rules/cloud.ts:15), and the part past the bound stays visible.
+Reason: (c) Google documents a 2048-byte cap for an access token (https://developers.google.com/identity/protocols/oauth2, section "Token size"); the rule bounds the first segment at 2048 (hooks/secret-shield/rules/cloud.ts:15-16), and the part past the bound stays visible.
 Shape: ya29. followed by 2100 characters in the first segment: the first 2048 are hidden, the last 52 stay visible.
 Hidden instead: The same value after access_token= is hidden whole.
 Card: none
@@ -58,7 +58,7 @@ Test: KNOWN MISS google-access-over-2048: the part of a Google access token past
 
 ## google-access-dotted-segment-over-512
 
-Reason: (b) the dotted form of an access token is undocumented; the 512-character bound per dotted segment and the limit of four dotted segments are copied from veil (hooks/secret-shield/rules/cloud.ts:15).
+Reason: (b) the dotted form of an access token is undocumented; the 512-character bound per dotted segment and the limit of four dotted segments are copied from veil (hooks/secret-shield/rules/cloud.ts:15-16).
 Shape: ya29., a 30-character first segment, a dot and a dotted segment of 600 characters: the first 512 of it are hidden, the last 88 stay visible.
 Hidden instead: The same value after access_token= is hidden whole.
 Card: none
@@ -66,7 +66,7 @@ Test: KNOWN MISS google-access-dotted-segment-over-512: the part of a dotted Goo
 
 ## google-access-more-than-four-dotted-segments
 
-Reason: (b) the dotted form of an access token is undocumented; the limit of four dotted segments is copied from veil (hooks/secret-shield/rules/cloud.ts:15).
+Reason: (b) the dotted form of an access token is undocumented; the limit of four dotted segments is copied from veil (hooks/secret-shield/rules/cloud.ts:15-16).
 Shape: ya29., a 30-character first segment and five dotted segments of 20 characters: the fifth, with its dot (21 characters), stays visible.
 Hidden instead: The same value after access_token= is hidden whole.
 Card: none
@@ -74,7 +74,7 @@ Test: KNOWN MISS google-access-more-than-four-dotted-segments: the fifth dotted 
 
 ## google-refresh-over-512
 
-Reason: (c) Google documents a 512-byte cap for a refresh token (https://developers.google.com/identity/protocols/oauth2, section "Token size"); the rule bounds the token at 512 characters (hooks/secret-shield/rules/cloud.ts:17), and the part past the bound stays visible.
+Reason: (c) Google documents a 512-byte cap for a refresh token (https://developers.google.com/identity/protocols/oauth2, section "Token size"); the rule bounds the token at 512 characters (hooks/secret-shield/rules/cloud.ts:17-18), and the part past the bound stays visible.
 Shape: 1//0 followed by 600 characters: the first 512 are hidden, the last 88 stay visible.
 Hidden instead: The same value after refresh_token= is hidden whole.
 Card: none
