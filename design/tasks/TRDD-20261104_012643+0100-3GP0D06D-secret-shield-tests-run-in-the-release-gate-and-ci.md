@@ -1,10 +1,10 @@
 ---
 trdd-id: 3GP0D06D
 title: secret-shield tests run in the release gate and CI
-column: backburner
+column: todo
 status: tasked
 created: 2026-11-04T01:26:43+0100
-updated: 2026-11-04T01:26:43+0100
+updated: 2026-11-04T01:33:53+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -22,11 +22,12 @@ approval-datetime: 2026-11-04T01:26:43+0100
 # secret-shield tests run in the release gate and CI
 
 ## Problem
-The secret-shield mod's tests (hooks/secret-shield/tests, run through the mods test kit) are run today only by a scratch runner script outside the repo. No committed runner exists, and neither scripts/publish.py nor CI runs them. So a release can ship a shield that fails its own tests, and every 'no behaviour change' step of TRDD-Q6LPJTPO rests on a worker happening to run the scratch script.
+The secret-shield mod's tests (hooks/secret-shield/tests, run through the mods test kit) are run today only by a scratch runner script outside the repo. No committed runner exists. A grep found no reference to secret-shield in scripts/, tests/ or .github/ apart from the wiring-gate test, so publish.py and CI most likely do not run them; confirm this by reading publish.py's gate step first. If so, a release can ship a shield that fails its own tests, and every 'no behaviour change' step of TRDD-Q6LPJTPO rests on a worker happening to run the scratch script.
 ## Do
 Commit a runner for the mod tests (assembling the mod the way the scratch script does), add it to the publish gate next to pytest, ruff, mypy and pyright, and run it in CI. It fails closed when the runtime it needs is missing.
+Open question: can a CI runner get the mods test kit (claude-code/testing) and its runtime without interaction? If it cannot, the gate runs locally in publish.py only, and CI reports the missing step as a coverage gap rather than going permanently red.
 ## Done when
-A failing shield test makes publish.py and CI fail, shown by one deliberate failure in a scratch branch.
+A deliberate failing shield test makes the gate step fail when that step is run on its own, without publishing, and makes CI fail on a feature branch.
 Found during TRDD-Q6LPJTPO (review of commit baeecd80).
 
 ## Approval log
