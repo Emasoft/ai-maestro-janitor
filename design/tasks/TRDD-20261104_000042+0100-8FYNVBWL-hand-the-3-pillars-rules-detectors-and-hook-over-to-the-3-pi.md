@@ -1,10 +1,10 @@
 ---
 trdd-id: 8FYNVBWL
 title: Hand the 3-pillars rules, detectors and hook over to the 3-pillars plugin
-column: backburner
+column: todo
 status: tasked
 created: 2026-11-04T00:00:42+0100
-updated: 2026-11-04T01:01:33+0100
+updated: 2026-11-04T11:07:09+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -20,6 +20,14 @@ approval-datetime: 2026-11-04T00:00:42+0100
 ---
 
 # Hand the 3-pillars rules, detectors and hook over to the 3-pillars plugin
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-04
+
+- Status: release N is not built. It waits for the 3-pillars-tasks-management session's frozen contracts (marker line, --porcelain columns, show --json fields, CI install of trddgrep). Shipping any janitor release also waits for TRDD-90LAMQ8B.
+- Reported by the 3-pillars session on 2026-11-04; these are not USER answers. That session took D1 to D4 as defaults under its goal, and the USER may veto them. D1: memgrep stays in the janitor. D2: the five TRDD detectors and on-session-start-trdd-state.py move to the 3-pillars plugin, ported to Node, so the release N stand-down applies. D7 (taking over three owner-written rule files) is OPEN, and that plugin's takeover list stays empty until the USER answers. D5 (replacing the ~/.local/bin launchers) waits for the USER. N+1 is also gated on that plan's P0b (how harness agents load user-scope rules and plugins).
+- Agreed with the 3-pillars session on 2026-11-04, replacing the PATH-only lookup until D5: the janitor builds the 3-pillars DATA dir name from the 3-pillars-tasks-management@<marketplace> key in enabledPlugins and runs <DATA>/bin/trddgrep (the Windows filename is still to be frozen). It runs --version on every candidate and requires exactly "3-pillars-tasks-management <semver>". It falls back to PATH only when that candidate's --version names the plugin. If no candidate qualifies, it fails loudly, with no fallback to scripts/lib/trdd_common.py. After D5, PATH plus the --version check becomes the primary lookup, per the USER ruling of 2026-11-04 quoted below.
+- show --json, to be frozen with a test by the 3-pillars session: id, path, column, zone, title, the full frontmatter as an object, blocked-by, npt, eht and implementation-commits as arrays, and the STATE block text (string or null).
+- NEXT ACTION: when the frozen-contracts message arrives, build release N: rules_installer.py never overwrites or removes a file whose first line carries 3-pillars-tasks-management:installed-rule, and the five detectors and the STATE hook stand down while 3-pillars-tasks-management is enabled. Then work the janitor-side list below for N+1.
 
 ## User directive (verbatim, 2026-11-03, given to the 3-pillars-tasks-management session and repeated to this session)
 
@@ -40,6 +48,16 @@ approval-datetime: 2026-11-04T00:00:42+0100
 - Source of truth for everything outside the janitor: the 3-pillars migration plan, in the 3-pillars-tasks-management repo at design/specs/proposals/20261104_001734+0100-3pillars-migration-plan.md, with its card TRDD-53GAE0MO. The 3-pillars session states that its plan wins over its own card. Owner rulings win over both that plan and this card.
 - Also in N+1: the further janitor items the plan lists for N+1 (the writers that create cards, the LOCAL design mirror, janitor-footprint.md, and the tests and userConfig keys tied to these rules). Read them from the plan; this card does not copy the list, so it cannot drift.
 - The release N stand-down applies only if the owner decides (3-pillars plan decision D2) that the five detectors and the STATE hook move to the 3-pillars plugin. If they stay in the janitor, they keep running and nothing stands down.
+- Found by a dependency sweep on 2026-11-04 and not in the 3-pillars plan; each is handled in N or N+1:
+  - jev_compaction_lane.py parses the human board and show output of trddgrep (a format change gives silently empty STATE heads). Move it to --porcelain and show --json.
+  - ticket_proposal.py creates, approves (proposal to planned, moved to tasks/) and retracts (to refused) cards by direct edits, with janitor-only keys ticket-kind, ticket-dedupe-key, ticket-evidence, ticket-severity and ticket-origin. issue_catalog.py retracts through it.
+  - dispatch.py board helpers (_all_folders_columns, _directive_task_is_terminal, _board_cards, _owner_mandate_bit, _classify_blocker_column, _attention_summary, _board_workable_ids) swallow a failed trdd_common import. The private column copies (dispatch.py _WORK_COLUMNS and _ATTENTION_COLUMNS, and fleet_status.py's column table) lose their guard test when trdd_common.ALL_COLUMNS goes.
+  - findings_cli.py, fleet_status.py (which also reads PRRD prrd-version:), post-compact-resume.py and pre-compact-handoff.py (which has private column and id copies and sees PROJECT scope only) read cards without trddgrep. ticket-dispatch.py uses trdd_common._main_checkout_root, so a linked worktree shares the main checkout's LOCAL corpus.
+  - The five detectors run only when state.project_is_ai_maestro() is true, and report-to-trdd-drift skips on the memory chores' janitor-outcome marker (memory_outcome.py). The port must keep both, or the 3-pillars session must drop them on purpose (asked 2026-11-04). on-session-start-trdd-state.py also migrates the old LOCAL design dir (_migrate_local_design); that duty needs a home.
+  - rules_installer.py: versions before N install over any file without the janitor stamp, including 3-pillars-marked ones. Its cleanup deletes any .md containing the janitor installed-rule marker string. N+1 has no removal path for the installed copies in ~/.claude/rules or for the references in <DATA>/rules-reference. janitor-footprint.md:44 and .integrity/manifest-sha256.json change too.
+  - staged_privacy_scan.py exempts the <role>@<project-id> author tokens trddgrep writes; the 3-pillars session was asked to pin that shape.
+  - Config and registrations: plugin.json keys trdd_path (also read by trdd_common for code that stays), trdd_drift_interval, trdd_reminder_interval and trdd_staleness_days; three more interval keys read in dispatch.py are undeclared; hooks/hooks.json registers the STATE hook; scripts/commands/doctor.py _DETECTORS names trdd-drift and trdd-reminder.
+  - Text: README.md, the CLAUDE.md index, docs/ISSUE-CODES.md, skills (janitor-support-work-ticket names ~/.claude/rules/trdd-design-tasks.md; janitor-handoff-and-clear, janitor-write-handoff, janitor-resume, janitor-findings, janitor-audit, janitor-show-global-status, and the memory-conflict references), agents/janitor-repair-agent.md, 11 PROJECT wikimem pages (three-pillars-rules-ownership first), and memgrep's TRDD id grammar (scripts/memgrep/src/memory.rs normalize_trdd_id).
 
 ## Found during
 
