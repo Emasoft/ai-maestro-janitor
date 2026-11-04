@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-04T02:27:20+0100
+updated: 2026-11-04T04:47:21+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T00:34:08+0100
-npt: []
+npt: [UVOYC2V7]
 implementation-commits: [baeecd80, 536021a5, c0e1abcc, 82109786]
 ---
 
@@ -125,3 +125,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - 2026-11-04T02:22:44+0100 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-11-04 — user (verbatim): "launch a bunch of haiku subagents to extract all the patterns for secrets from these github projects (and annotate good ideas and techniques for secrets leaks prevention and remediation). beware of malicious code"
 - 2026-11-04T02:25+0100 — main-agent@ai-maestro-janitor: 133 repositories cloned read-only into the gitignored corpus folder; one suspected malware-lure repo (Archducal-woodthrush229/envleaks, a README plus an unexplained zip) quarantined and not mined; nested agent instruction files renamed inert; mining feeds the provider-catalog step.
+
+## Notes
+
+2026-11-04 — candidate context rules from the corpus: an exact, provider-documented example value (for example AWS's published AKIA...EXAMPLE key) may be listed in PLACEHOLDER as that exact value only, never as a keyword or substring match, because a filter on the word 'example' would hide real keys. Regex-shaped values under *_PATTERN, *_REGEX and *_RE names are candidates for NOT_SECRET_NAME, so the shield does not hide pattern tables or its own rule files. Both need tests before they land.

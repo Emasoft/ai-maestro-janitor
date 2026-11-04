@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-04T01:36:27+0100
+updated: 2026-11-04T04:47:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -41,3 +41,7 @@ Split out of TRDD-M1218EMH.
 
 - 2026-11-03T22:46:01+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-03T22:46:10+0100 — column → blocked. waits for the write-back guard and the pre-wiring checks
+
+## Notes
+
+2026-11-04 — when jr-redact (from the claude-code-mods marketplace) is enabled alongside the janitor shield, both rewrite the same tool results; jr-redact marks them [REDACTED:<kind>] but passes error results unredacted (register.ts:11, found by a corpus miner), and its password rule can also replace the username (redact.ts:32). If jr-redact stays enabled, decide the two redactors' order and whether a value already marked by one is left alone by the other before this card turns the shield on; if this card disables it as planned, the ordering question is moot.
