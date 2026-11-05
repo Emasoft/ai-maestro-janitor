@@ -20,7 +20,7 @@ export const googleOAuthRefreshToken: Rule = { kind: 'google-oauth-refresh-token
 // DigitalOcean personal access token, OAuth token and refresh token, standalone (no secret name before them needed).
 // WHY each part of the pattern is written this way (NOTICE credits gitleaks v8.30.1):
 // - No leading \b and no lookbehind: a token right after an escape such as \n (a literal backslash and n) must still be hidden, because \n puts the word character n right before the prefix (TRDD-5VZTPXBJ).
-// - {64,} and not {64}, with no trailing boundary or lookahead: a longer hex run is hidden whole, instead of leaving a hex tail in view. The cost: hex characters glued to the end of a token, such as a date or a word made of a-f, are hidden with it.
+// - {64,} and not {64}, with no trailing boundary or lookahead: a longer hex run is hidden whole, instead of leaving a hex tail in view. The cost: hex characters glued to the end of a token are hidden with it, up to the first non-hex character (the 2024 of 2024-11, the dead of deadline).
 // - The i flag covers the whole token, prefix and body: upper-case hex and an upper-case prefix are hidden too.
 // DigitalOcean documents only the three prefixes (docs.digitalocean.com/notes/2022/api-token-format); the 64-hex body comes from gitleaks v8.30.1, not from DigitalOcean.
 export const digitaloceanPat: Rule = { kind: 'digitalocean-pat', pattern: /dop_v1_[0-9a-f]{64,}/gi }
