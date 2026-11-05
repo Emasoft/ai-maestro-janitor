@@ -4,7 +4,7 @@ title: Clear the open publish-gate findings before the next janitor release
 column: proposal
 status: proposed
 created: 2026-11-05T00:23:08+0100
-updated: 2026-11-05T00:57:00+0100
+updated: 2026-11-05T01:03:20+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -19,7 +19,7 @@ relevant-rules: [5.1]
 
 ## Release blockers
 
-State as of 2026-11-05, HEAD 0ff8f2e5. Done when every box below is ticked. PRRD S5.1 applies: a CPV finding is cleared by devitalizing or removing the offending code, never by exempting a rule or relaxing --strict.
+State as of 2026-11-05; the facts tied to a commit were measured at 0ff8f2e5. Done when every box below is ticked. PRRD S5.1 applies: a CPV finding is cleared by devitalizing or removing the offending code, never by exempting a rule or relaxing --strict.
 
 - [ ] Four cards hold absolute paths, found in design/tasks; design/proposals and design/archived not scanned. Genericize them. Each card has exactly one hit (count of lines holding a macOS home-directory or volume prefix). origin/main is as of the last fetch (its last commit is 3b81287f of 2026-10-23, 279 commits behind HEAD), so "pushed" below means "present in that ref". A pushed path is not un-leaked by a redaction. A card in a terminal column is frozen, so its redaction needs an owner ruling.
   - TRDD-M5BRPISQ: column backburner; not in origin/main (count not available, the file is absent there); the hit is a local absolute path.
@@ -37,8 +37,8 @@ State as of 2026-11-05, HEAD 0ff8f2e5. Done when every box below is ticked. PRRD
       +# janitor: report dirs carry private data (paths, hostnames, pasted secrets)
       +/reports/
 
-  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing while the diff is exactly that hunk. Right before publish.py, check that git diff -- .gitignore shows only the quoted hunk, then run git restore -- .gitignore; if the diff holds anything else, remove only the three added lines (the blank line, the header and /reports/). Check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
-- [ ] The reports/ tree is swept with sanitize-reports, including files that are untracked today only because the stray /reports/ line hides them.
+  It matches the installed janitor 3.8.13 exactly: its scripts/lib/reports_gitignore.py sets REQUIRED_DIRS = ("reports", "reports_dev") and writes this header line, and its reports-gitignore detector runs once a day. The owner already decided on 2026-11-01 (TRDD-KSUIEPTQ) that reports/ is tracked. Commit 010be429 changed the source writer to require only reports_dev/ and removed the line, but the running 3.8.13 adds it back. Do not commit the line. The line is janitor-generated and quoted in full above, so dropping it loses nothing while the diff is exactly that hunk. Right before publish.py, check that git diff -- .gitignore shows only the quoted hunk, then run git restore -- .gitignore; if the diff holds anything else, remove only the three added lines (the blank line, the header and /reports/), and commit or resolve the other edits before publish.py, which refuses a dirty tree. Check again just before the run, because 3.8.13 can add it back on its next daily run, even during a long publish. Start the publish soon after a reports-gitignore run, or expect one retry. After the release is installed, check that the line stays absent after one reports-gitignore run.
+- [ ] After the .gitignore line is dropped, the reports/ files it hid become untracked, and publish.py counts untracked files as a dirty tree (it reads git status --porcelain). Sweep them with sanitize-reports, then commit them or move them to reports_dev/ before publish.py. Sweep the tracked reports/ tree too.
 - [ ] The owner has said yes to the publish.
 
 ## Approval log
