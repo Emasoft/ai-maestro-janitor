@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { applyRule, countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, withhold } from '../patterns'
+import { applyRule, countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { pypiToken } from '../rules/dev-services'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
@@ -326,20 +326,19 @@ describe('a long run of scheme characters is redacted in linear time', () => {
 // and of the text when no newline follows. b://u:1? repeated k times and followed by n characters cost O(k*n). The growth tests grow the URL count
 // with the size (size/16 URLs, then size/2 characters): with a fixed URL count the old regex is linear in n and the test proves nothing. They
 // assert the ratio t(8s)/t(s), which is machine speed independent, never an absolute duration (the pinned 1 s test below is only a bound against a
-// catastrophic slowdown) (TRDD-Q6LPJTPO: linear means the ratio stays near 8, quadratic means near 64). The sizes are 8 KB and 64 KB on purpose.
+// catastrophic slowdown) (TRDD-Q6LPJTPO: linear means the ratio stays near 8, quadratic means near 64). The sizes are 32 KB and 256 KB.
 // Measured under claude plugin test on the grown() shape with a short password after the URLs (shape b), redact() took medians of about 3 ms at 96
-// KB, 75 ms at 128 KB, 188 ms at 256 KB and 615 ms at 512 KB (5 runs per size in one probe, load about 67): a step between 96 KB and 128 KB. On
-// `b://u:` repeated then `x`, which both regex versions read the same way, URL_PASSWORD alone took medians of 0.7 and 0.8 ms at 96 KB, 33 ms
-// (previous regex) and 62 ms (corrected) at 128 KB, and 137 and 139 ms at 256 KB (load 80-104), so a step of similar size predates the corrected
-// regex on that shape; the previous regex was not measured on grown() past 64 KB. On grown() shapes a and b the password is hidden at every
-// measured size from 32 KB to 1 MB, so on those shapes the step is not a give-up. One URL whose password alone is 1 MB is not hidden by either
-// version (the known-defect test below, TRDD-AGOEWF2E). The cause of the step is not found (TRDD-OD5Z90YL). A size pair that straddles the step
-// fails the ratio rule, so both sizes stay at or below 64 KB until it is diagnosed. The 2 ms escape is applied at the larger size of 64 KB, which
-// is looser than TRDD-Q6LPJTPO's 2 ms at 256 KB. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came
-// within 0.4 ms of the 2 ms escape (1.6 ms; 8 KB was not measured).
-describe('a port-skip query scan is linear up to 64 KB and still tells a port from a password', () => {
+// KB, 75 ms at 128 KB, 188 ms at 256 KB and 615 ms at 512 KB (load about 67): a step between 96 KB and 128 KB. The cause is measured
+// (TRDD-HF7GNHNF): a greedy loop over a GROUP (the password loop and the query scan of the port-skip lookahead) runs about 35 times slower per
+// character once one run passes about 63.8K iterations, and returns no match at all from about 553K (TRDD-AGOEWF2E); a loop over a single character
+// class has neither ceiling. The loops are unrolled so a group iterates only at a colon, and a guard in redactUrlPasswords counts markers and colons
+// before the regex runs (see the WHY block above URL_PASSWORD in patterns.ts). A size pair that straddles 63.8K iterations (32 KB to 256 KB does:
+// grown() holds size/2 characters in one run) fails the ratio rule on the old regex and passes it now. The 2 ms escape is applied at the larger size
+// of 256 KB, which is TRDD-Q6LPJTPO's. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came within 0.4 ms of
+// the 2 ms escape (1.6 ms).
+describe('a port-skip query scan is linear up to 256 KB and still tells a port from a password', () => {
   const marker = '[JANITOR-' + 'REDACTED:url-password]'
-  const SMALL = 8 * 1024
+  const SMALL = 32 * 1024
   const tail = '\n' + 'https://admin:' + 'Zq8' + 'vR2m' + '@db.example'
   const grown = (size: number) => 'b://u:1?'.repeat(size / 16) + 'x'.repeat(size / 2)
   const bestOf = (text: string) => {
@@ -413,19 +412,70 @@ describe('a port-skip query scan is linear up to 64 KB and still tells a port fr
       expect(redact(url).text).toBe(hidden)
     }
   })
-  // WHY it asserts the miss: so the defect stays visible (TRDD-AGOEWF2E). The size where hiding stops may depend on the runtime: between 512 KB
-  // and 1 MB under claude plugin test on this shape, about 360 KB in system Bun on a shape not re-checked. If the 1 MB half turns red with no fix
-  // in this repo, a Claude Code update may have moved that size: check the runtime before flipping it; flip it to assert the hit only when
-  // TRDD-AGOEWF2E is fixed here.
-  test('KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is', () => {
-    const oneUrl = (n: number) => 'https://u:' + 'aB3dE5fG7hJ9kL1m'.repeat(n / 16) + '@h'
-    const quarter = redact(oneUrl(256 * 1024))
-    expect(quarter.hits['url-password']).toBe(1)
-    expect(quarter.text.endsWith('https://u:' + marker + '@h')).toBe(true)
-    const full = oneUrl(1024 * 1024)
-    const miss = redact(full)
-    expect(miss.hits['url-password']).toBeUndefined()
-    expect(miss.text === full).toBe(true)
+  // WHY these tests exist (TRDD-AGOEWF2E, TRDD-HF7GNHNF): under claude plugin test a greedy loop over a group stepped at about 63.8K iterations and
+  // returned no match from about 553K, so one 1 MB URL password was not hidden. The loops are unrolled and a guard counts the markers and colons of
+  // each URL before the regex runs. Passwords of every power of two from 256 KB to 4 MB must be hidden with exactly one hit; the discriminators below
+  // fail when the guard is deleted (the unrolled regex alone reads the port shapes as ports, and misses a colon-dense password); the scheme and
+  // whitespace cases fail when the guard reads either with a simpler rule than the regex does.
+  const BOUND = URL_PASSWORD_BOUND
+  const mixed = (n: number) => 'aB3dE5fG7hJ9kL1m'.repeat(n / 16)
+  const bounded = (url: string) => {
+    const r = redact(url)
+    return { hidden: r.hits['url-password'] === 1 && countOf(r.hits) === 1, same: r.text === url, text: r.text }
+  }
+  test('one URL whose password alone is every power of two from 256 KB to 4 MB is hidden, with exactly one hit', { timeoutMs: 60000 }, () => {
+    for (let n = 256 * 1024; n <= 4 * 1024 * 1024; n *= 2) {
+      const r = redact('https://u:' + mixed(n) + '@h')
+      expect(r.hits).toEqual({ 'url-password': 1 })
+      expect(r.text === 'https://u:' + marker + '@h').toBe(true)
+    }
+  })
+  test('a port followed by a path with more than the bound of colons before the at-sign is hidden; with exactly the bound it stays visible', { timeoutMs: 20000 }, () => {
+    const atBound = 'b://u:8080/' + 'a:'.repeat(BOUND) + '@h'
+    expect(bounded(atBound).same).toBe(true)
+    const over = bounded('b://u:8080/' + 'a:'.repeat(BOUND + 1) + '@h')
+    expect(over.hidden).toBe(true)
+    expect(over.text === 'b://u:' + marker + '@h').toBe(true)
+  })
+  test('a user part with more than the bound of markers makes the same port shape hidden; with exactly the bound it stays visible', { timeoutMs: 20000 }, () => {
+    const user = (n: number) => mark('aws-access-key').repeat(n)
+    expect(bounded('b://' + user(BOUND) + ':8080/p@h').same).toBe(true)
+    const over = bounded('b://' + user(BOUND + 1) + ':8080/p@h')
+    expect(over.hidden).toBe(true)
+    expect(over.text === 'b://' + user(BOUND + 1) + ':' + marker + '@h').toBe(true)
+  })
+  test('a password of 2 MB made mostly of colons and ending at the at-sign is hidden', { timeoutMs: 30000 }, () => {
+    const r = redact('https://u:' + 'aB3:'.repeat(512 * 1024) + '@h')
+    expect(r.hits).toEqual({ 'url-password': 1 })
+    expect(r.text === 'https://u:' + marker + '@h').toBe(true)
+  })
+  test('a long colon-dense run is not hidden across a Unicode line separator, a no-break space or an ideographic space', { timeoutMs: 20000 }, () => {
+    for (const space of ['\u2028', '\u00a0', '\u3000']) {
+      const url = 'b://u:' + 'a:'.repeat(BOUND + 10) + space + 'a:'.repeat(10) + '@h'
+      const r = bounded(url)
+      expect(r.same).toBe(true)
+      expect(r.hidden).toBe(false)
+    }
+  })
+  test('above the bound the guard reads the scheme as the regex does: 1://, _a:// and .:// are left alone, -https://, foo.https:// and a1:// are hidden', { timeoutMs: 20000 }, () => {
+    const rest = 'u:' + 'a:'.repeat(BOUND + 1) + '@h'
+    for (const head of ['1://', '_a://', '.://', '1a://']) expect(bounded(head + rest).same).toBe(true)
+    for (const head of ['-https://', 'foo.https://', 'a1://', '(https://', '1-a://']) {
+      const r = bounded(head + rest)
+      expect(r.hidden).toBe(true)
+      expect(r.text === head + 'u:' + marker + '@h').toBe(true)
+    }
+  })
+  // WHY the best of 5 and not the median of 5: measured under claude plugin test at load 125, the median of 5 broke the ratio rule in 3 of 6 repeats
+  // on this shape (for example 0.90 -> 13.06 ms, ratio 14.6) while the best of 5 stayed between 6.9 and 10.5 on all 6 (a ratio near 8 is linear);
+  // a loaded machine inflates single runs, and the minimum is the run it inflated least. The previous regex fails this test (a run took 3.4 s).
+  test('a colon-dense tail with no at-sign takes under 12 times as long at 8 times the size (or under 2 ms)', { timeoutMs: 60000 }, () => {
+    const dense = (reps: number) => 'b://u:1?' + 'a:'.repeat(reps) + ' '
+    const small = bestOf(dense(16384))
+    const big = bestOf(dense(131072))
+    expect(linear(small.ms, big.ms)).toBe(true)
+    expect(big.done.text === dense(131072)).toBe(true)
+    expect(big.done.hits['url-password']).toBeUndefined()
   })
 })
 describe('redacting twice changes nothing', () => {

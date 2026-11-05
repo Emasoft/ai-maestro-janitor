@@ -28,21 +28,51 @@ const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // scheme in front of the `://`, of any length, and the text kept is the same, because the scheme was never changed. Do not cap the
 // scheme length instead: a cap would stop hiding a scheme of more than N unbroken letters. Group 1 is `://` and the scheme stays
 // outside the match (TRDD-Q6LPJTPO).
-// WHY the port-skip lookahead scans its query with `(?:(?!:\/\/)[^\s@#])*=` and not `[^\s@#]*=`: the plain class does not stop at
+// WHY the port-skip lookahead scans its query with a loop that stops at `://` and not with `[^\s@#]*=`: the plain class does not stop at
 // `://`, so for every `://` whose password starts with up to 5 digits then `?` it scanned on past every later `://` looking for an
 // `=`, up to the next whitespace, `@` or `#`, at the latest the end of the line, and of the text when no newline follows.
 // `b://u:1?` repeated k times and followed by n characters cost O(k*n) (k=4000, n=64 KB took 18.5 s in system Bun under load).
 // Stopping the scan at `://` changes no result: the old class `[^\s@#]` already stopped at the first `@`, so an `=` it found past
 // the next `://` means no `@` sits before that `://`. The password branch cannot cross `://`, so it cannot reach an `@` either,
-// and both versions hide nothing there. Each scan now ends at the next `://`, so the scans themselves are linear. Measured under
-// claude plugin test, URL_PASSWORD still slows by a step of tens to about 200 times between 96 KB and 128 KB on the grown() shape
-// of tests/patterns.test.ts, and the previous regex shows a step of similar size on `b://u:` repeated then `x` (it was not
-// measured on grown() past 64 KB, where its quadratic cost hides any step); the cause is not found (TRDD-OD5Z90YL). Do not cap the
-// scan length instead: a cap would read a port with a longer query as a password and hide it (TRDD-Q6LPJTPO).
+// and both versions hide nothing there. Each scan now ends at the next `://`, so the scans themselves are linear.
+// WHY the three loops (user, password, query) are unrolled so a group iterates only at a marker or a colon, never per character:
+// measured under claude plugin test (TRDD-HF7GNHNF, TRDD-AGOEWF2E), a greedy loop over a GROUP such as `(?:(?!:\/\/)[^\s@'"`])+` has two
+// iteration-count ceilings in that engine: the loop runs about 35 times slower per character once one run passes about 63.8K
+// iterations (last fast run 63,808, first slow 63,824; still linear), and it returns no match at all, silently, from about 553K
+// iterations (last hidden 552,896, first missed 552,960). A loop over a single character class has neither ceiling (hidden at 4 MB).
+// Node (V8) and the system Bun 1.3.14 show no step (Bun misses from about 360K, Node throws a RangeError at 2^23), so the regex itself and
+// backtracking are ruled out. The engine is inferred to be the JavaScriptCore inside Claude Code, whose binary names Bun v1.4.4: not asserted.
+// Unrolled, a loop over a run of non-colon characters is a class loop, and the group repeats once per colon (password, query) or once per
+// marker (user). The language is the same: every `:` not followed by `//` is still allowed; the differential fuzz found no difference.
+// WHY a guard drives the matching (redactUrlPasswords): a password made of colons, or a user part made of markers, still has the
+// group iterating once per colon or marker, so it reaches the ceilings again (a colon-dense password stepped at 65,536 colons and was
+// missed between 589,824 and 1,048,576 characters). The guard reads each `://` before the regex may run: the scheme, the user part
+// (counting its markers) and the colons up to the first whitespace, `@` or `://`. Past URL_PASSWORD_BOUND of either it runs no regex
+// on that span at all, so the cost stays linear, and it fails closed: a password region that ends at `@` is hidden whole.
+// Otherwise (up to the bound) the regex runs sticky at that `://`, and the result is the same as a global replace.
+// "Do not cap the scan length" (the earlier rule for the query scan and the scheme) still holds for the regex: a cap inside the
+// regex makes it fail to match, which FAILS OPEN, and a port with a longer query would be read as a password and hidden or a
+// password missed. The guard is not that cap: above the bound it hides, which fails closed.
+// Disclosed over-hide above the bound, for security first: (1) a port followed by a path or a `?query` that holds more than the bound
+// of colons before an `@` is read as a password and hidden, because no regex tells the port from a password there; (2) markers (tokens
+// hidden earlier) inside the hidden region collapse into one url-password marker, their hits stay counted; (3) such a value is not
+// added to `found`, so it is not hidden elsewhere in the row (a value that long is not propagated). Not guarded: the scheme and the
+// user part must be valid as the regex reads them, so `1://`, `_a://` and `.://` shapes are not touched.
+const NOT_USER = String.raw`[^\s:/@'"${'`'}\[]`
+const NOT_PASSWORD = String.raw`[^\s@'"${'`'}:]`
+const QUERY = String.raw`[^\s@#:]*(?::(?!\/\/)[^\s@#:]*)*`
 const URL_PASSWORD = new RegExp(
-  String.raw`(?=:\/\/)(?<=\b[a-z][a-z0-9+.-]*)(:\/\/)((?:` + MARK_BODY + String.raw`|[^\s:/@'"` + '`' + String.raw`\[])+):((?!\d{1,5}(?:\/|\?(?:(?!:\/\/)[^\s@#])*=))(?:(?!:\/\/)[^\s@'"` + '`' + String.raw`])+)@`,
-  'gi',
+  String.raw`(?=:\/\/)(?<=\b[a-z][a-z0-9+.-]*)(:\/\/)((?:${NOT_USER}|${MARK_BODY})${NOT_USER}*(?:${MARK_BODY}${NOT_USER}*)*):` +
+    String.raw`((?!\d{1,5}(?:\/|\?${QUERY}=))(?!:\/\/)[^\s@'"${'`'}]${NOT_PASSWORD}*(?::(?!\/\/)${NOT_PASSWORD}*)*)@`,
+  'iy',
 )
+/** The most markers in a URL's user part, and the most colons in its password span, that URL_PASSWORD is run on. Above it the guard hides the password without the regex. */
+export const URL_PASSWORD_BOUND = 4096
+// The pieces the guard reads a `://` with: a run of user characters, a whole marker, the end of the span the regex can reach, the end of the password.
+const USER_RUN = new RegExp(`${NOT_USER}+`, 'y')
+const MARK_AT = new RegExp(MARK_BODY, 'iy')
+const SPAN_END = /[\s@]|:\/\//g
+const PASSWORD_END = /[\s@'"`]|:\/\//g
 
 // Specific, high-confidence token formats, defined by category under rules/ and listed here one by one.
 // The order is load-bearing: rules run in this order and the first match wins, because a hidden token is
@@ -202,6 +232,26 @@ export function applyRule(text: string, rule: Rule, hits: Hits, found?: Map<stri
   })
 }
 
+/** Whether the text before the `://` at `end` ends in what the URL_PASSWORD lookbehind `\b[a-z][a-z0-9+.-]*` accepts: a letter, with no word character before it, inside the run of scheme characters. */
+function hasScheme(text: string, end: number): boolean {
+  const isLetter = (code: number): boolean => (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+  const isDigit = (code: number): boolean => code >= 48 && code <= 57
+  let start = end
+  // `+` `-` `.` are scheme characters but not word characters, so a letter right after one of them stands at a \b.
+  while (start > 0) {
+    const code = text.charCodeAt(start - 1)
+    if (!(isLetter(code) || isDigit(code) || code === 43 || code === 45 || code === 46)) break
+    start--
+  }
+  for (let at = start; at < end; at++) {
+    if (!isLetter(text.charCodeAt(at))) continue
+    if (at === 0) return true
+    const before = text.charCodeAt(at - 1)
+    if (!(isLetter(before) || isDigit(before) || before === 95)) return true
+  }
+  return false
+}
+
 /** A password in a URL's userinfo part: keeps the scheme, user and host, hides the password. */
 function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>): string {
   // The password may contain a slash. A value of up to 5 digits followed by / is a port followed by a
@@ -211,13 +261,61 @@ function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>
   // (a token hidden first, such as an AWS access key used as the user name) but no other [,
   // so a bracketed IPv6 host is never read as a user. A password cannot contain :// so it never runs
   // into a second URL. Known false positive: `localhost:3000#a@b` reads its fragment as a password.
-  return text.replace(URL_PASSWORD, (match, separator: string, user: string, password: string) => {
-    const rest = password.replace(MARKS, '')
-    if (rest === '' || PLACEHOLDER.test(rest)) return match
+  // WHY a loop over each `://` and not text.replace(URL_PASSWORD, ...): see the WHY block above URL_PASSWORD. The guard reads each `://`
+  // (scheme, user part, count of markers and colons) before the regex may run on it, and the regex runs only sticky at that `://`, so no
+  // regex ever scans a span that holds more than URL_PASSWORD_BOUND iterations of a group loop. Every span read is bounded by the next
+  // `://` (the user part, the password and the scheme run all stop at one), so the spans never overlap and the cost is linear.
+  let next = 0
+  let done = 0
+  const parts: string[] = []
+  for (let idx = text.indexOf('://'); idx !== -1; idx = text.indexOf('://', next)) {
+    next = idx + 1
+    if (!hasScheme(text, idx)) continue
+    // The user part: runs of non-separator characters and whole markers, the same grammar as the regex. A marker holds a `:` and a `[`, so it is read whole first.
+    let colon = idx + 3
+    let markers = 0
+    for (;;) {
+      USER_RUN.lastIndex = colon
+      const run = USER_RUN.exec(text)
+      if (run !== null) colon += run[0].length
+      MARK_AT.lastIndex = colon
+      const marker = MARK_AT.exec(text)
+      if (marker === null) break
+      colon += marker[0].length
+      markers++
+    }
+    if (colon === idx + 3 || text[colon] !== ':') continue
+    // The span the password and the port-skip query can reach: up to the first whitespace, `@` or `://`. Its colons are the group iterations of the unrolled regex.
+    SPAN_END.lastIndex = colon + 1
+    const spanEnd = SPAN_END.exec(text)?.index ?? text.length
+    let colons = 0
+    for (let at = text.indexOf(':', colon + 1); at !== -1 && at < spanEnd && colons <= URL_PASSWORD_BOUND; at = text.indexOf(':', at + 1)) colons++
+    if (markers <= URL_PASSWORD_BOUND && colons <= URL_PASSWORD_BOUND) {
+      URL_PASSWORD.lastIndex = idx
+      const match = URL_PASSWORD.exec(text)
+      if (match === null) continue
+      next = idx + match[0].length
+      const [, separator, user, password] = match
+      const rest = password.replace(MARKS, '')
+      if (rest === '' || PLACEHOLDER.test(rest)) continue
+      hits['url-password'] = (hits['url-password'] ?? 0) + 1
+      if (propagates(password)) found.set(password, 'url-password')
+      parts.push(text.slice(done, idx), `${separator}${user}:${mark('url-password')}@`)
+      done = next
+      continue
+    }
+    // Over the bound: no regex runs. A password region that ends at `@` is hidden whole; any other span is left as it is.
+    PASSWORD_END.lastIndex = colon + 1
+    const end = PASSWORD_END.exec(text)?.index ?? text.length
+    if (text[end] !== '@' || end === colon + 1) continue
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
-    if (propagates(password)) found.set(password, 'url-password')
-    return `${separator}${user}:${mark('url-password')}@`
-  })
+    parts.push(text.slice(done, colon + 1), mark('url-password'))
+    done = end
+    next = end + 1
+  }
+  if (parts.length === 0) return text
+  parts.push(text.slice(done))
+  return parts.join('')
 }
 
 // JSON pairs, `"api_key": "..."`. Group 1 is the run of backslashes written before every quote of the pair: none

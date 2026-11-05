@@ -192,14 +192,6 @@ Hidden instead: The same token standalone, for each rule.
 Card: TRDD-5VZTPXBJ
 Test: KNOWN DEFECT TRDD-5VZTPXBJ escape-boundary: a valid token right after a backslash-n, %22 or a backslash-t is not hidden by any rule that starts with a word boundary or a lookbehind
 
-## url-password-over-1mb
-
-Reason: (d) an open defect: a URL whose password alone is 1 MB is not hidden.
-Shape: One URL with a password of 1 MB (1048576 characters).
-Hidden instead: The same URL with a 256 KB password.
-Card: TRDD-AGOEWF2E
-Test: KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is
-
 ## gitlab-body-under-20-chars
 
 Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:18-22 and :31). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
