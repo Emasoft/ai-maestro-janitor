@@ -4,7 +4,7 @@ title: Pick the best corpus projects for redacting Claude transcripts, log files
 column: todo
 status: tasked
 created: 2026-11-05T02:35:23+0100
-updated: 2026-11-05T02:35:23+0100
+updated: 2026-11-05T02:41:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -27,12 +27,14 @@ Scope: three targets. (1) Claude Code JSONL session transcripts already on disk 
 
 Sources: the 108 repos in _corpus_dev/secret-patterns/repos (untrusted; see clone.log, neutralized.txt, removed.txt there). Existing pieces to verify before reuse: hooks/secret-shield (rows.ts, register.ts), jr-redact (TRDD-2V7OAUPE), the trufflehog scan in the pre-push hook.
 
-Constraints: security first. Every claim about a project rests on reading its code, never its README. Rewriting git history is irreversible: tools may block secrets before they enter history and may scan history, but any history rewrite runs only on an exact command the owner approves (CLAUDE.md RULE 0). In-place redaction of transcripts and logs must never leave a broken or half-written file: validate, then replace atomically.
+Constraints: security first. Every claim about a project rests on reading its code, never its README. Rewriting git history is irreversible: tools may block secrets before they enter history and may scan history, but any history rewrite runs only on an exact command the owner approves (RULE 0 of the owner's global rules). In-place redaction of transcripts and logs must never leave a broken or half-written file: validate, then replace atomically.
 
 ## Done when
  - [ ] A comparison report names, per target, the best project or approach and why, each claim cited to file:line in the corpus.
  - [ ] One implementation card exists per target, each citing this card.
+ - [ ] Every candidate listed in _corpus_dev/secret-patterns/neutralized.txt or removed.txt is excluded or its use is justified; _corpus_dev/ is gitignored and local to this machine, so the report records the commit of each repo it cites.
 
 ## Approval log
 
 - 2026-11-05T02:35:23+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-05 — Authority for this card: the owner directive quoted in the body; trddgrep recorded the main agent as issuer.

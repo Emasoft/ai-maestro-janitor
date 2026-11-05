@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-05T02:34:49+0100
+updated: 2026-11-05T02:41:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T22:46:01+0100
-blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6]
+blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, HF7GNHNF, J0TBHZ15]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, decision:owner-answers-TEP6F3A3-wiring-gate]
 pre-block-column: design
 blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
@@ -48,3 +48,4 @@ Split out of TRDD-M1218EMH.
  - 2026-11-05 — No automated gate runs the secret-shield TS suite: scripts/publish.py stage_tests runs pytest only, no .github workflow calls claude plugin test, and nothing type-checks hooks/. This covers every shield family so far (d711e5f8, dbd5aaf9, 28b42512). The tests run only when someone runs them by hand in a scratch plugin shell; the real hooks/hooks.json names no module yet.
  - 2026-11-05 — The TS-suite publish gate is tracked in TRDD-T36Z4ACR.
 - 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. This card stays blocked until those land.
+- 2026-11-05 — blocked-by now also names AGOEWF2E, HF7GNHNF and J0TBHZ15, the three items the owner-decision note above waits for. The 'Read as' reading in that note was put to the owner, whose next message ('decide yourself on anything else, but decide on verified facts') did not contest it. Correction to commit f0453a7d: its message says 'until both land'; the blockers are three.
