@@ -4,7 +4,7 @@ title: The memory split chore's size split leaves the original atom's desc and k
 column: todo
 status: tasked
 created: 2026-11-05T00:59:59+0100
-updated: 2026-11-05T01:03:19+0100
+updated: 2026-11-05T01:05:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,8 +35,8 @@ In eee842b6, the split chore size-split ATOM-Q2B2-FBQP on the PROJECT page oauth
 
 ## Done when
 
-1. The size-split path of the split skill sets the original atom's desc and keywords for the part it keeps, either with --orig-desc and --orig-keywords on split-mem-atom or by re-deriving them right after the split. Both atoms are held to the same keyword floor.
-2. A test, or a recorded run on a scratch copy, shows a size split that leaves no keyword on the original atom describing only the moved part.
+1. When the two halves hold distinct subjects (a judgement made per split, as in the topic-split triage), the size-split path of the split skill sets the original atom's desc and keywords for the part it keeps, either with --orig-desc and --orig-keywords on split-mem-atom or by re-deriving them right after the split. Both atoms are held to the same keyword floor.
+2. A test, or a recorded run on a scratch copy, uses a fixture atom with a known keyword set per half: after a size split that separates distinct subjects, the original atom keeps no keyword from the moved half's set.
 
 ## Approval log
 
