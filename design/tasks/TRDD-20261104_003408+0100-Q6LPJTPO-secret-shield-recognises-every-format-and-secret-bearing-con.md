@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-05T02:02:21+0100
+updated: 2026-11-05T02:06:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -220,3 +220,4 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
  - 2026-11-05 — Dropped from step 1: the Twitter A-run, Facebook EAA and Telegram AA rules. They return only with vendor documentation; otherwise they go to KNOWN-MISSES.md.
  - 2026-11-05 — Gaps: no test iterates TOKENS for linearity (the linear tests cover the URL regex only); nothing type-checks hooks/.
  - 2026-11-05 — Correction of the DigitalOcean note above: "10 with a prefix, 18 without" counts rows whose regex contains a prefix as a literal substring. Some rows spell the prefix with a character class or an alternation: at least 15 of the 23 sampled DigitalOcean rows yield a sample carrying a prefix (13 hidden, 2 visible), and the oauth-token rule fired on 5 samples against 3 rows with a literal doo_v1_. So "18 without" is an upper bound, not a count, and not a list of rows to work on; any later work on unprefixed DigitalOcean rows starts from a fresh per-row shape count. Also: the Slack-on-GitLab re-run's out.json is byte-identical to the original run (cmp). The ReDoS harness of TRDD-OD5Z90YL does not exist yet (that card is in backburner); its requirement (1) registers every rules/ export, so it will cover the three DigitalOcean rules when built.
+ - 2026-11-05 — Qualifiers on the correction note above: "some rows spell the prefix with a character class or an alternation" is the likely mechanism, inferred, not measured (escaped or upper-case literals would give the same counts). The "24 entries" in NEXT ACTION: verified 2026-11-05, 24 lines start with ## in hooks/secret-shield/KNOWN-MISSES.md and each is a known-miss entry name (a slug; no intro or format heading), and tests/test_secret_shield_known_misses.py (10 passed) checks heading shape but states no entry count.
