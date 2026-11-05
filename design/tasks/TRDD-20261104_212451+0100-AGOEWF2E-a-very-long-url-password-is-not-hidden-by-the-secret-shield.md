@@ -4,7 +4,7 @@ title: A very long URL password is not hidden by the secret shield
 column: todo
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-04T21:50:25+0100
+updated: 2026-11-05T02:34:53+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -27,3 +27,7 @@ Measured on 2026-11-04 under claude plugin test: one URL whose password alone is
 ## Approval log
 
 - 2026-11-04T21:24:51+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes
+
+- 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. Now in scope: measure and fix here.
