@@ -162,6 +162,30 @@ describe('known misses: formats and names the shield does not hide on their own'
     expect(withToken.text.indexOf(token)).toBe(-1)
     expect(withToken.hits.jwt).toBe(1)
   })
+
+  test('KNOWN MISS gitlab-body-under-20-chars: a GitLab prefix followed by a 19-character body is not hidden, with 20 characters it is', () => {
+    const short = fake('Hd7Lq2VmX9sKc4TnB6w')
+    const edge = fake('Hd7Lq2VmX9sKc4TnB6wZ')
+    expect(short.length).toBe(19)
+    expect(edge.length).toBe(20)
+    expect(shown(`see ${j('gl', 'pat-')}${short} end`, short)).toBe(true)
+    check('20 characters hidden', hiddenAs(`see ${j('gl', 'pat-')}${edge} end`, edge, 'gitlab-pat'))
+  })
+
+  test('KNOWN MISS gitlab-body-without-digit-or-upper: a GitLab prefix followed by 21 lower-case letters is not hidden, with one digit added it is', () => {
+    const lower = fake('qwhxkmzpdnrtvbcjflgsy')
+    const withDigit = fake(lower + '7')
+    expect(/^[a-z]{21}$/.test(lower)).toBe(true)
+    expect(shown(`see ${j('gl', 'pat-')}${lower} end`, lower)).toBe(true)
+    check('with one digit hidden', hiddenAs(`see ${j('gl', 'pat-')}${withDigit} end`, withDigit, 'gitlab-pat'))
+  })
+
+  test('KNOWN MISS gitlab-legacy-unprefixed-token: a bare 20-character legacy GitLab token is not hidden, after GITLAB_TOKEN= it is', () => {
+    const legacy = fake('kTq4Zm9Wd2VxN7pRb3Hs')
+    expect(/^[A-Za-z0-9]{20}$/.test(legacy)).toBe(true)
+    expect(shown(`see ${legacy} here`, legacy)).toBe(true)
+    check('hidden after GITLAB_TOKEN=', hiddenAs(`GITLAB_TOKEN=${legacy}`, legacy, 'assignment'))
+  })
 })
 
 describe('known misses: copies of a hidden secret the shield does not follow', () => {
@@ -247,6 +271,7 @@ describe('known misses: copies of a hidden secret the shield does not follow', (
       check(`${name} copy visible`, shown(`${line}\necho ${value}`, `echo ${value}`))
     }
   })
+
 })
 
 describe('known defects: secrets the shield misses by a bug with its own card', () => {
@@ -317,5 +342,12 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       check(`${name} standalone hidden`, hiddenAs(`see ${token} here`, secret, rules[name].kind))
       for (const [context, frame] of contexts) check(`${name} after ${context} visible`, shown(frame(token), secret))
     }
+  })
+
+  test('KNOWN DEFECT TRDD-Q6LPJTPO gitlab-session-cookie: _gitlab_session= followed by 32 lower-case letters and digits is not hidden, the same value after GITLAB_TOKEN= is', () => {
+    const value = fake('e4b7a1c9d2f60385a1b2c3d4e5f60718')
+    expect(/^[0-9a-z]{32}$/.test(value)).toBe(true)
+    expect(shown(`_gitlab_session=${value}`, value)).toBe(true)
+    check('hidden after GITLAB_TOKEN=', hiddenAs(`GITLAB_TOKEN=${value}`, value, 'assignment'))
   })
 })

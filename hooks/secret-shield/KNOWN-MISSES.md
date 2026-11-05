@@ -199,3 +199,35 @@ Shape: One URL with a password of 1 MB (1048576 characters).
 Hidden instead: The same URL with a 256 KB password.
 Card: TRDD-AGOEWF2E
 Test: KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password alone is 1 MB is not hidden today, while the same URL at 256 KB is
+
+## gitlab-body-under-20-chars
+
+Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:21-22 and :32). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
+Shape: A GitLab prefix (glpat-) followed by 19 characters of letters, digits, underscore and hyphen, with a digit among them.
+Hidden instead: The same prefix followed by 20 characters (hidden with the gitlab-pat marker).
+Card: none
+Test: KNOWN MISS gitlab-body-under-20-chars: a GitLab prefix followed by a 19-character body is not hidden, with 20 characters it is
+
+## gitlab-body-without-digit-or-upper
+
+Reason: (c) a false-positive trade-off stated at hooks/secret-shield/rules/code-hosts.ts:15-18: the rule requires a digit or an upper-case letter inside the body, which keeps all-lower-case kebab names and lower-case x placeholders visible. A real 20-character body has neither with probability (28/64)^20, about 6.6e-8 (computed, not measured on real tokens).
+Shape: A GitLab prefix (glpat-) followed by 21 lower-case letters, with no digit and no upper-case letter in the body.
+Hidden instead: The same body with one digit added (hidden with the gitlab-pat marker).
+Card: none
+Test: KNOWN MISS gitlab-body-without-digit-or-upper: a GitLab prefix followed by 21 lower-case letters is not hidden, with one digit added it is
+
+## gitlab-legacy-unprefixed-token
+
+Reason: (b) no source was found for the form: GitLab tokens issued before the prefixes existed have no leading literal and no published shape (searched: docs.gitlab.com/security/tokens, which lists only the prefixed forms, and the 15 gitlab rules of gitleaks v8.30.1 gitlab.go, each of which needs a prefix or a cookie name). A standalone rule for 20 letters and digits would hide ordinary identifiers.
+Shape: 20 characters of letters and digits, with no name and no prefix before them.
+Hidden instead: The same 20 characters after GITLAB_TOKEN= (hidden by the assignment pass, because the name says secret).
+Card: none
+Test: KNOWN MISS gitlab-legacy-unprefixed-token: a bare 20-character legacy GitLab token is not hidden, after GITLAB_TOKEN= it is
+
+## gitlab-session-cookie
+
+Reason: (d) an open defect: the gitleaks rule gitlab-session-cookie (_gitlab_session= followed by 32 lower-case letters and digits) has no rule in the shield yet; it is planned as family 2b of TRDD-Q6LPJTPO, and the name _gitlab_session is not a secret name to the assignment pass.
+Shape: _gitlab_session= followed by 32 lower-case letters and digits.
+Hidden instead: The same 32 characters after GITLAB_TOKEN= (hidden by the assignment pass).
+Card: TRDD-Q6LPJTPO
+Test: KNOWN DEFECT TRDD-Q6LPJTPO gitlab-session-cookie: _gitlab_session= followed by 32 lower-case letters and digits is not hidden, the same value after GITLAB_TOKEN= is

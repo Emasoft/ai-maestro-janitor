@@ -2,7 +2,7 @@
 
 import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
-import { githubTokenClassic, githubTokenFineGrained } from './rules/code-hosts'
+import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, privateKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
@@ -66,6 +66,19 @@ const TOKENS: readonly Rule[] = [
   awsSessionToken,
   githubTokenClassic,
   githubTokenFineGrained,
+  gitlabPat,
+  gitlabOAuthAppSecret,
+  gitlabDeployToken,
+  gitlabRunnerToken,
+  gitlabRunnerRegistrationToken,
+  gitlabCicdJobToken,
+  gitlabTriggerToken,
+  gitlabFeedToken,
+  gitlabIncomingMailToken,
+  gitlabAgentToken,
+  gitlabWorkspaceToken,
+  gitlabScimToken,
+  gitlabFeatureFlagClientToken,
   anthropicKey,
   openaiProjectKey,
   openaiLegacyKey,
@@ -479,6 +492,19 @@ const LABELS: Record<string, string> = {
   'aws-secret-key': 'AWS secret key',
   'aws-session-token': 'AWS session token',
   'github-token': 'GitHub token',
+  'gitlab-pat': 'GitLab personal access token',
+  'gitlab-oauth-app-secret': 'GitLab OAuth application secret',
+  'gitlab-deploy-token': 'GitLab deploy token',
+  'gitlab-runner-token': 'GitLab runner authentication token',
+  'gitlab-runner-registration-token': 'GitLab runner registration token',
+  'gitlab-cicd-job-token': 'GitLab CI/CD job token',
+  'gitlab-trigger-token': 'GitLab pipeline trigger token',
+  'gitlab-feed-token': 'GitLab feed token',
+  'gitlab-incoming-mail-token': 'GitLab incoming mail token',
+  'gitlab-agent-token': 'GitLab agent for Kubernetes token',
+  'gitlab-workspace-token': 'GitLab workspace token',
+  'gitlab-scim-token': 'GitLab SCIM token',
+  'gitlab-feature-flag-client-token': 'GitLab feature flag client token',
   'anthropic-key': 'Anthropic API key',
   'openai-key': 'OpenAI API key',
   'slack-token': 'Slack token',

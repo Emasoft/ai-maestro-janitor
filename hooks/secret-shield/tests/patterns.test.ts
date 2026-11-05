@@ -619,18 +619,20 @@ describe('Google OAuth client secrets, access tokens and refresh tokens are hidd
   })
 })
 
-describe('DigitalOcean personal access, OAuth and refresh tokens are hidden with no name before them', () => {
-  // Fixtures are built at run time: no whole fake token sits in this file. The hex body is pure JS (no imports: the mod loader refuses node: imports) and deterministic.
-  const HEXDIGITS = '0123456789abcdef'
-  const hex = (n: number, seed: number): string => {
-    let state = seed
-    let out = ''
-    for (let i = 0; i < n; i++) {
-      state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-      out += HEXDIGITS[state >>> 28]
-    }
-    return out
+// A deterministic hex body for the DigitalOcean and GitLab families. Pure JS (no imports: the mod loader refuses node: imports), so no whole fake token sits in this file.
+const HEXDIGITS = '0123456789abcdef'
+const hex = (n: number, seed: number): string => {
+  let state = seed
+  let out = ''
+  for (let i = 0; i < n; i++) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    out += HEXDIGITS[state >>> 28]
   }
+  return out
+}
+
+describe('DigitalOcean personal access, OAuth and refresh tokens are hidden with no name before them', () => {
+  // Fixtures are built at run time: no whole fake token sits in this file.
   const families: Array<[string, string, number]> = [
     ['digitalocean-pat', j('do', 'p_', 'v1_'), 11],
     ['digitalocean-oauth-token', j('do', 'o_', 'v1_'), 22],
@@ -713,6 +715,231 @@ describe('DigitalOcean personal access, OAuth and refresh tokens are hidden with
   }
 })
 
+describe('GitLab prefixed tokens are hidden with no name before them', () => {
+  // Fixtures are built at run time with j(): no prefix and body sit together in this file. The bodies are slices of a fixed mixed-case alphanumeric run;
+  // the bodies with _ and - are built by hand (fake() in known-misses.test.ts has neither).
+  const BASE = A36 + A36
+  const slice = (n: number, from: number): string => BASE.slice(from, from + n)
+  // [kind, name in the test titles, prefix, body]. gitlab-runner-token has two prefixes, so it has two rows.
+  const families: Array<[string, string, string, string]> = [
+    ['gitlab-pat', 'gitlab-pat', j('gl', 'pat-'), slice(20, 0)],
+    ['gitlab-oauth-app-secret', 'gitlab-oauth-app-secret', j('gl', 'oas-'), slice(64, 2)],
+    ['gitlab-deploy-token', 'gitlab-deploy-token', j('gl', 'dt-'), slice(20, 4)],
+    ['gitlab-runner-token', 'gitlab-runner-token (glrt-)', j('gl', 'rt-'), slice(20, 6)],
+    ['gitlab-runner-token', 'gitlab-runner-token (glrtr-)', j('gl', 'rtr-'), slice(20, 8)],
+    ['gitlab-runner-registration-token', 'gitlab-runner-registration-token', j('GR', '1348941'), slice(20, 10)],
+    ['gitlab-cicd-job-token', 'gitlab-cicd-job-token', j('gl', 'cbt-'), j('k7_', slice(20, 12))],
+    ['gitlab-trigger-token', 'gitlab-trigger-token', j('gl', 'ptt-'), slice(40, 1)],
+    ['gitlab-feed-token', 'gitlab-feed-token', j('gl', 'ft-'), slice(20, 14)],
+    ['gitlab-incoming-mail-token', 'gitlab-incoming-mail-token', j('gl', 'imt-'), slice(25, 3)],
+    ['gitlab-agent-token', 'gitlab-agent-token', j('gl', 'agent-'), slice(50, 5)],
+    ['gitlab-workspace-token', 'gitlab-workspace-token', j('gl', 'wt-'), slice(20, 16)],
+    ['gitlab-scim-token', 'gitlab-scim-token', j('gl', 'soat-'), slice(20, 18)],
+    ['gitlab-feature-flag-client-token', 'gitlab-feature-flag-client-token', j('gl', 'ffct-'), slice(20, 20)],
+  ]
+  const patPrefix = families[0][2]
+  const patToken = j(patPrefix, families[0][3])
+  const runnerPrefix = families[3][2]
+  const runnerToken = j(runnerPrefix, families[3][3])
+  const only = (kind: string): Record<string, number> => ({ [kind]: 1 })
+
+  for (const [kind, name, prefix, tokenBody] of families) {
+    const M = mark(kind)
+    const token = j(prefix, tokenBody)
+    // The other letter case of the prefix: lower case for GR, upper case for the rest.
+    const flipped = prefix === prefix.toUpperCase() ? prefix.toLowerCase() : prefix.toUpperCase()
+
+    test(`${name}: a token alone on a line is one marker, counted once`, () => {
+      const done = redact(`before\n${token}\nafter`)
+      expect(done.text).toBe(`before\n${M}\nafter`)
+      expect(done.hits).toEqual(only(kind))
+    })
+
+    test(`${name}: hidden in a JSON string, right after a literal backslash-n inside a JSON string, and in a URL query (neutral names)`, () => {
+      const cases: Array<[string, string]> = [
+        [`{"v":"${token}"}`, `{"v":"${M}"}`],
+        [`{"msg":"line one\\n${token}"}`, `{"msg":"line one\\n${M}"}`],
+        [`https://api.example.com/v2/items?q=${token}&x=1`, `https://api.example.com/v2/items?q=${M}&x=1`],
+      ]
+      for (const [input, expected] of cases) {
+        const done = redact(input)
+        expect(done.text).toBe(expected)
+        expect(done.hits).toEqual(only(kind))
+      }
+    })
+
+    // The name says secret, so the assignment pass would hide this value even without the rule: this pins the kind of the marker (the rule runs first), not detection.
+    test(`${name}: label-only, GITLAB_TOKEN= names a secret, the token is one marker of its own kind`, () => {
+      const done = redact(`GITLAB_TOKEN=${token}`)
+      expect(done.text).toBe(`GITLAB_TOKEN=${M}`)
+      expect(done.hits).toEqual(only(kind))
+    })
+
+    test(`${name}: a 19-character body stays visible, a 20-character body with one digit is hidden`, () => {
+      const short = j(prefix, 'abcdefghijklmnopqr7')
+      const edge = j(prefix, 'abcdefghijklmnopqrs7')
+      const visible = redact(`see ${short} end`)
+      expect(visible.text).toBe(`see ${short} end`)
+      expect(visible.hits).toEqual({})
+      const hidden = redact(`see ${edge} end`)
+      expect(hidden.text).toBe(`see ${M} end`)
+      expect(hidden.hits).toEqual(only(kind))
+    })
+
+    test(`${name}: an upper-case prefix (lower-case for GR) is hidden`, () => {
+      const done = redact(`see ${j(flipped, tokenBody)} end`)
+      expect(done.text).toBe(`see ${M} end`)
+      expect(done.hits).toEqual(only(kind))
+    })
+
+    test(`${name}: a body with - and _ inside is hidden whole, and so are - and _ glued to its end`, () => {
+      const inside = j(prefix, tokenBody.slice(0, 7), '-', tokenBody.slice(7, 12), '_', tokenBody.slice(12))
+      const a = redact(`see ${inside} end`)
+      expect(a.text).toBe(`see ${M} end`)
+      expect(a.hits).toEqual(only(kind))
+      const b = redact(`see ${token}_-x end`)
+      expect(b.text).toBe(`see ${M} end`)
+      expect(b.hits).toEqual(only(kind))
+    })
+
+    test(`${name}: the text after the token (a double quote, &x=1, a space, a space and a word) is kept as it is`, () => {
+      for (const after of ['"', '&x=1', ' ', ' then']) {
+        const done = redact(`see ${token}${after} end`)
+        expect(done.text).toBe(`see ${M}${after} end`)
+        expect(done.hits).toEqual(only(kind))
+      }
+    })
+  }
+
+  test('gitlab-trigger-token: a real hex-40 body is hidden alone, in a JSON string and after a literal backslash-n', () => {
+    const body = hex(40, 44)
+    expect(/[0-9]/.test(body)).toBe(true)
+    const token = j('gl', 'ptt-', body)
+    const M = mark('gitlab-trigger-token')
+    for (const [input, expected] of [
+      [`see ${token} end`, `see ${M} end`],
+      [`{"v":"${token}"}`, `{"v":"${M}"}`],
+      [`{"msg":"line one\\n${token}"}`, `{"msg":"line one\\n${M}"}`],
+    ]) {
+      const done = redact(input)
+      expect(done.text).toBe(expected)
+      expect(done.hits).toEqual(only('gitlab-trigger-token'))
+    }
+  })
+
+  test('gitlab-incoming-mail-token: -issue glued to a 25-character body is hidden with it', () => {
+    const done = redact(`see ${j('gl', 'imt-', slice(25, 3))}-issue end`)
+    expect(done.text).toBe(`see ${mark('gitlab-incoming-mail-token')} end`)
+    expect(done.hits).toEqual(only('gitlab-incoming-mail-token'))
+  })
+
+  describe('the routable tail', () => {
+    // A routable token: a payload of 27 or more characters, a dot and 9 lower-case letters or digits. The payload has an underscore inside.
+    const payload = j(slice(13, 0), '_', slice(13, 20))
+    const tail = 'q7f2k9x4m'
+
+    test('a routable glpat- token (27-character payload, dot, 9 characters) is one marker', () => {
+      expect(payload.length).toBe(27)
+      const done = redact(`see ${j(patPrefix, payload, '.', tail)} end`)
+      expect(done.text).toBe(`see ${mark('gitlab-pat')} end`)
+      expect(done.hits).toEqual(only('gitlab-pat'))
+    })
+
+    test('a routable glrt-t1_ token is one marker, and so is a glrtr- token with the same tail', () => {
+      for (const prefix of [runnerPrefix, j('gl', 'rtr-')]) {
+        const done = redact(`see ${j(prefix, 't1_', payload, '.', tail)} end`)
+        expect(done.text).toBe(`see ${mark('gitlab-runner-token')} end`)
+        expect(done.hits).toEqual(only('gitlab-runner-token'))
+      }
+    })
+
+    // Both tailed kinds. The tail is a dot and exactly 9 lower-case letters or digits followed by a non-alphanumeric.
+    for (const [kind, token] of [['gitlab-pat', patToken], ['gitlab-runner-token', runnerToken]]) {
+      const M = mark(kind)
+      test(`${kind}: a dot and 10 or more characters after the token stay visible, so does .toLowerCase, and a dot and exactly 9 before a parenthesis is hidden with it`, () => {
+        for (const [after, expected] of [
+          ['.abcdefghij', `${M}.abcdefghij`],
+          ['.toLowerCase()', `${M}.toLowerCase()`],
+          ['.substring(x)', `${M}(x)`],
+        ]) {
+          const done = redact(`${token}${after}`)
+          expect(done.text).toBe(expected)
+          expect(done.hits).toEqual(only(kind))
+        }
+      })
+    }
+
+    test('gitlab-oauth-app-secret has no tail: a dot and 9 characters after the token stay visible', () => {
+      const done = redact(`${j('gl', 'oas-', slice(64, 2))}.substring(x)`)
+      expect(done.text).toBe(`${mark('gitlab-oauth-app-secret')}.substring(x)`)
+      expect(done.hits).toEqual(only('gitlab-oauth-app-secret'))
+    })
+  })
+
+  describe('the digit-or-upper-case requirement', () => {
+    const M = mark('gitlab-pat')
+    test('a digit or an upper-case letter after 25 lower-case characters of the same body is enough', () => {
+      for (const last of ['7', 'Z']) {
+        const done = redact(`see ${j(patPrefix, 'abcdefghijklmnopqrstuvwxy', last)} end`)
+        expect(done.text).toBe(`see ${M} end`)
+        expect(done.hits).toEqual(only('gitlab-pat'))
+      }
+    })
+  })
+
+  describe('secrets in URLs and headers', () => {
+    test('PRIVATE-TOKEN: <pat> (label-only: the name says secret) has the token hidden as a gitlab-pat', () => {
+      const done = redact(`PRIVATE-TOKEN: ${patToken}`)
+      expect(done.text).toBe(`PRIVATE-TOKEN: ${mark('gitlab-pat')}`)
+      expect(done.hits).toEqual(only('gitlab-pat'))
+    })
+
+    test('https://oauth2:<pat>@gitlab.example keeps the user and the host, the token has its GitLab kind', () => {
+      const done = redact(`git clone https://oauth2:${patToken}@gitlab.example/g/p.git`)
+      expect(done.text).toBe(`git clone https://oauth2:${mark('gitlab-pat')}@gitlab.example/g/p.git`)
+      expect(done.hits).toEqual(only('gitlab-pat'))
+    })
+
+    test('https://gitlab-ci-token:<job token>@gitlab.example keeps the user and the host, the token has its GitLab kind', () => {
+      const done = redact(`git clone https://gitlab-ci-token:${j('gl', 'cbt-', 'k7_', slice(20, 12))}@gitlab.example/g/p.git`)
+      expect(done.text).toBe(`git clone https://gitlab-ci-token:${mark('gitlab-cicd-job-token')}@gitlab.example/g/p.git`)
+      expect(done.hits).toEqual(only('gitlab-cicd-job-token'))
+    })
+  })
+
+  // Visible by decision: names, placeholders and prose that carry a prefix without a body.
+  // The titles describe the case and never carry the text, so no token-shaped name is printed.
+  const stayVisible: Array<[string, string]> = [
+    ['an all-lower-case kebab name of 23 characters', j('gl', 'pat-', 'expiry-notification-job')],
+    ['20 lower-case x', j('gl', 'pat-', 'x'.repeat(20))],
+    // A year makes the name look like a token, but the body is 15 characters, under the 20 of the rule.
+    ['a kebab name with a year whose body is 15 characters', j('gl', 'pat-', 'expiry-job-2024')],
+    ['the prefix in a sentence', `GitLab tokens start with ${j('gl', 'pat-')} and are long.`],
+    ['the prefix followed by a <token> placeholder', j('gl', 'pat-', '<token>')],
+    ['the prefix followed by three dots', j('gl', 'pat-', '...')],
+  ]
+  for (const [description, line] of stayVisible) {
+    test(`stays visible: ${description}`, () => {
+      const done = redact(line)
+      expect(done.text).toBe(line)
+      expect(done.hits).toEqual({})
+    })
+  }
+
+  // Hidden by decision: a body of 20 or more characters that has a digit or an upper-case letter is hidden even when it reads like a name.
+  const hiddenByDecision: Array<[string, string]> = [
+    ['20 upper-case X', j('gl', 'pat-', 'X'.repeat(20))],
+    ['a kebab name with a year whose body is 28 characters', j('gl', 'pat-', 'expiry-notification-job-2024')],
+  ]
+  for (const [description, line] of hiddenByDecision) {
+    test(`hidden by decision: ${description}`, () => {
+      const done = redact(`see ${line} end`)
+      expect(done.text).toBe(`see ${mark('gitlab-pat')} end`)
+      expect(done.hits).toEqual(only('gitlab-pat'))
+    })
+  }
+})
+
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -735,6 +962,19 @@ describe('token rule order', () => {
       id('aws-session-token', /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g),
       id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g),
       id('github-token', /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g),
+      id('gitlab-pat', /[gG][lL][pP][aA][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}(?:\.[0-9a-z]{9}(?![0-9A-Za-z]))?/g),
+      id('gitlab-oauth-app-secret', /[gG][lL][oO][aA][sS]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-deploy-token', /[gG][lL][dD][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-runner-token', /(?:[gG][lL][rR][tT][rR]-|[gG][lL][rR][tT]-)(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}(?:\.[0-9a-z]{9}(?![0-9A-Za-z]))?/g),
+      id('gitlab-runner-registration-token', /[gG][rR]1348941(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-cicd-job-token', /[gG][lL][cC][bB][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-trigger-token', /[gG][lL][pP][tT][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-feed-token', /[gG][lL][fF][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-incoming-mail-token', /[gG][lL][iI][mM][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-agent-token', /[gG][lL][aA][gG][eE][nN][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-workspace-token', /[gG][lL][wW][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-scim-token', /[gG][lL][sS][oO][aA][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
+      id('gitlab-feature-flag-client-token', /[gG][lL][fF][fF][cC][tT]-(?=[0-9A-Za-z_-]{0,319}?[0-9A-Z])[0-9A-Za-z_-]{20,}/g),
       id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),
