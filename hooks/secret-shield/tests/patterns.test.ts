@@ -982,6 +982,28 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     ['a HAR pair, name first, escaped', `{${BS}"name${BS}":${BS}"${NAME}${BS}",${BS}"value${BS}":${BS}"${hex32}${BS}"}`, `{${BS}"name${BS}":${BS}"${NAME}${BS}",${BS}"value${BS}":${BS}"${M}${BS}"}`],
     ['a HAR pair, value first', `{"value": "${hex32}", "name": "${NAME}"}`, `{"value": "${M}", "name": "${NAME}"}`],
     ['a HAR pair, value first, with no spaces', `{"value":"${hex32}","name":"${NAME}","path":"/"}`, `{"value":"${M}","name":"${NAME}","path":"/"}`],
+    // Round 3 (TRDD-Q6LPJTPO): unquoted keys, positional calls, a Rails hash, and fields between name and value.
+    ['a Puppeteer pair with unquoted keys, name first', `{name: '${NAME}', value: '${hex32}'}`, `{name: '${NAME}', value: '${M}'}`],
+    ['a Playwright addCookies call with fields after the value', `await context.addCookies([{ name: '${NAME}', value: '${hex32}', domain: 'gitlab.example', path: '/' }])`, `await context.addCookies([{ name: '${NAME}', value: '${M}', domain: 'gitlab.example', path: '/' }])`],
+    ['a Puppeteer pair with unquoted keys, value first', `{value: '${hex32}', name: '${NAME}'}`, `{value: '${M}', name: '${NAME}'}`],
+    ['a Go http.Cookie, name first', `http.Cookie{Name: "${NAME}", Value: "${hex32}"}`, `http.Cookie{Name: "${NAME}", Value: "${M}"}`],
+    ['a Go http.Cookie, value first', `http.Cookie{Value: "${hex32}", Name: "${NAME}"}`, `http.Cookie{Value: "${M}", Name: "${NAME}"}`],
+    ['a set_cookie call, single quotes', `set_cookie('${NAME}', '${hex32}')`, `set_cookie('${NAME}', '${M}')`],
+    ['a cookies.set call, double quotes', `cookies.set("${NAME}", "${hex32}")`, `cookies.set("${NAME}", "${M}")`],
+    ['a res.cookie call with options after the value', `res.cookie('${NAME}', '${hex32}', { httpOnly: true })`, `res.cookie('${NAME}', '${M}', { httpOnly: true })`],
+    ['a positional call with no space after the comma', `set_cookie('${NAME}','${hex32}')`, `set_cookie('${NAME}','${M}')`],
+    ['a Rails cookie hash', `cookies[:${NAME}] = { value: '${hex32}' }`, `cookies[:${NAME}] = { value: '${M}' }`],
+    ['a Rails cookie hash with options after the value', `cookies[:${NAME}] = { value: '${hex32}', httponly: true }`, `cookies[:${NAME}] = { value: '${M}', httponly: true }`],
+    ['a Rails cookie hash with options before the value', `cookies[:${NAME}] = { expires: 1.hour, value: '${hex32}' }`, `cookies[:${NAME}] = { expires: 1.hour, value: '${M}' }`],
+    [
+      'a Chrome extension export object, pretty-printed (six fields between name and value)',
+      `{\n    "domain": "gitlab.example",\n    "hostOnly": true,\n    "name": "${NAME}",\n    "path": "/",\n    "sameSite": "unspecified",\n    "secure": true,\n    "session": false,\n    "storeId": "0",\n    "value": "${hex32}"\n}`,
+      `{\n    "domain": "gitlab.example",\n    "hostOnly": true,\n    "name": "${NAME}",\n    "path": "/",\n    "sameSite": "unspecified",\n    "secure": true,\n    "session": false,\n    "storeId": "0",\n    "value": "${M}"\n}`,
+    ],
+    ['a pair with fields between value and name', `{"value": "${hex32}", "domain": "gitlab.example", "path": "/", "name": "${NAME}"}`, `{"value": "${M}", "domain": "gitlab.example", "path": "/", "name": "${NAME}"}`],
+    // The span is 400 characters at most: ` "x": "`, 382 filler characters and `", "` are 393 characters.
+    ['a pair with 393 characters between name and value', `{"name": "${NAME}", "x": "${'a'.repeat(382)}", "value": "${hex32}"}`, `{"name": "${NAME}", "x": "${'a'.repeat(382)}", "value": "${M}"}`],
+    ['a pair with 393 characters between value and name', `{"value": "${hex32}", "x": "${'a'.repeat(382)}", "name": "${NAME}"}`, `{"value": "${M}", "x": "${'a'.repeat(382)}", "name": "${NAME}"}`],
     ['a YAML pair', `${NAME}: ${hex32}`, `${NAME}: ${M}`],
     ['a Netscape cookie-jar line (name, a tab, value)', `gitlab.example\tFALSE\t/\tTRUE\t0\t${NAME}\t${hex32}`, `gitlab.example\tFALSE\t/\tTRUE\t0\t${NAME}\t${M}`],
     ['a URL query, the text after & kept', `https://gitlab.example/x?${NAME}=${hex32}&next=/x`, `https://gitlab.example/x?${NAME}=${M}&next=/x`],
@@ -1017,6 +1039,10 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     ['16 lower-case x', `${NAME}=${'x'.repeat(16)}`, `${NAME}=${M}`],
     ['a code expression after =', `${NAME} = fetch_session_value()`, `${NAME} = ${M}`],
     ['a 16-character word after a colon', `${NAME}: abcdefghijklmnop`, `${NAME}: ${M}`],
+    // Costs of the positional and field-list shapes, accepted for security (round 3): the next name of a quoted list, and a 15-character value after a doubled separator.
+    ['a quoted list of cookie names hides the next name of 16 or more characters', `['${NAME}', 'remember_user_token']`, `['${NAME}', '${M}']`],
+    ['a 15-character value after => (the > counts as the 16th)', `${NAME}=>${cut16.slice(1)}`, `${NAME}=${M}`],
+    ['a 15-character value after :: (the second colon counts as the 16th)', `${NAME}::${cut16.slice(1)}`, `${NAME}:${M}`],
   ]
   for (const [description, text, expected] of hiddenByDecision) {
     test(`hidden by decision: ${description}`, () => {
@@ -1049,6 +1075,17 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     ['a HAR pair of another cookie, name first', `{"name": "other_cookie", "value": "${hex32}"}`],
     ['a HAR pair of another cookie, value first', `{"value": "${hex32}", "name": "other_cookie"}`],
     ['the name repeated with no value', NAME.repeat(5)],
+    // Round 3 (TRDD-Q6LPJTPO): the value never comes from the next line, and the new field-list and positional shapes need a quoted value.
+    ['a YAML map header alone on its line, a long key on the next line', `${NAME}:\nsome_long_key_name_here: 1`],
+    ['a log line ending in the name and a colon, the next line starts with a timestamp', `2026-11-05 ${NAME}:\n2026-11-05T10:00:00.123+0100 started`],
+    ['a positional call with a short value', `set_cookie('${NAME}', 'abc123')`],
+    ['a positional call whose second argument is a variable', `set_cookie('${NAME}', current_session_value)`],
+    ['a Rails hash whose value is short', `cookies[:${NAME}] = { value: 'abc123' }`],
+    ['a field list whose value is a variable', `{name: '${NAME}', value: current_session_value}`],
+    ['a field list of another cookie, name first', `{name: 'other_cookie', path: '/', value: '${hex32}'}`],
+    ['a field list of another cookie, value first', `{value: '${hex32}', path: '/', name: 'other_cookie'}`],
+    ['a second object after the closing brace, name first', `[{"name": "${NAME}", "path": "/"}, {"name": "other_cookie", "value": "${hex32}"}]`],
+    ['a second object before the opening brace, value first', `[{"value": "${hex32}", "name": "other_cookie"}, {"path": "/", "name": "${NAME}"}]`],
   ]
   for (const [description, line] of stayVisible) {
     test(`stays visible: ${description}`, () => {
@@ -1093,8 +1130,8 @@ describe('token rule order', () => {
       id('gitlab-workspace-token', /glwt-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-scim-token', /glsoat-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-feature-flag-client-token', /glffct-[0-9A-Za-z_-]{20,}/gi),
-      id('gitlab-session-cookie', /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:\\*["']|%2[27])?\]?[ \r\n]*(?:=>?|:|%3[AD]|\t|,\s*(?:\\*["']|%2[27])value(?:\\*["']|%2[27])\s*:)\s*(?:\\*["']|%2[27])?([^;&,%\s"'`\\]{16,})/gi),
-      id('gitlab-session-cookie', /value(?:\\*["']|%2[27])\s*:\s*(?:\\*["']|%2[27])?([^;&,%\s"'`\\]{16,})(?:\\*["']|%2[27])\s*,\s*(?:\\*["']|%2[27])name(?:\\*["']|%2[27])\s*:\s*(?:\\*["']|%2[27])_gitlab_session/gi),
+      id('gitlab-session-cookie', /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:(?:\\*["']|%2[27])[ \t]*,[ \t]*(?:\\*["']|%2[27])|(?:\\*["']|%2[27])?\]?[ \r\n]*(?:(?:=>?|:|%3[AD]|\t)[ \t]*(?:\\*["']|%2[27])?|(?:,|=>?[ \t]*\{)[^{}]{0,400}?value(?:\\*["']|%2[27])?[ \t]*:[ \t]*(?:\\*["']|%2[27])))([^;&,%\s"'`\\]{16,})/gi),
+      id('gitlab-session-cookie', /value(?:\\*["']|%2[27])?[ \t]*:[ \t]*(?:\\*["']|%2[27])([^;&,%\s"'`\\]{16,})(?:\\*["']|%2[27])\s*,[^{}]{0,400}?name(?:\\*["']|%2[27])?[ \t]*:[ \t]*(?:\\*["']|%2[27])?_gitlab_session/gi),
       id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),

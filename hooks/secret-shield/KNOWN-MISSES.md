@@ -218,7 +218,7 @@ Test: KNOWN MISS gitlab-legacy-unprefixed-token: a bare 20-character legacy GitL
 
 ## gitlab-session-cookie-under-16-chars
 
-Reason: (c) a bound kept for a stated reason: the value floor of the GitLab session cookie rule is 16 characters (hooks/secret-shield/rules/code-hosts.ts:67-70). A GitLab session value is a 32-character Rack public id (cache_store.rb and abstract_store.rb, SecureRandom.hex(16)); 16 characters are 64 bits of it, and a shorter run after the name reads more often as a flag, a number or a placeholder than as a cut cookie.
+Reason: (c) a bound kept for a stated reason: the value floor of the GitLab session cookie rule is 16 characters (hooks/secret-shield/rules/code-hosts.ts:76-81). A GitLab session value is a 32-character Rack public id (cache_store.rb and abstract_store.rb, SecureRandom.hex(16)); 16 characters are 64 bits of it, and a shorter run after the name reads more often as a flag, a number or a placeholder than as a cut cookie.
 Shape: _gitlab_session= followed by 15 characters of letters and digits.
 Hidden instead: The same name followed by 16 characters (hidden with the gitlab-session-cookie marker).
 Card: none
@@ -226,16 +226,32 @@ Test: KNOWN MISS gitlab-session-cookie-under-16-chars: a session cookie cut to 1
 
 ## gitlab-session-cookie-value-with-delimiter
 
-Reason: (c) a bound kept for a stated reason: an unquoted session cookie value stops at a semicolon, an ampersand, a comma, a percent sign, whitespace, a quote, a backtick or a backslash (hooks/secret-shield/rules/code-hosts.ts:62-66). GitLab session values are hex with an optional hyphenated prefix and never hold one of those, so stopping there keeps the text after a URL query ampersand or a log-line comma visible; a value that did hold an ampersand or a comma would be hidden only up to it.
+Reason: (c) a bound kept for a stated reason: an unquoted session cookie value stops at a semicolon, an ampersand, a comma, a percent sign, whitespace, a quote, a backtick or a backslash (hooks/secret-shield/rules/code-hosts.ts:71-75). GitLab session values are hex with an optional hyphenated prefix and never hold one of those, so stopping there keeps the text after a URL query ampersand or a log-line comma visible; a value that did hold an ampersand or a comma would be hidden only up to it.
 Shape: _gitlab_session= followed by 20 characters of letters and digits, an ampersand and 20 more.
 Hidden instead: The same value without the ampersand (hidden whole).
 Card: none
 Test: KNOWN MISS gitlab-session-cookie-value-with-delimiter: the part of a session cookie value after an ampersand is not hidden, a value without one is
 
-## gitlab-session-cookie-har-fields-apart
+## gitlab-session-cookie-fields-beyond-span
 
-Reason: (c) a bound kept for a stated reason: the browser export pair is hidden only when its name and value fields are adjacent (hooks/secret-shield/rules/code-hosts.ts:77-78); a gap needs a bounded wildcard span between the fields, which hides more text and costs a scan per name.
-Shape: A JSON object with the fields name (_gitlab_session), path and value, in that order.
-Hidden instead: The same object with the value field right after the name field (hidden with the gitlab-session-cookie marker).
+Reason: (c) a bound kept for a stated reason: the name and the value of a browser export pair, a Puppeteer, Playwright or Go cookie and a Rails cookie hash may be separated by other fields, but only inside one object and only up to 400 characters (hooks/secret-shield/rules/code-hosts.ts:84-90). The widest real export read (a Chrome extension cookies.Cookie object, pretty-printed) puts about 150 characters between them; the bound keeps the scan per name constant, and the brace stop keeps the span from reaching another cookie's value.
+Shape: A JSON object with the fields name (_gitlab_session), then 401 characters of other fields, then value; or a nested object between the name and the value.
+Hidden instead: The same object with 400 characters or fewer between the name and the value, and no brace between them (hidden with the gitlab-session-cookie marker).
 Card: none
-Test: KNOWN MISS gitlab-session-cookie-har-fields-apart: a browser export pair with another field between the name and the value is not hidden, with the fields adjacent it is
+Test: KNOWN MISS gitlab-session-cookie-fields-beyond-span: a name and a value more than 400 characters apart, or with a nested object between them, are not hidden; 400 characters apart they are
+
+## gitlab-session-cookie-tab-before-colon
+
+Reason: (c) a bound kept for a stated reason: the whitespace between the name and the separator is spaces and line breaks without the tab, because the tab is itself a separator and a tab run then splits one way only, which keeps the match linear (hooks/secret-shield/rules/code-hosts.ts:91-94). A tab before a colon is not read as a separator followed by a value.
+Shape: "_gitlab_session", a tab, a colon, a space and a quoted 32-character value.
+Hidden instead: The same pair with the colon right after the quote, or after spaces (hidden with the gitlab-session-cookie marker).
+Card: none
+Test: KNOWN MISS gitlab-session-cookie-tab-before-colon: a session cookie pair with a tab before the colon is not hidden, with a space it is
+
+## gitlab-session-cookie-double-url-encoded
+
+Reason: (c) a bound kept for a stated reason: only one level of URL-encoding is read between the name and the value (%3D and %3A) and around a quote (%22, %27); a second level (%253D) is not (hooks/secret-shield/rules/code-hosts.ts:95).
+Shape: _gitlab_session%253D followed by a 32-character value.
+Hidden instead: The same value after _gitlab_session%3D (hidden with the gitlab-session-cookie marker).
+Card: none
+Test: KNOWN MISS gitlab-session-cookie-double-url-encoded: a session cookie value after a double-URL-encoded equals sign is not hidden, after a single-encoded one it is
