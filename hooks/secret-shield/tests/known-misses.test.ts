@@ -335,11 +335,4 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       for (const [context, frame] of contexts) check(`${name} after ${context} visible`, shown(frame(token), secret))
     }
   })
-
-  test('KNOWN DEFECT TRDD-Q6LPJTPO gitlab-session-cookie: _gitlab_session= followed by 32 lower-case letters and digits is not hidden, the same value after GITLAB_TOKEN= is', () => {
-    const value = fake('e4b7a1c9d2f60385a1b2c3d4e5f60718')
-    expect(/^[0-9a-z]{32}$/.test(value)).toBe(true)
-    expect(shown(`_gitlab_session=${value}`, value)).toBe(true)
-    check('hidden after GITLAB_TOKEN=', hiddenAs(`GITLAB_TOKEN=${value}`, value, 'assignment'))
-  })
 })

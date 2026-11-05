@@ -47,3 +47,26 @@ export const gitlabAgentToken: Rule = gitlab('gitlab-agent-token', 'glagent-')
 export const gitlabWorkspaceToken: Rule = gitlab('gitlab-workspace-token', 'glwt-')
 export const gitlabScimToken: Rule = gitlab('gitlab-scim-token', 'glsoat-')
 export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-client-token', 'glffct-')
+
+// GitLab session cookie: its name makes the whole value a secret, so it is hidden from `_gitlab_session` followed by `=` (a Cookie header, a Set-Cookie header, a curl -b
+// argument, a cookie assignment) or by a JSON pair (`"_gitlab_session": "..."`, also escaped). It is not a prefixed token, so it has its own pattern, not the factory above.
+// Sources (NOTICE credits gitleaks v8.30.1): the name and the 32-character body come from the gitleaks rule gitlab-session-cookie (`_gitlab_session=[0-9a-z]{32}`);
+// GitLab's own code (gitlabhq lib/gitlab/sessions/cache_store.rb, generate_sid) builds the value as an optional `<session_cookie_token_prefix>-` followed by the Rack public
+// id, and Rails (actionpack abstract_store.rb, generate_sid) makes that id `SecureRandom.hex(16)`: 32 hex characters. The cookie name comes from
+// config/initializers/session_store.rb: `_gitlab_session`, or `_gitlab_session_geo_<64 hex>` on a Geo secondary (and `_gitlab_session_<64 hex>` in development).
+// WHY each part is written this way:
+// - Flag gi: the name matches in any letter case (a header name or a JSON key may be re-cased); the value is a negated class, so the flag does not touch it.
+// - The value is everything up to a `;`, whitespace, a quote, a backtick or a backslash (the last stops it at the `\"` of escaped JSON and at a literal backslash-n), and it
+//   needs 32 or more of them: the shortest published form is 32, the cell prefix makes a real value longer, and a run that is not letters and digits (the prefix has hyphens) must
+//   still be hidden whole. A value under 32 characters (empty, a placeholder, `<session>`) stays visible. The alphabet is not restricted to [0-9a-z], because security comes first
+//   (owner, 2026-11-05) and the cell prefix is not in that alphabet. The cost: a placeholder of 32 or more characters is hidden too.
+// - The name may carry a suffix of up to 80 letters, digits and underscores (the Geo and development cookie names above). It is bounded and not `*`: with `*` a text that repeats
+//   the name with no `=` would rescan the rest of the text from every copy, which is quadratic.
+// - The separator is `=` or a quoted key, a colon and a quoted value, with a run of backslashes allowed before each quote (escaped and double-escaped JSON). No leading \b and no
+//   lookbehind: a name right after an escape such as a literal backslash-n must still be hidden (TRDD-5VZTPXBJ).
+// - No group repeats a group: every quantifier sits on one class or one character, so the match is linear.
+export const gitlabSessionCookie: Rule = {
+  kind: 'gitlab-session-cookie',
+  pattern: /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:=|\\*"\s*:\s*\\*")([^;\s"'`\\]{32,})/gi,
+  group: 1,
+}

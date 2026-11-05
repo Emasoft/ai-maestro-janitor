@@ -215,11 +215,3 @@ Shape: 20 characters of letters and digits, with no name and no prefix before th
 Hidden instead: The same 20 characters after GITLAB_TOKEN= (hidden by the assignment pass, because the name says secret).
 Card: none
 Test: KNOWN MISS gitlab-legacy-unprefixed-token: a bare 20-character legacy GitLab token is not hidden, after GITLAB_TOKEN= it is
-
-## gitlab-session-cookie
-
-Reason: (d) an open defect: the gitleaks rule gitlab-session-cookie (_gitlab_session= followed by 32 lower-case letters and digits) has no rule in the shield yet; it is planned as family 2b of TRDD-Q6LPJTPO, and the name _gitlab_session is not a secret name to the assignment pass.
-Shape: _gitlab_session= followed by 32 lower-case letters and digits.
-Hidden instead: The same 32 characters after GITLAB_TOKEN= (hidden by the assignment pass).
-Card: TRDD-Q6LPJTPO
-Test: KNOWN DEFECT TRDD-Q6LPJTPO gitlab-session-cookie: _gitlab_session= followed by 32 lower-case letters and digits is not hidden, the same value after GITLAB_TOKEN= is

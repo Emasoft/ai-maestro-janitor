@@ -931,6 +931,83 @@ describe('GitLab prefixed tokens are hidden with no name before them', () => {
   }
 })
 
+describe('the GitLab session cookie is hidden whole, the cookie name is kept', () => {
+  // Moved here from the KNOWN DEFECT test of known-misses.test.ts (TRDD-Q6LPJTPO). The values are built at run time with j(); a Rack session id is 32 hex characters.
+  const kind = 'gitlab-session-cookie'
+  const only = { [kind]: 1 }
+  const M = mark(kind)
+  const hex32 = j('e4b7a1c9', 'd2f60385', 'a1b2c3d4', 'e5f60718')
+  // Independent of hex32: a copy of the value inside the name would be hidden by the propagation pass.
+  const hex64 = j('1a2b3c4d', '5e6f7081', '92a3b4c5', 'd6e7f809', '0f1e2d3c', '4b5a6978', '8796a5b4', 'c3d2e1f0')
+  const BS = '\\'
+  const NAME = '_gitlab_session'
+
+  const hidden: Array<[string, string, string]> = [
+    ['a Cookie header, the cookie in the middle', `Cookie: a=1; ${NAME}=${hex32}; b=2`, `Cookie: a=1; ${NAME}=${M}; b=2`],
+    ['a Cookie header, the cookie last', `Cookie: a=1; ${NAME}=${hex32}`, `Cookie: a=1; ${NAME}=${M}`],
+    ['a Set-Cookie header with attributes', `Set-Cookie: ${NAME}=${hex32}; path=/; secure; HttpOnly`, `Set-Cookie: ${NAME}=${M}; path=/; secure; HttpOnly`],
+    ['a curl -b argument in double quotes', `curl -b "${NAME}=${hex32}" https://gitlab.example/api`, `curl -b "${NAME}=${M}" https://gitlab.example/api`],
+    ['a curl --cookie argument in single quotes with another cookie', `curl --cookie '${NAME}=${hex32}; x=1' https://gitlab.example/`, `curl --cookie '${NAME}=${M}; x=1' https://gitlab.example/`],
+    ['a curl -b argument with no quotes', `curl -b ${NAME}=${hex32} https://gitlab.example/`, `curl -b ${NAME}=${M} https://gitlab.example/`],
+    ['an assignment at the start of a line', `${NAME}=${hex32}`, `${NAME}=${M}`],
+    ['a JSON pair', `{"${NAME}": "${hex32}", "x": 1}`, `{"${NAME}": "${M}", "x": 1}`],
+    ['a JSON pair with no space around the colon', `{"${NAME}":"${hex32}"}`, `{"${NAME}":"${M}"}`],
+    ['a JSON pair inside another JSON string (escaped quotes)', `{"cmd":"{${BS}"${NAME}${BS}":${BS}"${hex32}${BS}"}"}`, `{"cmd":"{${BS}"${NAME}${BS}":${BS}"${M}${BS}"}"}`],
+    ['a JSON pair stringified twice (three backslashes before each quote)', `${BS}${BS}${BS}"${NAME}${BS}${BS}${BS}":${BS}${BS}${BS}"${hex32}${BS}${BS}${BS}"`, `${BS}${BS}${BS}"${NAME}${BS}${BS}${BS}":${BS}${BS}${BS}"${M}${BS}${BS}${BS}"`],
+    ['an upper-case name', `Cookie: ${NAME.toUpperCase()}=${hex32}`, `Cookie: ${NAME.toUpperCase()}=${M}`],
+    ['the Geo secondary name (a 64-hex suffix)', `Cookie: ${NAME}_geo_${hex64}=${hex32}`, `Cookie: ${NAME}_geo_${hex64}=${M}`],
+    ['a value of 40 characters, whole', `Cookie: ${NAME}=${hex32}abcdef01`, `Cookie: ${NAME}=${M}`],
+    ['a value with a cell prefix and hyphens, whole', `Cookie: ${NAME}=cell-12-${hex32}`, `Cookie: ${NAME}=${M}`],
+    ['a name right after a literal backslash-n', `line${BS}n${NAME}=${hex32}`, `line${BS}n${NAME}=${M}`],
+    ['a value that ends at a literal backslash-n', `${NAME}=${hex32}${BS}nnext`, `${NAME}=${M}${BS}nnext`],
+    ['a value whose end is the end of the text', `x ${NAME}=${hex32}`, `x ${NAME}=${M}`],
+  ]
+  for (const [description, text, expected] of hidden) {
+    test(`hidden: ${description}`, () => {
+      const done = redact(text)
+      expect(done.text).toBe(expected)
+      expect(done.hits).toEqual(only)
+    })
+  }
+
+  test('a copy of the value written elsewhere in the same text is hidden too', () => {
+    const done = redact(`Cookie: ${NAME}=${hex32}\nrepeat ${hex32} here`)
+    expect(done.text.includes(hex32)).toBe(false)
+    expect(done.hits[kind]).toBe(1)
+  })
+
+  test('the 32-character floor: 31 characters stay visible, 32 are hidden', () => {
+    const short = redact(`${NAME}=${hex32.slice(1)}`)
+    expect(short.text).toBe(`${NAME}=${hex32.slice(1)}`)
+    expect(short.hits).toEqual({})
+    const edge = redact(`${NAME}=${hex32}`)
+    expect(edge.text).toBe(`${NAME}=${M}`)
+    expect(edge.hits).toEqual(only)
+  })
+
+  // Visible by decision: the name without a value, a placeholder, other cookie names. No title carries a value.
+  const stayVisible: Array<[string, string]> = [
+    ['the name in prose', `The ${NAME} cookie holds the session id.`],
+    ['the name with an empty value', `Cookie: a=1; ${NAME}=; b=2`],
+    ['the name with a <session> placeholder', `${NAME}=<session>`],
+    ['the name with a ${VAR} reference', `${NAME}=\${SESSION}`],
+    ['the name with a short value', `${NAME}=abc123`],
+    ['the internal write-time key with its number', `${NAME}_last_write_at=1700000000`],
+    ['a JSON pair whose value is short', `{"${NAME}": "abc123"}`],
+    ['a JSON pair whose value is empty', `{"${NAME}": ""}`],
+    ['a cookie with a similar name', `Cookie: _gitlab_sess=${hex32}`],
+    ['a cookie named session', `Cookie: session=${hex32}`],
+    ['a cookie whose name lacks the leading underscore', `Cookie: gitlab_session=${hex32}`],
+    ['the name repeated with no value', NAME.repeat(5)],
+  ]
+  for (const [description, line] of stayVisible) {
+    test(`stays visible: ${description}`, () => {
+      const done = redact(line)
+      expect(done.text).toBe(line)
+      expect(done.hits).toEqual({})
+    })
+  }
+})
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -966,6 +1043,7 @@ describe('token rule order', () => {
       id('gitlab-workspace-token', /glwt-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-scim-token', /glsoat-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-feature-flag-client-token', /glffct-[0-9A-Za-z_-]{20,}/gi),
+      id('gitlab-session-cookie', /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:=|\\*"\s*:\s*\\*")([^;\s"'`\\]{32,})/gi),
       id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),
