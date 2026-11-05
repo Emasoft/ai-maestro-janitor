@@ -4,7 +4,7 @@ title: URL_PASSWORD slows by a large step between 96 KB and 128 KB of URL-shaped
 column: testing
 status: tasked
 created: 2026-11-05T02:40:38+0100
-updated: 2026-11-05T05:31:00+0100
+updated: 2026-11-05T05:39:15+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -43,3 +43,4 @@ Owner decision 2026-11-05 (quoted on TRDD-2V7OAUPE): measure and fix this here, 
 - 2026-11-05 — Correction to the b3363706 commit message: "load 233" was a 5-minute average and "about 115" a 1-minute one. On the same scale the failing run and the two passing runs had about the same load (215-233), so the data shows one timing failure in three runs under sustained load, not a failure only at higher load.
 - 2026-11-05 — Precision on the Done-when 2 note: the old tree was the pre-7d54b062 patterns.ts with export const URL_PASSWORD_BOUND = 4096 appended (the tests import it; it changes no behaviour). The 561/8 run was at load 49 and the 569/0 runs at a 1-minute load of about 115. 0495dbcb adds a test for the colon-count route above the bound.
 - 2026-11-05 — NEXT ACTION for Done-when 3: a scratch test that interleaves the 64 KB and 512 KB runs of grown() shapes a and b in one loop, best of 15, run at a 1-minute load under 50; this host often sits at 100-270.
+- 2026-11-05 — Correction to the precision note: the 561/8 run had a 1-minute load of 49 and a 5-minute load of 172. The NEXT ACTION gate is: both the 1-minute and the 5-minute load under 50, with the load recorded during the run.

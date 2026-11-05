@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: todo
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-05T05:31:02+0100
+updated: 2026-11-05T05:39:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -38,3 +38,4 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 - 2026-11-05 — The registry (requirements 1 and 2) must list the module-level regexes 7d54b062 added to patterns.ts: URL_PASSWORD (flags now iy, sticky), USER_RUN, MARK_AT, SPAN_END and PASSWORD_END. Requirement (6) now has a third URL_PASSWORD version for red on old: the one before 7d54b062.
 - 2026-11-05 — The URL_PASSWORD step this card set out to diagnose is found and fixed in TRDD-HF7GNHNF (group-loop ceilings at about 63.8K and 553K iterations; commits 7d54b062 and b3363706).
 - 2026-11-05 — Correction to the note above that says the step is found and fixed: fixed up to 256 KB (the 32 KB to 256 KB ratio test fails on the old code at load 49 and passes now); at 512 KB the ratio is unmeasured (TRDD-HF7GNHNF Done-when 3). The load-125 median and best figures and the load 185-270 control figures come from worker runs (reports urlpw-fix and urlpw-fix2).
+- 2026-11-05 — Qualifier on the correction note: the 32 KB to 256 KB ratio test is load-sensitive (it failed once at a 5-minute load of 233 on b3363706, then passed twice; see TRDD-T36Z4ACR); the deterministic evidence is the hiding at 256 KB and above.
