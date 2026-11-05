@@ -4,7 +4,7 @@ title: A very long URL password is not hidden by the secret shield
 column: todo
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-05T02:34:53+0100
+updated: 2026-11-05T04:04:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -31,3 +31,4 @@ Measured on 2026-11-04 under claude plugin test: one URL whose password alone is
 ## Notes
 
 - 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. Now in scope: measure and fix here.
+- 2026-11-05 — Measured (same raw data as TRDD-HF7GNHNF): the miss is the second ceiling of the same group-loop family. Under claude plugin test a password in a mixed 16-character alphabet is hidden up to 552,896 characters and missed from 552,960 (bisect step 64), silently: 0 matches and no error, in 47 to 60 ms. Text before the URL (2.7 MB of prose, or 800 KB of short URL starts) moves the limit by 0, and so does the case flag; dropping the lookbehind moves it to 589,760 and dropping the port-skip lookahead to 749,504; a long user part instead of a long password is missed from 995,328. System Bun 1.3.14 misses from 360,448; Node v26 throws a RangeError at 2^23 iterations instead of missing. These shifts were measured first and explained afterwards, so they do not tick Done when 1 (a prediction, then one confirming run). A password that is a run of x is never hidden at any size, because redact() treats it as a placeholder, so tests need a mixed alphabet. With the three loops unrolled (TRDD-HF7GNHNF), the regex alone matches a mixed password at 4,194,304 characters (redact() not measured at that size), but a password made mostly of colons is still missed somewhere between 589,824 and 1,048,576 characters, so the fix needs an explicit bound that fails closed. Not yet checked (Done when 3): every rules/ export and module-private regex that can match a value longer than 64 KB.
