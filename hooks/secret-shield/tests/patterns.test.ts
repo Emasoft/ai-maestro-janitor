@@ -430,6 +430,7 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
       expect(r.text === 'https://u:' + marker + '@h').toBe(true)
     }
   })
+  // This test pins a disclosed over-hide (a port read as a password above the bound) as intended fail-closed behaviour.
   test('a port followed by a path with more than the bound of colons before the at-sign is hidden; with exactly the bound it stays visible', { timeoutMs: 20000 }, () => {
     const atBound = 'b://u:8080/' + 'a:'.repeat(BOUND) + '@h'
     expect(bounded(atBound).same).toBe(true)
@@ -443,6 +444,27 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
     const over = bounded('b://' + user(BOUND + 1) + ':8080/p@h')
     expect(over.hidden).toBe(true)
     expect(over.text === 'b://' + user(BOUND + 1) + ':' + marker + '@h').toBe(true)
+  })
+  // WHY (TRDD-HF7GNHNF): the over-bound branch once hid a region without the PLACEHOLDER and marker-only check the regex path applies, so redact() on its own
+  // output (the region was already one marker) counted a phantom url-password hit and a placeholder password was hidden only above the bound.
+  test('above the bound, redact() on its own output returns the same text and counts no hit', { timeoutMs: 30000 }, () => {
+    const user = (n: number) => mark('aws-access-key').repeat(n)
+    for (const url of ['b://u:8080/' + 'a:'.repeat(BOUND + 1) + '@h', 'b://' + user(BOUND + 1) + ':8080/p@h', 'https://u:' + 'aB3:'.repeat(512 * 1024) + '@h']) {
+      const once = redact(url)
+      expect(countOf(once.hits)).toBeGreaterThan(0)
+      const twice = redact(once.text)
+      expect(twice.text === once.text).toBe(true)
+      expect(countOf(twice.hits)).toBe(0)
+    }
+  })
+  test('above the bound, a placeholder or marker-only password stays visible with no hit, as it does below the bound', { timeoutMs: 20000 }, () => {
+    const user = mark('aws-access-key').repeat(BOUND + 1)
+    for (const password of ['x', '${DB_PASS}', mark('aws-access-key')]) {
+      const url = 'b://' + user + ':' + password + '@h'
+      const r = redact(url)
+      expect(r.text === url).toBe(true)
+      expect(countOf(r.hits)).toBe(0)
+    }
   })
   test('a password of 2 MB made mostly of colons and ending at the at-sign is hidden', { timeoutMs: 30000 }, () => {
     const r = redact('https://u:' + 'aB3:'.repeat(512 * 1024) + '@h')

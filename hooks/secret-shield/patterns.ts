@@ -53,11 +53,12 @@ const MARK_SPLIT = new RegExp('(' + MARK_BODY + ')')
 // "Do not cap the scan length" (the earlier rule for the query scan and the scheme) still holds for the regex: a cap inside the
 // regex makes it fail to match, which FAILS OPEN, and a port with a longer query would be read as a password and hidden or a
 // password missed. The guard is not that cap: above the bound it hides, which fails closed.
-// Disclosed over-hide above the bound, for security first: (1) a port followed by a path or a `?query` that holds more than the bound
+// Disclosed over-hide above the bound, for security first: (1) a port followed by a path, a `?query` or a `#fragment` that holds more than the bound
 // of colons before an `@` is read as a password and hidden, because no regex tells the port from a password there; (2) markers (tokens
 // hidden earlier) inside the hidden region collapse into one url-password marker, their hits stay counted; (3) such a value is not
 // added to `found`, so it is not hidden elsewhere in the row (a value that long is not propagated). Not guarded: the scheme and the
-// user part must be valid as the regex reads them, so `1://`, `_a://` and `.://` shapes are not touched.
+// user part must be valid as the regex reads them, so `1://`, `_a://` and `.://` shapes are not touched. Placeholder and marker-only passwords
+// (`x`, `${VAR}`, or markers alone) are left alone above the bound, the same as below it: the guard applies the PLACEHOLDER and MARKS check before it hides.
 const NOT_USER = String.raw`[^\s:/@'"${'`'}\[]`
 const NOT_PASSWORD = String.raw`[^\s@'"${'`'}:]`
 const QUERY = String.raw`[^\s@#:]*(?::(?!\/\/)[^\s@#:]*)*`
@@ -308,6 +309,10 @@ function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>
     PASSWORD_END.lastIndex = colon + 1
     const end = PASSWORD_END.exec(text)?.index ?? text.length
     if (text[end] !== '@' || end === colon + 1) continue
+    // WHY the same placeholder check as below the bound: without it a password that is only markers or a placeholder (`x`, `${VAR}`) was hidden here but not at or under the bound,
+    // so redact() on its own output (the region is one marker) counted a phantom hit and was not idempotent. Every other region that ends at `@` is still hidden (fail closed).
+    const rest = text.slice(colon + 1, end).replace(MARKS, '')
+    if (rest === '' || PLACEHOLDER.test(rest)) continue
     hits['url-password'] = (hits['url-password'] ?? 0) + 1
     parts.push(text.slice(done, colon + 1), mark('url-password'))
     done = end
