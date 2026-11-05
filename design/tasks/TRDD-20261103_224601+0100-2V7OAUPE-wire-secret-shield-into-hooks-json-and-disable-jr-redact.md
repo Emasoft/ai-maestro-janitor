@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-04T21:57:38+0100
+updated: 2026-11-05T01:55:04+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -45,3 +45,4 @@ Split out of TRDD-M1218EMH.
 ## Notes
 
 2026-11-04 — when jr-redact (from the claude-code-mods marketplace) is enabled alongside the janitor shield, both rewrite the same tool results; jr-redact marks them [REDACTED:<kind>] but passes error results unredacted (register.ts:11, found by a corpus miner), and its password rule can also replace the username (redact.ts:32). If jr-redact stays enabled, decide the two redactors' order and whether a value already marked by one is left alone by the other before this card turns the shield on; if this card disables it as planned, the ordering question is moot.
+ - 2026-11-05 — No automated gate runs the secret-shield TS suite: scripts/publish.py stage_tests runs pytest only, no .github workflow calls claude plugin test, and nothing type-checks hooks/. This covers every shield family so far (d711e5f8, dbd5aaf9, 28b42512). The tests run only when someone runs them by hand in a scratch plugin shell; the real hooks/hooks.json names no module yet.
