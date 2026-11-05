@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: todo
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-05T04:09:21+0100
+updated: 2026-11-05T05:26:47+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -34,3 +34,6 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 - 2026-11-05 — The URL_PASSWORD slowdown fix itself is TRDD-HF7GNHNF (bugfix); this card stays the harness.
 - 2026-11-05 — Diagnosis (a) to (e) done; the findings are on TRDD-HF7GNHNF (the step) and TRDD-AGOEWF2E (the miss). For requirement (3): for a group-loop ceiling the adversarial tail is one long run inside that group (a long password, or a long query after a port-skip candidate); the quadratic tails named above, with a growing count of URL starts, still apply. A password that is a run of x is a placeholder that redact() never hides, so tails need a mixed alphabet.
 - 2026-11-05 — Correction to the note above (review of 64d0a827): both quadratic tails named in the body still apply, the run of scheme characters such as A1- repeated, and 'b://u:1?' repeated with the URL count growing; the clause "with a growing count of URL starts" described only the second.
+- 2026-11-05 — Requirement (4) as written (the median of at least 5 runs per size) is not satisfiable on this host under load: at load 125 the median of 5 broke the ratio on a linear algorithm (ratios up to 14.6) while the best of 5 stayed between 6.9 and 10.5, and at load 185-270 a control shape with no URL gave ratios of 8.6 to 69. Amend (4): interleave the two sizes in one test, take the best of N, or gate on load.
+- 2026-11-05 — The registry (requirements 1 and 2) must list the module-level regexes 7d54b062 added to patterns.ts: URL_PASSWORD (flags now iy, sticky), USER_RUN, MARK_AT, SPAN_END and PASSWORD_END. Requirement (6) now has a third URL_PASSWORD version for red on old: the one before 7d54b062.
+- 2026-11-05 — The URL_PASSWORD step this card set out to diagnose is found and fixed in TRDD-HF7GNHNF (group-loop ceilings at about 63.8K and 553K iterations; commits 7d54b062 and b3363706).
