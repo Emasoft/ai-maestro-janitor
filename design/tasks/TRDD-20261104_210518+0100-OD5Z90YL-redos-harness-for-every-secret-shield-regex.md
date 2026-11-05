@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: todo
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-05T04:04:48+0100
+updated: 2026-11-05T04:09:21+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -33,3 +33,4 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 - 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. This card moves from backburner to todo: the owner asked for the fix.
 - 2026-11-05 — The URL_PASSWORD slowdown fix itself is TRDD-HF7GNHNF (bugfix); this card stays the harness.
 - 2026-11-05 — Diagnosis (a) to (e) done; the findings are on TRDD-HF7GNHNF (the step) and TRDD-AGOEWF2E (the miss). For requirement (3): for a group-loop ceiling the adversarial tail is one long run inside that group (a long password, or a long query after a port-skip candidate); the quadratic tails named above, with a growing count of URL starts, still apply. A password that is a run of x is a placeholder that redact() never hides, so tails need a mixed alphabet.
+- 2026-11-05 — Correction to the note above (review of 64d0a827): both quadratic tails named in the body still apply, the run of scheme characters such as A1- repeated, and 'b://u:1?' repeated with the URL count growing; the clause "with a growing count of URL starts" described only the second.
