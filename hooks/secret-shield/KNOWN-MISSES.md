@@ -202,7 +202,7 @@ Test: KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password a
 
 ## gitlab-body-under-20-chars
 
-Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:17-18 and :26). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
+Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:18-22 and :31). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
 Shape: A GitLab prefix (glpat-) followed by 19 characters of letters, digits, underscore and hyphen.
 Hidden instead: The same prefix followed by 20 characters (hidden with the gitlab-pat marker).
 Card: none

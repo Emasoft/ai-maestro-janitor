@@ -11,16 +11,21 @@ export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b
 // All 13 rules are built here from one prefix, one body and one tail, so a single edit changes every rule.
 // WHY each part is written this way:
 // - Flag gi: the prefix and the body are matched in any letter case, and so is the tail (it accepts upper-case letters too). The rules have no digit-or-upper-case
-//   requirement, because security comes first (owner, 2026-11-05) and the character set of each GitLab token kind is unverified: gitleaks gives 20 characters of
-//   letters, digits, _ and -, but a kind whose generator draws only lower-case letters or base36 would be missed often by such a requirement. The consequence: a prefix
-//   followed by 20 or more of [0-9A-Za-z_-] is hidden even when it is a hyphenated lower-case name or a lower-case x placeholder.
+//   requirement, because security comes first (owner, 2026-11-05) and the character set of each GitLab token kind is unverified: gitleaks gives mostly 20 characters of
+//   letters, digits, _ and -, and such a requirement would miss every token of a kind whose generator draws only lower-case letters (a 20-character base36 body has
+//   no digit only about 0.15% of the time, (26/36)^20). The consequence: a prefix followed by 20 or more of [0-9A-Za-z_-] is hidden even when it is a hyphenated
+//   lower-case name or a lower-case x placeholder.
 // - Body {20,}, open-ended: covers 20, 25, 40, 50, 64 and the routable payloads in one shape, and hides a longer run whole instead of leaving a tail in
-//   view. The cost: a _ or - or a word character glued to the end of a token is hidden with it.
+//   view. The cost: a _ or - or a word character glued to the end of a token is hidden with it. The 20-character floor stays although GitLab documents no length:
+//   every body gitleaks gives for the 12 of these 13 kinds it has a rule for (all but glwt-; for the runner kind, glrt- only) is 20 characters or more, and so is every
+//   routable length in merge request 169322, so the floor misses no published shape; for glwt- and glrtr- the floor, like their body, is an assumption. The alphabet
+//   requirement, by contrast, rested on no published fact.
 // - No leading \b and no lookbehind: a token right after an escape such as \n (a literal backslash and n) must still be hidden, because the n is a
 //   word character right before the prefix (TRDD-5VZTPXBJ).
-// - The tail is on gitlab-pat and the runner kind only: a routable token ends in a dot and 9 letters or digits (gitleaks), and the tail is
-//   exactly that followed by a non-alphanumeric. Consequences: a dot and exactly 9 letters or digits after a token (the
-//   .substring before a parenthesis) is hidden with it; a dot and 10 or more (.abcdefghij, .toLowerCase) stays visible.
+// - The tail is on gitlab-pat and the runner kind only: a routable token ends in a dot and 9 lower-case letters or digits (gitleaks); the gi flags widen that to
+//   either case here, and the tail is exactly that followed by a non-alphanumeric. Consequences: a dot and exactly 9 letters or digits after a token (the
+//   .substring before a parenthesis) is hidden with it; a dot and 10 or more (.abcdefghij, .toLowerCase) stays visible. A dot and a 9-character mixed-case name
+//   before any non-alphanumeric character, such as .isPresent( or .getMethod(, is hidden with the token too.
 //   glrtr- gets the tail without evidence, on the assumption that it mirrors glrt-.
 // - The glwt- and glrtr- bodies are an assumption: neither prefix has a published shape, and gitleaks has no rule for either.
 const BODY = '[0-9A-Za-z_-]{20,}'
