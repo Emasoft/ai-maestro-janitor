@@ -939,6 +939,9 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
   const hex32 = j('e4b7a1c9', 'd2f60385', 'a1b2c3d4', 'e5f60718')
   // Independent of hex32: a copy of the value inside the name would be hidden by the propagation pass.
   const hex64 = j('1a2b3c4d', '5e6f7081', '92a3b4c5', 'd6e7f809', '0f1e2d3c', '4b5a6978', '8796a5b4', 'c3d2e1f0')
+  // A cookie cut short in a log, and a cut value of exactly the 16-character floor.
+  const cut20 = j('7c3d9e1f', '5a2b8c4d', '6e0f1a2b')
+  const cut16 = j('3b9f1d7a', '5c2e8b40')
   const BS = '\\'
   const NAME = '_gitlab_session'
 
@@ -961,6 +964,30 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     ['a name right after a literal backslash-n', `line${BS}n${NAME}=${hex32}`, `line${BS}n${NAME}=${M}`],
     ['a value that ends at a literal backslash-n', `${NAME}=${hex32}${BS}nnext`, `${NAME}=${M}${BS}nnext`],
     ['a value whose end is the end of the text', `x ${NAME}=${hex32}`, `x ${NAME}=${M}`],
+    // The forms of the 2026-11-05 review.
+    ['a Ruby hash pair with =>', `{"${NAME}"=>"${hex32}"}`, `{"${NAME}"=>"${M}"}`],
+    ['a Ruby hash pair with spaces around =>', `{"${NAME}" => "${hex32}"}`, `{"${NAME}" => "${M}"}`],
+    ['a Python dict pair in single quotes', `{'${NAME}': '${hex32}'}`, `{'${NAME}': '${M}'}`],
+    ['a subscript assignment in single quotes', `cookies['${NAME}'] = '${hex32}'`, `cookies['${NAME}'] = '${M}'`],
+    ['a subscript assignment in double quotes', `cookies["${NAME}"] = "${hex32}"`, `cookies["${NAME}"] = "${M}"`],
+    ['a double-quoted value after =', `${NAME}="${hex32}"`, `${NAME}="${M}"`],
+    ['a single-quoted value after =', `${NAME}='${hex32}'`, `${NAME}='${M}'`],
+    ['spaces around =', `x ${NAME} = ${hex32} y`, `x ${NAME} = ${M} y`],
+    ['a URL-encoded =', `q=${NAME}%3D${hex32}%3Bpath`, `q=${NAME}%3D${M}%3Bpath`],
+    ['a URL-encoded = in lower case', `q=${NAME}%3d${hex32}`, `q=${NAME}%3d${M}`],
+    ['a fully URL-encoded JSON pair', `q=%22${NAME}%22%3A%22${hex32}%22`, `q=%22${NAME}%22%3A%22${M}%22`],
+    ['a HAR pair, name first', `{"name": "${NAME}", "value": "${hex32}"}`, `{"name": "${NAME}", "value": "${M}"}`],
+    ['a HAR pair, name first, with no spaces and a field after', `{"name":"${NAME}","value":"${hex32}","path":"/"}`, `{"name":"${NAME}","value":"${M}","path":"/"}`],
+    ['a HAR pair, name first, pretty-printed on separate lines', `{\n  "name": "${NAME}",\n  "value": "${hex32}"\n}`, `{\n  "name": "${NAME}",\n  "value": "${M}"\n}`],
+    ['a HAR pair, name first, escaped', `{${BS}"name${BS}":${BS}"${NAME}${BS}",${BS}"value${BS}":${BS}"${hex32}${BS}"}`, `{${BS}"name${BS}":${BS}"${NAME}${BS}",${BS}"value${BS}":${BS}"${M}${BS}"}`],
+    ['a HAR pair, value first', `{"value": "${hex32}", "name": "${NAME}"}`, `{"value": "${M}", "name": "${NAME}"}`],
+    ['a HAR pair, value first, with no spaces', `{"value":"${hex32}","name":"${NAME}","path":"/"}`, `{"value":"${M}","name":"${NAME}","path":"/"}`],
+    ['a YAML pair', `${NAME}: ${hex32}`, `${NAME}: ${M}`],
+    ['a Netscape cookie-jar line (name, a tab, value)', `gitlab.example\tFALSE\t/\tTRUE\t0\t${NAME}\t${hex32}`, `gitlab.example\tFALSE\t/\tTRUE\t0\t${NAME}\t${M}`],
+    ['a URL query, the text after & kept', `https://gitlab.example/x?${NAME}=${hex32}&next=/x`, `https://gitlab.example/x?${NAME}=${M}&next=/x`],
+    ['a comma-joined log line, the text after the comma kept', `a=1,${NAME}=${hex32},b=2`, `a=1,${NAME}=${M},b=2`],
+    ['a value cut to 20 characters', `Cookie: ${NAME}=${cut20}`, `Cookie: ${NAME}=${M}`],
+    ['a value cut to 16 characters', `Cookie: ${NAME}=${cut16}`, `Cookie: ${NAME}=${M}`],
   ]
   for (const [description, text, expected] of hidden) {
     test(`hidden: ${description}`, () => {
@@ -976,14 +1003,28 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     expect(done.hits[kind]).toBe(1)
   })
 
-  test('the 32-character floor: 31 characters stay visible, 32 are hidden', () => {
-    const short = redact(`${NAME}=${hex32.slice(1)}`)
-    expect(short.text).toBe(`${NAME}=${hex32.slice(1)}`)
+  test('the 16-character floor: 15 characters stay visible, 16 are hidden', () => {
+    const short = redact(`${NAME}=${cut16.slice(1)}`)
+    expect(short.text).toBe(`${NAME}=${cut16.slice(1)}`)
     expect(short.hits).toEqual({})
-    const edge = redact(`${NAME}=${hex32}`)
+    const edge = redact(`${NAME}=${cut16}`)
     expect(edge.text).toBe(`${NAME}=${M}`)
     expect(edge.hits).toEqual(only)
   })
+
+  // Hidden by decision, security first (owner, 2026-11-05): anything of 16 or more characters after the name is hidden, a placeholder or a code expression too.
+  const hiddenByDecision: Array<[string, string, string]> = [
+    ['16 lower-case x', `${NAME}=${'x'.repeat(16)}`, `${NAME}=${M}`],
+    ['a code expression after =', `${NAME} = fetch_session_value()`, `${NAME} = ${M}`],
+    ['a 16-character word after a colon', `${NAME}: abcdefghijklmnop`, `${NAME}: ${M}`],
+  ]
+  for (const [description, text, expected] of hiddenByDecision) {
+    test(`hidden by decision: ${description}`, () => {
+      const done = redact(text)
+      expect(done.text).toBe(expected)
+      expect(done.hits).toEqual(only)
+    })
+  }
 
   // Visible by decision: the name without a value, a placeholder, other cookie names. No title carries a value.
   const stayVisible: Array<[string, string]> = [
@@ -992,12 +1033,21 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
     ['the name with a <session> placeholder', `${NAME}=<session>`],
     ['the name with a ${VAR} reference', `${NAME}=\${SESSION}`],
     ['the name with a short value', `${NAME}=abc123`],
+    ['the name with a value of 15 characters', `${NAME}=${cut16.slice(1)}`],
     ['the internal write-time key with its number', `${NAME}_last_write_at=1700000000`],
     ['a JSON pair whose value is short', `{"${NAME}": "abc123"}`],
     ['a JSON pair whose value is empty', `{"${NAME}": ""}`],
+    ['a Ruby hash pair whose value is short', `{"${NAME}"=>"abc123"}`],
+    ['a HAR pair whose value is short, name first', `{"name": "${NAME}", "value": "abc123"}`],
+    ['a HAR pair whose value is short, value first', `{"value": "abc123", "name": "${NAME}"}`],
+    ['a HAR pair whose value is 15 characters, value first', `{"value": "${cut16.slice(1)}", "name": "${NAME}"}`],
+    ['a YAML pair whose value is short', `${NAME}: true`],
+    ['the name followed by a colon in prose', `The ${NAME}: see the docs for details.`],
     ['a cookie with a similar name', `Cookie: _gitlab_sess=${hex32}`],
     ['a cookie named session', `Cookie: session=${hex32}`],
     ['a cookie whose name lacks the leading underscore', `Cookie: gitlab_session=${hex32}`],
+    ['a HAR pair of another cookie, name first', `{"name": "other_cookie", "value": "${hex32}"}`],
+    ['a HAR pair of another cookie, value first', `{"value": "${hex32}", "name": "other_cookie"}`],
     ['the name repeated with no value', NAME.repeat(5)],
   ]
   for (const [description, line] of stayVisible) {
@@ -1043,7 +1093,8 @@ describe('token rule order', () => {
       id('gitlab-workspace-token', /glwt-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-scim-token', /glsoat-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-feature-flag-client-token', /glffct-[0-9A-Za-z_-]{20,}/gi),
-      id('gitlab-session-cookie', /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:=|\\*"\s*:\s*\\*")([^;\s"'`\\]{32,})/gi),
+      id('gitlab-session-cookie', /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:\\*["']|%2[27])?\]?[ \r\n]*(?:=>?|:|%3[AD]|\t|,\s*(?:\\*["']|%2[27])value(?:\\*["']|%2[27])\s*:)\s*(?:\\*["']|%2[27])?([^;&,%\s"'`\\]{16,})/gi),
+      id('gitlab-session-cookie', /value(?:\\*["']|%2[27])\s*:\s*(?:\\*["']|%2[27])?([^;&,%\s"'`\\]{16,})(?:\\*["']|%2[27])\s*,\s*(?:\\*["']|%2[27])name(?:\\*["']|%2[27])\s*:\s*(?:\\*["']|%2[27])_gitlab_session/gi),
       id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),

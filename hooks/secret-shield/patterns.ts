@@ -2,7 +2,7 @@
 
 import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
-import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
+import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, privateKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
@@ -80,6 +80,7 @@ const TOKENS: readonly Rule[] = [
   gitlabScimToken,
   gitlabFeatureFlagClientToken,
   gitlabSessionCookie,
+  gitlabSessionCookieValueFirst,
   anthropicKey,
   openaiProjectKey,
   openaiLegacyKey,

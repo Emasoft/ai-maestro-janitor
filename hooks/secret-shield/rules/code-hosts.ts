@@ -48,25 +48,47 @@ export const gitlabWorkspaceToken: Rule = gitlab('gitlab-workspace-token', 'glwt
 export const gitlabScimToken: Rule = gitlab('gitlab-scim-token', 'glsoat-')
 export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-client-token', 'glffct-')
 
-// GitLab session cookie: its name makes the whole value a secret, so it is hidden from `_gitlab_session` followed by `=` (a Cookie header, a Set-Cookie header, a curl -b
-// argument, a cookie assignment) or by a JSON pair (`"_gitlab_session": "..."`, also escaped). It is not a prefixed token, so it has its own pattern, not the factory above.
+// GitLab session cookie: its name makes the whole value a secret, so the value is hidden wherever it is written next to the name `_gitlab_session`. It is not a prefixed token, so it has
+// its own two rules, not the factory above. Forms hidden: `_gitlab_session=V` (a Cookie header, a Set-Cookie header, a curl -b argument, a URL query, a cookie assignment, with spaces
+// around the `=` or quotes after it), `_gitlab_session%3DV` (URL-encoded), a JSON, Ruby-hash, JavaScript or Python key (`"_gitlab_session": "V"`, `"_gitlab_session"=>"V"`,
+// `{'_gitlab_session': 'V'}`, `cookies['_gitlab_session'] = 'V'`, plain, escaped or URL-encoded), YAML (`_gitlab_session: V`), a Netscape cookie-jar line (the name, a tab, the value) and the
+// browser/HAR export pair, name first (`"name": "_gitlab_session", "value": "V"`) or value first (`"value": "V", "name": "_gitlab_session"`; the second is gitlabSessionCookieValueFirst).
 // Sources (NOTICE credits gitleaks v8.30.1): the name and the 32-character body come from the gitleaks rule gitlab-session-cookie (`_gitlab_session=[0-9a-z]{32}`);
 // GitLab's own code (gitlabhq lib/gitlab/sessions/cache_store.rb, generate_sid) builds the value as an optional `<session_cookie_token_prefix>-` followed by the Rack public
 // id, and Rails (actionpack abstract_store.rb, generate_sid) makes that id `SecureRandom.hex(16)`: 32 hex characters. The cookie name comes from
 // config/initializers/session_store.rb: `_gitlab_session`, or `_gitlab_session_geo_<64 hex>` on a Geo secondary (and `_gitlab_session_<64 hex>` in development).
 // WHY each part is written this way:
 // - Flag gi: the name matches in any letter case (a header name or a JSON key may be re-cased); the value is a negated class, so the flag does not touch it.
-// - The value is everything up to a `;`, whitespace, a quote, a backtick or a backslash (the last stops it at the `\"` of escaped JSON and at a literal backslash-n), and it
-//   needs 32 or more of them: the shortest published form is 32, the cell prefix makes a real value longer, and a run that is not letters and digits (the prefix has hyphens) must
-//   still be hidden whole. A value under 32 characters (empty, a placeholder, `<session>`) stays visible. The alphabet is not restricted to [0-9a-z], because security comes first
-//   (owner, 2026-11-05) and the cell prefix is not in that alphabet. The cost: a placeholder of 32 or more characters is hidden too.
+// - The value is everything up to a `;`, `&`, `,`, `%`, whitespace, a quote, a backtick or a backslash. The backslash stops it at the `\"` of escaped JSON and at a literal backslash-n;
+//   `;` ends a cookie in a header; `&` and `,` end it in a URL query and in a comma-joined log line; `%` ends it before a URL-encoded `%3B`, `%22` or `%26`. Stopping at those cannot leak a
+//   real value: a GitLab session value is a Rack public id (32 hex characters, SecureRandom.hex(16)) with an optional `<prefix>-` in front, as read in cache_store.rb and abstract_store.rb
+//   above, and none of those characters occurs in it. Without the stop, an unquoted value ran to the next `;`, whitespace, quote, backtick or backslash, so `_gitlab_session=V&next=/x` and
+//   `_gitlab_session=V,other` hid the text after the `&` or `,` as well. What remains: a value of an operator-chosen prefix that held one of these characters would be hidden only up to it.
+// - The floor is 16 characters, not the 32 of the published form: a cookie cut short in a log (16 to 31 characters) is still most of a 128-bit id and must be hidden, because security
+//   comes first (owner, 2026-11-05). A value under 16 characters (empty, `<session>`, a number, a short word) stays visible: 16 hex characters are 64 bits, and a shorter run reads more
+//   often as a flag or a placeholder. The alphabet is not restricted to [0-9a-z], because the cell prefix has hyphens. The cost: a placeholder or any word of 16 or more characters
+//   after the name is hidden too, and so is an unquoted code expression (`_gitlab_session = fetch_session_value()`), because a bare `:` and a tab are accepted as separators.
 // - The name may carry a suffix of up to 80 letters, digits and underscores (the Geo and development cookie names above). It is bounded and not `*`: with `*` a text that repeats
 //   the name with no `=` would rescan the rest of the text from every copy, which is quadratic.
-// - The separator is `=` or a quoted key, a colon and a quoted value, with a run of backslashes allowed before each quote (escaped and double-escaped JSON). No leading \b and no
-//   lookbehind: a name right after an escape such as a literal backslash-n must still be hidden (TRDD-5VZTPXBJ).
-// - No group repeats a group: every quantifier sits on one class or one character, so the match is linear.
+// - Between the name and the value: an optional closing quote (with any run of backslashes before it, or its URL-encoded form), an optional `]`, spaces and line breaks, then one separator
+//   (`=`, `=>`, `:`, `%3D`, `%3A`, a tab, or a comma and the `"value":` key of the HAR pair), then whitespace and an optional opening quote. Every piece sits on its own character class (backslash,
+//   quote, bracket, space, operator), so no two neighbours can share a run and the match is linear. The tab is the only separator that is also whitespace, so the whitespace before the separator
+//   is spaces and line breaks without the tab: a tab run then splits one way only.
+// - The HAR pair is hidden only when its two fields are adjacent, as a browser export writes them (name then value, or value then name). A gap between them (`"name": "_gitlab_session", "path": "/",
+//   "value": "V"`) would need a bounded wildcard span between the fields, which hides more text and costs a scan per name; it is a known miss (KNOWN-MISSES.md gitlab-session-cookie-har-fields-apart).
+// - No leading \b and no lookbehind: a name right after an escape such as a literal backslash-n must still be hidden (TRDD-5VZTPXBJ). The value-first rule starts at the literal `value` for the
+//   same reason, and not at a quote: a pattern that starts with a run of backslashes would try every position of a long run (quadratic).
+const QUOTE = String.raw`(?:\\*["']|%2[27])`
+const SESSION_VALUE = String.raw`([^;&,%\s"'` + '`' + String.raw`\\]{16,})`
+const SESSION_NAME = '_gitlab_session(?:_[0-9a-z_]{0,80})?'
+const SESSION_SEPARATOR = String.raw`(?:=>?|:|%3[AD]|\t|,\s*` + QUOTE + 'value' + QUOTE + String.raw`\s*:)`
 export const gitlabSessionCookie: Rule = {
   kind: 'gitlab-session-cookie',
-  pattern: /_gitlab_session(?:_[0-9a-z_]{0,80})?(?:=|\\*"\s*:\s*\\*")([^;\s"'`\\]{32,})/gi,
+  pattern: new RegExp(SESSION_NAME + QUOTE + String.raw`?\]?[ \r\n]*` + SESSION_SEPARATOR + String.raw`\s*` + QUOTE + '?' + SESSION_VALUE, 'gi'),
+  group: 1,
+}
+export const gitlabSessionCookieValueFirst: Rule = {
+  kind: 'gitlab-session-cookie',
+  pattern: new RegExp('value' + QUOTE + String.raw`\s*:\s*` + QUOTE + '?' + SESSION_VALUE + QUOTE + String.raw`\s*,\s*` + QUOTE + 'name' + QUOTE + String.raw`\s*:\s*` + QUOTE + '_gitlab_session', 'gi'),
   group: 1,
 }

@@ -335,4 +335,30 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       for (const [context, frame] of contexts) check(`${name} after ${context} visible`, shown(frame(token), secret))
     }
   })
+
+  test('KNOWN MISS gitlab-session-cookie-under-16-chars: a session cookie cut to 15 characters is not hidden, with 16 characters it is', () => {
+    const short = fake('4f8a2c6e1b9d3a7')
+    const edge = fake('4f8a2c6e1b9d3a7c')
+    expect(short.length).toBe(15)
+    expect(edge.length).toBe(16)
+    expect(shown(`Cookie: _gitlab_session=${short}`, short)).toBe(true)
+    check('16 characters hidden', hiddenAs(`Cookie: _gitlab_session=${edge}`, edge, 'gitlab-session-cookie'))
+  })
+
+  test('KNOWN MISS gitlab-session-cookie-value-with-delimiter: the part of a session cookie value after an ampersand is not hidden, a value without one is', () => {
+    const head = fake('9a1b2c3d4e5f60718293')
+    const tail = fake('a4b5c6d7e8f901234567')
+    expect(head.length).toBe(20)
+    expect(tail.length).toBe(20)
+    expect(shown(`x?_gitlab_session=${head}&${tail}`, tail)).toBe(true)
+    check('head hidden', hiddenAs(`x?_gitlab_session=${head}&${tail}`, head, 'gitlab-session-cookie'))
+    check('whole value hidden without the ampersand', hiddenAs(`x?_gitlab_session=${head}${tail}`, head + tail, 'gitlab-session-cookie'))
+  })
+
+  test('KNOWN MISS gitlab-session-cookie-har-fields-apart: a browser export pair with another field between the name and the value is not hidden, with the fields adjacent it is', () => {
+    const value = fake('c1d2e3f405162738495a6b7c8d9e0f1a')
+    expect(value.length).toBe(32)
+    expect(shown(`{"name": "_gitlab_session", "path": "/", "value": "${value}"}`, value)).toBe(true)
+    check('adjacent fields hidden', hiddenAs(`{"name": "_gitlab_session", "value": "${value}"}`, value, 'gitlab-session-cookie'))
+  })
 })
