@@ -4,7 +4,7 @@ title: A publish gate runs the secret-shield TS suite
 column: todo
 status: tasked
 created: 2026-11-05T02:01:56+0100
-updated: 2026-11-05T02:08:20+0100
+updated: 2026-11-05T02:13:26+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -41,3 +41,4 @@ TRDD-2V7OAUPE (wiring the shield), TRDD-Q6LPJTPO (the token families), TRDD-6FB7
 ## Notes
 
  - 2026-11-05 — Scope and risks: type-checking hooks/ is out of scope here; it gets its own card if wanted. The change edits publish.py, the release pipeline: consult the advisor first (CLAUDE.md), and check whether publish.py comes from a CPV template that a re-standardize would overwrite, since that decides where the stage must live. "No pytest test runs the suite" rests on one grep over tests/ for the pattern plugin test|.test.ts|"plugin", *"test" (hits: the docstring at tests/test_publish_lock_guard.py:211, the KNOWN-MISSES name-sync test, bench corpora); five test files that call claude were not read.
+ - 2026-11-05 — Checked after the review of 5e71b67e: the lock deletion is documented in the _reassert_publish_lock docstring (scripts/publish.py:3305; a test wrote a lock at the real repo root and unlinked it, fixed in a52d5195) and in tests/test_publish_lock_guard.py:211. The re-assert warns and re-arms the lock and never fails the publish, so a stage before it is covered by the re-arm and a stage after it is not. The call sits at scripts/publish.py:3702, right after stage_tests; Done-when 1 is checked by reading that flow. Unmeasured: whether a secret-shield TS test can write files at all; the hand run's shell lives under /tmp, outside the repo. The ordering is cheap insurance, not a response to a measured risk.
