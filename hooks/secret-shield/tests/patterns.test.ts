@@ -466,6 +466,17 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
       expect(countOf(r.hits)).toBe(0)
     }
   })
+
+  // WHY (TRDD-HF7GNHNF): the b3363706 tests reach above the bound only through the marker count, so this pins the colon-count route.
+  test('above the bound by colon count, a placeholder password stays visible with no hit, as it does at the bound', { timeoutMs: 20000 }, () => {
+    for (const n of [BOUND, BOUND + 1]) {
+      const url = 'b://u:$(' + ':'.repeat(n) + ')@h'
+      const r = redact(url)
+      expect(r.text === url).toBe(true)
+      expect(countOf(r.hits)).toBe(0)
+    }
+  })
+
   test('a password of 2 MB made mostly of colons and ending at the at-sign is hidden', { timeoutMs: 30000 }, () => {
     const r = redact('https://u:' + 'aB3:'.repeat(512 * 1024) + '@h')
     expect(r.hits).toEqual({ 'url-password': 1 })
