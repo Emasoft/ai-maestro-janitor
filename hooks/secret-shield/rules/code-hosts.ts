@@ -85,13 +85,13 @@ export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-cl
 //   spaces and line breaks, then one of `=`, `=>`, `:`, `%3D`, `%3A` or a tab, then spaces or tabs and an optional opening quote. (2) A positional call: a closing quote, a comma, spaces or
 //   tabs and then a MANDATORY opening quote. (3) A field list: a comma (a HAR, Puppeteer, Playwright or Go pair) or `=` and `{` (a Rails hash), then a span of up to 400 characters that holds
 //   no brace, then the key `value`, an optional closing quote, a colon, spaces or tabs and a MANDATORY opening quote. The span stops at a brace, so it never leaves the object that holds the
-//   name; a nested object between the fields, or more than 400 characters between them, is a known miss (KNOWN-MISSES.md gitlab-session-cookie-har-fields-apart). The span is lazy, so the first
+//   name; a nested object between the fields, or more than 400 characters between them, is a known miss (KNOWN-MISSES.md gitlab-session-cookie-fields-beyond-span). The span is lazy, so the first
 //   `value` key after the name wins. Costs: a quoted list of cookie names (the name, a comma, then another quoted name) hides the next name when it has 16 or more characters, and any
 //   text of the form name, comma, `value:` and a quoted run of 16 characters within 400 characters and no brace is hidden, a prose sentence too.
 // - After the separator only spaces and tabs are skipped, never a line break (`[ \t]*`, not `\s*`): with `\s*` a YAML map header `_gitlab_session:` alone on its line, or a log line that ends in
 //   `_gitlab_session:`, took the first 16 or more characters of the next line (a key, a timestamp) as the value and hid them. The line break before the separator (`[ \r\n]*`) stays, for a
 //   pretty-printed `"_gitlab_session"\n: "V"`; a tab is not in that set because the tab is itself a separator, so a tab run splits one way only. A tab before the colon
-//   (`"_gitlab_session"\t: "V"`) is therefore not hidden (KNOWN-MISSES.md gitlab-session-cookie-tab-before-colon).
+//   (`"_gitlab_session"\t: "V"`) is therefore not read by this rule; a 32-hex value there is hidden by redactGitlabSessionWindows in patterns.ts.
 // - A double URL-encoding (`_gitlab_session%253DV`) is not hidden: only `%3D` and `%3A` are separators, and a `%25` before them is not (KNOWN-MISSES.md gitlab-session-cookie-double-url-encoded).
 // - Linearity, which every change here must keep: a value run is always preceded by something that cannot occur inside a run. In the name-first rule the value is the last element of the pattern,
 //   so a match never backtracks out of a run and the next search starts after it. In the value-first rule the value is followed by a mandatory quote, and it is preceded by a mandatory opening

@@ -226,19 +226,11 @@ Test: KNOWN MISS gitlab-session-cookie-value-with-delimiter: the part of a sessi
 
 ## gitlab-session-cookie-fields-beyond-span
 
-Reason: (c) a bound kept for a stated reason: the name and the value of a browser export pair, a Puppeteer, Playwright or Go cookie and a Rails cookie hash may be separated by other fields, but only inside one object and only up to 400 characters (hooks/secret-shield/rules/code-hosts.ts:84-90). The widest real export read (a Chrome extension cookies.Cookie object, pretty-printed) puts about 150 characters between them; the bound keeps the scan per name constant, and the brace stop keeps the span from reaching another cookie's value.
-Shape: A JSON object with the fields name (_gitlab_session), then 401 characters of other fields, then value; or a nested object between the name and the value.
-Hidden instead: The same object with 400 characters or fewer between the name and the value, and no brace between them (hidden with the gitlab-session-cookie marker).
+Reason: (c) a bound kept for a stated reason: the value pass reads a window of 512 characters on each side of the name (hooks/secret-shield/patterns.ts redactGitlabSessionWindows) and stops at a semicolon, an opening brace or a closing brace, because those end the cookie or the object that holds the name, and going past them would hide the value of another cookie or object. The widest real export read (a Chrome extension cookies.Cookie object, pretty-printed) puts about 150 characters between name and value. The name-first and value-first rules keep their own 400-character span for values that are not 32 hex.
+Shape: A JSON object with the fields name (_gitlab_session), then 480 characters of other fields, then value (32 hex characters); or a nested object between the name and the value.
+Hidden instead: The same object with 440 characters of other fields between the name and the value, and no brace or semicolon between them (hidden with the gitlab-session-cookie marker).
 Card: none
-Test: KNOWN MISS gitlab-session-cookie-fields-beyond-span: a name and a value more than 400 characters apart, or with a nested object between them, are not hidden; 400 characters apart they are
-
-## gitlab-session-cookie-tab-before-colon
-
-Reason: (c) a bound kept for a stated reason: the whitespace between the name and the separator is spaces and line breaks without the tab, because the tab is itself a separator and a tab run then splits one way only, which keeps the match linear (hooks/secret-shield/rules/code-hosts.ts:91-94). A tab before a colon is not read as a separator followed by a value.
-Shape: "_gitlab_session", a tab, a colon, a space and a quoted 32-character value.
-Hidden instead: The same pair with the colon right after the quote, or after spaces (hidden with the gitlab-session-cookie marker).
-Card: none
-Test: KNOWN MISS gitlab-session-cookie-tab-before-colon: a session cookie pair with a tab before the colon is not hidden, with a space it is
+Test: KNOWN MISS gitlab-session-cookie-fields-beyond-span: a session cookie value more than 512 characters from the name, or past a closing brace, is not hidden; within 512 characters it is
 
 ## gitlab-session-cookie-double-url-encoded
 
@@ -247,3 +239,19 @@ Shape: _gitlab_session%253D followed by a 32-character value.
 Hidden instead: The same value after _gitlab_session%3D (hidden with the gitlab-session-cookie marker).
 Card: none
 Test: KNOWN MISS gitlab-session-cookie-double-url-encoded: a session cookie value after a double-URL-encoded equals sign is not hidden, after a single-encoded one it is
+
+## gitlab-session-cookie-split-across-line-wrap
+
+Reason: (c) a bound kept for a stated reason: the value pass needs 32 unbroken lowercase hex characters (hooks/secret-shield/patterns.ts redactGitlabSessionWindows), and a part of 12 hex characters after a line break cannot be told from a word, a number or a hash fragment, so no part of a broken value is taken on its own. The first part, when it has 16 or more characters, is hidden by the name-first rule.
+Shape: _gitlab_session= followed by 20 hex characters, a line break and the remaining 12 hex characters.
+Hidden instead: The same value without the line break (hidden whole with the gitlab-session-cookie marker).
+Card: none
+Test: KNOWN MISS gitlab-session-cookie-split-across-line-wrap: a session cookie value broken by a line wrap is hidden only in its first part, an unbroken value is hidden whole
+
+## gitlab-session-cookie-uppercase-hex
+
+Reason: (c) a bound kept for a stated reason: the value pass hides only lowercase hex, because Rails and Rack write the session id with SecureRandom.hex(16), which is lowercase (lib/gitlab/sessions/cache_store.rb, actionpack abstract_store.rb), and a pass that also took upper-case 32-hex runs near the name would hide upper-case hashes and GUIDs that are not session ids. The name-first rule still hides an upper-case value written right after the name (any 16 or more characters), so the miss is the forms only the value pass reads (a keyword argument, a nested value, a Ruby hash rocket).
+Shape: create_cookie(name='_gitlab_session', value='...') with 32 upper-case hex characters as the value.
+Hidden instead: The same call with the value in lower case (hidden with the gitlab-session-cookie marker).
+Card: none
+Test: KNOWN MISS gitlab-session-cookie-uppercase-hex: an upper-case 32-hex session cookie value in a keyword-argument form is not hidden, the same value in lower case is

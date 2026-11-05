@@ -323,6 +323,94 @@ function redactUrlPasswords(text: string, hits: Hits, found: Map<string, string>
   return parts.join('')
 }
 
+
+// GitLab session cookie windows (TRDD-Q6LPJTPO, option B). The two rules in rules/code-hosts.ts read the value from the text right after the name; the review of eb370f5e listed
+// the forms they cannot read (Python keyword arguments, a Ruby hash rocket, a compact Rails hash, a key of 16 or more characters after the name in compact JSON, `defaultvalue`, a
+// value nested under the name in JSON or YAML, a Ruby symbol in a positional call, a tab before `=`, a Go raw string). Every one of them keeps the VALUE next to the NAME, and the
+// value has a fixed shape, so this pass looks for the shape in a window around each name instead of parsing the syntax between them.
+// The shape (read in GitLab master): lib/gitlab/sessions/cache_store.rb:57-59 builds the stored id as `prefix + DELIMITER("-") + super.public_id`, and the Rails compatibility
+// generate_sid is `SecureRandom.hex(16)`, so a value is an optional `<prefix>-` followed by exactly 32 lowercase hex characters. The prefix is free text (empty by default,
+// `cell-<id>` with Cells), so it is any run of 1 to 40 of `[0-9A-Za-z_.-]` ending in a hyphen. Both old rules stay: they hide values of other shapes (any 16 or more characters).
+// WHY a window and not a syntax: the window is the text AFTER the name (up to the first `;` or `}`, the next name, or 512 characters) and the text BEFORE it (back to the nearest
+// `;`, `{` or `}`, the previous name, or 512 characters). It does NOT stop at a line break (the YAML form puts the value on the next line) and it does NOT stop at a JANITOR marker:
+// the old rules run first and, for the forms above, may have hidden the wrong text between the name and the value, so a marker there says nothing about where the value is.
+// `;` ends a cookie in a header, `{` and `}` end the object that holds the name, and 512 characters cover the widest real export (about 150 between name and value).
+// WHY the hex is lowercase only: Rails and Rack write lowercase, so an upper-case 32-hex run after the name is not a session id of GitLab (it is disclosed as a miss in
+// KNOWN-MISSES.md gitlab-session-cookie-uppercase-hex); accepting it would hide upper-case hashes and GUIDs for nothing. The value must not be followed by a letter or a digit
+// (a 40-hex commit id or a 64-hex Geo suffix is not a value), and it starts at the start of the window, after a character that is not a letter or a digit (and not `%`), or right
+// after a `%XX` URL escape (`%3D`, `%22`), so the `3D` of an escape is never taken for the start of a prefix.
+// Disclosed over-hide: any other run of 32 lowercase hex characters inside a window (an MD5, an ETag, a trace id) is hidden too; the window is short and the name says session.
+// Windows are merged where they overlap, and each value is scanned once, so the cost is O(n + names x 1024) and a second pass finds nothing (a hidden value is a marker).
+// The windows exclude the name itself: a prefix that reached back over the name would hide the name. A value is counted under the same kind as the old rules, and is added to
+// `found` when propagates() accepts it, as applyRule does.
+const SESSION_NAME_ANY = /_gitlab_session/i
+const SESSION_NAME_EACH = /_gitlab_session/gi
+const SESSION_NAME_LENGTH = 15
+const SESSION_WINDOW = 512
+const SESSION_VALUE = /(?:(?<![0-9A-Za-z%])|(?<=%[0-9A-Fa-f]{2}))(?:[0-9A-Za-z_.-]{1,40}-)?[0-9a-f]{32}(?![0-9A-Za-z])/g
+const isAlnum = (code: number): boolean => (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+function redactGitlabSessionWindows(text: string, hits: Hits, found: Map<string, string>): string {
+  if (!SESSION_NAME_ANY.test(text)) return text
+  const names: number[] = []
+  for (const match of text.matchAll(SESSION_NAME_EACH)) names.push(match.index)
+  // Whether a value may start at `at`: after a character that is not a letter, a digit or `%`, or right after a `%XX` escape. Used where a window starts in the middle of the text.
+  const startOk = (at: number): boolean => {
+    if (at === 0) return true
+    const before = text.charCodeAt(at - 1)
+    if (at >= 3 && text.charCodeAt(at - 3) === 37 && /^[0-9A-Fa-f]{2}$/.test(text.slice(at - 2, at))) return true
+    return !isAlnum(before) && before !== 37
+  }
+  const endOk = (at: number): boolean => at >= text.length || !isAlnum(text.charCodeAt(at))
+  // Windows in text order: for each name its BEFORE and its AFTER, never the name itself. A window that overlaps or touches the previous one is merged into it.
+  const windows: Array<{ start: number; end: number; checkStart: boolean }> = []
+  const add = (start: number, end: number, checkStart: boolean): void => {
+    if (start >= end) return
+    const last = windows[windows.length - 1]
+    if (last !== undefined && start <= last.end) last.end = Math.max(last.end, end)
+    else windows.push({ start, end, checkStart })
+  }
+  names.forEach((at, i) => {
+    const previousEnd = i > 0 ? names[i - 1] + SESSION_NAME_LENGTH : 0
+    let start = at
+    for (const floor = Math.max(previousEnd, at - SESSION_WINDOW); start > floor; start--) {
+      const code = text.charCodeAt(start - 1)
+      if (code === 59 || code === 123 || code === 125) break
+    }
+    add(start, at, start > previousEnd)
+    const end = at + SESSION_NAME_LENGTH
+    const ceiling = Math.min(i + 1 < names.length ? names[i + 1] : text.length, end + SESSION_WINDOW, text.length)
+    let stop = end
+    for (; stop < ceiling; stop++) {
+      const code = text.charCodeAt(stop)
+      if (code === 59 || code === 125) break
+    }
+    add(end, stop, false)
+  })
+  const kind = 'gitlab-session-cookie'
+  const parts: string[] = []
+  let done = 0
+  for (const span of windows) {
+    const piece = text.slice(span.start, span.end)
+    SESSION_VALUE.lastIndex = 0
+    for (let match = SESSION_VALUE.exec(piece); match !== null; match = SESSION_VALUE.exec(piece)) {
+      const at = span.start + match.index
+      const stop = at + match[0].length
+      // A window cut by the 512-character cap may start or end inside a longer run of letters and digits; the real neighbours decide, and a rejected match retries one character on.
+      if ((match.index === 0 && span.checkStart && !startOk(at)) || !endOk(stop)) {
+        SESSION_VALUE.lastIndex = match.index + 1
+        continue
+      }
+      hits[kind] = (hits[kind] ?? 0) + 1
+      if (propagates(match[0])) found.set(match[0], kind)
+      parts.push(text.slice(done, at), mark(kind))
+      done = stop
+    }
+  }
+  if (parts.length === 0) return text
+  parts.push(text.slice(done))
+  return parts.join('')
+}
+
 // JSON pairs, `"api_key": "..."`. Group 1 is the run of backslashes written before every quote of the pair: none
 // in plain JSON, one when the JSON sits inside another JSON string (`\"api_key\":\"...\"`), three when it was
 // stringified twice (`\\\"api_key\\\":\\\"...\\\"`). A pm2 jlist dump nested that way leaked a Dropbox secret on
@@ -422,6 +510,8 @@ function redactConnectionStrings(text: string, hits: Hits, found: Map<string, st
 function redactInto(text: string, hits: Hits, found: Map<string, string>): string {
   let out = text
   for (const rule of TOKENS) out = applyRule(out, rule, hits, found)
+  // Right after the provider tokens, so every provider rule wins first and its own kind stays; before the URL passwords, which never see a session value.
+  out = redactGitlabSessionWindows(out, hits, found)
   out = redactUrlPasswords(out, hits, found)
   out = redactAssignments(out, hits, found)
   out = redactConnectionStrings(out, hits, found)

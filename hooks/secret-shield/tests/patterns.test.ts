@@ -1105,7 +1105,8 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
   test('a copy of the value written elsewhere in the same text is hidden too', () => {
     const done = redact(`Cookie: ${NAME}=${hex32}\nrepeat ${hex32} here`)
     expect(done.text.includes(hex32)).toBe(false)
-    expect(done.hits[kind]).toBe(1)
+    // Two hits: the rule hides the first copy and the window pass hides the second one (the window crosses the line break by design, for the YAML form), where hideKnown alone used to hide it uncounted.
+    expect(done.hits[kind]).toBe(2)
   })
 
   test('the 16-character floor: 15 characters stay visible, 16 are hidden', () => {
@@ -1175,6 +1176,134 @@ describe('the GitLab session cookie is hidden whole, the cookie name is kept', (
       const done = redact(line)
       expect(done.text).toBe(line)
       expect(done.hits).toEqual({})
+    })
+  }
+})
+describe('the GitLab session cookie value is found by its shape in a window around the name', () => {
+  // TRDD-Q6LPJTPO, option B: the old rules read the value from the syntax after the name; this pass hides an optional prefix and exactly 32 lowercase hex characters within 512
+  // characters of the name (not past ; { }). The values are built at run time with j(). Hit counts are pinned as measured: a form where an old rule hides the WRONG text first
+  // (the key after the name, a default value) counts two hits, one for the wrong text and one for the real value.
+  const kind = 'gitlab-session-cookie'
+  const M = mark(kind)
+  const NAME = '_gitlab_session'
+  const hex32 = j('e4b7a1c9', 'd2f60385', 'a1b2c3d4', 'e5f60718')
+  const hex32b = j('0a1b2c3d', '4e5f6071', '8293a4b5', 'c6d7e8f9')
+  const sha40 = j('1a36494e', '24f084b1', '7d167990', '53515679', 'a1f2b37d')
+  const hex64 = j('1a2b3c4d', '5e6f7081', '92a3b4c5', 'd6e7f809', '0f1e2d3c', '4b5a6978', '8796a5b4', 'c3d2e1f0')
+  const prefixes = ['', 'cell-3-', 'custom_token-']
+  const forms: Array<[string, number, (v: string) => string]> = [
+    ['Python keyword arguments', 1, v => `create_cookie(name='${NAME}', value='${v}')`],
+    ['a Ruby hash rocket', 1, v => `{ :name => '${NAME}', :value => '${v}' }`],
+    ['a compact Rails hash', 1, v => `cookies[:${NAME}]={value:'${v}',httponly:true}`],
+    ['a key of 16 or more characters after the name in compact JSON', 2, v => `{"name":"${NAME}","partitionKeyLong":true,"value":"${v}"}`],
+    ['a key that ends in value before the real value', 2, v => `{"name": "${NAME}", "defaultvalue": "some-default-text-here", "value": "${v}"}`],
+    ['a value nested under the name in JSON', 1, v => `{"${NAME}": {"value": "${v}"}}`],
+    ['a value nested under the name in YAML', 1, v => `${NAME}:\n  value: ${v}\n`],
+    ['a Ruby symbol in a positional call', 1, v => `cookies.set(:${NAME}, '${v}')`],
+    ['a tab before the equals sign', 1, v => `${NAME}\t=${v}`],
+    ['a Go raw string', 1, v => 'http.Cookie{Name: "' + NAME + '", Value: `' + v + '`}'],
+    ['a URL-encoded equals sign', 1, v => `q=${NAME}%3D${v}%3Bx`],
+    ['a URL-encoded JSON pair', 1, v => `q=%22${NAME}%22%3A%22${v}%22`],
+  ]
+  for (const prefix of prefixes) {
+    for (const [description, count, build] of forms) {
+      test(`hidden: ${description}, prefix '${prefix}'`, () => {
+        const done = redact(build(prefix + hex32))
+        expect(done.text.includes(hex32)).toBe(false)
+        expect(prefix === '' || !done.text.includes(prefix)).toBe(true)
+        expect(done.text.includes(M)).toBe(true)
+        expect(done.hits).toEqual({ [kind]: count })
+      })
+    }
+  }
+
+  test('a value between two names is hidden once and counted once', () => {
+    const done = redact(`${NAME}=short ${hex32} ${NAME}=short`)
+    expect(done.text).toBe(`${NAME}=short ${M} ${NAME}=short`)
+    expect(done.hits).toEqual({ [kind]: 1 })
+  })
+
+  test('a value before the name and a value after it are both hidden', () => {
+    const done = redact(`id ${hex32} then ${NAME} cookie, id ${hex32b}`)
+    expect(done.text).toBe(`id ${M} then ${NAME} cookie, id ${M}`)
+    expect(done.hits).toEqual({ [kind]: 2 })
+  })
+
+  test('a provider token near the name keeps its own kind', () => {
+    // The token holds a 32-hex run that this pass would also take; the provider rules run first, so the pass sees a marker.
+    const token = j('glpat-', hex32b)
+    const done = redact(`token ${token}\n${NAME} cookie`)
+    expect(done.text).toBe(`token ${mark('gitlab-pat')}\n${NAME} cookie`)
+    expect(done.hits).toEqual({ 'gitlab-pat': 1 })
+  })
+
+  // Stay visible. A 40-hex commit id and a 64-hex Geo suffix are longer than a value; an upper-case run is not a Rack id (disclosed in KNOWN-MISSES.md gitlab-session-cookie-uppercase-hex).
+  const stayVisible: Array<[string, string]> = [
+    ['a 40-hex commit id after the name', `The ${NAME} cookie was renewed in ${sha40}.`],
+    ['a 40-hex commit id before the name', `Fixed in ${sha40}: the ${NAME} cookie is renewed.`],
+    ['the 64-hex Geo suffix of the name', `Cookie: ${NAME}_geo_${hex64}=short`],
+    ['an upper-case 32-hex run after the name', `The ${NAME} cookie was ${hex32.toUpperCase()}.`],
+    ['a 32-hex run after a semicolon', `Cookie: ${NAME}=short; x=${hex32}`],
+    ['a 32-hex run before a semicolon that precedes the name', `x=${hex32}; ${NAME}=short`],
+    ['a 32-hex run after a closing brace', `{"${NAME}": "short"} ${hex32}`],
+    ['a 32-hex run before an opening brace', `${hex32} {"${NAME}": "short"}`],
+    ['a 32-hex run 513 characters after the name', `The ${NAME}${' '.repeat(513)}${hex32}`],
+    ['a 32-hex run 513 characters before the name', `${hex32}${' '.repeat(513)}${NAME} cookie`],
+    ['a 32-hex run with no name', `etag ${hex32} md5 ${hex32b}`],
+  ]
+  // Pinned on HEAD as well: these pass before this pass existed, so they fail only if the pass crosses a bound it must not cross.
+  for (const [description, line] of stayVisible) {
+    test(`stays visible: ${description}`, () => {
+      const done = redact(line)
+      expect(done.text).toBe(line)
+      expect(done.hits).toEqual({})
+    })
+  }
+
+  test('a 32-hex run 480 characters from the name is hidden, on either side', () => {
+    expect(redact(`The ${NAME}${' '.repeat(480)}${hex32}`).text).toBe(`The ${NAME}${' '.repeat(480)}${M}`)
+    expect(redact(`${hex32}${' '.repeat(480)}${NAME} cookie`).text).toBe(`${M}${' '.repeat(480)}${NAME} cookie`)
+  })
+
+  test('an over-hide is disclosed: another 32-hex run inside the window is hidden too', () => {
+    const done = redact(`etag ${hex32b} for ${NAME}`)
+    expect(done.text).toBe(`etag ${M} for ${NAME}`)
+  })
+
+  const idempotent: Array<[string, string]> = forms.map(([description, , build]) => [description, build('cell-3-' + hex32)])
+  idempotent.push(['all the forms in one text', forms.map(([, , build]) => build(hex32)).join('\n')])
+  for (const [description, text] of idempotent) {
+    test(`redacting twice changes nothing: ${description}`, () => {
+      const once = redact(text)
+      const twice = redact(once.text)
+      expect(twice.text).toBe(once.text)
+      expect(countOf(twice.hits)).toBe(0)
+    })
+  }
+
+  // WHY five texts: dense names, dense names with a value between (windows merge), snake_case runs near the name (the name search), 32-hex runs with no name (the prefilter), and a mix of names, prefixes and runs.
+  // Each time is the best of 5 runs after one warm-up run (see the port-skip tests above); linear means the ratio stays near 8.
+  const SMALL = 32 * 1024
+  const bestOf = (text: string) => {
+    redact(text)
+    return Math.min(...[0, 1, 2, 3, 4].map(() => {
+      const started = performance.now()
+      redact(text)
+      return performance.now() - started
+    }))
+  }
+  const linear = (small: number, big: number) => big < 2 || big / small < 12
+  const grow = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size)
+  const shapes: Array<[string, (size: number) => string]> = [
+    ['dense names', grow(`${NAME} `)],
+    ['dense names with a value between', grow(`${NAME}=short ${hex32} `)],
+    ['snake_case runs near the name', grow('a_gitlab_sessio_n_gitlab_sess_ion_')],
+    ['32-hex runs with no name', grow(`${hex32}-${hex32b} `)],
+    ['a mix of names, prefixes and hex runs', grow(`${NAME} cell-3-${hex32}-${hex32b} a_b_c \n${NAME}: x ${sha40} `)],
+  ]
+  for (const [description, build] of shapes) {
+    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 60000 }, () => {
+      expect(linear(bestOf(build(SMALL)), bestOf(build(8 * SMALL)))).toBe(true)
     })
   }
 })

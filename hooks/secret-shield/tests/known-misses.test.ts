@@ -355,26 +355,19 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
     check('whole value hidden without the ampersand', hiddenAs(`x?_gitlab_session=${head}${tail}`, head + tail, 'gitlab-session-cookie'))
   })
 
-  test('KNOWN MISS gitlab-session-cookie-fields-beyond-span: a name and a value more than 400 characters apart, or with a nested object between them, are not hidden; 400 characters apart they are', () => {
-    // The span starts after the comma that follows the name (or the value) and ends at the next key: ` "x": "`, the filler and `", "` are 11 characters around it.
+  test('KNOWN MISS gitlab-session-cookie-fields-beyond-span: a session cookie value more than 512 characters from the name, or past a closing brace, is not hidden; within 512 characters it is', () => {
+    // The window pass reads 512 characters around the name and stops at ; { }. The filler field is 7 characters plus its text; from the end of the name to the start of the value are 22 characters plus the filler (name first), and from the start of the value to the start of the name 53 plus the filler (value first).
     const apart = (filler: number) => `"x": "${'a'.repeat(filler)}"`
     const farName = fake('c1d2e3f405162738495a6b7c8d9e0f1a')
     const nearName = fake('d2e3f405162738495a6b7c8d9e0f1a2b')
     const farValue = fake('e3f405162738495a6b7c8d9e0f1a2b3c')
     const nearValue = fake('f405162738495a6b7c8d9e0f1a2b3c4d')
     const nested = fake('0516273849a5b6c7d8e9f0a1b2c3d4e5')
-    expect(shown(`{"name": "_gitlab_session", ${apart(390)}, "value": "${farName}"}`, farName)).toBe(true)
-    check('name first, 400 characters apart, hidden', hiddenAs(`{"name": "_gitlab_session", ${apart(389)}, "value": "${nearName}"}`, nearName, 'gitlab-session-cookie'))
-    expect(shown(`{"value": "${farValue}", ${apart(390)}, "name": "_gitlab_session"}`, farValue)).toBe(true)
-    check('value first, 400 characters apart, hidden', hiddenAs(`{"value": "${nearValue}", ${apart(389)}, "name": "_gitlab_session"}`, nearValue, 'gitlab-session-cookie'))
+    expect(shown(`{"name": "_gitlab_session", ${apart(480)}, "value": "${farName}"}`, farName)).toBe(true)
+    check('name first, 440 characters of other fields between, hidden', hiddenAs(`{"name": "_gitlab_session", ${apart(440)}, "value": "${nearName}"}`, nearName, 'gitlab-session-cookie'))
+    expect(shown(`{"value": "${farValue}", ${apart(480)}, "name": "_gitlab_session"}`, farValue)).toBe(true)
+    check('value first, 440 characters of other fields between, hidden', hiddenAs(`{"value": "${nearValue}", ${apart(440)}, "name": "_gitlab_session"}`, nearValue, 'gitlab-session-cookie'))
     expect(shown(`{"name": "_gitlab_session", "meta": {"a": 1}, "value": "${nested}"}`, nested)).toBe(true)
-  })
-
-  test('KNOWN MISS gitlab-session-cookie-tab-before-colon: a session cookie pair with a tab before the colon is not hidden, with a space it is', () => {
-    const value = fake('1a2b3c4d5e6f708192a3b4c5d6e7f801')
-    expect(value.length).toBe(32)
-    expect(shown(`{"_gitlab_session"\t: "${value}"}`, value)).toBe(true)
-    check('a space before the colon hidden', hiddenAs(`{"_gitlab_session" : "${value}"}`, value, 'gitlab-session-cookie'))
   })
 
   test('KNOWN MISS gitlab-session-cookie-double-url-encoded: a session cookie value after a double-URL-encoded equals sign is not hidden, after a single-encoded one it is', () => {
@@ -382,5 +375,20 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
     expect(value.length).toBe(32)
     expect(shown(`q=_gitlab_session%253D${value}`, value)).toBe(true)
     check('single-encoded hidden', hiddenAs(`q=_gitlab_session%3D${value}`, value, 'gitlab-session-cookie'))
+  })
+
+  test('KNOWN MISS gitlab-session-cookie-split-across-line-wrap: a session cookie value broken by a line wrap is hidden only in its first part, an unbroken value is hidden whole', () => {
+    const head = fake('3f9a6c1e8b2d4a7f5c0e')
+    const tail = fake('91b3d5f7a2c4')
+    expect(head.length + tail.length).toBe(32)
+    expect(shown(`Cookie: _gitlab_session=${head}\n${tail}`, tail)).toBe(true)
+    check('the unbroken value is hidden whole', hiddenAs(`Cookie: _gitlab_session=${head}${tail}`, head + tail, 'gitlab-session-cookie'))
+  })
+
+  test('KNOWN MISS gitlab-session-cookie-uppercase-hex: an upper-case 32-hex session cookie value in a keyword-argument form is not hidden, the same value in lower case is', () => {
+    const upper = fake('3F9A6C1E8B2D4A7F5C0E91B3D5F7A2C4')
+    expect(/^[0-9A-F]{32}$/.test(upper)).toBe(true)
+    expect(shown(`create_cookie(name='_gitlab_session', value='${upper}')`, upper)).toBe(true)
+    check('the lower-case value is hidden', hiddenAs(`create_cookie(name='_gitlab_session', value='${upper.toLowerCase()}')`, upper.toLowerCase(), 'gitlab-session-cookie'))
   })
 })
