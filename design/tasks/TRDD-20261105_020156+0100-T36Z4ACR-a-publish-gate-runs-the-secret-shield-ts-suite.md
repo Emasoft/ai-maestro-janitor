@@ -4,7 +4,7 @@ title: A publish gate runs the secret-shield TS suite
 column: todo
 status: tasked
 created: 2026-11-05T02:01:56+0100
-updated: 2026-11-05T02:05:58+0100
+updated: 2026-11-05T02:08:20+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -25,7 +25,7 @@ approval-datetime: 2026-11-05T02:01:56+0100
 No automated gate runs the secret-shield TypeScript suite. scripts/publish.py stage_tests (publish.py:1829-1871) runs pytest only; no .github workflow calls claude plugin test; no pytest test runs it (tests/test_publish_lock_guard.py:211 only mentions plugin test code in a docstring); and nothing type-checks hooks/ (carried from earlier reports, not re-measured). Every shield family so far (d711e5f8, dbd5aaf9, 28b42512) was proven only by hand in a scratch plugin shell.
 
 ## Done when
- - [ ] publish.py gains its own stage, run right after stage_tests, that fails the publish when the secret-shield TS suite fails. It is a publish.py stage, not a pytest test, so CI runners without a claude CLI are not affected by Done-when 3.
+ - [ ] publish.py gains its own stage, run right after stage_tests and before _reassert_publish_lock (or followed by a fresh re-assert), that fails the publish when the secret-shield TS suite fails: the TS suite also runs plugin test code with write access, and a test once deleted the publish lock. It is a publish.py stage, not a pytest test, so CI runners without a claude CLI are not affected by Done-when 3.
  - [ ] The stage builds a faithful shell: the real .claude-plugin/plugin.json, hooks/secret-shield/ copied, and a hooks.json listing ./secret-shield/register.ts until TRDD-2V7OAUPE wires the module.
  - [ ] It runs claude plugin test and requires exit 0 with 0 fail; a missing claude CLI fails the stage instead of skipping it.
  - [ ] CI parity is decided and written down on this card: either a CI job installs the claude CLI and runs the suite, or the card states why CI does not run it.
