@@ -16,3 +16,13 @@ export const googleOAuthClientSecret: Rule = { kind: 'google-oauth-client-secret
 export const googleOAuthAccessToken: Rule = { kind: 'google-oauth-access-token', pattern: /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g }
 // WHY: adapted from veil's (?<![\w/])1\/\/0[\w-]{40,512} (NOTICE): '+' is added to the lookbehind. Inside standard base64, which has '+' and '/' but neither '-' nor '_', 1//0 can then start only at the first character of a base64 value (or right after its '=' padding). That makes a refresh-token match splitting an AWS SessionToken, or another base64 value a later rule hides whole, rare (about 2e-8 per value, estimated) instead of removing it, and removes almost all of veil's base64 over-hide (this rule runs before the AWS rules). A real refresh token right after '+' is not hidden. 512 is Google's documented refresh-token cap. The lookbehind keeps /path/1//0 and word1//0 visible.
 export const googleOAuthRefreshToken: Rule = { kind: 'google-oauth-refresh-token', pattern: /(?<![\w/+])1\/\/0[\w-]{40,512}/g }
+
+// DigitalOcean personal access token, OAuth token and refresh token, standalone (no secret name before them needed).
+// WHY each part of the pattern is written this way (NOTICE credits gitleaks v8.30.1):
+// - No leading \b and no lookbehind: a token right after an escape such as \n (a literal backslash and n) must still be hidden, because \n puts the word character n right before the prefix (TRDD-5VZTPXBJ).
+// - {64,} and not {64}, with no trailing boundary or lookahead: a longer hex run is hidden whole, instead of leaving a hex tail in view. The cost: hex characters glued to the end of a token, such as a date or a word made of a-f, are hidden with it.
+// - The i flag covers the whole token, prefix and body: upper-case hex and an upper-case prefix are hidden too.
+// DigitalOcean documents only the three prefixes (docs.digitalocean.com/notes/2022/api-token-format); the 64-hex body comes from gitleaks v8.30.1, not from DigitalOcean.
+export const digitaloceanPat: Rule = { kind: 'digitalocean-pat', pattern: /dop_v1_[0-9a-f]{64,}/gi }
+export const digitaloceanOAuthToken: Rule = { kind: 'digitalocean-oauth-token', pattern: /doo_v1_[0-9a-f]{64,}/gi }
+export const digitaloceanRefreshToken: Rule = { kind: 'digitalocean-refresh-token', pattern: /dor_v1_[0-9a-f]{64,}/gi }

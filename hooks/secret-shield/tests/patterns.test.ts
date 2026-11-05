@@ -619,6 +619,100 @@ describe('Google OAuth client secrets, access tokens and refresh tokens are hidd
   })
 })
 
+describe('DigitalOcean personal access, OAuth and refresh tokens are hidden with no name before them', () => {
+  // Fixtures are built at run time: no whole fake token sits in this file. The hex body is pure JS (no imports: the mod loader refuses node: imports) and deterministic.
+  const HEXDIGITS = '0123456789abcdef'
+  const hex = (n: number, seed: number): string => {
+    let state = seed
+    let out = ''
+    for (let i = 0; i < n; i++) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+      out += HEXDIGITS[state >>> 28]
+    }
+    return out
+  }
+  const families: Array<[string, string, number]> = [
+    ['digitalocean-pat', j('do', 'p_', 'v1_'), 11],
+    ['digitalocean-oauth-token', j('do', 'o_', 'v1_'), 22],
+    ['digitalocean-refresh-token', j('do', 'r_', 'v1_'), 33],
+  ]
+
+  for (const [kind, prefix, seed] of families) {
+    const M = mark(kind)
+    const body = hex(64, seed)
+    const token = j(prefix, body)
+    const only = { [kind]: 1 }
+
+    test(`${kind}: a token alone on a line is one marker, counted once`, () => {
+      const done = redact(`before\n${token}\nafter`)
+      expect(done.text).toBe(`before\n${M}\nafter`)
+      expect(done.hits).toEqual(only)
+    })
+
+    test(`${kind}: hidden in an assignment, a JSON string, right after a literal backslash-n inside a JSON string, and in a URL query`, () => {
+      const cases: Array<[string, string]> = [
+        [`DO_TOKEN=${token}`, `DO_TOKEN=${M}`],
+        [`{"token":"${token}"}`, `{"token":"${M}"}`],
+        // A neutral key keeps this case about the DigitalOcean rule alone; the same escape under a secret-named key is not tested here.
+        [`{"msg":"line one\\n${token}"}`, `{"msg":"line one\\n${M}"}`],
+        [`https://api.example.com/v2/account?access_token=${token}&x=1`, `https://api.example.com/v2/account?access_token=${M}&x=1`],
+      ]
+      for (const [input, expected] of cases) {
+        const done = redact(input)
+        expect(done.text).toBe(expected)
+        expect(done.hits).toEqual(only)
+      }
+    })
+
+    test(`${kind}: an upper-case body is hidden`, () => {
+      const done = redact(`see ${j(prefix, body.toUpperCase())} end`)
+      expect(done.text).toBe(`see ${M} end`)
+      expect(done.hits).toEqual(only)
+    })
+
+    test(`${kind}: an upper-case prefix is hidden`, () => {
+      const done = redact(`see ${j(prefix.toUpperCase(), body)} end`)
+      expect(done.text).toBe(`see ${M} end`)
+      expect(done.hits).toEqual(only)
+    })
+
+    test(`${kind}: a 70-hex body is one marker, no hex left`, () => {
+      const done = redact(`x ${j(prefix, hex(70, seed))} y`)
+      expect(done.text).toBe(`x ${M} y`)
+      expect(done.hits).toEqual(only)
+    })
+
+    // Pins the {64,} choice: the rule tightened to {64} leaves the last four characters visible and fails here.
+    test(`${kind}: 64 hex followed by 9abc is one marker, the whole run is hidden`, () => {
+      const done = redact(`x ${j(prefix, body, '9abc')} y`)
+      expect(done.text).toBe(`x ${M} y`)
+      expect(done.hits).toEqual(only)
+    })
+
+    test(`${kind}: the text after the token (Zq9, a double quote, &x=1, a space and a word) is kept as it is`, () => {
+      for (const after of ['Zq9', '"', '&x=1', ' then']) {
+        const done = redact(`see ${token}${after} end`)
+        expect(done.text).toBe(`see ${M}${after} end`)
+        expect(done.hits).toEqual(only)
+      }
+    })
+  }
+
+  const stayVisible = [
+    'dop_v1_<token>',
+    'dop_v1_...',
+    'dop_v1_xxxxxxxx',
+    'DigitalOcean tokens start with dop_v1_ and are long.',
+  ]
+  for (const line of stayVisible) {
+    test(`stays visible: ${line}`, () => {
+      const done = redact(line)
+      expect(done.text).toBe(line)
+      expect(done.hits).toEqual({})
+    })
+  }
+})
+
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -632,6 +726,9 @@ describe('token rule order', () => {
       id('google-oauth-client-secret', /\bGOCSPX-[A-Za-z0-9_-]{20,}/g),
       id('google-oauth-access-token', /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g),
       id('google-oauth-refresh-token', /(?<![\w/+])1\/\/0[\w-]{40,512}/g),
+      id('digitalocean-pat', /dop_v1_[0-9a-f]{64,}/gi),
+      id('digitalocean-oauth-token', /doo_v1_[0-9a-f]{64,}/gi),
+      id('digitalocean-refresh-token', /dor_v1_[0-9a-f]{64,}/gi),
       id('aws-access-key', /\b((?:AKIA|ASIA)[A-Z0-9]{16})\b/g),
       id('aws-secret-key', /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi),
       id('aws-secret-key', /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g),

@@ -1,7 +1,7 @@
 // Pure secret detection and redaction: no `$`, so tests and other mods can import it.
 
 import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
-import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
+import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, privateKey } from './rules/key-material'
@@ -57,6 +57,9 @@ const TOKENS: readonly Rule[] = [
   googleOAuthClientSecret,
   googleOAuthAccessToken,
   googleOAuthRefreshToken,
+  digitaloceanPat,
+  digitaloceanOAuthToken,
+  digitaloceanRefreshToken,
   awsAccessKey,
   awsSecretKeyAssignment,
   awsSecretKeyJson,
@@ -487,6 +490,9 @@ const LABELS: Record<string, string> = {
   'google-oauth-client-secret': 'Google OAuth client secret',
   'google-oauth-access-token': 'Google OAuth access token',
   'google-oauth-refresh-token': 'Google OAuth refresh token',
+  'digitalocean-pat': 'DigitalOcean personal access token',
+  'digitalocean-oauth-token': 'DigitalOcean OAuth token',
+  'digitalocean-refresh-token': 'DigitalOcean refresh token',
   jwt: 'JWT',
   'npm-token': 'npm token',
   'pypi-token': 'PyPI token',
