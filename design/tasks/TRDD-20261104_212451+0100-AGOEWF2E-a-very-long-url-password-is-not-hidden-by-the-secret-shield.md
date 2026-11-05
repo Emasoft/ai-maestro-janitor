@@ -4,7 +4,7 @@ title: A very long URL password is not hidden by the secret shield
 column: todo
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-05T05:26:45+0100
+updated: 2026-11-05T05:31:04+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -37,3 +37,4 @@ Measured on 2026-11-04 under claude plugin test: one URL whose password alone is
 - 2026-11-05 — Correction to note (3) above: unrolling alone meets the mixed-alphabet test of Done-when 2, but not a colon-dense password, which still reached the ceiling once unrolled; the bound is what covers it.
 - 2026-11-05 — Correction: a password that is a run of x or a run of X is a placeholder (x+ and X+ in PLACEHOLDER, patterns.ts), not only a run of x.
 - 2026-11-05 — Still open: Done-when 1 (a prediction, then one confirming run) and Done-when 3 (every rule and module-private regex that can match more than 64 KB, for example jsonPair). This card does not close on 7d54b062.
+- 2026-11-05 — Board: this card stays in todo because Done-when 1 and 3 are not started; the code for Done-when 2 has landed (7d54b062, b3363706).

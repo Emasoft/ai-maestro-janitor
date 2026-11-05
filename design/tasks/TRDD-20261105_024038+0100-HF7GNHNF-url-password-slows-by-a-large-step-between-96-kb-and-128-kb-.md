@@ -4,7 +4,7 @@ title: URL_PASSWORD slows by a large step between 96 KB and 128 KB of URL-shaped
 column: testing
 status: tasked
 created: 2026-11-05T02:40:38+0100
-updated: 2026-11-05T05:26:43+0100
+updated: 2026-11-05T05:31:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-05T02:40:38+0100
-implementation-commits: [7d54b062, b3363706]
+implementation-commits: [7d54b062, b3363706, 0495dbcb]
 ---
 
 # URL_PASSWORD slows by a large step between 96 KB and 128 KB of URL-shaped text
@@ -41,3 +41,5 @@ Owner decision 2026-11-05 (quoted on TRDD-2V7OAUPE): measure and fix this here, 
 - 2026-11-05 — Done-when 3 is split. The password is hidden at every measured size from 32 KB to 1 MB on grown() shape b in every run (worker report urlpw-fix2). The ratio half is open: at load 185-270 the 512 KB to 64 KB ratios ran from 3.4 to 96 on old and new code alike, and a control shape with no URL gave 8.6 to 69, so load dominates. Measure it with the small and big runs interleaved in one test, best of 15 or more, or at low load.
 - 2026-11-05 — Corrections to the 7d54b062 commit message: red on old (7 fail), the 1.2M-string fuzz and the FP diff were the worker's runs, and the fuzz and FP diff ran in system Bun, not in the plugin engine; "0 differences" holds at or under the bound only; "the regex and backtracking are ruled out" is an inference (system Bun also misses from about 360K); the over-hide disclosure was incomplete and was completed in b3363706 (the fragment case; placeholder and marker-only passwords are now left alone above the bound).
 - 2026-11-05 — Correction to the b3363706 commit message: "load 233" was a 5-minute average and "about 115" a 1-minute one. On the same scale the failing run and the two passing runs had about the same load (215-233), so the data shows one timing failure in three runs under sustained load, not a failure only at higher load.
+- 2026-11-05 — Precision on the Done-when 2 note: the old tree was the pre-7d54b062 patterns.ts with export const URL_PASSWORD_BOUND = 4096 appended (the tests import it; it changes no behaviour). The 561/8 run was at load 49 and the 569/0 runs at a 1-minute load of about 115. 0495dbcb adds a test for the colon-count route above the bound.
+- 2026-11-05 — NEXT ACTION for Done-when 3: a scratch test that interleaves the 64 KB and 512 KB runs of grown() shapes a and b in one loop, best of 15, run at a 1-minute load under 50; this host often sits at 100-270.
