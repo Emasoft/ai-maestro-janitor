@@ -202,19 +202,11 @@ Test: KNOWN DEFECT TRDD-AGOEWF2E url-password-over-1mb: one URL whose password a
 
 ## gitlab-body-under-20-chars
 
-Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:21-22 and :32). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
-Shape: A GitLab prefix (glpat-) followed by 19 characters of letters, digits, underscore and hyphen, with a digit among them.
+Reason: (c) a bound kept for a stated reason: the body floor of the 13 GitLab rules is 20 characters (hooks/secret-shield/rules/code-hosts.ts:17-18 and :26). GitLab documents no length; 20 is the shortest body of any GitLab rule in gitleaks v8.30.1 (gitlab.go), and a prefix followed by fewer characters reads as a name or a placeholder.
+Shape: A GitLab prefix (glpat-) followed by 19 characters of letters, digits, underscore and hyphen.
 Hidden instead: The same prefix followed by 20 characters (hidden with the gitlab-pat marker).
 Card: none
 Test: KNOWN MISS gitlab-body-under-20-chars: a GitLab prefix followed by a 19-character body is not hidden, with 20 characters it is
-
-## gitlab-body-without-digit-or-upper
-
-Reason: (c) a false-positive trade-off stated at hooks/secret-shield/rules/code-hosts.ts:15-18: the rule requires a digit or an upper-case letter inside the body, which keeps all-lower-case kebab names and lower-case x placeholders visible. A real 20-character body has neither with probability (28/64)^20, about 6.6e-8 (computed, not measured on real tokens).
-Shape: A GitLab prefix (glpat-) followed by 21 lower-case letters, with no digit and no upper-case letter in the body.
-Hidden instead: The same body with one digit added (hidden with the gitlab-pat marker).
-Card: none
-Test: KNOWN MISS gitlab-body-without-digit-or-upper: a GitLab prefix followed by 21 lower-case letters is not hidden, with one digit added it is
 
 ## gitlab-legacy-unprefixed-token
 

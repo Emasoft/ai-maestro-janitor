@@ -172,14 +172,6 @@ describe('known misses: formats and names the shield does not hide on their own'
     check('20 characters hidden', hiddenAs(`see ${j('gl', 'pat-')}${edge} end`, edge, 'gitlab-pat'))
   })
 
-  test('KNOWN MISS gitlab-body-without-digit-or-upper: a GitLab prefix followed by 21 lower-case letters is not hidden, with one digit added it is', () => {
-    const lower = fake('qwhxkmzpdnrtvbcjflgsy')
-    const withDigit = fake(lower + '7')
-    expect(/^[a-z]{21}$/.test(lower)).toBe(true)
-    expect(shown(`see ${j('gl', 'pat-')}${lower} end`, lower)).toBe(true)
-    check('with one digit hidden', hiddenAs(`see ${j('gl', 'pat-')}${withDigit} end`, withDigit, 'gitlab-pat'))
-  })
-
   test('KNOWN MISS gitlab-legacy-unprefixed-token: a bare 20-character legacy GitLab token is not hidden, after GITLAB_TOKEN= it is', () => {
     const legacy = fake('kTq4Zm9Wd2VxN7pRb3Hs')
     expect(/^[A-Za-z0-9]{20}$/.test(legacy)).toBe(true)
