@@ -3897,6 +3897,132 @@ def test_refresh_failure_log_carries_http_status_and_error_code_only(
     assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]
 
 
+# ---- JY0OBQZ4 / TRDD-S6GX1DHN: per-step tick timing (opt-in gated, rotator.log only) ----
+
+def _isolate_tick(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
+    """Stub every cmd_tick step to append its name to `order` — no keychain/state/log IO."""
+    monkeypatch.setattr(rotator, "claude_running", lambda: order.append("claude_running") or True)
+    monkeypatch.setattr(rotator, "migrate_root_to_canonical", lambda: order.append("migrate"))
+    monkeypatch.setattr(rotator, "_log_cascade_plan", lambda: order.append("_log_cascade_plan"))
+    monkeypatch.setattr(rotator, "_keepalive_refresh", lambda: order.append("_keepalive_refresh") or [])
+    monkeypatch.setattr(rotator, "_repair_integrity", lambda: order.append("_repair_integrity"))
+    monkeypatch.setattr(rotator, "cmd_capture", lambda _b: order.append("cmd_capture") or 0)
+    monkeypatch.setattr(rotator, "cmd_auto", lambda: order.append("cmd_auto") or 0)
+    monkeypatch.setattr(rotator, "_bootstrap_seeded_slots", lambda: order.append("_bootstrap"))
+    monkeypatch.setattr(rotator, "_stamp_tick_completed", lambda: order.append("stamp"))
+
+
+def test_cmd_tick_step_timing_flag_absent_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LOAD-BEARING (card JY0OBQZ4): with opt-in.flag ABSENT, a tick must write ZERO
+    tick-step lines to rotator.log — a non-opted-in install pays one file-stat per
+    step, never a log line."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)   # no opt-in.flag inside
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    order: list[str] = []
+    _isolate_tick(monkeypatch, order)
+    monkeypatch.setattr(rotator, "write_live_identity_beacon", lambda: order.append("beacon"))
+
+    def _slow_migrate() -> None:
+        order.append("migrate")
+        time.sleep(1.2)  # would cross the 1 s threshold if ungated
+
+    monkeypatch.setattr(rotator, "migrate_root_to_canonical", _slow_migrate)
+    assert rotator.cmd_tick(only_if_running=True) == 0
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8") if (tmp_path / "rotator.log").exists() else ""
+    assert "tick-step:" not in log, "no timing line may be written while opt-in.flag is absent"
+
+
+def test_cmd_tick_step_timing_flag_present_logs_slow_step_to_rotator_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With opt-in.flag PRESENT, a step crossing 1 s (monkeypatched sleep) emits exactly
+    one `tick-step:` line to the rotator log FILE (via _log — never stderr)."""
+    (tmp_path / "opt-in.flag").write_text("")
+    order: list[str] = []
+    _isolate_tick(monkeypatch, order)
+
+    def _slow_migrate() -> None:
+        order.append("migrate")
+        time.sleep(1.2)
+
+    monkeypatch.setattr(rotator, "migrate_root_to_canonical", _slow_migrate)
+    monkeypatch.setattr(rotator, "write_live_identity_beacon", lambda: order.append("beacon"))
+    stderr = io.StringIO()
+    monkeypatch.setattr("sys.stderr", stderr)
+    assert rotator.cmd_tick(only_if_running=True) == 0
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    steps = [ln for ln in log.splitlines() if "tick-step:" in ln]
+    assert len(steps) == 1, steps
+    assert "tick-step: migrate_root_to_canonical " in steps[0]
+    assert "tick-step:" not in stderr.getvalue(), "timing lines go through _log, NEVER stderr"
+
+
+def test_cmd_tick_step_timing_verbose_logs_every_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--tick-timing-verbose dumps EVERY step: one tick-step line per step boundary,
+    in the same order the steps ran."""
+    (tmp_path / "opt-in.flag").write_text("")
+    monkeypatch.setattr(rotator, "_TICK_TIMING_VERBOSE", True)
+    order: list[str] = []
+    _isolate_tick(monkeypatch, order)
+    monkeypatch.setattr(rotator, "write_live_identity_beacon", lambda: order.append("beacon"))
+    assert rotator.cmd_tick(only_if_running=True) == 0
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    logged = [ln.split("tick-step: ")[1].split()[0]
+              for ln in log.splitlines() if "tick-step:" in ln]
+    expected = ["claude_running", "migrate_root_to_canonical", "write_live_identity_beacon",
+                "_log_cascade_plan", "_keepalive_refresh", "_repair_integrity", "cmd_capture",
+                "cmd_auto", "_bootstrap_seeded_slots"]
+    assert logged == expected, "one line per step boundary, step order preserved"
+
+
+def test_cmd_tick_step_timing_order_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Instrumentation must not change the tick: with timing ACTIVE (flag present) the
+    steps still run in the same order the un-instrumented tick does."""
+    (tmp_path / "opt-in.flag").write_text("")
+    order: list[str] = []
+    _isolate_tick(monkeypatch, order)
+    monkeypatch.setattr(rotator, "write_live_identity_beacon", lambda: order.append("beacon"))
+    assert rotator.cmd_tick(only_if_running=True) == 0
+    steps = [s for s in order if s != "stamp"]
+    assert steps == ["claude_running", "migrate", "beacon", "_log_cascade_plan",
+                     "_keepalive_refresh", "_repair_integrity", "cmd_capture", "cmd_auto",
+                     "_bootstrap"], "step order must not change"
+
+
+def test_cmd_tick_step_timing_step_exception_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LOAD-BEARING (card JY0OBQZ4 review): an exception raised inside a timed step must
+    propagate out of cmd_tick in BOTH gate states — a bare `return` in the timer's
+    `finally` discards the in-flight exception (a contextmanager whose __exit__ swallows
+    makes the tick look like it succeeded). The migrate step (no surrounding handler)
+    raises RuntimeError; the flag-absent branch is where the suppression bites."""
+    for flag_present in (False, True):
+        if flag_present:
+            (tmp_path / "opt-in.flag").write_text("")
+        else:
+            (tmp_path / "opt-in.flag").unlink(missing_ok=True)
+        monkeypatch.setattr(rotator, "ROOT", tmp_path)
+        monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+        order: list[str] = []
+        _isolate_tick(monkeypatch, order)
+        monkeypatch.setattr(rotator, "write_live_identity_beacon", lambda: order.append("beacon"))
+
+        def _raising_migrate() -> None:
+            order.append("migrate")
+            raise RuntimeError("step blew up under timing")
+
+        monkeypatch.setattr(rotator, "migrate_root_to_canonical", _raising_migrate)
+        with pytest.raises(RuntimeError, match="step blew up"):
+            rotator.cmd_tick(only_if_running=True)
+        assert "migrate" in order
+
 
 def _fake_ps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
     """Install a real executable `ps` first on PATH running the given shell body."""

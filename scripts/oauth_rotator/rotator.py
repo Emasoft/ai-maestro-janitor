@@ -42,6 +42,7 @@ Safety invariants
 from __future__ import annotations
 
 import calendar
+import contextlib
 import hashlib
 import json
 import os
@@ -3552,6 +3553,56 @@ def _log_cascade_plan() -> None:
         _log("cascade: plan unavailable (%r)" % exc)
 
 
+# JY0OBQZ4 (TRDD-S6GX1DHN): per-step tick timing. Runs ONLY inside the rotator tick
+# subprocess (cmd_tick path) and ONLY when opt-in.flag is present, so a non-opted-in
+# install pays one cheap isfile per step (~µs), zero log lines when absent. Lines go through _log —
+# NEVER stderr: the daemon captures ~130 chars of child stderr (verify trace
+# 2026-11-06), so stderr lines are structurally lossy while rotator.log is durable.
+TICK_STEP_THRESHOLD_S = 1.0  # log only steps crossing this; a slow step inside a fast tick is still data
+_TICK_TIMING_VERBOSE = "TICK_TIMING_VERBOSE" in os.environ or "--tick-timing-verbose" in sys.argv
+_TICK_PROCESS_START: float | None = None
+
+
+def _tick_step_timer(name: str):
+    """Context manager timing ONE cmd_tick step, logged to rotator.log on exit.
+
+    Opt-in gated twice (spec JY0OBQZ4 design 1): the flag file must be present, and the
+    step must cross TICK_STEP_THRESHOLD_S — _TICK_TIMING_VERBOSE relaxes only that
+    threshold, dumping every GATED step for a manual run (the flag file stays the master
+    gate). Reads load1 on every gated step exit; each line carries
+    the process-start delta so import/start-up latency separates from in-tick
+    latency (spec design 5). Best-effort: NEVER raises — a timing failure must not
+    break the beat, exactly like _log itself. A step exception must still propagate:
+    NO return anywhere near the finally (a bare return in a contextmanager finally
+    discards the in-flight exception — repro-verified pre-fix, test
+    test_cmd_tick_step_timing_step_exception_propagates)."""
+
+    @contextlib.contextmanager
+    def _timer():
+        gated = os.path.isfile(ROOT / "opt-in.flag")
+        t0 = time.time()
+        try:
+            yield
+        finally:
+            try:
+                if gated:
+                    dt = time.time() - t0
+                    load1 = ""
+                    try:
+                        load1 = " (load %.2f)" % os.getloadavg()[0]
+                    except (OSError, AttributeError):
+                        pass
+                    start_note = ""
+                    if _TICK_PROCESS_START is not None:
+                        start_note = " (process-start +%s)" % ("%.1f" % (t0 - _TICK_PROCESS_START))
+                    if _TICK_TIMING_VERBOSE or dt >= TICK_STEP_THRESHOLD_S:
+                        _log("tick-step: %s %.2fs%s%s" % (name, dt, load1, start_note))
+            except Exception:  # noqa: BLE001 — timing/logging is best-effort only
+                pass
+
+    return _timer()
+
+
 def cmd_tick(only_if_running: bool) -> int:
     """One daemon beat: migrate the legacy root once, keepalive-refresh slot tokens nearing
     expiry (F2b), run the Pillar-2 integrity-repair pass (verify/restore state + slots + live
@@ -3564,24 +3615,36 @@ def cmd_tick(only_if_running: bool) -> int:
     launch itself returns immediately; this ordering is belt-and-braces.)
     """
     try:
-        if only_if_running and not claude_running():
-            return 0
+        if only_if_running:
+            # JY0OBQZ4: the ONLY claude_running call — the only_if_running pre-check, timed
+            # because the 2026-10-23 decision noted it as unmeasured at load. No second call:
+            # the step IS the pre-check, so the timer must wrap it, not duplicate it.
+            with _tick_step_timer("claude_running"):
+                _claude_was_running = claude_running()
+            if not _claude_was_running:
+                return 0
         # One-time, non-destructive: move state.json/opt-in from the legacy standalone root
         # into the canonical DATA-dir root. The smart _rotator_root() already reads from
         # whichever root holds the state, so this is just promotion — the NEXT tick process
         # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
-        migrate_root_to_canonical()
+        with _tick_step_timer("migrate_root_to_canonical"):
+            migrate_root_to_canonical()
         # F2 (TRDD-7PYTX4E9): a tick running in a context that CAN read the primary (a
         # manual/session-context run) refreshes the live-identity beacon for free — the
         # daemon's own ticks can't (their primary read fails), which is the point.
-        write_live_identity_beacon()
-        _log_cascade_plan()  # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
-        refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
+        with _tick_step_timer("write_live_identity_beacon"):
+            write_live_identity_beacon()
+        with _tick_step_timer("_log_cascade_plan"):
+            _log_cascade_plan()  # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
+        with _tick_step_timer("_keepalive_refresh"):
+            refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
         if refreshed:
             _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
-        _repair_integrity()  # Pillar 2: verify/restore state + slots + live BEFORE deciding
+        with _tick_step_timer("_repair_integrity"):
+            _repair_integrity()  # Pillar 2: verify/restore state + slots + live BEFORE deciding
         try:
-            cmd_capture(False)
+            with _tick_step_timer("cmd_capture"):
+                cmd_capture(False)
         except SlotKeychainWriteError as exc:
             # FAIL CLOSED (P1) without crashing the unattended tick: a locked/declined keychain
             # refused the slot write. The LIVE credential is untouched (Claude owns it); we simply
@@ -3589,8 +3652,10 @@ def cmd_tick(only_if_running: bool) -> int:
             # standalone `rotator.py capture` still surfaces this error to the present human.
             print("[capture] keychain write refused (%s) — slot not filed this tick" % exc, file=sys.stderr)
             _log("[capture] keychain write refused (%s) — slot not filed this tick" % exc)
-        rc = cmd_auto()  # usage-based rotation FIRST — never starved by bootstrap
-        _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
+        with _tick_step_timer("cmd_auto"):
+            rc = cmd_auto()  # usage-based rotation FIRST — never starved by bootstrap
+        with _tick_step_timer("_bootstrap_seeded_slots"):
+            _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
         return rc
     finally:
         # F4 (TRDD-7PYTX4E9): a completed tick — including the only-if-running no-op and a
@@ -3772,6 +3837,10 @@ def cmd_oauth_health(as_json: bool) -> int:
 
 
 def main(argv: list[str]) -> int:
+    # JY0OBQZ4: stamp process start so the FIRST tick-step line can separate start-up
+    # latency (imports, the 5N+1 pre-log keychain reads) from in-tick latency.
+    global _TICK_PROCESS_START
+    _TICK_PROCESS_START = time.time()
     if not argv:
         print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | beacon [--if-stale] | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
         return 2
