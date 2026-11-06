@@ -1,10 +1,10 @@
 ---
 trdd-id: JY0OBQZ4
 title: Daemon runs at normal priority
-column: todo
+column: dev
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-11-06T07:59:58+0100
+updated: 2026-11-06T08:00:30+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -68,3 +68,4 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-11-04T19:39:38+0100 — column → human_review. waits on the owner: the owner turned the rotator off on 2026-11-03 at 15:58, so the tick acceptance cannot be judged until the owner turns it back on
 - 2026-11-04T19:47:45+0100 — column → todo by main-agent@ai-maestro-janitor. the per-step timing code is not built and is workable now; only its field measurement needs the owner to turn the rotator back on; the 19:39 move to human_review (recorded without an approver) overstated the block
 - 2026-11-04T20:02+0100 — main-agent: reading recorded in STATE (owner not asked): the 2026-11-03 rotator order covers the running daemon only; code work on per-step timing proceeds, and is required to be inert while opt-in.flag is absent.
+- 2026-11-06T08:00:30+0100 — column → dev. verify_assumptions and plan complete; implementation begins
