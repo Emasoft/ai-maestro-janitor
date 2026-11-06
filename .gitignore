@@ -111,3 +111,6 @@ llm_externalizer_output/
 # generate_corpus.py; only the ASSEMBLED corpus JSONL files are tracked.
 tests/agent_context_bench/out*/
 tests/agent_context_bench/reports/
+
+# janitor: report dirs carry private data (paths, hostnames, pasted secrets)
+/reports/
