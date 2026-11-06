@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: todo
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-11-06T07:52:17+0100
+updated: 2026-11-06T07:55:57+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -42,6 +42,7 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-11 01:24. FIELD SIGNAL, NOT MET, from reports/board/20261011_005026+0200-testing-sweep.md (a read-only worker; leads, not re-read by the main session unless said): since the Standard job began (2026-10-09T22:20) 27 of 1514 oauth-rotator-tick runs took 30 s or more (40, 53, 47, 93 s among the first). Host load is in no log, so it is not shown that the slow ticks were under load. Stays in testing.
 - NEXT ACTION (2026-11-04): verify_assumptions — trace whether the rotator tick reaches safe_storage._log_if_slow, find where _log_if_slow writes, then read that log around the 2026-10-23 83 s tick if it is still retained (an empty read is not evidence that it logged nothing); then write the plan file for per-step timing (ticks of 30 s or more, rotator subprocess only).
 2026-11-06: verify_assumptions item 1 DONE (main session, inline): (a) the tick REACHES _log_if_slow — every `security` call in rotator.py routes through safe_storage.run_security (call sites verified by grep: 536, 606, 806, 881, 975, 1162, 1456, 1537), and run_security calls _log_if_slow on BOTH exits (slow path 401 and timeout path 381); (b) _log_if_slow writes to STDERR (file=sys.stderr, safe_storage.py:317), NOT rotator.log — and the daemon keeps only ~130 chars of child stderr (established on the card 2026-10-23), so a slow-security line during the 83 s tick was structurally likely CUT; (c) the raw evidence is NOT retained: 0 'SLOW `security` op' lines in daemon.log, daemon.log.1 (date ranges 2026-11-05/06), rotator.log, or the reports tree. IMPLICATION, confirms the card's plan: per-step timing MUST go to rotator.log, not stderr — the existing slow-security log channel is lossy by daemon capture design. Empty-log finding is a retention fact, not evidence the call never ran. Item 2 (plan file for per-step timing) is the next work.
+2026-11-06: verify_assumptions item 2 DONE — plan file written: design/specs/jy0obqz4-per-step-timing-plan.md (64 lines, committed). Design decisions it fixes: timing gated on opt-in.flag, runs only in the rotator subprocess; per-step timers around each cmd_tick call; output to rotator.log via _log, NEVER stderr (the 2026-11-06 trace showed stderr is the lossy channel); per-step threshold 1 s; verbose flag for manual runs; first timing line before migrate_root_to_canonical to separate start-up from in-tick latency; process-start stamp at main() entry to expose import-time latency. NEXT: implement in rotator.py per the plan (coding worker, tests first); field measurement waits on the owner turning the rotator back on.
 
 ## Approval log
 
