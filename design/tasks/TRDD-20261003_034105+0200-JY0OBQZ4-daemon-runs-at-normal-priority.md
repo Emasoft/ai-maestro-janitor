@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: todo
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-11-06T07:57:29+0100
+updated: 2026-11-06T07:59:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,6 +45,7 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-11-06: verify_assumptions item 2 DONE — plan file written: design/specs/jy0obqz4-per-step-timing-plan.md (64 lines, committed). Design decisions it fixes: timing gated on opt-in.flag, runs only in the rotator subprocess; per-step timers around each cmd_tick call; output to rotator.log via _log, NEVER stderr (the 2026-11-06 trace showed stderr is the lossy channel); per-step threshold 1 s; verbose flag for manual runs; first timing line before migrate_root_to_canonical to separate start-up from in-tick latency; process-start stamp at main() entry to expose import-time latency. NEXT: implement in rotator.py per the plan (coding worker, tests first); field measurement waits on the owner turning the rotator back on.
 2026-11-06 review correction (adversarial fork, applied): (1) 'item 1 DONE' is OVERSTATED — answered to the limit of retained evidence; its second half (whether _log_if_slow logged during the 2026-10-23 83 s tick) is UNDETERMINED, evidence not retained. (2) assertion (a) 'every security call routes through run_security' is a negative claim resting on a grep for run_security call sites; a direct subprocess 'security' invocation built through another helper would not match it — WEAK, settle by reading the subprocess import/use sites before relying on it. (3) the 'MUST go to rotator.log' is a design constraint and belongs to the plan (it is already in design/specs/jy0obqz4-per-step-timing-plan.md); the card records the observation only.
 2026-11-06 second correction (review's weakest assertion settled): assertion (a) is VERIFIED, not just grepped — all 8 direct subprocess sites in rotator.py enumerated (936, 1331, 1467, 1520, 1543, 1670, 3292 + site at 1467 read): every argv is 'secret-tool' (the Linux keyring fallback), 'ps -eo args=' (detection), or a Popen bootstrap launch; NONE invokes 'security' directly, so every security call routes through run_security as claimed.
+2026-11-06 (2nd): review-fork findings on the choke-point append CORRECTED and re-verified by package-wide enumeration. (1) The '8 sites' count was defective as written (7 line numbers listed; one pair 1467/1520 was two rows) — do NOT cite the count; the verified claim is instead: every invocation of macOS 'security' across ALL of scripts/oauth_rotator/*.py routes through safe_storage.run_security (lines 601/610/620 — add/retrieve/delete-generic-password), no sibling (supervisor, reauth, slot_capture_browser, cookie_vault, burn_gate, cascade, rotate_to) spawns 'security' directly, and all security-adjacent modules import safe_storage. os.system/os.popen also scanned — zero hits. (2) Wording fix adopted: claim is VERIFIED at package scope, not rotator.py-only. (3) Standing: /reports/ gitignore contradiction (1b190e13) remains an owner flag with revert proposed.
 
 ## Approval log
 
