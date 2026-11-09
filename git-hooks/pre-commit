@@ -71,58 +71,95 @@ pytest_output="$(uv run pytest -q -p no:cacheprovider tests/test_detector_execut
 # WHY rc=0 IS NOT "CLEAN" (measured 2026-11-09): rc=1 requires >=1 CRITICAL —
 # WARNINGS ALONE RETURN 0. So rc=0 can carry warnings, and the counts below are
 # read from the JSON report, not inferred from the exit code.
-#
 # COUNTS COME FROM A TMP REPORT, NOT A PIPE: ubs writes a banner BEFORE its
-# JSON, so the report is read from a file and parsed after the first `{`;
-# sed/cut on ubs' TEXT format would be brittle. Stdlib python3 only (no uv,
-# no venv, no project file needed). Non-code staged sets exit 3 with
-# "no supported languages detected" — that message is the explanation, so it is
-# printed in full rather than truncated.
+# JSON, so the report is read from a file and parsed after the first `{`.
+# Stdlib python3 only (no uv, no venv, no project file needed). A parsed object
+# WITHOUT both `totals` and `scanners` is refused, never defaulted to zeros: a
+# wrong-brace parse would otherwise print "0 0 0" — a confident FALSE CLEAN,
+# the very bug this stage exists to prevent.
+# The report path is `mktemp .../ubs-commit-XXXXXX` with NO suffix — BSD
+# `mktemp` substitutes only trailing X's, so a `.json` template fails there.
+# If mktemp itself fails (full temp dir) the scanner STILL runs, just without a
+# report: an unrelated environmental failure must not block a commit.
+# Non-code staged sets exit 3 with "no supported languages detected"; that
+# message is the explanation, so it is printed in full rather than truncated.
 #
 # Deliberately NOT set: UBS_ALLOW_NO_SCAN (measured: it turns exit 3 into 0).
 ubs_rc=0
-ubs_report="$(mktemp "${TMPDIR:-/tmp}/ubs-commit-XXXXXX")"
-ubs_text="$(ubs --staged --format=json --report-json="$ubs_report" 2>&1)" || ubs_rc=$?
+ubs_report="$(mktemp "${TMPDIR:-/tmp}/ubs-commit-XXXXXX" 2>/dev/null)" || ubs_report=""
+if [ -n "$ubs_report" ]; then
+  ubs_text="$(ubs --staged --format=json --report-json="$ubs_report" 2>&1)" || ubs_rc=$?
+else
+  # mktemp failed (e.g. a full temp dir). Still RUN the scanner, just without a
+  # report — counts are then unavailable. Deliberately NOT a block: a full temp
+  # dir is not the committer's fault, and blocking there would punish an
+  # unrelated condition. The scan still runs and its text still prints.
+  ubs_text="$(ubs --staged 2>&1)" || ubs_rc=$?
+fi
 
 ubs_summary=""
-ubs_counts="$(UBS_REPORT="$ubs_report" python3 - <<'PY' 2>/dev/null || true
+ubs_findings=""
+if [ -n "$ubs_report" ]; then
+  ubs_parsed="$(UBS_REPORT="$ubs_report" python3 - <<'PY' 2>/dev/null || true
 import json, os
 raw = open(os.environ["UBS_REPORT"], encoding="utf-8", errors="replace").read()
 i = raw.find("{")
 if i < 0:
     raise SystemExit(1)
-totals = json.loads(raw[i:]).get("totals") or {}
-print(f'{int(totals.get("critical", 0))} {int(totals.get("warning", 0))} {int(totals.get("info", 0))}')
+d = json.loads(raw[i:])
+# BOTH keys are required. A well-formed JSON object that lacks them is NOT a
+# ubs report — a wrong-brace parse or a schema change. Defaulting to zeros
+# there would print a confident "0 0 0" false clean, which is the exact bug
+# this stage exists to prevent, so refuse the report instead.
+if "totals" not in d or "scanners" not in d:
+    raise SystemExit(1)
+t = d["totals"]
+print(f'{int(t.get("critical", 0))} {int(t.get("warning", 0))} {int(t.get("info", 0))}')
+for sc in d.get("scanners", []):
+    for f in sc.get("findings", []):
+        if f.get("severity") in ("critical", "warning") and f.get("count"):
+            for smp in f.get("samples", [])[:3]:
+                loc = str(smp.get("file", "?"))
+                if smp.get("line"):
+                    loc += f':{smp["line"]}'
+                print(f'  {f["severity"]} {f.get("rule_id", "?")} {loc}')
 PY
 )"
-
-if [ -n "$ubs_counts" ]; then
-  read -r ubs_crit ubs_warn ubs_info <<<"$ubs_counts"
-  ubs_summary="critical ${ubs_crit:-?}, warning ${ubs_warn:-?}, info ${ubs_info:-?}"
+  ubs_counts="$(printf '%s\n' "$ubs_parsed" | head -1)"
+  ubs_findings="$(printf '%s\n' "$ubs_parsed" | tail -n +2)"
+  # Validate the counts line is EXACTLY three fields before trusting it: a
+  # schema change that adds or drops a severity must not be read as "0 0 0".
+  read -r ubs_crit ubs_warn ubs_info ubs_extra <<<"$ubs_counts"
+  if [ -z "${ubs_crit:-}" ] || [ -z "${ubs_warn:-}" ] || [ -z "${ubs_info:-}" ] || [ -n "${ubs_extra:-}" ]; then
+    ubs_counts=""
+    ubs_findings=""
+  else
+    ubs_summary="critical $ubs_crit, warning $ubs_warn, info $ubs_info"
+  fi
 fi
 
 case "$ubs_rc" in
   0|1)
-    if [ -n "$ubs_summary" ]; then
-      if [ "$ubs_crit" -eq 0 ] 2>/dev/null; then
+    if [ -z "$ubs_report" ]; then
+      printf '%s\n' "$ubs_text"
+      echo "pre-commit: ubs — ran, but no report could be created (temp-file failure), so counts are unavailable. Findings above are ADVISORY; nothing blocked. [advisory stage]"
+    elif [ -n "$ubs_summary" ]; then
+      if [ -n "$ubs_findings" ]; then
+        printf '%s\n' "$ubs_findings"
+      fi
+      if [ "$ubs_crit" -eq 0 ]; then
         rm -f "$ubs_report"
-        echo "pre-commit: ubs — no critical findings in the staged set ($ubs_summary). Lower-severity findings are ADVISORY (not printed here); full text: ubs --staged. [advisory stage]"
+        echo "pre-commit: ubs — no critical findings in the staged set ($ubs_summary). [advisory stage]"
       else
-        echo "pre-commit: ubs — CRITICAL findings in the staged set ($ubs_summary). ADVISORY: they did NOT block this commit. See the report, or re-run ubs --staged. [advisory stage]"
-        echo "  report kept at: $ubs_report"
+        echo "pre-commit: ubs — CRITICAL findings in the staged set ($ubs_summary). ADVISORY: they did NOT block this commit. Full report kept at: $ubs_report"
       fi
     elif grep -q "No changed files to scan" <<<"$ubs_text"; then
-      # Measured 2026-11-09: an EMPTY staged set exits 0, writes NO report, and
-      # prints only "✓ No changed files to scan." — that is a legitimate
-      # nothing-to-do, not a scanner that failed to run.
       rm -f "$ubs_report"
       echo "pre-commit: ubs — nothing staged to scan (no changed files). [advisory stage]"
     else
-      # A report was expected and is missing or unparseable: the scanner ran but
-      # its result is unreadable, which is NOT a clean scan.
       printf '%s\n' "$ubs_text"
       rm -f "$ubs_report"
-      echo "pre-commit: ubs reported exit $ubs_rc but wrote no parseable JSON report (output above) — the result is unknown. BLOCKING, because an unreadable result is not a clean one."
+      echo "pre-commit: ubs reported exit $ubs_rc but wrote no parsable ubs report (output above) — the result is unknown. BLOCKING, because an unreadable result is not a clean one."
       exit 1
     fi
     ;;
@@ -134,8 +171,10 @@ case "$ubs_rc" in
   *)
     printf '%s\n' "$ubs_text"
     rm -f "$ubs_report"
-    echo "pre-commit: ubs — could not run (exit $ubs_rc, above). This is not a scan result. BLOCKING, because an unscanned commit must not look like a clean one."
-    echo "  fix: ubs doctor --fix   (deps: brew install ast-grep ripgrep jq typos-cli typos-lsp on macOS; see the ultimate-bug-scanner skill for other platforms)"
+    echo "pre-commit: ubs — exit $ubs_rc, which this hook does not recognise as a scan result (output above). BLOCKING to fail safe; if the code is new, update this hook."
+    echo "  fix: ubs doctor --fix   (needs ast-grep, ripgrep, jq, typos-cli, typos-lsp; see the ultimate-bug-scanner skill for install lines per platform)."
+    echo "  if this is an environment problem you cannot fix now: git commit --no-verify"
     exit 1
     ;;
 esac
+#
