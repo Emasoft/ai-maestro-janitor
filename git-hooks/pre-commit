@@ -145,6 +145,7 @@ case "$ubs_rc" in
       echo "pre-commit: ubs — ran, but no report could be created (temp-file failure), so counts are unavailable. Findings above are ADVISORY; nothing blocked. [advisory stage]"
     elif [ -n "$ubs_summary" ]; then
       if [ -n "$ubs_findings" ]; then
+        echo "pre-commit: ubs — up to 3 sample locations per rule; the counts are RULE GROUPS, not finding instances:"
         printf '%s\n' "$ubs_findings"
       fi
       if [ "$ubs_crit" -eq 0 ]; then
@@ -153,9 +154,14 @@ case "$ubs_rc" in
       else
         echo "pre-commit: ubs — CRITICAL findings in the staged set ($ubs_summary). ADVISORY: they did NOT block this commit. Full report kept at: $ubs_report"
       fi
-    elif grep -q "No changed files to scan" <<<"$ubs_text"; then
+    elif [ ! -s "$ubs_report" ]; then
+      # MEASURED 2026-11-09: for an EMPTY staged set ubs exits 0 and writes NO
+      # report — the mktemp file stays 0 bytes. An empty report file is a
+      # MACHINE-CHECKABLE "nothing to scan", so the decision does not depend on
+      # matching ubs' English message, which a reword would break in the worst
+      # direction (blocking every no-op commit).
       rm -f "$ubs_report"
-      echo "pre-commit: ubs — nothing staged to scan (no changed files). [advisory stage]"
+      echo "pre-commit: ubs — nothing staged to scan (ubs wrote no report: no changed files). [advisory stage]"
     else
       printf '%s\n' "$ubs_text"
       rm -f "$ubs_report"
