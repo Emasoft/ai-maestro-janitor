@@ -4,7 +4,7 @@ title: Pre-commit hook runs ultimate-bug-scanner advisory, blocking only on sile
 column: dev
 status: tasked
 created: 2026-11-09T18:09:11+0100
-updated: 2026-11-09T18:09:11+0100
+updated: 2026-11-09T18:30:10+0100
 current-owner: user
 created-by: user
 task-type: infra
@@ -90,3 +90,5 @@ hook exits 0 with this change staged.
 ## Approval log
 
 - 2026-11-09T18:09:11+0100 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-11-09 — adversarial review of ad33dbde found the report parse failed toward a confident clean (a JSON object without `totals` became "0 0 0" via `or {}`). Fixed in c34bd069: both `totals` and `scanners` are now required, the counts line must be exactly three fields, findings print as severity/rule_id/file:line, an unrecognised exit code blocks while naming --no-verify, and a mktemp failure no longer blocks. Re-verified on the shipped file across 10 states in a fresh TMPDIR.
+2026-11-09 — verification note: the eight-state claim in the first card body was made partly against an extracted copy of the stage body; the post-fix matrix (clean 0, warnings-only 0, critical 0 with findings printed, docs-only rc=3 0, empty index 0, ubs absent 1, rc=2 1, rc=4 unknown 1, report without totals 1, mktemp failure 0) ran the shipped file via /tmp/ubs-h/s3.sh extracted from the committed hook, with a fresh TMPDIR, and the leak count was exactly 1.
