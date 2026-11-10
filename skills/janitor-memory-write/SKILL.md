@@ -110,10 +110,9 @@ reads like a sentence about one fact (`implementation-of-…`, `how-to-…`, `fi
 no future atom joins it. A failing name means you skipped step 2 (UPDATE the topic page)
 or must broaden it. Full rule: [references/atom-authoring.md](references/atom-authoring.md).
 
-**Where the page lives:** `$MEMDIR/wikimem/<name>.md` — curated pages live in the
-`wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision 2026-07-08); the
-scope ROOT is the harness-owned buffer (MEMORY.md + raw notes), never a curated
-page's home.
+**Where the page lives:** `$MEMDIR/<name>.md` — curated pages live at the scope
+root (memgrep `new-mem-topic` derives the destination from `--scope`, never
+`--path`).
 
 Keep the new page LEAN — never re-copy a governing rule into a component; link
 up to it instead (this is what keeps the pyramid from exploding). Honor

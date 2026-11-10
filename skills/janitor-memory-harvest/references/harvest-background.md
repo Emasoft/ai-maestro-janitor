@@ -10,7 +10,7 @@ CPV token cap.
   Anthropic/harness-owned (the harness `# Memory` directive writes it and auto-loads
   it every session; Claude Code keeps evolving it). It is an unorganized,
   freely-growing buffer. **The janitor NEVER stubs, trims, or modifies it.**
-- **The WIKI** — the curated pages under `memory/wikimem/`: rich frontmatter
+- **The WIKI** — the curated pages at the scope root: rich frontmatter
   (`ocd`/`lmd`/`tier`), `[^N]` lessons, bidirectional links, git-versioned,
   memgrep-indexed.
 
@@ -22,7 +22,7 @@ idempotent.
 
 ## CREATE-a-new-page discipline (moved from the SKILL body, step 2)
 
-When no existing wiki page covers the subject, CREATE `wikimem/<name>.md` per the
+When no existing wiki page covers the subject, CREATE `<name>.md` at the scope root per the
 `/janitor-memory-write` discipline:
 
 - **One subject per page; same-theme memories share ONE page.**

@@ -258,6 +258,8 @@ def test_resolve_scope_dirs_includes_project_in_git_repo(tmp_path, monkeypatch):
 
 # ---- coexistence primitives (TRDD-ab232dbd) --------------------------------
 
+# NOTE: resolve_wiki_dir is DEPRECATED (issue #349) — new-mem-topic writes curated pages to
+# the scope root, not the wikimem subfolder. Kept for the 3 legacy USER-scope pages there.
 def test_resolve_wiki_dir_is_the_wiki_subnamespace(tmp_path):
     """The curated wiki lives at ``<scope_root>/wiki`` — the buffer at the root, the
     wiki one level down, so memgrep recall (which recurses the root) covers both."""

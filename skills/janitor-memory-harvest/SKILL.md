@@ -62,7 +62,7 @@ MEMDIR="$SCOPE_ROOT"   # the root memory_dispatch_claim.py printed — never han
 
 PROJECT is edited only when `edit_project_scope` is on, and then **staged-not-pushed**
 (rides the next `publish.py`). Otherwise restrict to LOCAL + USER. The curated wiki for a
-scope is `<scope>/wikimem/` (`memory_scopes.resolve_wiki_dir`).
+scope is the curated pages at `<scope>/` (filtered by `is_curated_wiki_page`).
 
 ## The procedure
 
@@ -82,7 +82,6 @@ uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_scopes as msc, memory_settings as ms, pathlib
 scope, root = "$SCOPE", pathlib.Path("$MEMDIR")   # claimed scope/root — never hand-picked
-wiki = msc.resolve_wiki_dir(root)
 todo = []
 for p in sorted(root.glob("*.md")):
     if p.name in {"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"}:
@@ -104,7 +103,7 @@ reduced — it is owned by the harness.
 ### 2. Mirror each un-mirrored buffer note into the curated wiki (the editorial work)
 
 For each candidate note, **RECALL-before-write** to de-dup against the existing wiki, then
-UPDATE-or-CREATE a curated copy in `<scope>/wikimem/`:
+UPDATE-or-CREATE a curated page at `<scope>/<name>.md`:
 
 ```bash
 memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
@@ -117,14 +116,14 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
 - **A wiki page on the same subject already exists** → UPDATE it (the
   `/janitor-memory-update` correction protocol — clean the fact in place, demote a
   superseded statement to a dated `[^N]` lesson). Do NOT create a duplicate.
-- **No existing page** → CREATE `wikimem/<name>.md` per the `/janitor-memory-write` discipline
+- **No existing page** → CREATE `<name>.md` at the scope root per the `/janitor-memory-write` discipline
   (one subject per page, NAME the broad topic never the note's description, complete
   frontmatter, tier, bidirectional links, scope routing). Full checklist:
   [harvest-background § CREATE-a-new-page discipline](references/harvest-background.md#create-a-new-page-discipline-moved-from-the-skill-body-step-2).
 
   How to land the edit (memgrep is the ONLY wikimem page writer — TRDD-XI10BA5D; the
   agent's Write tool never touches a wikimem page):
-  - **CREATE a brand-new `wikimem/<name>.md`** → `memgrep new-mem-topic --scope <scope>
+  - **CREATE a brand-new `<name>.md` at the scope root** → `memgrep new-mem-topic --scope <scope>
     --name <slug> --content-file F` (CONTENT-CREATE mode: the caller's bytes ARE the
     complete page, frontmatter included, through the shared write gate; it REFUSES an
     existing page — an existing page is the UPDATE branch, never force it). stdout:
@@ -152,7 +151,7 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   cannot tell which wiki atoms came from which buffer note.
 
   Then `memgrep reindex "$MEMDIR"`.
-  **The buffer note is left exactly as it was** — you mirror its content into `wikimem/`, you
+  **The buffer note is left exactly as it was** — you mirror its content into a curated page at the scope root, you
   do not move, edit, or delete it.
 
 ### 3. Verify the mirror is complete (the gate — NOT a stub reduction)
@@ -165,16 +164,18 @@ uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_edit_verify as v, memory_scopes as msc, pathlib
 root = pathlib.Path("$MEMDIR")
-wiki = msc.resolve_wiki_dir(root)
 # the buffer notes this pass set out to mirror (recompute the same candidate list)
 buffer_notes = []
+wiki_pages = []
 for p in sorted(root.glob("*.md")):
     if p.name in {"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"}:
         continue
     t = p.read_text(encoding="utf-8")
-    if not msc.is_curated_wiki_page(t):
+    if msc.is_curated_wiki_page(t):
+        wiki_pages.append(t)
+    else:
         buffer_notes.append((p.name, t))
-wiki_corpus = "\n".join(p.read_text(encoding="utf-8") for p in wiki.glob("*.md")) if wiki.is_dir() else ""
+wiki_corpus = "\n".join(wiki_pages)
 ok, missing = v.mirror_preservation_ok(buffer_notes, wiki_corpus)
 print("MIRRORED" if ok else "ABSTAIN: " + "; ".join(missing))
 sys.exit(0 if ok else 1)

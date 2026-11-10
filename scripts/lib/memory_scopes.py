@@ -774,17 +774,19 @@ def sync_local_design_mirror() -> str | None:
 
 
 def resolve_wiki_dir(scope_root: Path) -> Path:
-    """The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wikimem``.
+    """DEPRECATED — do not use in new code. Returns the ``<scope_root>/wikimem`` sub-namespace.
 
     (The name is ``WIKI_SUBDIR``. This line said ``wiki`` — the pre-2026-07-08 name, kept
     in the prose after the rename landed in the constant. A docstring naming a path that
     does not exist is worse than none: it is the copy a reader trusts without checking.)
 
-    The coexistence model (TRDD-ab232dbd): the harness BUFFER (MEMORY.md + raw
-    notes) lives at the scope root; the janitor's CURATED wiki lives here. Harvest
-    mirrors raw buffer notes into this dir as separate curated pages and NEVER
-    modifies the buffer. memgrep recall recurses the scope root, so it naturally
-    covers both. Not created — the caller (bootstrap / harvest) mkdirs it.
+    .. deprecated::
+        ``memgrep new-mem-topic`` writes curated pages to the SCOPE ROOT
+        (``<scope_root>/<name>.md``), NOT this subfolder — the ``wikimem/`` dir was never
+        populated (issue #349). The harvest verifier now reads curated pages from the
+        scope root directly. This function still returns ``scope_root / WIKI_SUBDIR`` for
+        backward compat (the USER scope has 3 legacy pages there), but must NOT be used
+        for new code.
     """
     return scope_root / WIKI_SUBDIR
 
