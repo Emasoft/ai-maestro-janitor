@@ -87,6 +87,17 @@ warnings-only (0), critical (0, report kept), docs-only rc=3 (0), empty index
 leak count after the matrix: exactly 1, the kept critical report. The live
 hook exits 0 with this change staged.
 
+## Acceptance
+
+- [x] `git-hooks/pre-commit` runs `ubs --staged` as a THIRD stage, after the existing two
+- [x] A scan that FINDS problems never blocks: rc=1 with a parsable report prints the findings and the commit proceeds (advisory)
+- [x] A scan that DID NOT RUN blocks: `ubs` absent → exit 1; `ubs` rc=2 (env/usage) → exit 1; an unrecognised rc → exit 1; rc=0 with a NON-EMPTY unparseable report → exit 1
+- [x] A legitimate no-op does NOT block: empty staged set (0-byte report, rc=0) → exit 0; docs-only staged set (rc=3) → exit 0 with an advisory line
+- [x] Findings never gate on COUNT, and the message states its units: up to 3 sample locations per rule, counts are RULE GROUPS not instances
+- [x] `bash -n git-hooks/pre-commit` is clean
+- [x] The live hook IS the tracked file: `core.hooksPath` resolves to the repo's `git-hooks/`, so no install step can let source and live drift apart
+- [x] Live end-to-end: commit 3e45681e (docs-only staged set) printed the rc=3 advisory line and committed
+
 ## Approval log
 
 - 2026-11-09T18:09:11+0100 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
