@@ -150,6 +150,7 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
   for the two arm scripts; add them to the project's `.claude/settings.local.json` / user
   `settings.json` where absent. Headless cron contexts launch with `--permission-prompts none`
   (2.1.259) so a prompt can never stall the fire.
+- **Auto-mode classifier denial (janitor#351):** if the Bash call to `arm_prepare.py` is denied by the auto-mode classifier (the error says "denied by the Claude Code auto mode classifier" or "Blocked by classifier"), the heartbeat is NOT armed. Surface this to the user: "The arm was blocked by the Claude Code auto-mode classifier. Add these allow rules to `.claude/settings.local.json` or user `settings.json`: `Bash(uv run --script */arm_prepare.py*)`, `Bash(uv run --script */arm_record.py*)`, `Bash(uv run --script */dispatcher-stub.py*)`. Narrow script-path allow rules resolve BEFORE the classifier and stay in effect in auto mode." Do NOT retry the call — a classifier deny is terminal (2.1.280).
 - `arm_prepare.py` exits non-zero → surface its output; **do not create a cron**. A bad stub or a
   wrong install scope is worse than no arm.
 - `CronList` fails → skip the sweep; duplicates are cleaned up by the next sweep.
