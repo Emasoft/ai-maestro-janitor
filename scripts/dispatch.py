@@ -3312,8 +3312,10 @@ def _phase_iterm_automation_alarm() -> None:
             # The remedy stays — a hard failure is still consistent with a denied grant.
             print(
                 findings_ledger.HUMAN_ONLY_DIRECTIVE +
-                "[janitor] OBSERVED: this scan diagnosed `cron_dead` on an instance whose "
-                "ONLY possible channel was iTerm — a rescue was WARRANTED — AND osascript's "
+                "[janitor] OBSERVED: this scan diagnosed `cron_dead` on an instance for "
+                "which NO usable channel was found (the instance may be on Apple "
+                "Terminal.app, Desktop, or another terminal the guardian does not "
+                "enumerate) — a rescue was WARRANTED — AND osascript's "
                 "enumeration came back with ZERO iTerm sessions, the same scan the rescue "
                 "was needed. This is an UNCONDITIONAL NEGATIVE, not the usual two-cause "
                 "ambiguity: the channel was EXERCISED (something needed it right now) and "
@@ -3323,8 +3325,8 @@ def _phase_iterm_automation_alarm() -> None:
                 "A hard failure THIS scan outranks a `FIRED rearm → iterm` from earlier "
                 "today: past success does not explain why the rescue THIS scan needed was "
                 "denied. Consequence: the guardian could not reach the instance that needed "
-                "it (tmux panes are unaffected). If it is a denied Automation grant: System "
-                "Settings → Privacy & Security → Automation → "
+                "it (tmux panes are unaffected). IF any of these instances run under iTerm, "
+                "check the Automation grant: Settings → Privacy & Security → Automation → "
                 f"allow {binary} to control iTerm. Note the grant follows that exact binary, "
                 "so a uv/python upgrade that moves the path silently orphans a grant you "
                 "really did give. On some hosts (macOS 26+, an adhoc-signed uv/python with "

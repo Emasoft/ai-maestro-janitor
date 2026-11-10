@@ -162,8 +162,9 @@ def is_repl_invocation(cmd: str) -> bool:
 def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
     """``(pid, normalized_tty, command)`` for every claude SESSION in
     ``ps -eo pid=,tty=,command=`` output. A claude process = argv[0] basename
-    ``claude`` OR a ``/share/claude/versions/`` launcher path in the cmdline
-    (the two shapes the real install presents). Malformed rows are skipped.
+    ``claude`` OR a ``/share/claude/versions/`` launcher path OR a
+    ``claude.app/Contents/MacOS/claude`` Desktop bundle path in the cmdline
+    (the three shapes the real install presents). Malformed rows are skipped.
 
     One-shot CLI invocations are EXCLUDED (`is_repl_invocation`, TRDD-R3D5YRQJ): both callers
     — the fleet guardian and the status table — are asking about sessions, and a live scan
@@ -183,7 +184,16 @@ def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
             continue
         toks = cmd.split()
         first = toks[0] if toks else ""
-        if os.path.basename(first) == "claude" or "/share/claude/versions/" in cmd:
+        # A Claude Desktop app session's argv[0] is a bundle path that contains SPACES
+        # (`~/Library/Application Support/Claude/claude-code/<ver>/<hash>/claude.app/
+        # Contents/MacOS/claude`), so `cmd.split()` shatters it: `basename(first)` is
+        # `Application`, not `claude`, and there is no `/share/claude/versions/` in it, so
+        # neither install shape above matched and the Desktop session was silently dropped
+        # (janitor#346). Matched case-insensitively on the whole cmdline because macOS
+        # bundle-name casing varies.
+        if (os.path.basename(first) == "claude"
+                or "/share/claude/versions/" in cmd
+                or "claude.app/contents/macos/claude" in cmd.lower()):
             if not is_repl_invocation(cmd):
                 continue  # a one-shot CLI verb, not a session that can be dead or recovered
             out.append((pid, session_liveness.normalize_tty(tty_s), cmd))
@@ -403,9 +413,12 @@ def iterm_rescue_warranted(fleet: "list[Instance]") -> bool:
     resolution found NO other channel (no `tmux_pane`, `aimaestro_session`, or
     `linux_gui_channel`) — the "UNREACHABLE" case `fleet_scan._main` already prints.
     On a host where `iterm_by_tty` came back empty (the blocked condition itself), such
-    an instance's ONLY possible channel was iTerm, so a rescue was WARRANTED and the
-    channel was EXERCISED and returned nothing — unlike the v2.8.1 rearm-evidence
-    downgrade, this has no "quiet fleet, nothing needed rescuing" explanation available.
+    an instance has NO usable channel the guardian can reach, so a rescue was WARRANTED and
+    every enumerated channel was EXERCISED and returned nothing — unlike the v2.8.1
+    rearm-evidence downgrade, this has no "quiet fleet, nothing needed rescuing" explanation
+    available. NOTE: this is a REACHABILITY test only (janitor#346) — it does NOT establish
+    that the instance is iTerm-hosted; an Apple Terminal.app or Desktop session matches this
+    predicate identically, so no caller may upgrade "unreachable" into "was iTerm".
 
     Callers only need this when `blocked` is already True (a healthy scan never diagnoses
     the flag at all), but the function itself stays a pure predicate over `fleet` so it is
