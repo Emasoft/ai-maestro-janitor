@@ -1,10 +1,10 @@
 ---
 trdd-id: DBQDGZT1
 title: Y3B4HPTF closing scope claim covers arms its source reading did not
-column: todo
+column: human_review
 status: tasked
 created: 2026-11-10T05:20:05+0100
-updated: 2026-11-10T05:45:29+0100
+updated: 2026-11-10T06:31:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -68,6 +68,7 @@ The same failure mode the card's own 2026-11-09 entries kept producing — a fre
 ## Approval log
 
 - 2026-11-10T05:20:05+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-10T06:31:50+0100 — column → human_review by main-agent@ai-maestro-janitor. The card's own work is complete — it is an errata record whose only remaining terminal condition is that the owner reads and acknowledges it. 'todo' was a false column under governance-trdd-kanban.md ('WIP must match capacity … an untrue column is worse than an unstarted card'): there is nothing to pull. Same reasoning already applied to JY0OBQZ4 one commit earlier.
 
 ## AUTHORITATIVE RECORD — consolidated corrections, 2026-11-10 (the same corrections also appear IN PLACE above, in Accurate form and in the section retitled 'Partly refuted'; this section is the record, and where the two copies differ, THIS section wins)
 
