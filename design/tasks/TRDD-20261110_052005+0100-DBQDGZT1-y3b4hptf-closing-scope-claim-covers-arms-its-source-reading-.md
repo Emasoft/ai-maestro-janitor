@@ -4,7 +4,7 @@ title: Y3B4HPTF closing scope claim covers arms its source reading did not
 column: todo
 status: tasked
 created: 2026-11-10T05:20:05+0100
-updated: 2026-11-10T05:20:05+0100
+updated: 2026-11-10T05:45:29+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -66,3 +66,7 @@ The same failure mode the card's own 2026-11-09 entries kept producing — a fre
 ## Approval log
 
 - 2026-11-10T05:20:05+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## CORRECTION on adversarial review — 2026-11-10
+
+Findings against this card, APPLIED. (1) FALSE ALARM WITHDRAWN: the refutation confuted the MESSAGE, not the OUTCOME — the 3) arm (git-hooks/pre-commit:170-174) contains no exit, so exit 3 falls through exactly as a clean pass does (both exit 0, both let the commit land), and on the exit-STATUS channel they remain indistinguishable; accurate form is PARTLY REFUTED, distinguishable by message and not by exit status, and commit c96364db's FALSE ALARM wording is errata pointing here. (2) The parent card's SCOPE caveat (a source reading of 5.4.17, not a vendor statement; another version may differ) was dropped by this card and is RESTORED; the ubs:8875-8884 citation was read in the CLOSING turn, not in this turn, so it is INFERRED-INHERITED, not VERIFIED here. (3) 'governs exactly that arm and nothing else' was an uncited unit-of-analysis choice — --report-json is passed on the mktemp-SUCCESS path (git-hooks/pre-commit:91), a precondition ACROSS arms, not an arm; weakened to: the contract governs the invocation shapes that REQUEST a report, and the empty-report predicate sits inside the 0|1) arm. (4) The bare '10 measured states' figure, ENUMERATED: clean 0; warnings-only 0; critical 0 with findings printed; docs-only rc=3 to 0; empty index 0; ubs absent to 1; rc=2 to 1; rc=4 unknown to 1; report without totals to 1; mktemp failure to 0. (5) TERMINAL CONDITION, unstated before: no code change is owed and b72aff2a implements every arm correctly, so this card is COMPLETE when read and acknowledged by the owner; the errata is the deliverable, it is not a work item, and nothing should be pulled from it. (6) The exit-3 observations from the closing sequence exercised the one arm that runs no scan and are NOT end-to-end confirmation of the critical/advisory arms.
