@@ -1,10 +1,10 @@
 ---
 trdd-id: JY0OBQZ4
 title: Daemon runs at normal priority
-column: dev
+column: todo
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-11-06T09:22:11+0100
+updated: 2026-11-10T05:20:19+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -73,3 +73,5 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-11-04T19:47:45+0100 — column → todo by main-agent@ai-maestro-janitor. the per-step timing code is not built and is workable now; only its field measurement needs the owner to turn the rotator back on; the 19:39 move to human_review (recorded without an approver) overstated the block
 - 2026-11-04T20:02+0100 — main-agent: reading recorded in STATE (owner not asked): the 2026-11-03 rotator order covers the running daemon only; code work on per-step timing proceeds, and is required to be inert while opt-in.flag is absent.
 - 2026-11-06T08:00:30+0100 — column → dev. verify_assumptions and plan complete; implementation begins
+2026-11-10 — COLUMN CORRECTION by the main session, from repository files only (the owner was not asked). The 2026-11-03 STATE paragraph and the STATE header both say the column is todo, and the frontmatter agreed until 2026-11-06. It is now dev, and that is wrong on two counts. (1) Nothing is being implemented: the timing code the STATE calls NEXT is already committed and an ancestor of HEAD — e4029f38 "per-step tick timing to rotator.log, opt-in gated" (205+/10-), verified this session by `git merge-base --is-ancestor e4029f38 HEAD` (YES) and `grep -c _tick_step_timer scripts/oauth_rotator/rotator.py` (10). (2) The remaining work cannot start: the evidence check is "tick wall time under 30 s at high load" read from rotator.log tick-step lines, and the owner disabled the rotator on 2026-11-03 at 15:58. Re-verified this session — no opt-in.flag exists in the plugin DATA dir or the control dir, and rotator.log carries only beacon lines after 2026-11-03T15:58:01 (newest 2026-11-10T01:44:20). A `dev` column asserts someone is working it right now; that assertion is false, and an untrue column hides the stall from the only view anyone checks. Restored to todo, which under 3-pillars 3.0.0 is the correct resting column for approved-and-designed code with its implementation landed. Cause note: the 2026-11-06 entry that says "Card STAYS in dev" was written while a coding worker was in flight; when that worker's work landed in e4029f38 the column was never revisited. Not moved to a terminal column: the field acceptance is a real, named, pending obligation, so this is a wait, not a completion.
+- 2026-11-10T05:20:19+0100 — column → todo by main-agent@ai-maestro-janitor. timing implementation landed in e4029f38 (ancestor of HEAD, verified) so no work is in flight; the one remaining obligation is the field check, which waits on the owner re-enabling the rotator (off since 2026-11-03 15:58, no opt-in.flag present); dev falsely asserted an active worker
