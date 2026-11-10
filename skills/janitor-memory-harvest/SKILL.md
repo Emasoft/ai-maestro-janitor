@@ -175,6 +175,14 @@ for p in sorted(root.glob("*.md")):
         wiki_pages.append(t)
     else:
         buffer_notes.append((p.name, t))
+# Also include any legacy pages in the wikimem/ subfolder (USER scope has 3 real
+# pages there from before new-mem-topic wrote to the scope root — janitor#349).
+wiki_subdir = msc.resolve_wiki_dir(root)
+if wiki_subdir.is_dir():
+    for p in sorted(wiki_subdir.glob("*.md")):
+        t = p.read_text(encoding="utf-8")
+        if msc.is_curated_wiki_page(t):
+            wiki_pages.append(t)
 wiki_corpus = "\n".join(wiki_pages)
 ok, missing = v.mirror_preservation_ok(buffer_notes, wiki_corpus)
 print("MIRRORED" if ok else "ABSTAIN: " + "; ".join(missing))
