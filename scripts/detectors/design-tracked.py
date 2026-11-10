@@ -162,16 +162,37 @@ def _warn_untracked(root: Path, seen: Path) -> None:
             continue
         try:
             if (root / rel).stat().st_mtime < cutoff:
-                old.append(name)
+                old.append(rel)
         except OSError:
             continue
     if not old:
         return
-    line = dedupe.emit_once(
-        seen, f"untracked:{date.today().isoformat()}",
-        f"[{_NAME}] {len(old)} design card(s) untracked for over 24 h: {', '.join(sorted(old)[:5])}"
-        f"{' …' if len(old) > 5 else ''} — design/ is PROJECT scope: `git add` them by name and commit.",
-    )
+    listed = ", ".join(sorted(Path(p).name for p in old)[:5])
+    more = " …" if len(old) > 5 else ""
+    autofix = state.autofix_enabled()
+    staged = 0
+    if autofix:
+        # stage BY NAME, one path at a time: `git add -A`/`.` would sweep unrelated changes.
+        for rel in old:
+            res = state.run_subprocess(
+                ["git", "-C", str(root), "add", "--", rel], timeout=30, detector_name=_NAME,
+            )
+            if res is not None and res.returncode == 0:
+                staged += 1
+            else:
+                state.log_line(_NAME, f"git add failed for {rel}")
+    if autofix and staged == len(old):
+        msg = (f"[{_NAME}] staged {staged} design card(s) untracked for over 24 h: {listed}{more}"
+               " — design/ is PROJECT scope; commit them by name.")
+    elif autofix:
+        msg = (f"[{_NAME}] {len(old) - staged} of {len(old)} design card(s) untracked for over 24 h "
+               f"could not be staged: {listed}{more} — design/ is PROJECT scope; `git add` them "
+               "by name and commit.")
+    else:
+        msg = (f"[{_NAME}] {len(old)} design card(s) untracked for over 24 h: {listed}{more}"
+               " (autofix is off, nothing was staged) — design/ is PROJECT scope: `git add` them "
+               "by name and commit.")
+    line = dedupe.emit_once(seen, f"untracked:{date.today().isoformat()}:{autofix}", msg)
     if line:
         print(line)
 
