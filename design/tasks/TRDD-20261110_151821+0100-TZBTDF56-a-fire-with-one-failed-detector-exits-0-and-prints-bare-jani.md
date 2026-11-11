@@ -1,10 +1,10 @@
 ---
 trdd-id: TZBTDF56
 title: a fire with one failed detector exits 0 and prints bare janitor-quiet
-column: todo
+column: testing
 status: tasked
 created: 2026-11-10T15:18:21+0100
-updated: 2026-11-10T15:18:21+0100
+updated: 2026-11-11T07:13:39+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,8 @@ From issue #342 (tier E of the 2026-11-10 reconciliation on FQVEILVK): when a de
 ## Approval log
 
 - 2026-11-10T15:18:21+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-11T07:11:54+0100 — column → testing by main-agent@ai-maestro-janitor. fix implemented in a1e0b8a3; 3 new tests pass; ruff+mypy clean; existing quiet/streak tests pass
+
+## STATE
+
+2026-11-11: fix implemented in a1e0b8a3. _fire_degraded list appended in _track_detector_streak (single chokepoint), printed by _emit_quiet_if_idle after [janitor-quiet] and after _phase_background_worker_progress. 3 new tests in test_dispatch_phases.py pass; ruff+mypy clean; existing quiet/streak tests pass. Card in testing pending full suite run before publish.
