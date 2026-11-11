@@ -2641,7 +2641,7 @@ def test_iterm_alarm_hard_negative_outranks_rearm_downgrade(
 
     assert "UNCONDITIONAL NEGATIVE" in out
     assert "TRANSIENT" not in out            # the downgrade must NOT win
-    assert "System Settings" in out          # remedy stays
+    assert "Privacy & Security" in out       # remedy stays (Settings nav instruction)
     assert "CANNOT tell you why" not in out  # the ambiguity clause is dropped
 
 
@@ -2664,7 +2664,7 @@ def test_iterm_alarm_hard_negative_beats_the_base_ambiguity_clause(
     assert "rescue was WARRANTED" in out
     assert "ZERO iTerm sessions" in out
     assert "CANNOT tell you why" not in out
-    assert "System Settings" in out
+    assert "Privacy & Security" in out
 
     # TRDD-KU3ERYFX: the hard-negative branch still ends in a GUI remedy — must still
     # carry the human-only marker, same as the base branch.
