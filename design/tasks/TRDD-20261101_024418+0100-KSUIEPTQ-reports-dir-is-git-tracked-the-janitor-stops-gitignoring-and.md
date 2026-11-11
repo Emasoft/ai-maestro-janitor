@@ -1,10 +1,10 @@
 ---
 trdd-id: KSUIEPTQ
 title: reports dir is git-tracked, the janitor stops gitignoring and purging it
-column: dev
+column: testing
 status: tasked
 created: 2026-11-01T02:44:18+0100
-updated: 2026-11-04T20:06:08+0100
+updated: 2026-11-11T14:22:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,6 +37,7 @@ Changes:
 
 - 2026-11-01T02:44:18+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-11-04 main-agent: the working-tree .gitignore again carries '/reports/' under the comment 'janitor: report dirs carry private data' (git diff, 2026-11-04). It is re-added by the installed 3.8.13 janitor, which predates 010be429. Restore .gitignore to HEAD right before publish.py runs (a dirty tree blocks it). After 3.8.14 is installed, check that the line does not come back.
+- 2026-11-11T14:22:00+0100 — column → testing by user. code complete (010be429+bb9dc94b), release pending — dev-cards assessment 2026-11-11
 
 ## Correction 2026-11-01
 

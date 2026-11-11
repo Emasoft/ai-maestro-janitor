@@ -1,10 +1,10 @@
 ---
 trdd-id: HM8WOCOO
 title: the janitor never types clear on its own, compaction belongs to the user's compaction mod
-column: dev
+column: testing
 status: tasked
 created: 2026-11-01T02:44:19+0100
-updated: 2026-11-01T03:13:07+0100
+updated: 2026-11-11T14:21:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -29,6 +29,7 @@ Every automatic /clear funnels through scripts/clear_trigger.py::spawn_shrink_ch
 ## Approval log
 
 - 2026-11-01T02:44:19+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-11T14:21:59+0100 — column → testing by user. code complete (64768ab7), release pending — dev-cards assessment 2026-11-11
 
 ## Correction 2026-11-01
 
