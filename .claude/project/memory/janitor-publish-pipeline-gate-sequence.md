@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline-gate-sequence
 description: "how do I release the janitor / publish blocked / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / what is the gate sequence for scripts/publish.py / why does publish.py refuse a --skip-tests flag / CPV --strict is the sole validation step / why does the resolver twin tag exist / what does --dry-run actually do / why can publish.py push directly to the default branch / how does the admin-bypass branch ruleset model work / process-ancestry pre-push hook verification / machine-specific facts live in LOCAL scope not here / devitalize-or-remove not exempt-and-suppress / rules floor cap failed / trim a shipped rule / 6 bytes headroom / compaction lost a directive / compacting normative text"
 ocd: 2026-06-13
-lmd: 2026-09-18
+lmd: 2026-11-11
 metadata:
   node_type: memory
   type: project
@@ -145,7 +145,7 @@ push-guard hook).
 
 ## See also
 
-- [[janitor-self-update-bootstrap-gap]] — the OTHER half of a release: after publish.py
+- [[claude-code-plugin-rollout-staleness]] — the OTHER half of a release: after publish.py
   succeeds, why the local cache can stay on the old version (the fast-updater can't
   accelerate its own first release; reload ≠ update).
 

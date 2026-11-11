@@ -124,7 +124,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=8c8d2aeb2a80 generated=2026-10-20T15:04:17+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=1caebb34ffbf generated=2026-11-11T13:27:10+0100
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -208,7 +208,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
-- [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
+- [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — Merged into claude-code-plugin-rollout-staleness
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [macos-keychain-incidents](.claude/project/memory/macos-keychain-incidents.md) — macOS keychain dialog opened hundreds of times
 - [macos-keychain-testing](.claude/project/memory/macos-keychain-testing.md) — how do I test keychain code without mocks or a real prompt
