@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth-cascade
 description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free', 'rotation is stuck with a lot of headroom', '7d wall projected in ~0 min', 'learned cap from a usage endpoint 429'."
 ocd: 2026-06-13
-lmd: 2026-10-21
+lmd: 2026-11-11
 metadata:
   node_type: memory
   type: project
@@ -139,15 +139,16 @@ already-logged-in dedicated debug Chrome over CDP to click Authorize, reads the
 claude's "Paste code here >" prompt — so PKCE, the token exchange, and the keychain write
 stay Claude's job. `reauth.py --manual` lets the human click Authorize.
 
-^688FP1EM [desc:"REAUTH stays a human step forever: claude.ai login needs an OS-level passkey/Google 2FA prompt no automation can satisfy; a hands-free password-only login was rejected as less secure.", keywords:"why_cant_reauth_be_fully_automated passkey_google_oauth_2fa_is_os_level no_browser_automation_can_satisfy_2fa password_only_login_rejected_less_secure janitors_entire_job_at_this_layer_is_the_monthly_nudge", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
-**Why the human is UNAVOIDABLE at this layer (user decision 2026-06-24):** the claude.ai
+^688FP1EM [desc: "REAUTH stays a human step forever: claude.ai login needs an OS-level passkey/Google 2FA prompt no automation can satisfy; a hands-free password-only login was rejected as less secure.", keywords: why_cant_reauth_be_fully_automated passkey_google_oauth_2fa_is_os_level no_browser_automation_can_satisfy_2fa password_only_login_rejected_less_secure janitors_entire_job_at_this_layer_is_the_monthly_nudge, type: project, ocd: 2026-06-13, lmd: 2026-11-11]
+**Why the human is UNAVOIDABLE at this layer (user decision 2026-06-24):** the 
 login authenticates with a **passkey / Google-OAuth 2FA**, and that passkey/2FA prompt is
 **OS-level — outside the browser** — so NO browser automation (Playwright, agent-browser, or
 anything else) can satisfy it. The ONLY way to make REAUTH hands-free would be a plain
 username+password login (no Google), which is **less secure** → that is deliberately the
 **least-favoured option and is NOT adopted**. So REAUTH stays a human step, and the janitor's
-ENTIRE job for this layer is the **~monthly reminder** (`oauth-login-needed` → `REAUTH_NUDGE`
-nudge) to run `/janitor-refresh-claude-logins` — nothing more.
+ENTIRE job for this layer is the **~monthly reminder** (the `REAUTH_NUDGE` leg: the detector
+`oauth-login-needed` RECORDS it, prints nothing, and the daemon sends the owner the desktop
+notification) to run `/janitor-refresh-claude-logins` — nothing more.
 
 `WAIT_SETUP_TOKEN` is the benign in-between: a setup-token slot (no refresh, no session)
 that still has runway — nothing to do yet, do NOT nudge. (`classify()` also returns
