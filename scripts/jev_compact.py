@@ -572,11 +572,10 @@ def cmd_compact(args: argparse.Namespace) -> int:
         print(f"declined: no digest material: {exc}", file=sys.stderr)
         return 6
 
-    client = None
     try:
-        client = make_client()
-        scores = jc.score_items(
-            scored, digest, client,
+        # TRDD-Q3SR1ZK2: scoring routed through llm-ext classify filter (owner directive: use Jev through llm-ext classifiers, not direct API). The adapter writes items to JSONL, calls `llm-ext classify filter`, parses the JSON report for per-item relevance scores.
+        scores = jc.score_items_via_llm_ext(
+            scored, digest,
             relevance_threshold=args.relevance_threshold,
         )
     except JevBudgetError as exc:
@@ -595,11 +594,6 @@ def cmd_compact(args: argparse.Namespace) -> int:
                            kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc),
                            status=_status_for_stamp(exc))
         return 7
-    finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
 
     # TRDD-N9LDHF7N card 7: log every keep/elide decision the scoring pass above just made --
     # from the scores already in hand, never a hook inside jev_compaction.py itself. An
@@ -628,7 +622,13 @@ def cmd_compact(args: argparse.Namespace) -> int:
         shadow_log_failed = True
         print(f"jev-shadow: {type(exc).__name__}: {exc}", file=sys.stderr)
 
-    usage = getattr(client, "usage", None)
+    # TRDD-Q3SR1ZK2: scoring now runs out of process via `llm-ext`, which the adapter does NOT
+    # surface a usage/cost channel from -- its contract is `dict[str, Scores]`, same as
+    # `score_items`. So the header/stamp report no token or cost figures, exactly as the old
+    # path did whenever the client exposed no `usage` attribute (the `getattr(..., None)`
+    # fallthrough that fed these two lines). Never a crash: both readers below take a missing
+    # value as 0.
+    usage = None
     usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
     usage_cost = getattr(usage, "cost", 0.0)
 

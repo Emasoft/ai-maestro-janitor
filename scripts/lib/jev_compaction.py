@@ -14,8 +14,12 @@ which lives one directory up (``scripts/lib/jevctx/``).
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -31,6 +35,7 @@ if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
 import jsonl_walk  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared byte-safe JSONL walk (TRDD-DQXMND59 stage 3)
+import llm_ext_summary as _les  # noqa: E402  -- needs the sys.path line above; resolve_llm_ext for the TRDD-Q3SR1ZK2 llm-ext classify filter adapter (sibling lib)
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
 from jev_expand import attachment_item_text, tool_result_text  # noqa: E402  -- needs the sys.path line above; stdlib-only, the ONE attachment-text / tool-result-text rule, shared with `expand` and the cross-/clear verifier (TRDD-I40IKPWU)
 from jevctx import scorer as _scorer  # noqa: E402
@@ -42,6 +47,7 @@ from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
     MAX_QUESTIONS_PER_REQUEST,
     JevClient,
+    JevError,
     JevValidationError,
     NoulAnswer,
     Origin,
@@ -61,6 +67,7 @@ __all__ = [
     "split_conversation",
     "build_digest",
     "score_items",
+    "score_items_via_llm_ext",
     "compose",
 ]
 
@@ -1161,6 +1168,123 @@ def score_items(
     return scores
 
 
+def score_items_via_llm_ext(
+    items: list[Item],
+    digest: str,
+    *,
+    relevance_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
+) -> dict[str, Scores]:
+    """TRDD-Q3SR1ZK2: scoring routed through `llm-ext classify filter` (owner directive: use Jev
+    through llm-ext classifiers, not direct API).
+
+    The adapter writes items to a JSONL temp file, calls `llm-ext classify filter`, parses the
+    JSON report for per-item relevance scores, and returns the SAME `dict[str, Scores]` shape
+    `score_items` returns -- so every downstream caller (`compose`, the shadow log, the CLI's
+    decision counting) is unchanged. Unlike `score_items` it takes NO `client` (llm-ext is a
+    CLI, not a client object) and runs ONE classification over all items rather than fanning
+    batches out on a thread pool: `llm-ext` does its own request planning/chunking internally.
+
+    FAIL-CLOSED, matching `score_items` (never fails open like the library's own default): any
+    failure -- llm-ext absent, a non-zero subprocess exit (a 402, an outage, a bad profile), or
+    a missing/malformed report -- raises `JevError` so the one caller (`scripts/jev_compact.py
+    compact`) falls back to `llm_ext_compact.py`, never silently keeps everything.
+    """
+    if not items:
+        return {}
+
+    cli = _les.resolve_llm_ext()
+    if not cli:
+        raise JevError("llm-ext classify not available — install llm-externalizer plugin")
+
+    # WHY one JSONL temp dir for both the items file and the report: `llm-ext` discovers items
+    # by path and writes `<output_dir>/<timestamp>-filter-<id>.json`; keeping both in one
+    # `mkdtemp` tree makes cleanup a single rmtree and never touches the caller's CWD.
+    tmp_dir = tempfile.mkdtemp(prefix="jev-score-llm-ext-")
+    try:
+        items_path = Path(tmp_dir) / "items.jsonl"
+        with items_path.open("w", encoding="utf-8") as fh:
+            for it in items:
+                fh.write(json.dumps({"id": it.id, "text": it.text}, ensure_ascii=False) + "\n")
+
+        profile = os.environ.get("JEV_EXT_CLASSIFY_PROFILE", "or-jev")
+        report_dir = Path(tmp_dir) / "reports"
+        argv = [
+            cli, "classify", "filter", f"{RETRIEVE_QUESTION.instructions}\n\nTask context:\n{digest}",
+            "--items", str(items_path),
+            "--threshold", str(relevance_threshold),
+            "--profile", profile,
+            "--output_dir", str(report_dir),
+        ]
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=1200)
+        except FileNotFoundError as exc:
+            # `resolve_llm_ext` already proved the binary exists; a race that removes it between
+            # the check and the call is the one case left -- report it the same way, not as a crash.
+            raise JevError(f"llm-ext classify not available — install llm-externalizer plugin ({exc})") from exc
+        except subprocess.TimeoutExpired as exc:
+            # llm-ext makes network requests (and local-model calibration can run for hours); a
+            # hang must fail closed within the 20-minute Bash-tool convention rather than block
+            # the whole compaction forever.
+            raise JevError(f"llm-ext classify filter timed out after 1200s: {exc}") from exc
+        if proc.returncode != 0:
+            # The CLI prints its own diagnosis on stderr (e.g. "API error 402: Insufficient
+            # credits"); surface that verbatim so the caller's stamp kind and message name it.
+            detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            raise JevError(f"llm-ext classify filter failed: {detail}")
+
+        # The report is the JSON envelope run-decision.ts writes to `--output_dir`; its
+        # `decision` member carries the FilterResult (`rows` = every answered item). Find the
+        # single `.json` it just wrote (the fresh dir holds nothing else).
+        reports = sorted(report_dir.glob("*.json")) if report_dir.is_dir() else []
+        if not reports:
+            raise JevError("llm-ext classify filter produced no JSON report")
+        try:
+            envelope = json.loads(reports[-1].read_text(encoding="utf-8"))
+            rows = envelope["decision"]["rows"]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise JevError(f"llm-ext classify filter report malformed: {exc}") from exc
+
+        try:
+            scored: dict[str, Scores] = {}
+            for row in rows:
+                # `matched` is already `p >= threshold` per the report's own projection, but
+                # never trust it blindly: derive `kept` from `p` and the threshold the caller
+                # passed, so a mismatch between the CLI's default band and this call can never
+                # drift the decision.
+                p = float(row["p"])
+                scored[row["id"]] = Scores(
+                    relevance=p, oversized=False, kept=p >= relevance_threshold,
+                )
+        except (ValueError, TypeError, KeyError) as exc:
+            # The envelope parsed, but a per-row VALUE did not: `float(row["p"])` on a string like
+            # "abc" or null raises ValueError/TypeError, and an absent/non-string id raises
+            # TypeError/KeyError. Fail closed exactly like every other malformed-report path
+            # instead of letting a bare exception escape as a non-JevError crash.
+            raise JevError(f"llm-ext classify filter report malformed: {exc}") from exc
+
+        # FAIL-CLOSED on an item with no row (an unsent/aborted item the report lists only under
+        # `invalid`): a pointer-only, never-scored entry exactly as `score_items` marks a blocked
+        # item -- never a silent keep of an item Jev did not actually judge.
+        for exc_id in _unscored_report_ids(envelope):
+            if exc_id not in scored:
+                scored[exc_id] = Scores(relevance=0.0, oversized=False, kept=False, blocked=True)
+        for it in items:
+            if it.id not in scored:
+                scored[it.id] = Scores(relevance=0.0, oversized=False, kept=False, blocked=True)
+        return scored
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _unscored_report_ids(envelope: dict[str, Any]) -> list[str]:
+    """The ids the report lists as unanswered (`decision.invalid[].id`), so the caller can mark
+    each `blocked` rather than let it vanish. Tolerant by design -- an unexpected envelope shape
+    yields no ids (the caller's own per-item sweep still catches everything), never a raise."""
+    decision = envelope.get("decision") if isinstance(envelope, dict) else None
+    invalid = decision.get("invalid") if isinstance(decision, dict) else None
+    if not isinstance(invalid, list):
+        return []
+    return [e["id"] for e in invalid if isinstance(e, dict) and isinstance(e.get("id"), str)]
 def _format_pointer(item: Item) -> str:
     """The elided-item stand-in text, via `jevctx.pipeline.format_pointer` (card 5,
     TRDD-HWF3QFAB). The local literal this replaced had no escaping -- a `"` or `\\` in an

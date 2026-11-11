@@ -2,9 +2,11 @@
 
 `expand` is tested against a tiny synthetic transcript carrying the three block kinds the
 spec names (user text, assistant text block, tool_result block) — not a real transcript,
-which can be 24-258 MB per the study's facts. `probe`/`compact` are tested by monkeypatching
-`jev_compact.make_client` (the name bound in jev_compact's own module namespace), so no
-network call happens and every exit code the CLI contract promises is exercised directly.
+which can be 24-258 MB per the study's facts. `probe` is tested by monkeypatching
+`jev_compact.make_client`; `compact` is tested by monkeypatching
+`jev_compact.jc.score_items_via_llm_ext`, because TRDD-Q3SR1ZK2 moved scoring off the client
+and onto the `llm-ext` adapter. Either way no network call and no subprocess happens, and
+every exit code the CLI contract promises is exercised directly.
 Every test runs under an isolated `JANITOR_CONTROL_DIR` (see `_isolated_control_dir` below)
 so the probe stamp `compact`/`probe` write never touches this machine's real
 `~/.claude/janitor-control/`.
@@ -33,8 +35,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 import jev_compaction as jc  # noqa: E402
 import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7
 import state  # noqa: E402
-from jevctx.shadow import ShadowLog  # noqa: E402
-from jevctx.testing import FakeJevClient  # noqa: E402  -- needs the sys.path line above
+from jevctx.shadow import ShadowLog  # noqa: E402  -- needs the sys.path line above
 
 
 def _import():
@@ -649,9 +650,12 @@ def test_probe_ask_raises_429_writes_rate_limited_stamp(
 
 
 def _keep_only(*keywords: str):
-    """A `FakeJevClient` answer function: keep an item iff its text contains one of
-    `keywords`, on the relevance question. Keys arrive as `<ref>:rel` (score_items sends one
-    question per item, TRDD-R9UXOSR5); the ref is the part before the ':'."""
+    """A per-item answer function: keep an item iff its text contains one of `keywords`.
+
+    Fed through `_fake_scorer` below, one item at a time, on the relevance question. The
+    `<ref>:rel` key shape and the `{"items": [{"ref", "text"}]}` state are the ones
+    `jc.score_items`'s own `_score_batch` sent to Jev (TRDD-R9UXOSR5), which is why this
+    function survived the TRDD-Q3SR1ZK2 seam change with its scoring logic untouched."""
 
     def answer(state: Any, questions: Any, key: str) -> float:
         ref = key.split(":", 1)[0]
@@ -665,14 +669,48 @@ def _keep_only(*keywords: str):
     return answer
 
 
+def _fake_scorer(answer_fn: Any):
+    """A `jc.score_items_via_llm_ext` stand-in driven by a per-item `answer_fn`.
+
+    WHY this seam and not `make_client`: TRDD-Q3SR1ZK2 routed `compact`'s scoring through
+    `llm-ext classify filter`, so `cmd_compact` no longer calls `make_client()` -- it calls
+    this function, which takes no client at all. A test that controls scoring therefore
+    replaces THIS name on `jev_compact.jc` (the module the CLI resolves it from), and
+    `answer_fn` keeps the `FakeJevClient` answer shape so `_keep_only` keeps working.
+
+    Scores are derived exactly as `jc.score_items`'s `_score_batch` derived them from a
+    `NoulAnswer`: `kept = relevance >= relevance_threshold`, never below it.
+
+    Refs are POSITIONAL (`i0`, `i1`, ...) and the key is `i<n>:rel`, NOT `<item id>:rel`:
+    an item id is itself `<uuid>:<index>`, so `_keep_only`'s `key.split(":", 1)[0]` (the
+    shape `score_items` really used) would truncate it and never match the state. Positional
+    refs are what a batch always used, so `_keep_only`'s lookup keeps working unchanged.
+    """
+
+    def score(
+        items: Any, digest: Any, *, relevance_threshold: float = jc.DEFAULT_RELEVANCE_THRESHOLD
+    ) -> dict[str, jc.Scores]:
+        state = {"task": digest,
+                 "items": [{"ref": f"i{i}", "text": it.text} for i, it in enumerate(items)]}
+        scores: dict[str, jc.Scores] = {}
+        for i, it in enumerate(items):
+            key = f"i{i}:rel"
+            rel = float(answer_fn(state, {key: None}, key))
+            scores[it.id] = jc.Scores(
+                relevance=rel, oversized=False, kept=rel >= relevance_threshold,
+            )
+        return scores
+
+    return score
+
+
 def test_compact_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     # "bug" keeps the user message and the assistant's text; the dangling tool_result item
     # ("file written: 12 lines") has no such keyword, so it must be elided -- giving this
     # test both a kept item AND a pointer, per the task's own "pointers present" requirement.
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -698,8 +736,7 @@ def test_compact_reports_blocked_zero_when_nothing_was_blocked(
     two different line shapes."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -739,8 +776,7 @@ def test_compact_reports_pre_boundary_count_and_the_lane_still_parses_the_line(
     transcript = tmp_path / "boundary.jsonl"
     transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -763,8 +799,7 @@ def test_compact_reports_malformed_count_for_a_half_written_last_line(
     with transcript.open("a", encoding="utf-8") as fh:
         fh.write('{"type": "user", "uuid": "u-3", "parentUuid": "u-2", "message": {"rol')
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -777,22 +812,18 @@ def test_compact_reports_blocked_count_and_a_content_digest(
 ) -> None:
     """TRDD-1ETALGDG followup item 2(a): a compaction that still exits 0 but had to pointer
     some items (a provider firewall block or an oversized batch that survived every split
-    retry, `jc.score_items`'s own `Scores.blocked`) must say so in the summary line --
+    retry, `jc.Scores.blocked`) must say so in the summary line --
     otherwise it is indistinguishable from a fully clean compaction to every caller that
     only checks the exit code. `blocked_digest` is a real sha256 hex digest of the blocked
     items' own TEXT (jev_compaction_lane.py uses it as a cross-session dedupe key), never
     the text itself."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
 
-    real_score_items = jev_compact.jc.score_items
-
-    def _score_items_with_one_blocked(items: Any, digest: Any, client_: Any, **kwargs: Any) -> Any:
-        scores = real_score_items(items, digest, client_, **kwargs)
-        # As if this item had survived every split retry still unscored -- score_items's own
-        # real contract for a blocked item (see its docstring): kept=False, oversized=False.
+    def _score_items_with_one_blocked(items: Any, digest: Any, **kwargs: Any) -> Any:
+        scores = _fake_scorer(_keep_only("bug"))(items, digest, **kwargs)
+        # As if this item had come back never judged -- the adapter's own real contract for
+        # an unanswered item: kept=False, oversized=False, blocked=True.
         first_id = items[0].id
         scores[first_id] = jev_compact.jc.Scores(
             relevance=0.0, oversized=False, kept=False,
@@ -800,7 +831,7 @@ def test_compact_reports_blocked_count_and_a_content_digest(
         )
         return scores
 
-    monkeypatch.setattr(jev_compact.jc, "score_items", _score_items_with_one_blocked)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _score_items_with_one_blocked)
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -818,10 +849,10 @@ def test_compact_declines_on_recent_probe_failure(
               "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called on a fast decline")
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("score_items_via_llm_ext must not be called on a fast decline")
 
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _must_not_be_called)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -847,8 +878,7 @@ def test_compact_does_not_decline_on_non_outage_stamp(
               "cost": None, "model": None, "provider": "openrouter", "kind": kind}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -872,10 +902,10 @@ def test_compact_no_digest_material(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
     out = tmp_path / "compacted.md"
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called when there is no digest")
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("score_items_via_llm_ext must not be called when there is no digest")
 
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _must_not_be_called)
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -889,11 +919,10 @@ def test_compact_scorer_error_writes_failure_stamp(
 ) -> None:
     from jevctx.types import JevUnavailableError
 
-    class _FailingScoreClient:
-        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
-            raise JevUnavailableError("simulated 503", status=503, cause="HTTP 503")
+    def _failing_scorer(*_args: Any, **_kwargs: Any) -> Any:
+        raise JevUnavailableError("simulated 503", status=503, cause="HTTP 503")
 
-    monkeypatch.setattr(jev_compact, "make_client", lambda: _FailingScoreClient())
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _failing_scorer)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -916,13 +945,12 @@ def test_compact_scorer_429_writes_rate_limited_stamp(
     `kind="rate_limited"` with the server's `retry_after_s` -- not `"unavailable"`."""
     from jevctx.types import JevUnavailableError
 
-    class _FailingScoreClient:
-        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
-            raise JevUnavailableError(
-                "simulated 429", status=429, cause="HTTP 429", retry_after=7.0
-            )
+    def _failing_scorer(*_args: Any, **_kwargs: Any) -> Any:
+        raise JevUnavailableError(
+            "simulated 429", status=429, cause="HTTP 429", retry_after=7.0
+        )
 
-    monkeypatch.setattr(jev_compact, "make_client", lambda: _FailingScoreClient())
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _failing_scorer)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -941,16 +969,15 @@ def test_compact_scorer_429_writes_rate_limited_stamp(
 def test_compact_budget_error_exits_7_with_budget_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`JevBudgetError` during scoring is the planner's own bug, not an outage -- exit 7
+    """`JevBudgetError` during scoring is a malformed request, not an outage -- exit 7
     with a `budget:`-prefixed message and a `kind="budget"` stamp, distinct from the generic
     `compact failed:` / `kind="unavailable"` path the JevUnavailableError test above covers."""
     from jevctx.types import JevBudgetError
 
-    class _BudgetBustingClient:
-        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
-            raise JevBudgetError("too many questions for one state")
+    def _budget_busting_scorer(*_args: Any, **_kwargs: Any) -> Any:
+        raise JevBudgetError("too many questions for one state")
 
-    monkeypatch.setattr(jev_compact, "make_client", lambda: _BudgetBustingClient())
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _budget_busting_scorer)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1030,10 +1057,10 @@ def test_compact_declines_on_recent_unreachable_stamp(
               "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called on a fast decline")
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("score_items_via_llm_ext must not be called on a fast decline")
 
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _must_not_be_called)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1058,8 +1085,7 @@ def test_compact_does_not_decline_once_unreachable_ttl_has_passed(
     }
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1080,10 +1106,10 @@ def test_compact_declines_on_recent_rate_limited_probe_failure(
               "retry_after_s": 20.0}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called on a fast decline")
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("score_items_via_llm_ext must not be called on a fast decline")
 
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _must_not_be_called)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1106,8 +1132,7 @@ def test_compact_does_not_decline_once_rate_limited_ttl_has_passed(
               "retry_after_s": 5.0}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1128,8 +1153,7 @@ def test_compact_rate_limited_ttl_falls_back_and_caps_without_retry_after(
               "retry_after_s": None}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1213,24 +1237,30 @@ def test_write_probe_stamp_uses_atomic_replace(
 def test_compact_budget_error_from_planner_site_exits_7_with_budget_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`JevBudgetError` from `BudgetPlanner.plan` (inside `jc.score_items`, BEFORE any
-    request is sent) must be caught by the same `except JevBudgetError` in `cmd_compact`
-    as the client's own `check_request_budget` inside `ask()` -- proven here by making the
-    planner itself raise, not the client."""
+    """`JevBudgetError` raised from inside the scoring seam must be caught by
+    `cmd_compact`'s own `except JevBudgetError` and land the `budget:` message and stamp.
+    TRDD-Q3SR1ZK2 retired `BudgetPlanner` from this path, so the error is now proven to come
+    from the llm-ext adapter, which receives the whole item list before any score exists."""
 
     from jevctx.types import JevBudgetError
 
-    def _raising_plan(self: Any, items: Any, question_tokens: int, envelope_tokens: int = 0) -> Any:
+    handed: list[str] = []
+
+    def _budget_busting_scorer(items: Any, digest: Any, **kwargs: Any) -> Any:
+        # The adapter holds the whole item list at once, so it is the only place a budget
+        # error can still arise. Record the ids first: that proves the error came from
+        # scoring, not from an earlier gate that never reached an item.
+        handed.extend(it.id for it in items)
         raise JevBudgetError("item too large for even one batch")
 
-    monkeypatch.setattr(jc.BudgetPlanner, "plan", _raising_plan)
-    monkeypatch.setattr(jev_compact, "make_client", lambda: FakeJevClient(_keep_only("bug")))
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _budget_busting_scorer)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
     assert code == 7
+    assert handed == ["u-2:0"]  # the item was handed to scoring before the budget error
     assert "budget: item too large for even one batch" in output
     assert not out.exists()
     stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
@@ -1287,8 +1317,7 @@ def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     inject_out = tmp_path / "compacted.inject.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
@@ -1315,24 +1344,20 @@ def test_compact_inject_out_scores_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Card 5 injection-caps review (TRDD-RAEGS1D5) verification item (a): "score once, render
-    twice" means exactly that -- `--inject-out` must never trigger a SECOND `jc.score_items`
-    call. Counts calls to the wrapping function itself (never the Jev endpoint's own per-item
-    `ask()` calls, which scale with item count and would not distinguish one scoring pass from
-    two smaller ones)."""
+    twice" means exactly that -- `--inject-out` must never trigger a SECOND scoring pass.
+    Counts calls to the seam itself, so one pass and two smaller ones are told apart."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     inject_out = tmp_path / "compacted.inject.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
 
     calls: list[int] = []
-    real_score_items = jc.score_items
+    real_score_items = _fake_scorer(_keep_only("bug"))
 
-    def _counting_score_items(*args: Any, **kwargs: Any) -> Any:
+    def _counting_score_items(items: Any, digest: Any, **kwargs: Any) -> Any:
         calls.append(1)
-        return real_score_items(*args, **kwargs)
+        return real_score_items(items, digest, **kwargs)
 
-    monkeypatch.setattr(jc, "score_items", _counting_score_items)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _counting_score_items)
 
     code, output = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
@@ -1340,7 +1365,7 @@ def test_compact_inject_out_scores_exactly_once(
     ])
 
     assert code == 0, output
-    assert len(calls) == 1, f"expected exactly one score_items() call, got {len(calls)}"
+    assert len(calls) == 1, f"expected exactly one scoring pass, got {len(calls)}"
 
 def test_compact_state_heads_reach_the_digest_at_full_card3_size(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -1362,8 +1387,7 @@ def test_compact_state_heads_reach_the_digest_at_full_card3_size(
     head_path = tmp_path / "state-head.md"
     head_path.write_text(head_text, encoding="utf-8")
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
@@ -1383,8 +1407,7 @@ def test_compact_without_inject_out_writes_only_the_full_document(
     one document, at `--out`, no companion file."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -1410,8 +1433,7 @@ def test_compact_inject_out_truncates_a_kept_item_over_the_per_item_cap(
     transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
     out = tmp_path / "compacted.md"
     inject_out = tmp_path / "compacted.inject.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
@@ -1445,8 +1467,7 @@ def test_compact_no_decline_bypasses_a_recent_unavailable_stamp(
               "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1471,8 +1492,7 @@ def test_compact_unavailable_stamp_ttl_is_5_minutes_not_30(
               "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1493,10 +1513,10 @@ def test_compact_no_decline_still_honours_a_recent_rate_limited_stamp(
               "retry_after_s": 60}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called on a fast decline")
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("score_items_via_llm_ext must not be called on a fast decline")
 
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _must_not_be_called)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1521,8 +1541,7 @@ def test_compact_no_decline_bypasses_a_recent_unreachable_stamp(
               "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -1570,8 +1589,7 @@ def test_compact_logs_shadow_decisions_for_every_item(
     no "retrieve" row exists at all."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
     assert code == 0
@@ -1594,8 +1612,7 @@ def test_expand_records_a_shadow_outcome_for_the_expanded_id(
     counts it as a false negative (ground truth the gate was too aggressive)."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
     assert code == 0
 
@@ -1623,8 +1640,7 @@ def test_compact_run_twice_for_the_same_session_and_transcript_does_not_double_t
     instead of doubling every decision row."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code1, _output1 = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
@@ -1663,8 +1679,7 @@ def test_compact_completes_normally_when_the_shadow_log_write_raises(
 
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
 
@@ -1682,8 +1697,7 @@ def test_replay_subcommand_prints_shadow_stats(
 ) -> None:
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
     assert code == 0
 
@@ -1727,8 +1741,7 @@ def test_trailer_replace_id_wording_actually_lists_items(
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     inject_out = tmp_path / "compacted.inject.md"
-    client = FakeJevClient(_keep_only("bug"))
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", _fake_scorer(_keep_only("bug")))
     code, _output = _run([
         "compact", "--transcript", str(transcript), "--out", str(out),
         "--inject-out", str(inject_out), "--max-elided-pointers", "0", "--inject-max-bytes", "2000",
@@ -1787,7 +1800,7 @@ def test_trailer_replace_id_wording_actually_lists_items(
 def test_compact_never_sends_prose_to_jev(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-D7RLXAN1 test 9 -- the enforcement point. Owner directive (2026-09-24): "assistant
     prose and user prose (the messages exchanges) should be all kept intact". `compact` must
-    hand `score_items` only tool/event items: no owner, assistant or control message is ever a
+    hand the scoring seam only tool/event items: no owner, assistant or control message is ever a
     scored item (so no score can drop one, and the decision question is never asked), the shadow
     log still works on the scored subset, and both documents carry every message verbatim."""
     owner, reply, control = "please fix the bug in login", "I will fix the bug now.", "resume"
@@ -1805,27 +1818,23 @@ def test_compact_never_sends_prose_to_jev(tmp_path: Path, monkeypatch: pytest.Mo
     out, inject_out = tmp_path / "full.md", tmp_path / "inject.md"
 
     asked: list[str] = []
-    real_score_items = jc.score_items
+    sent: list[str] = []
+    real_score = _fake_scorer(lambda *_args: 0.9)  # stands in for FakeJevClient.constant(0.9)
 
-    def spy(items: list[jc.Item], *args: Any, **kwargs: Any) -> dict[str, jc.Scores]:
+    def spy(items: list[jc.Item], digest: str, **kwargs: Any) -> dict[str, jc.Scores]:
         asked.extend(it.id for it in items)
-        return real_score_items(items, *args, **kwargs)
+        # The scored items' own texts -- the digest is Jev's task context, never an item.
+        sent.extend(it.text for it in items)
+        return real_score(items, digest, **kwargs)
 
-    monkeypatch.setattr(jc, "score_items", spy)
-    client = FakeJevClient.constant(0.9)
-    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    monkeypatch.setattr(jev_compact.jc, "score_items_via_llm_ext", spy)
 
     code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out),
                          "--inject-out", str(inject_out)])
 
     assert code == 0, output
     assert asked == ["u-2:0"]
-    sent: list[str] = []  # the scored items' texts -- `task` (the digest) is Jev's context, not an item
-    for call in client.calls:
-        assert isinstance(call.state, dict)
-        sent.extend(entry["text"] for entry in call.state["items"])
     assert sent and not {owner, reply, control} & set(sent)
-    assert all(key.endswith(":rel") for call in client.calls for key in call.questions)
     assert "shadow_log_failed" not in output
     assert "compacted items=1/1 " in output and output.strip().endswith(
         "conversation=3 malformed=0 pre_boundary=0"
