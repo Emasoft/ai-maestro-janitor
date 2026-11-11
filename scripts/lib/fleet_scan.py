@@ -1286,7 +1286,10 @@ def diagnose_root(
             retry_wedged = bool(prev and prev.get("confirmed"))
         else:
             new_state, retry_wedged = session_liveness.retry_wedge_state_update(
-                prev=prev, current_attempt=session_liveness.retry_wedge_attempt(pane_text)
+                prev=prev,
+                current_attempt=session_liveness.retry_wedge_attempt(pane_text),
+                current_retry_in=session_liveness.retry_wedge_retry_in(pane_text),
+                now=int(time.time()),
             )
             _write_retry_wedge_state(root, new_state)
     else:

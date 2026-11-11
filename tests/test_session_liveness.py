@@ -165,23 +165,23 @@ def test_retry_wedge_state_advance_decrease_tie_cleared() -> None:
     the beat); no signature clears the state entirely."""
     # first sighting — baseline only, not yet wedged
     st1, wedged1 = sl.retry_wedge_state_update(prev=None, current_attempt=5)
-    assert st1 == {"attempt": 5, "confirmed": False}
+    assert st1 == {"attempt": 5, "confirmed": False, "retry_in": None, "first_seen": None}
     assert wedged1 is False
     # advance — confirmed wedged
     st2, wedged2 = sl.retry_wedge_state_update(prev=st1, current_attempt=6)
-    assert st2 == {"attempt": 6, "confirmed": True}
+    assert st2 == {"attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None}
     assert wedged2 is True
     # tie on a confirmed episode — stays wedged (backoff exceeded the beat)
     st3, wedged3 = sl.retry_wedge_state_update(prev=st2, current_attempt=6)
-    assert st3 == {"attempt": 6, "confirmed": True}
+    assert st3 == {"attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None}
     assert wedged3 is True
     # decrease — a NEW episode starts, unconfirmed again (never carries the old confirm)
     st4, wedged4 = sl.retry_wedge_state_update(prev=st3, current_attempt=1)
-    assert st4 == {"attempt": 1, "confirmed": False}
+    assert st4 == {"attempt": 1, "confirmed": False, "retry_in": None, "first_seen": None}
     assert wedged4 is False
     # tie on an UNCONFIRMED episode — still not wedged (no advance ever seen)
     st5, wedged5 = sl.retry_wedge_state_update(prev=st4, current_attempt=1)
-    assert st5 == {"attempt": 1, "confirmed": False}
+    assert st5 == {"attempt": 1, "confirmed": False, "retry_in": None, "first_seen": None}
     assert wedged5 is False
     # signature gone — state cleared entirely, regardless of prior confirmation
     st6, wedged6 = sl.retry_wedge_state_update(prev=st2, current_attempt=None)
@@ -204,6 +204,101 @@ def test_retry_wedge_never_self_triggers_on_a_static_display() -> None:
         attempt = sl.retry_wedge_attempt(static_text)
         state_, wedged = sl.retry_wedge_state_update(prev=state_, current_attempt=attempt)
         assert wedged is False, "a static display must never confirm as wedged"
+
+
+
+def _wedge_frame(retry_in: str, attempt: int = 1) -> str:
+    """A real-shaped [CC] pane capture: the status row sits directly above the input box's
+    upper border, and the status row starts with a status glyph at column 0."""
+    border = "─" * 40
+    return (
+        "⏺ some earlier output\n"
+        f"✻ Rate limited · Retrying in {retry_in} · attempt {attempt}/300\n"
+        f"{border}\n"
+        "❯ \n"
+        f"{border}\n"
+    )
+
+
+def test_frozen_countdown_confirms_wedge() -> None:
+    """Two polls >=120s apart with BYTE-IDENTICAL second-scale retry_in text and no attempt
+    advance prove the countdown is frozen, not waiting (TRDD-RJJGXPIK)."""
+    st1, wedged1 = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="30s", now=1000
+    )
+    assert wedged1 is False
+    assert st1 == {"attempt": 1, "confirmed": False, "retry_in": "30s", "first_seen": 1000}
+    st2, wedged2 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1120
+    )
+    assert wedged2 is True
+    assert st2 == {"attempt": 1, "confirmed": True, "retry_in": "30s", "first_seen": 1000}
+
+
+def test_frozen_countdown_below_threshold_no_confirm() -> None:
+    """60s apart is below the 120s threshold — the countdown could still be a legitimately
+    slow refresh, so no confirmation and the first_seen clock keeps running."""
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="30s", now=1000
+    )
+    st2, wedged2 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1060
+    )
+    assert wedged2 is False
+    assert st2["confirmed"] is False
+    assert st2["first_seen"] == 1000  # still counting from the first sighting
+
+
+def test_frozen_countdown_hour_scale_excluded() -> None:
+    """`Retrying in 5h` legitimately holds identical text for hours — no second-level
+    granularity means this path can never confirm a wedge."""
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="5h", now=1000
+    )
+    st2, wedged2 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="5h", now=1120
+    )
+    assert wedged2 is False
+    assert st2["confirmed"] is False
+    assert st2["first_seen"] is None
+
+
+def test_frozen_countdown_different_retry_in_resets() -> None:
+    """A CHANGED countdown text is real progress (the timer ticked), so first_seen resets and
+    nothing is confirmed."""
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="30s", now=1000
+    )
+    st2, wedged2 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="25s", now=1120
+    )
+    assert wedged2 is False
+    assert st2["confirmed"] is False
+    assert st2["retry_in"] == "25s"
+    assert st2["first_seen"] == 1120
+
+
+def test_advance_still_confirms() -> None:
+    """The original advance-across-polls guard is unchanged and takes priority."""
+    st1, _ = sl.retry_wedge_state_update(prev=None, current_attempt=1, now=1000)
+    st2, wedged2 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=2, current_retry_in="30s", now=1001
+    )
+    assert wedged2 is True
+    assert st2["attempt"] == 2
+    assert st2["confirmed"] is True
+
+
+def test_retry_wedge_retry_in_extracts() -> None:
+    """The countdown text is pulled from the status row, not from anywhere else in the frame."""
+    assert sl.retry_wedge_retry_in(_wedge_frame("30s", attempt=1)) == "30s"
+    assert sl.retry_wedge_retry_in(_wedge_frame("0s", attempt=5)) == "0s"
+
+
+def test_retry_wedge_retry_in_returns_none_when_no_wedge() -> None:
+    """A pane with no retry-wedge status row yields None (never a stray match from prose)."""
+    assert sl.retry_wedge_retry_in("⏺ Retrying in 30s · attempt 1/300\n" + "─" * 40 + "\n❯ \n") is None
+    assert sl.retry_wedge_retry_in("") is None
 
 
 def test_diagnose_instance_retry_wedged_ranks_above_frozen() -> None:

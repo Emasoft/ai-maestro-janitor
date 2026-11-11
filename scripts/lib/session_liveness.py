@@ -168,8 +168,41 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# LOCAL copy of `pane_state._WEDGE_DETAIL_RE` — pane_state imports from THIS module, so
+# importing it back would be a circular import. Keep the two in sync.
+_WEDGE_DETAIL_RE = re.compile(
+    r"retrying\s+in\s+(?P<retry_in>[^·(]+?)\s*(?:\((?P<resets_at>[^)]+)\))?\s*·\s*"
+    r"attempt\s+(?P<attempt>\d+)\s*/\s*(?P<total>\d+)",
+    re.IGNORECASE,
+)
+
+# Second-level granularity (`0s`, `30s`) is the ONLY countdown shape whose text is expected
+# to change every second. An hour-scale wait (`Retrying in 5h`) legitimately holds the same
+# text for hours, so a repeated match there proves nothing — see `retry_wedge_state_update`.
+_SECOND_SCALE_RE = re.compile(r"\d+\s*s", re.IGNORECASE)
+# How long byte-identical second-scale countdown text must persist before it proves a freeze.
+_FROZEN_COUNTDOWN_MIN_S = 120
+
+
+def retry_wedge_retry_in(text: str) -> str | None:
+    """The `Retrying in <duration>` text from a pane frame's STATUS block, or None. PURE.
+
+    The countdown text is the frozen-countdown probe (TRDD-RJJGXPIK): a second-scale
+    countdown that is byte-identical across two polls >=120s apart is stuck, not waiting.
+    """
+    status = status_row_text_at_tail(text)
+    if status is None:
+        return None
+    m = _WEDGE_DETAIL_RE.search(status)
+    return m.group("retry_in").strip() if m else None
+
+
 def retry_wedge_state_update(
-    *, prev: Mapping[str, object] | None, current_attempt: int | None
+    *,
+    prev: Mapping[str, object] | None,
+    current_attempt: int | None,
+    current_retry_in: str | None = None,
+    now: int | None = None,
 ) -> tuple[dict[str, object] | None, bool]:
     """Advance the persisted retry-wedge episode state by ONE poll and decide whether THIS
     poll counts as wedged. PURE (TRDD-WKTD5JTC, advisor correction #3).
@@ -192,16 +225,66 @@ def retry_wedge_state_update(
     an ALREADY-confirmed episode either: CC's backoffs (observed up to 2m50s) can exceed the
     ~2 min heartbeat interval, so two consecutive polls legitimately land on the same number
     while the episode is still genuinely wedged — "keep polling", not "reset to unconfirmed".
+
+    FROZEN COUNTDOWN (TRDD-RJJGXPIK): a tie that never advances is exactly the shape of a
+    retry watchdog stuck while re-printing the SAME countdown, so a second-scale
+    ``current_retry_in`` (``30s``, ``0s``) held byte-identical for >=120s also confirms the
+    wedge. ``now`` is the poll epoch; None skips this path entirely (the caller has no
+    timeline to compare across).
     """
     if current_attempt is None:
         return None, False
     prev_attempt = prev.get("attempt") if prev else None
     prev_confirmed = bool(prev.get("confirmed")) if prev else False
+    prev_retry_in = prev.get("retry_in") if prev else None
+    prev_first_seen = prev.get("first_seen") if prev else None
+    first_seen = prev_first_seen if isinstance(prev_first_seen, int) else None
+    retry_in = current_retry_in if current_retry_in is not None else prev_retry_in
     if not isinstance(prev_attempt, int) or current_attempt < prev_attempt:
-        return {"attempt": current_attempt, "confirmed": False}, False
+        return (
+            {
+                "attempt": current_attempt,
+                "confirmed": False,
+                "retry_in": retry_in,
+                "first_seen": now,
+            },
+            False,
+        )
     if current_attempt > prev_attempt:
-        return {"attempt": current_attempt, "confirmed": True}, True
-    return {"attempt": current_attempt, "confirmed": prev_confirmed}, prev_confirmed
+        return (
+            {
+                "attempt": current_attempt,
+                "confirmed": True,
+                "retry_in": retry_in,
+                "first_seen": now,
+            },
+            True,
+        )
+    confirmed = prev_confirmed
+    # A countdown changes every second, so byte-identical retry_in text across polls >=120s
+    # apart proves the countdown is frozen — the retry watchdog is stuck counting but not
+    # advancing. Only applies to second-level granularity; hour-scale countdowns
+    # ("Retrying in 5h") are legitimate long waits. TRDD-RJJGXPIK.
+    if current_retry_in is not None and now is not None:
+        if _SECOND_SCALE_RE.search(current_retry_in):
+            if prev_retry_in == current_retry_in and first_seen is not None:
+                if now - first_seen >= _FROZEN_COUNTDOWN_MIN_S:
+                    confirmed = True
+            else:
+                # first poll of this exact countdown text — start (or restart) the clock
+                first_seen = now
+        else:
+            # no second-level granularity: this path can never prove a freeze
+            first_seen = None
+    return (
+        {
+            "attempt": current_attempt,
+            "confirmed": confirmed,
+            "retry_in": retry_in,
+            "first_seen": first_seen,
+        },
+        confirmed,
+    )
 
 
 # PUBLIC: both dispatch.py's alarm and fleet_scan's flag stamp import these, so they are
