@@ -112,5 +112,5 @@ llm_externalizer_output/
 tests/agent_context_bench/out*/
 tests/agent_context_bench/reports/
 
-# janitor: report dirs carry private data (paths, hostnames, pasted secrets)
-/reports/
+# janitor: reports_dev/ carries private data (paths, hostnames, pasted secrets).
+# reports/ is git-TRACKED (TRDD-KSUIEPTQ) — do NOT ignore it.
