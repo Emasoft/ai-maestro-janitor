@@ -57,6 +57,7 @@ import findings_ledger  # type: ignore[import-not-found]  # noqa: E402
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
+import suppression  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "agent-context-integrity"
 _CODE = "AICTX-003"
@@ -403,6 +404,19 @@ def _scan(
     `exfil-structural-probe` findings never enter the first list — see `_route_exfil_candidate`
     for why they are diverted to the findings ledger + verification ladder instead of the
     normal print+ticket pipeline below."""
+    # Project-local waivers (janitor#339): `.janitor.toml` `[[suppress]]` entries, read with the
+    # SAME shared loader + predicate `workflow-security.py` consults (`suppression.load` /
+    # `is_suppressed`), so one entry means the same thing in every detector that opts in.
+    #
+    # Safe HERE even though this detector refuses suppression markers found INSIDE a scanned
+    # file (see `_downgrade_described_attacks`): such a marker is attacker-writable precisely
+    # because it lives in the content an injection can rewrite, while `.janitor.toml` is a
+    # separate config file that is NOT loaded as agent instructions and that no scanned file
+    # can influence. Each entry names exactly one `rule_id` (the loader rejects a blanket
+    # waiver) and may narrow itself to `paths` / `sha`, and every waiver applied below is
+    # LOGGED, so a stale or over-broad entry stays arguable instead of quietly hiding a new
+    # finding in the same file. Loaded once per scan; the lookup is O(entry count).
+    suppress_table = suppression.load(project_root)
     out: list[tuple[str, acp.Finding]] = []
     exfil_drift: list[str] = []
     # TRDD-XOITBRIZ: collect what the per-match discriminators SILENCED, and log it.
@@ -430,6 +444,20 @@ def _scan(
                 line = _route_exfil_candidate(rel, text, f)
                 if line:
                     exfil_drift.append(line)
+                continue
+            # `.janitor.toml` waiver (janitor#339) — dropped BEFORE it can print, open a
+            # proposal, or keep one alive (`main` reconciles against this list, so a waived
+            # finding also withdraws its standing ticket, which is the point of a waiver).
+            # Deliberately AFTER the `exfil-structural-probe` branch above: that candidate is a
+            # verification-ladder result whose drift line comes from the findings ledger, and
+            # an owner waiver must not be able to silence a VERIFIED exfiltration alarm.
+            if suppress_table.is_suppressed(f.rule_id, file=rel):
+                # LOG, never silent — the same audit contract the per-match discriminators
+                # below carry: a waiver stays defensible only while a human can see it fired.
+                state.log_line(
+                    "agent-context-integrity",
+                    f"waived {f.rule_id} at {rel}:{f.line} (.janitor.toml [[suppress]])",
+                )
                 continue
             out.append((rel, f))
         # `lineno`, not `line` — the exfil branch above binds `line` to the drift STRING
@@ -479,6 +507,27 @@ def poisoned_reason(findings: list[tuple[str, acp.Finding]], *, cap: int = 3) ->
     )
 
 
+def _waiver_signature(project_root: Path) -> str:
+    """Identity of the project-side WAIVER table (`.janitor.toml`, else `.janitorignore`).
+
+    Combined with `_content_signature` in `main` (janitor#339). A `[[suppress]]` edit changes
+    what this detector REPORTS while every scanned file stays byte-identical, so a content-only
+    signature would short-circuit the next fire: the new waiver would not take effect, and the
+    proposal for the finding it waives would not be withdrawn, until some agent-context file
+    happened to change. Both waiver sources are hashed (either can be the live one — the
+    loader prefers `.janitor.toml` but falls back to `.janitorignore`), and a missing file
+    contributes nothing, so a project with no waiver table hashes exactly as before."""
+    h = hashlib.sha256()
+    for name in (".janitor.toml", ".janitorignore"):
+        p = project_root / name
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        h.update(f"{name}|{st.st_mtime_ns}|{st.st_size}\n".encode())
+    return h.hexdigest()[:16]
+
+
 def _content_signature(paths: list[Path]) -> str:
     """Hash the SCANNED set — path + mtime + size. Must cover exactly the files scanned, or a
     change to an unscanned file busts the hash and re-emits an unchanged finding every fire."""
@@ -513,7 +562,10 @@ def main() -> int:
     # findings block every fire — the precise churn _content_signature's own docstring
     # forbids.
     scanned = candidates[: _max_files()]
-    signature = _content_signature(scanned)
+    # The waiver table is part of the signature (janitor#339): adding a `[[suppress]]` entry
+    # changes what this fire REPORTS without touching a single scanned file, so a content-only
+    # signature would short-circuit it away — see `_waiver_signature`.
+    signature = _content_signature(scanned) + _waiver_signature(project_root)
     last_hash_file = state.state_dir() / f"{_NAME}-last-hash.ts"
     if last_hash_file.is_file():
         try:
