@@ -1399,6 +1399,7 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
 # idle path. It is a MODULE global reset at the top of main() (a fire is one process, but
 # tests call main()/phases repeatedly in-process, so the reset is load-bearing).
 _decision_fired = False
+_fire_degraded: list[str] = []  # detector names that failed this fire (TZBTDF56)
 
 
 def _emit_decision(marker: str, payload_lines: Iterable[str] = ()) -> None:
@@ -1449,9 +1450,12 @@ def _emit_quiet_if_idle() -> None:
     `[janitor-quiet]` while a background worker ran real tests). It is a no-op (prints
     nothing) for a genuinely idle session, so the zero-noise contract holds.
     """
+    global _fire_degraded
     if not _decision_fired:
         print("[janitor-quiet]")
         _phase_background_worker_progress()
+        if _fire_degraded:
+            print(f"degraded: {', '.join(_fire_degraded)}")
 
 
 # TRDD-P64SR014: a detector the dispatcher kills or cannot start protects nothing, yet
@@ -1480,6 +1484,15 @@ def _track_detector_streak(name: str, outcome: str) -> None:
     Two concurrent sessions can race the read-modify-write (off-by-one or a duplicate row);
     accepted. Fail-open: it must never break the heartbeat.
     """
+    # TZBTDF56: per-fire degraded signal — a fire in which any detector failed must be
+    # distinguishable from a clean pass, so the collected failures are surfaced as one
+    # `degraded:` line by _emit_quiet_if_idle. This lives HERE, not at each call site,
+    # because _track_detector_streak is the single chokepoint every error outcome passes
+    # through: both _record_default_outcome and the guard-branch-protection direct path
+    # call it, so one insertion covers every detector.
+    global _fire_degraded
+    if outcome.startswith("error:"):
+        _fire_degraded.append(f"{name}={outcome}")
     try:
         stamp = state.state_dir() / f"detector-fail-streak-{name}.ts"
         try:
@@ -5395,8 +5408,9 @@ def main() -> int:
     # D5 (TRDD-82JRK0CY): reset the per-fire decision sentinel. A production fire is one
     # process so this is a no-op there, but tests call main()/phases repeatedly in-process,
     # and _emit_quiet_if_idle keys on it — so the reset is load-bearing for correctness.
-    global _decision_fired
+    global _decision_fired, _fire_degraded
     _decision_fired = False
+    _fire_degraded.clear()
 
     # Phase 0: resolve this fire's MODE — full | stop. A fired turn re-reads the whole
     # session context (~618k cached tokens at the 0.1x cache-READ rate — NOT free, but 1/10

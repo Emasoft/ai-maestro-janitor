@@ -3644,6 +3644,40 @@ def test_emit_quiet_if_idle_silent_after_a_decision(env_isolation: dict) -> None
     assert out == ""
 
 
+def test_emit_quiet_if_idle_degraded_line_after_failed_detector(env_isolation: dict) -> None:
+    """TZBTDF56: a fire in which a detector failed is not a clean pass — after the quiet
+    token (and after any background-worker progress line) one `degraded:` line names it."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_decision_fired", False)
+    setattr(dispatch, "_fire_degraded", ["fake-broken=error:rc=1"])
+    out = _capture_stdout(dispatch._emit_quiet_if_idle)
+    assert "[janitor-quiet]" in out, out
+    assert "degraded: fake-broken=error:rc=1" in out.splitlines(), out
+
+
+def test_emit_quiet_if_idle_no_degraded_line_on_clean_fire(env_isolation: dict) -> None:
+    """TZBTDF56: with no failed detector the quiet fire stays byte-identical to before."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_decision_fired", False)
+    setattr(dispatch, "_fire_degraded", [])
+    out = _capture_stdout(dispatch._emit_quiet_if_idle)
+    assert "[janitor-quiet]" in out, out
+    assert "degraded:" not in out, out
+
+
+def test_track_detector_streak_appends_to_fire_degraded(env_isolation: dict) -> None:
+    """TZBTDF56: the streak tracker is the single chokepoint every error outcome passes
+    through, so it is where the per-fire degraded list is fed; a non-error outcome adds
+    nothing (clearing is main()'s job, not the tracker's)."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_fire_degraded", [])
+    dispatch._track_detector_streak("test-det", "error:rc=1")
+    assert "test-det=error:rc=1" in dispatch._fire_degraded
+    before = list(dispatch._fire_degraded)
+    dispatch._track_detector_streak("test-det", "ok")
+    assert dispatch._fire_degraded == before
+
+
 def _seed_state_dir(dispatch):
     import state
 
