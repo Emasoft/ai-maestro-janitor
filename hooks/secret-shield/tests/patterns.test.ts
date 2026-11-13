@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { applyRule, countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { pypiToken } from '../rules/dev-services'
+import { privateKey } from '../rules/key-material'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -1316,7 +1317,7 @@ describe('token rule order', () => {
   const id = (kind: string, pattern: RegExp) => [kind, pattern.source, pattern.flags]
   test('the rules run in this exact order', () => {
     expect(TOKEN_ORDER).toEqual([
-      id('private-key', /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g),
+      id('private-key', /-----BEGIN ((?! )(?![A-Z0-9 ]*  )[A-Z0-9 ]*(?<= )PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g),
       id('google-oauth-client-secret', /\bGOCSPX-[A-Za-z0-9_-]{20,}/g),
       id('google-oauth-access-token', /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g),
       id('google-oauth-refresh-token', /(?<![\w/+])1\/\/0[\w-]{40,512}/g),
@@ -1374,6 +1375,67 @@ describe('token rule order', () => {
     const { text, hits } = redact(`key:\n${begin}\nMIIEpAIBAAKCAQEA\n${awsKey}\nabc\n${end}\ndone`)
     expect(text).toBe(`key:\n${mark('private-key')}\ndone`)
     expect(hits).toEqual({ 'private-key': 1 })
+  })
+  // TRDD-AGOEWF2E: the header class loop must keep hiding a key whose header is millions of characters long.
+  // The count is above 1,474,557, where the group loop this replaced first missed (silently, with no error).
+  const KEY_UNIT = 'A '
+  const KEY_UNITS = 1572864
+  const longKey = (end: boolean) => {
+    const header = KEY_UNIT.repeat(KEY_UNITS) + 'PRIVATE KEY'
+    return `key:\n${j('-----BEGIN ', header, '-----')}\nMIIEpAIBAAKCAQEA\n${end ? `${j('-----END ', header, '-----')}\n` : ''}done`
+  }
+  test('a PEM private key with a 3 MB header is hidden whole, with exactly one hit', { timeoutMs: 15000 }, () => {
+    expect(KEY_UNITS).toBeGreaterThan(1474557)
+    const { text, hits } = redact(longKey(true))
+    expect(hits['private-key']).toBe(1)
+    expect(text.includes(KEY_UNIT.repeat(32))).toBe(false)
+    expect(text).toBe(`key:\n${mark('private-key')}\ndone`)
+  })
+  test('a cut-off PEM private key with a 3 MB header is hidden to the end of the text', { timeoutMs: 15000 }, () => {
+    const { text, hits } = redact(longKey(false))
+    expect(hits['private-key']).toBe(1)
+    expect(text.includes(KEY_UNIT.repeat(32))).toBe(false)
+    expect(text).toBe(`key:\n${mark('private-key')}`)
+  })
+  // The old pattern, kept here as the reference the new header must agree with on every text.
+  const OLD_PRIVATE_KEY = /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g
+  test('the new pattern and the old one give the same matches (index, whole match, group 1) on random texts', () => {
+    // The edge pieces: a doubled space, a glued letter, a BEGIN with a leading space, and the markers themselves.
+    const pieces = ['A', ' ', '-', 'PRIVATE KEY', ' BLOCK', '\n', '  ', 'X', j('-----BEGIN '), j('-----BEGIN  '), j('-----END '), j('-----')]
+    // A fixed seed keeps the texts the same on every run; the high bits are used because the low bits of this generator cycle.
+    let seed = 20261113
+    const next = (n: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      return (seed >>> 16) % n
+    }
+    const list = (input: string, pattern: RegExp) => [...input.matchAll(new RegExp(pattern.source, 'g'))].map((m) => [m.index, m[0], m[1]])
+    let compared = 0
+    for (let i = 0; i < 3000; i++) {
+      let input = ''
+      const length = 1 + next(40)
+      for (let k = 0; k < length; k++) input += pieces[next(pieces.length)]
+      const old = list(input, OLD_PRIVATE_KEY)
+      compared += old.length
+      expect(JSON.stringify(list(input, privateKey.pattern)) === JSON.stringify(old)).toBe(true)
+    }
+    expect(compared).toBeGreaterThan(100)
+  })
+  test('a header glued to PRIVATE whose END lies inside an RSA block leaves the same text as the old pattern, and no RSA body shows', () => {
+    // BEGIN XPRIVATE KEY is not a header the old pattern accepted. A wider class took it, and its END (the line inside the RSA block) made the RSA tail visible.
+    const input = `${j('-----BEGIN ', 'XPRIVATE KEY-----')}\nalpha\n${j('-----BEGIN ', 'RSA PRIVATE KEY-----')}\nrsabody\n${j('-----END ', 'XPRIVATE KEY-----')}\nrsatail\n${j('-----END ', 'RSA PRIVATE KEY-----')}\ndone`
+    const { text, hits } = redact(input)
+    expect(hits).toEqual({ 'private-key': 1 })
+    expect(text.includes('rsabody') || text.includes('rsatail')).toBe(false)
+    expect(text).toBe(input.replace(OLD_PRIVATE_KEY, mark('private-key')))
+  })
+  test('two PEM blocks in one text: each complete block is its own hit; a block with no END of its own takes the rest of the text', () => {
+    const block = (kind: string, body: string) => `${j('-----BEGIN ', kind, ' PRIVATE KEY-----')}\n${body}\n${j('-----END ', kind, ' PRIVATE KEY-----')}`
+    const two = redact(`a\n${block('RSA', 'one')}\nb\n${block('EC', 'two')}\nc`)
+    expect(two.hits['private-key']).toBe(2)
+    expect(two.text).toBe(`a\n${mark('private-key')}\nb\n${mark('private-key')}\nc`)
+    const cut = redact(`a\n${j('-----BEGIN ', 'RSA PRIVATE KEY-----')}\none\nb\n${block('EC', 'two')}\nc`)
+    expect(cut.hits['private-key']).toBe(1)
+    expect(cut.text).toBe(`a\n${mark('private-key')}`)
   })
   test('an sk-ant- key is matched by the Anthropic rule', () => {
     const key = j('sk-', 'ant-', 'api03-', A36, 'abcd')
