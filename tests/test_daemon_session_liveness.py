@@ -1311,6 +1311,7 @@ def test_fast_lane_wedge_on_a_recent_transcript_is_escaped_through_the_real_beat
         # read-back) must keep seeing the LivePane composer, or the typed `resume` never reads back.
         with monkeypatch.context() as scan:
             scan.setattr(fleet_scan, "capture_pane_text", lambda _t: banner)
+            scan.setattr(fleet_scan, "_sleep", lambda _s: None)  # only the recheck wait, not the logic
             first = fleet_scan.diagnose_root(
                 str(proj), now=_T0, transcript_age=100, terminal=term, fast_lane=True
             )

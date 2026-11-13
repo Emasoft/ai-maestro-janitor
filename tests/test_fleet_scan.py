@@ -1932,3 +1932,170 @@ def test_gather_fleet_gives_the_fast_lane_only_to_an_opted_in_scan_of_a_single_i
     fleet = fs.gather_fleet(now=now, fast_lane=True)
     assert [i.diagnosis for i in fleet] == ["healthy", "healthy"]
     assert spy.reads == 1, "a root shared by two instances is stale-lane only"
+
+@pytest.fixture(autouse=True)
+def _recorded_recheck_pause(monkeypatch: "pytest.MonkeyPatch") -> list[float]:
+    """The frozen-proof confirmation recheck waits FROZEN_RECHECK_S between two real pane reads.
+    Replace only that wait (the module's `_sleep` seam): no test really sleeps, and the calls are
+    recorded so a test can prove the pause happened (the logic under test is unchanged)."""
+    calls: list[float] = []
+    monkeypatch.setattr(fs, "_sleep", calls.append)
+    return calls
+
+
+class _SeqPaneSpy:
+    """Pane READ boundary returning a scripted sequence of frames (last one repeats); counts reads."""
+
+    def __init__(self, *frames: str | None) -> None:
+        self.frames = frames
+        self.reads = 0
+
+    def __call__(self, _terminal: object) -> str | None:
+        frame = self.frames[min(self.reads, len(self.frames) - 1)]
+        self.reads += 1
+        return frame
+
+
+_STALE_AGE = fs.STALE_S + 5
+# A frame caught mid-redraw: read fine, but no parsable `Retrying in` status row.
+_UNPARSABLE_FRAME = "⏺ redrawing…\n" + "─" * 40 + "\n❯ \n" + "─" * 40 + "\n"
+
+
+@pytest.mark.parametrize("lane", ["fast", "stale"])
+@pytest.mark.parametrize(
+    ("recheck", "outcome"),
+    [
+        pytest.param(_retry_frame("12s", 3), "acts", id="identical"),  # frozen beyond doubt
+        pytest.param(_retry_frame("9s", 3), "moved", id="moved"),  # a LIVE retry that coincided at both beats
+pytest.param(None, "blind", id="capture-failed"),  # cannot assess, never act
+        pytest.param(_UNPARSABLE_FRAME, "blind", id="unparsable-frame"),  # read, but no countdown to compare
+    ],
+)
+def test_frozen_proof_acts_only_if_the_recheck_countdown_is_byte_identical(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", _recorded_recheck_pause: list[float],
+    lane: str, recheck: str | None, outcome: str,
+) -> None:
+    """Two samples ~119 s apart show the same `Retrying in 12s`, which a frozen countdown AND a
+    live one that happens to coincide both produce. On EITHER lane (fast: quiet in-flight
+    transcript; stale: transcript >= STALE_S) one more capture, FROZEN_RECHECK_S later, must be
+    byte-identical before acting. A recheck that was READ with a parsed, DIFFERENT countdown must not leave the frozen
+    confirmation on disk (a carried `confirmed` would let the stale lane ESC a live retry later):
+    persisted `confirmed` reverts to the previous poll's (False), no `proof`, `first_seen`
+    restarts, `retry_in` is the recheck's. A recheck that could not be read, or has no parsable
+    countdown (a mid-redraw frame), leaves the episode
+    exactly as it stood before the beat (TRDD-RJJGXPIK)."""
+    monkeypatch.setattr(fs, "FROZEN_RECHECK_S", 7)  # a sentinel: proves the configured pause is used
+    root = _fl_root(tmp_path, monkeypatch, "recheck", _IN_FLIGHT_ROWS)
+    frozen = _retry_frame("12s", 3)
+    spy = _SeqPaneSpy(frozen, frozen, recheck)  # beat 1, beat 2 first read, beat 2 recheck
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    age = 90 if lane == "fast" else _STALE_AGE
+    first = fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=age, terminal=_FL_TERM, fast_lane=True)
+    assert first[0] != "retry_wedged" and spy.reads == 1, "first sighting: baseline only, no recheck"
+    assert _recorded_recheck_pause == []
+    before = fs._read_retry_wedge_state(str(root))
+    second = fs.diagnose_root(str(root), now=_FL_BASE + 119, transcript_age=age + 119, terminal=_FL_TERM, fast_lane=True)
+    assert spy.reads == 3, "the frozen proof triggers exactly one recheck capture"
+    assert _recorded_recheck_pause == [7], "the pause between the two captures really happens"
+    assert (second[:2] == ("retry_wedged", "esc_retry")) is (outcome == "acts")
+    persisted = fs._read_retry_wedge_state(str(root))
+    assert persisted is not None, "the episode is never cleared by the recheck"
+    if outcome == "acts":
+        assert persisted["confirmed"] is True and persisted["proof"] == "frozen-countdown"
+        assert persisted["first_seen"] == _FL_BASE
+    elif outcome == "moved":
+        assert persisted["confirmed"] is False and "proof" not in persisted
+        assert persisted["first_seen"] == _FL_BASE + 119, "a live countdown must earn a fresh 100 s"
+        assert persisted["retry_in"] == "9s", "the latest observation"
+    else:
+        assert persisted == before, "an unreadable recheck leaves the episode exactly as it stood"
+    if outcome != "acts" and lane == "fast":
+        assert second[:2] == ("healthy", None)
+
+
+@pytest.mark.parametrize("lane", ["fast", "stale"])
+@pytest.mark.parametrize("outcome", ["moved", "blind", "unparsable"])
+def test_rejected_recheck_keeps_a_genuine_attempt_advance_confirmation(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", lane: str, outcome: str
+) -> None:
+    """A rejected frozen proof must not erase what an earlier poll genuinely proved: with the
+    episode already confirmed by an attempt ADVANCE (and a resume marker), a moved recheck keeps
+    `confirmed` True, the resume marker and `proof` = attempt-advance (the state shape
+    `retry_wedge_state_update` produces), restarts `first_seen` and stores the recheck's
+    `retry_in`; an unreadable recheck leaves the seeded state exactly as it was. The stale lane
+    still acts on that attempt-advance confirmation; the fast lane (no stale transcript) never
+    acts on it (TRDD-RJJGXPIK)."""
+    root = _fl_root(tmp_path, monkeypatch, "keep-advance", _IN_FLIGHT_ROWS)
+    seed = {
+        "attempt": 3, "confirmed": True, "retry_in": "12s", "first_seen": _FL_BASE - 119,
+        "proof": "attempt-advance", "resume_sent": True, "resume_sent_at": _FL_BASE - 50,
+    }
+    fs._write_retry_wedge_state(str(root), dict(seed))
+    recheck_frame = {"moved": _retry_frame("9s", 3), "blind": None, "unparsable": _UNPARSABLE_FRAME}[outcome]
+    spy = _SeqPaneSpy(_retry_frame("12s", 3), recheck_frame)
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    age = 90 if lane == "fast" else _STALE_AGE
+    diag = fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=age, terminal=_FL_TERM, fast_lane=True)
+    assert spy.reads == 2
+    assert (diag[:2] == ("retry_wedged", "esc_retry")) is (lane == "stale")
+    persisted = fs._read_retry_wedge_state(str(root))
+    if outcome != "moved":
+        assert persisted == seed
+        return
+    assert persisted == {**seed, "retry_in": "9s", "first_seen": _FL_BASE}
+
+
+# Spelled out here (not read from fs) so removing an entry from the source tuple fails the test.
+_NON_REQUEST_PREFIXES = (
+    "[Request interrupted by user",
+    "<local-command-caveat>",
+    "<command-name>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "This session is being continued",
+)
+
+
+@pytest.mark.parametrize("prefix", _NON_REQUEST_PREFIXES)
+def test_every_non_model_request_prefix_means_the_turn_is_not_in_flight(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", prefix: str
+) -> None:
+    """Each entry of `_NOT_A_MODEL_REQUEST_PREFIXES` (interrupt marker, local slash command rows,
+    shell-escape rows, compact summary) as the newest user row means the session is idle at its
+    prompt, never in flight; the same row without the prefix (a plain prompt) is in flight."""
+    assert set(_NON_REQUEST_PREFIXES) == set(fs._NOT_A_MODEL_REQUEST_PREFIXES), "update the expected list"
+    slug = "".join(c if c.isalnum() else "-" for c in prefix)
+    idle = _fl_root(tmp_path, monkeypatch, f"prefix-{slug}", [_row(_FL_BASE, "user", f"{prefix}payload")])
+    assert fs.transcript_turn_in_flight(str(idle)) is False
+    padded = _fl_root(tmp_path, monkeypatch, f"prefix-pad-{slug}", [_row(_FL_BASE, "user", f"\n  {prefix}payload")])
+    assert fs.transcript_turn_in_flight(str(padded)) is False, "leading whitespace is ignored"
+    prompt = _fl_root(tmp_path, monkeypatch, f"prefix-ctl-{slug}", [_row(_FL_BASE, "user", f"payload {prefix}")])
+    assert fs.transcript_turn_in_flight(str(prompt)) is True, "only a LEADING prefix counts"
+
+
+
+def test_only_the_liveness_beat_opts_into_the_fast_lane() -> None:
+    """Every production `gather_fleet(...)` call (fleet_status, the cold-cache and peer-freeze
+    scans, hooks, the CLI entry) must stay stale-only, because an iTerm pane read is an Apple
+    Event; exactly one call — `task_session_liveness` in daemon.py — may pass `fast_lane` (and
+    only as `True`). Found by walking the real sources' syntax trees (TRDD-RJJGXPIK rule (a))."""
+    import ast
+
+    scripts = Path(fs.__file__).resolve().parent.parent
+    opted_in: list[str] = []
+    calls = 0
+    for src in [*scripts.glob("*.py"), *(scripts / "lib").glob("*.py")]:
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) == "gather_fleet":
+                    calls += 1
+                    for kw in node.keywords:
+                        if kw.arg == "fast_lane":
+                            assert isinstance(kw.value, ast.Constant) and kw.value.value is True
+                            opted_in.append(f"{src.name}:{fn.name}")
+    assert calls >= 4, "the walker must actually see the production callers"
+    assert sorted(set(opted_in)) == ["daemon.py:task_session_liveness"]

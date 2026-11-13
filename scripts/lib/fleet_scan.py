@@ -53,6 +53,14 @@ STALE_S = 15 * 60
 # that are merely between two appends of a healthy turn.
 FROZEN_PROBE_S = 60
 
+# TRDD-RJJGXPIK frozen-proof confirmation pause: after the state update proves a frozen countdown on
+# either lane, `diagnose_root` takes ONE more pane capture this many seconds later and acts only
+# if the `Retrying in …` text is byte-identical to the first. A live countdown changes within 1-2 s,
+# so a 3 s gap tells a frozen one from a live one; tests replace the `_sleep` seam so they never wait.
+FROZEN_RECHECK_S = 3
+# The pause itself, a module seam so a test can replace the wait without touching `time.sleep`.
+_sleep = time.sleep
+
 # A transcript advanced this recently means the session is BUSY working (continuous
 # tool-call appends) — a display nuance over the merely-alive idle-but-cron-firing
 # case. Both are "fresh" (< STALE_S) and never flagged; this just distinguishes
@@ -1533,6 +1541,43 @@ def diagnose_root(
             fast_wedge = bool(
                 new_state and new_state.get("proof") == session_liveness.PROOF_FROZEN_COUNTDOWN
             )
+            # FROZEN-PROOF CONFIRMATION (why), on EVERY lane: two samples one beat (~119 s) apart
+            # cannot tell a FROZEN countdown from a LIVE one that happens to show the same second
+            # value at both reads (a pane without `attempt N/M`, or a capped backoff whose period
+            # divides the beat gap) — a false positive would ESC a live retry and type `resume`.
+            # A live countdown changes within 1-2 s, so one more capture FROZEN_RECHECK_S later
+            # must be byte-identical. `retry_wedge_state_update` has already set confirmed=True and
+            # carries `confirmed` across polls, so a recheck that WAS read and moved must not leave
+            # that on disk (the stale lane would ESC a live retry later): the episode is persisted
+            # with `confirmed` reverted to what the PREVIOUS poll had proven (a genuine
+            # attempt-advance confirmation survives), `proof` only if still confirmed, and
+            # `first_seen` restarted so a live countdown must earn a fresh 100 s. A recheck that
+            # could not be read leaves the episode exactly as it was before this beat.
+            if fast_wedge and new_state is not None:
+                _sleep(FROZEN_RECHECK_S)
+                recheck = capture_pane_text(terminal)
+                recheck_in = None if recheck is None else session_liveness.retry_wedge_retry_in(recheck)
+                if recheck_in is None:
+                    # CANNOT ASSESS: a declined/failed read, or a frame with no parsable
+                    # `Retrying in` status row (e.g. caught mid-redraw), the same contract as the
+                    # first-read branch above: the episode stands exactly as it was before this
+                    # beat. `prev` cannot be None here — a frozen proof needs prev's retry_in and
+                    # first_seen.
+                    fast_wedge = False
+                    retry_wedged = bool(prev and prev.get("confirmed"))
+                    new_state = prev
+                elif recheck_in != session_liveness.retry_wedge_retry_in(pane_text):
+                    # A recheck with a parsed, DIFFERENT countdown: a live retry. Revert the
+                    # confirmation this poll just added, restart the frozen clock, keep the state
+                    # shape `retry_wedge_state_update` produces (proof only when still confirmed).
+                    fast_wedge = False
+                    retry_wedged = bool(prev and prev.get("confirmed"))
+                    new_state = {k: v for k, v in new_state.items() if k != "proof"}
+                    new_state["confirmed"] = retry_wedged
+                    new_state["first_seen"] = now
+                    new_state["retry_in"] = recheck_in
+                    if retry_wedged:
+                        new_state["proof"] = session_liveness.PROOF_ATTEMPT_ADVANCE
             _write_retry_wedge_state(root, new_state)
     else:
         _write_retry_wedge_state(root, None)
