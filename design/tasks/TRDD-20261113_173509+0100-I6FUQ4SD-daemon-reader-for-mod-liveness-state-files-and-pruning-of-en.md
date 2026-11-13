@@ -1,10 +1,10 @@
 ---
 trdd-id: I6FUQ4SD
 title: Daemon reader for mod-liveness state files and pruning of ended session files
-column: backburner
+column: blocked
 status: tasked
 created: 2026-11-13T17:35:09+0100
-updated: 2026-11-13T17:35:09+0100
+updated: 2026-11-13T17:52:33+0100
 current-owner: user
 created-by: user
 task-type: feature
@@ -17,6 +17,11 @@ mandated-by: none
 approved: true
 approval-judge: user
 approval-datetime: 2026-11-13T17:35:09+0100
+blocked-by: [2V7OAUPE]
+pre-block-column: backburner
+unblock-when: [trdd:2V7OAUPE]
+blocker-probe: trddgrep --porcelain show 2V7OAUPE | cut -f3
+blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed|live_auditing)$
 ---
 
 # Daemon reader for mod-liveness state files and pruning of ended session files
@@ -26,3 +31,9 @@ Derived from TRDD-R9NLNV3W. The liveness hooks module writes <project-root>/.jan
 ## Approval log
 
 - 2026-11-13T17:35:09+0100 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-13T17:39:20+0100 — column → blocked by the orchestrator session, applying a review finding (the block was in prose only); the user did not order this move.
+
+## Links
+
+Related: TRDD-R9NLNV3W (the liveness module, source of this card); TRDD-RJJGXPIK (ESC+resume recovery — the staleness rule here concerns a stale alive_at only, not the frozen API-error countdown, which RJJGXPIK is designed to handle by ESC then resume per the owner directive (in progress, uncommitted as of 2026-11-13)).
+Note: unblock-when tracks a proxy, namely 2V7OAUPE reaching a terminal column. The real precondition is that the hooks.json modules entry registers the liveness module. If 2V7OAUPE closes for the shield only, re-block this card by hand.
