@@ -185,11 +185,23 @@ _WEDGE_DETAIL_RE = re.compile(
 # read as one through this route. (?<!\d) stops a match starting mid-number (`10s` must not be
 # re-read as `0s`); (?!0+\s*s) rejects an all-zero value.
 _SECOND_SCALE_RE = re.compile(r"(?<!\d)(?!0+\s*s)\d+\s*s", re.IGNORECASE)
-# 120 s (TRDD-RJJGXPIK): the owner's words are "more than one or 2 minutes". Only a SECOND-scale
-# countdown reaches this bar (see _SECOND_SCALE_RE), and one that stays byte-identical for 120 s
+# 100 s (TRDD-RJJGXPIK): the owner's words are "more than one or 2 minutes". Only a SECOND-scale
+# countdown reaches this bar (see _SECOND_SCALE_RE), and one that stays byte-identical for 100 s
 # while the clock moves is frozen beyond doubt — a ticking countdown changes every second, so the
-# bar is a margin against the heartbeat's own poll jitter, not against a slow refresh.
-_FROZEN_COUNTDOWN_MIN_S = 120
+# bar is a margin against the heartbeat's own poll jitter, not against a slow refresh. It is 100,
+# not 120: the liveness beat is NOMINALLY 120 s and whole-second clocks make the real gap between
+# two consecutive beats 119 s, which missed a 120 s bar and forced a third read (a full extra
+# beat of latency) for no gain in certainty.
+# The guard for a LEGITIMATE in-flight retry is this byte-identical countdown itself, not the
+# transcript: Claude Code retries WITHOUT writing the transcript, so a quiet transcript proves
+# nothing, whereas a live retry's countdown text changes within seconds.
+_FROZEN_COUNTDOWN_MIN_S = 100
+# Which proof confirmed a wedge, reported in the persisted episode state (`proof`) by
+# `retry_wedge_state_update` (TRDD-RJJGXPIK): the frozen countdown is the only proof strong enough
+# to act on before the stale-transcript gate; an attempt advance (or a carried confirmation) is
+# not, because a retry that is progressing must not be interrupted early.
+PROOF_FROZEN_COUNTDOWN = "frozen-countdown"
+PROOF_ATTEMPT_ADVANCE = "attempt-advance"
 # How long a resume_sent marker stays live (TRDD-RJJGXPIK). It must OUTLIVE the per-instance
 # recovery cooldown (fleet_recovery.COOLDOWN_S = 900, stamped by every fire AND every decline):
 # the next rung beat on the same instance cannot come sooner than that, so a shorter TTL
@@ -221,7 +233,7 @@ def retry_wedge_retry_in(text: str) -> str | None:
     """The `Retrying in <duration>` text from a pane frame's STATUS block, or None. PURE.
 
     The countdown text is the frozen-countdown probe (TRDD-RJJGXPIK): a second-scale
-    countdown that is byte-identical across two polls >=120s apart is stuck, not waiting.
+    countdown that is byte-identical across two polls >=100s apart is stuck, not waiting.
     """
     status = status_row_text_at_tail(text)
     if status is None:
@@ -261,9 +273,14 @@ def retry_wedge_state_update(
 
     FROZEN COUNTDOWN (TRDD-RJJGXPIK): a tie that never advances is exactly the shape of a
     retry watchdog stuck while re-printing the SAME countdown, so a second-scale
-    ``current_retry_in`` (``30s``, never ``0s``) held byte-identical for >=120s also confirms
+    ``current_retry_in`` (``30s``, never ``0s``) held byte-identical for >=100s also confirms
     the wedge. ``now`` is the poll epoch; None skips this path entirely (the caller has no
     timeline to compare across).
+
+    PROOF (TRDD-RJJGXPIK): a confirmed state carries ``proof`` — `PROOF_FROZEN_COUNTDOWN` when
+    THIS poll found the countdown frozen >=100s, otherwise `PROOF_ATTEMPT_ADVANCE` (an attempt
+    advance, or a confirmation carried over a tie). Only the first may be acted on before the
+    stale-transcript gate; see `fast_wedge` in `diagnose_instance`.
 
     RESUME MARKER (TRDD-RJJGXPIK): the daemon records ``resume_sent``/``resume_sent_at`` in
     this same state once it has typed ``resume`` for the episode. The marker is CARRIED across
@@ -315,32 +332,40 @@ def retry_wedge_state_update(
                 "confirmed": True,
                 "retry_in": retry_in,
                 "first_seen": now,
+                "proof": PROOF_ATTEMPT_ADVANCE,
                 **resume_carry,
             },
             True,
         )
     confirmed = prev_confirmed
-    # A countdown changes every second, so byte-identical retry_in text across polls >=120s
+    # A countdown changes every second, so byte-identical retry_in text across polls >=100s
     # apart proves the countdown is frozen — the retry watchdog is stuck counting but not
     # advancing. Only applies to second-level granularity; hour-scale countdowns
     # ("Retrying in 5h") are legitimate long waits. TRDD-RJJGXPIK.
+    frozen_now = False
     if current_retry_in is not None and now is not None:
         if _SECOND_SCALE_RE.search(current_retry_in):
             if prev_retry_in == current_retry_in and first_seen is not None:
                 if now - first_seen >= _FROZEN_COUNTDOWN_MIN_S:
                     confirmed = True
+                    frozen_now = True
             else:
                 # first poll of this exact countdown text — start (or restart) the clock
                 first_seen = now
         else:
             # no second-level granularity: this path can never prove a freeze
             first_seen = None
+    # `proof` is recomputed on EVERY poll, never carried: the fast lane in `diagnose_root` acts
+    # on a frozen countdown only while THIS poll still sees it frozen (a countdown that ticks
+    # again falls back to the carried confirmation, which needs the stale-transcript gate).
+    proof = PROOF_FROZEN_COUNTDOWN if frozen_now else (PROOF_ATTEMPT_ADVANCE if confirmed else None)
     return (
         {
             "attempt": current_attempt,
             "confirmed": confirmed,
             "retry_in": retry_in,
             "first_seen": first_seen,
+            **({"proof": proof} if proof is not None else {}),
             **resume_carry,
         },
         confirmed,
@@ -546,6 +571,7 @@ def diagnose_instance(
     version_stale: bool,
     server_owned: bool = False,
     retry_wedged: bool = False,
+    fast_wedge: bool = False,
 ) -> str:
     """Classify ONE armed claude instance's janitor health from pre-gathered
     boolean facts (the daemon computes each from the instance's state-dir +
@@ -581,7 +607,13 @@ def diagnose_instance(
         return "server_owned"
     if not pane_alive:
         return "dead"              # gone — keystroke recovery is impossible
-    if not transcript_stale:
+    # FAST LANE (TRDD-RJJGXPIK, owner: ESC once the countdown has been frozen 1-2 minutes, not
+    # after the 15-minute transcript gate): a confirmed FROZEN-COUNTDOWN wedge is diagnosed even
+    # while the transcript is not stale. It is consulted ONLY here, never folded into
+    # `transcript_stale` — forcing that flag True would also route the instance into frozen /
+    # version_mismatch / cron_dead, i.e. rearm / reload, for a session whose transcript is
+    # merely quiet. `fast_wedge` alone is inert: it still needs `retry_wedged`.
+    if not transcript_stale and not (retry_wedged and fast_wedge):
         return "healthy"           # transcript advancing = working OR heartbeat-firing; never touch
     if retry_wedged:
         # Ranked ABOVE frozen (TRDD-WKTD5JTC design §2): a pane can show BOTH the wedge

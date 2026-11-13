@@ -169,11 +169,17 @@ def test_retry_wedge_state_advance_decrease_tie_cleared() -> None:
     assert wedged1 is False
     # advance — confirmed wedged
     st2, wedged2 = sl.retry_wedge_state_update(prev=st1, current_attempt=6)
-    assert st2 == {"attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None}
+    assert st2 == {
+        "attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None,
+        "proof": "attempt-advance",
+    }
     assert wedged2 is True
     # tie on a confirmed episode — stays wedged (backoff exceeded the beat)
     st3, wedged3 = sl.retry_wedge_state_update(prev=st2, current_attempt=6)
-    assert st3 == {"attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None}
+    assert st3 == {
+        "attempt": 6, "confirmed": True, "retry_in": None, "first_seen": None,
+        "proof": "attempt-advance",
+    }
     assert wedged3 is True
     # decrease — a NEW episode starts, unconfirmed again (never carries the old confirm)
     st4, wedged4 = sl.retry_wedge_state_update(prev=st3, current_attempt=1)
@@ -221,7 +227,7 @@ def _wedge_frame(retry_in: str, attempt: int = 1) -> str:
 
 
 def test_frozen_countdown_confirms_wedge() -> None:
-    """Two polls >=120s apart with BYTE-IDENTICAL second-scale retry_in text and no attempt
+    """Two polls >=100s apart with BYTE-IDENTICAL second-scale retry_in text and no attempt
     advance prove the countdown is frozen, not waiting (TRDD-RJJGXPIK)."""
     st1, wedged1 = sl.retry_wedge_state_update(
         prev=None, current_attempt=1, current_retry_in="30s", now=1000
@@ -232,7 +238,10 @@ def test_frozen_countdown_confirms_wedge() -> None:
         prev=st1, current_attempt=1, current_retry_in="30s", now=1120
     )
     assert wedged2 is True
-    assert st2 == {"attempt": 1, "confirmed": True, "retry_in": "30s", "first_seen": 1000}
+    assert st2 == {
+        "attempt": 1, "confirmed": True, "retry_in": "30s", "first_seen": 1000,
+        "proof": "frozen-countdown",
+    }
 
 
 def test_frozen_countdown_below_threshold_no_confirm() -> None:
@@ -282,21 +291,76 @@ def test_frozen_countdown_different_retry_in_resets() -> None:
 
 
 
-def test_frozen_countdown_boundary_119_not_120_confirmed() -> None:
-    """The confirmation bar is exactly 120 s (TRDD-RJJGXPIK): 119 s of identical text is not
-    enough, 120 s is. The owner's words are "more than one or 2 minutes", and only a
-    second-scale countdown reaches this bar, so 120 s byte-identical is unambiguously frozen."""
+def test_frozen_countdown_boundary_99_not_100_confirmed() -> None:
+    """The confirmation bar is exactly 100 s (TRDD-RJJGXPIK): 99 s of identical text is not
+    enough, 100 s is. The owner's words are "more than one or 2 minutes", and only a
+    second-scale countdown reaches this bar, so 100 s byte-identical is unambiguously frozen."""
     st1, _ = sl.retry_wedge_state_update(
         prev=None, current_attempt=1, current_retry_in="30s", now=1000
     )
-    _, wedged119 = sl.retry_wedge_state_update(
+    _, wedged99 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1099
+    )
+    _, wedged100 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1100
+    )
+    assert wedged99 is False
+    assert wedged100 is True
+
+
+def test_frozen_countdown_confirms_on_a_119s_beat_gap() -> None:
+    """The liveness beat is nominally 120 s and whole-second clocks make the real gap 119 s;
+    that gap must confirm on the SECOND read (a 120 s bar needed a third, one beat later)."""
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="30s", now=1000
+    )
+    st2, wedged2 = sl.retry_wedge_state_update(
         prev=st1, current_attempt=1, current_retry_in="30s", now=1119
     )
-    _, wedged120 = sl.retry_wedge_state_update(
-        prev=st1, current_attempt=1, current_retry_in="30s", now=1120
-    )
-    assert wedged119 is False
-    assert wedged120 is True
+    assert wedged2 is True
+    assert st2 is not None and st2["proof"] == sl.PROOF_FROZEN_COUNTDOWN
+
+
+def test_proof_says_which_evidence_confirmed_the_wedge() -> None:
+    """TRDD-RJJGXPIK: a confirmed state names its proof. An attempt advance (and a confirmation
+    merely carried over a tie) is `attempt-advance`; only a countdown frozen THIS poll is
+    `frozen-countdown`; an unconfirmed state carries no proof at all."""
+    st1, _ = sl.retry_wedge_state_update(prev=None, current_attempt=1, current_retry_in="30s", now=1000)
+    assert st1 is not None and "proof" not in st1
+    adv, _ = sl.retry_wedge_state_update(prev=st1, current_attempt=2, current_retry_in="25s", now=1010)
+    assert adv is not None and adv["proof"] == sl.PROOF_ATTEMPT_ADVANCE
+    # a carried confirmation over a tie whose countdown TICKED: still attempt-advance
+    tie, wedged = sl.retry_wedge_state_update(prev=adv, current_attempt=2, current_retry_in="20s", now=1020)
+    assert wedged is True and tie is not None and tie["proof"] == sl.PROOF_ATTEMPT_ADVANCE
+    # the same confirmed episode, countdown now byte-identical for >=100 s: frozen-countdown
+    tie2, _ = sl.retry_wedge_state_update(prev=tie, current_attempt=2, current_retry_in="20s", now=1030)
+    assert tie2 is not None and tie2["proof"] == sl.PROOF_ATTEMPT_ADVANCE  # clock just restarted
+    tie3, _ = sl.retry_wedge_state_update(prev=tie2, current_attempt=2, current_retry_in="20s", now=1130)
+    assert tie3 is not None and tie3["proof"] == sl.PROOF_FROZEN_COUNTDOWN
+    # the countdown ticks again: the frozen proof is not carried
+    tie4, _ = sl.retry_wedge_state_update(prev=tie3, current_attempt=2, current_retry_in="15s", now=1140)
+    assert tie4 is not None and tie4["proof"] == sl.PROOF_ATTEMPT_ADVANCE
+
+
+def test_fast_wedge_acts_only_on_a_confirmed_wedge_and_never_forces_staleness() -> None:
+    """TRDD-RJJGXPIK: `fast_wedge` lets a confirmed frozen-countdown wedge win while the
+    transcript is NOT stale — but it is consulted only on the retry_wedged branch. Alone it
+    does nothing, and it never reroutes a non-stale instance into frozen / version_mismatch /
+    cron_dead (which a forced `transcript_stale=True` would)."""
+    base = dict(deliberately_unarmed=False, pane_alive=True, rate_limited=True, version_stale=True)
+    assert sl.diagnose_instance(**base, transcript_stale=False, retry_wedged=True, fast_wedge=True) == "retry_wedged"
+    assert sl.diagnose_instance(**base, transcript_stale=False, retry_wedged=True, fast_wedge=False) == "healthy"
+    assert sl.diagnose_instance(**base, transcript_stale=False, retry_wedged=False, fast_wedge=True) == "healthy"
+    # stale transcript: the old routing is untouched by the new flag
+    assert sl.diagnose_instance(**base, transcript_stale=True, retry_wedged=True, fast_wedge=False) == "retry_wedged"
+    assert sl.diagnose_instance(**base, transcript_stale=True, retry_wedged=False, fast_wedge=True) == "frozen"
+    # the opt-outs still outrank it
+    assert sl.diagnose_instance(
+        **{**base, "deliberately_unarmed": True}, transcript_stale=False, retry_wedged=True, fast_wedge=True
+    ) == "unarmed"
+    assert sl.diagnose_instance(
+        **base, transcript_stale=False, retry_wedged=True, fast_wedge=True, server_owned=True
+    ) == "server_owned"
 
 
 def test_frozen_countdown_zero_seconds_never_confirms() -> None:

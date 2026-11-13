@@ -1873,7 +1873,12 @@ def task_session_liveness(fleet: list | None = None) -> None:
     sweep_s = 3600 * _env_interval("CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS", 24)
     if fleet is None:
         try:
-            fleet = fleet_scan.gather_fleet(now=now, sweep_stale_rate_limit_s=sweep_s)
+            # TRDD-RJJGXPIK: this beat alone opts into the frozen-countdown fast lane (pane reads
+            # of quiet in-flight sessions); every other gather_fleet caller stays stale-only, since
+            # an iTerm pane read is an Apple Event that a status view or hook must never trigger.
+            fleet = fleet_scan.gather_fleet(
+                now=now, sweep_stale_rate_limit_s=sweep_s, fast_lane=True
+            )
         except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
             state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
             return
@@ -2803,8 +2808,9 @@ def _rotation_esc_pass(fleet: list, now: int, *, fire: bool) -> None:
     - The retry-watchdog wedge (`Retrying in … attempt N/M`) keeps the turn alive, so nothing
       writes `rate-limited.flag` and `_resume_wake_pass` cannot see it; and a typed command
       into that pane only buffers (TRDD-P7WU40G9). ESC is the one actuation that works.
-    - The `retry_wedged` diagnosis needs a stale transcript (≥ 15 min) AND an attempt number
-      that ADVANCES across polls. A weekly-window wall reads `Retrying in 5h … attempt 1/5`
+    - The `retry_wedged` diagnosis needs an attempt number that ADVANCES across polls AND a stale
+      transcript (≥ 15 min) — or, via the fast lane (TRDD-RJJGXPIK), a second-scale countdown
+      byte-identical for ≥ 100 s on a transcript quiet ≥ 60 s mid-turn. A weekly-window wall reads `Retrying in 5h … attempt 1/5`
       for five hours: measured 2026-09-02, the daemon had produced 0 `retry_wedged`
       diagnoses in its whole history. So this pass reads the pane NOW and keys on the
       signature at the frame's tail instead.

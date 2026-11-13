@@ -67,7 +67,7 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, enabled: str = "1", fire
     monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
     monkeypatch.setattr(
         daemon.fleet_scan, "gather_fleet",
-        lambda *, now, sweep_stale_rate_limit_s=None: fleet,
+        lambda *, now, sweep_stale_rate_limit_s=None, fast_lane=False: fleet,
     )
     return recorded
 

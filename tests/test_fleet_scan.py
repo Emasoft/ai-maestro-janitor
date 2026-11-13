@@ -1653,3 +1653,282 @@ def test_transcript_activity_since_sees_only_user_or_assistant_rows_after_the_in
     os.utime(path, (since - 1, since - 1))
     assert fs.transcript_activity_since(str(root), since) is False
     assert fs.transcript_activity_since(str(tmp_path / "no-such-project"), since) is False
+
+
+
+# --- TRDD-RJJGXPIK fast lane: ESC a frozen API-error countdown after ~2 beats, not at STALE_S ---
+
+_FL_BASE = 1_790_000_000
+_FL_TERM = {"tmux_pane": "%5"}
+
+
+def _retry_frame(retry_in: str, attempt: int) -> str:
+    """A real-shaped Claude Code pane frame: the status row sits right above the input box."""
+    border = "─" * 40
+    return (
+        "⏺ earlier output\n"
+        f"✻ Rate limited · Retrying in {retry_in} · attempt {attempt}/300\n"
+        f"{border}\n❯ \n{border}\n"
+    )
+
+
+_IN_FLIGHT_ROWS = [
+    _row(_FL_BASE - 400, "user", "say hi"),
+]
+_IDLE_ROWS = [  # a COMPLETED turn: the session sits at its prompt (real 2.1.323 row types)
+    _row(_FL_BASE - 400, "user", "say hi"),
+    _row(_FL_BASE - 397, "assistant", [{"type": "text", "text": "hi"}]),
+    _row(_FL_BASE - 396, "system"),
+    _row(_FL_BASE - 396, "api-request"),
+]
+
+
+class _PaneSpy:
+    """Stands in for the pane READ only (the I/O boundary): returns `text`, counts the reads."""
+
+    def __init__(self, text: str | None) -> None:
+        self.text = text
+        self.reads = 0
+
+    def __call__(self, _terminal: object) -> str | None:
+        self.reads += 1
+        return self.text
+
+
+def _fl_root(tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", tag: str, rows: list[str]) -> Path:
+    root, tdir = _activity_root(tmp_path, monkeypatch, tag)
+    (tdir / "s1.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return root
+
+
+def _fl_state_file(root: Path) -> Path:
+    return root / ".janitor" / "state" / fs._RETRY_WEDGE_STATE_FILE
+
+
+def test_turn_in_flight_reads_the_newest_user_or_assistant_row(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A turn is in flight iff the newest user/assistant row is a user prompt or tool_result.
+    Trailing bookkeeping rows, a completed assistant turn, a pending tool_use, Claude Code's own
+    interrupt marker, a torn last line and a missing transcript are not (TRDD-RJJGXPIK)."""
+    t = _FL_BASE
+    result = _row(t, "user", [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}])
+    bookkeeping = [_row(t + 1, "attachment"), _row(t + 1, "api-request"), _row(t + 1, "queue-operation")]
+    cases = [
+        ("prompt", [_row(t, "user", "say hi")], True),
+        ("tool_result", [_row(t - 1, "assistant", [{"type": "tool_use", "id": "t1"}]), result], True),
+        ("prompt+bookkeeping", [_row(t, "user", "say hi"), *bookkeeping], True),
+        ("end_turn", [*_IDLE_ROWS], False),
+        ("pending tool_use", [_row(t, "user", "x"), _row(t, "assistant", [{"type": "tool_use", "id": "t1"}])], False),
+        ("interrupt", [_row(t, "user", "x"), _row(t + 1, "user", "[Request interrupted by user]")], False),
+        ("no message rows", [_row(t, "attachment")], False),
+        # Shapes found as the LAST user row of real 2.1.322/2.1.323 sessions idle for over an hour:
+        ("interrupt for tool use", [_row(t, "user", [{"type": "text", "text": "[Request interrupted by user for tool use]"}])], False),
+        ("/model stdout", [_row(t, "user", "<local-command-caveat>Caveat: the messages below…</local-command-caveat>"),
+                           _row(t, "user", "<command-name>/model</command-name>\n<command-message>model</command-message>"),
+                           _row(t, "user", "<local-command-stdout>Set model to Fable 5</local-command-stdout>")], False),
+        ("/clear bare command", [_row(t, "user", "<command-name>/clear</command-name>")], False),
+        ("heartbeat prompt", [_row(t, "user", "[janitor-heartbeat]\n/path/stub.py")], True),
+        ("! shell escape", [_row(t, "user", "<bash-input> afplay /System/Library/Sounds/Glass.aiff</bash-input>"),
+                            _row(t, "user", "<bash-stdout>(Bash completed with no output)</bash-stdout>")], False),
+        ("bash input only", [_row(t, "user", "<bash-input> sleep 1</bash-input>")], False),
+        # The real 529-fixture run on 2.1.323: retries append only `api-request` rows after the user row.
+        ("529 retries", [_row(t, "user", "say hi"), _row(t, "attachment"), _row(t, "api-request-shape"),
+                         _row(t, "api-request-blob"), _row(t, "api-request"), _row(t + 1, "api-request"),
+                         _row(t + 3, "api-request")], True),
+        # A NON-retryable error ends the turn: assistant isApiErrorMessage row + turn_duration.
+        ("final api error", [_row(t, "user", "say hi"), _row(t, "api-request"),
+                             _row(t + 5, "assistant", [{"type": "text", "text": "API Error: 400"}]),
+                             _row(t + 5, "system")], False),
+        ("/compact summary", [_row(t - 1, "system"),
+                              _row(t, "user", "This session is being continued from a previous conversation that ran out of context.")], False),
+    ]
+    for tag, rows, expected in cases:
+        slug = "".join(c if c.isalnum() else "-" for c in tag)
+        root = _fl_root(tmp_path, monkeypatch, f"inflight-{slug}", rows)
+        assert fs.transcript_turn_in_flight(str(root)) is expected, tag
+    torn = _fl_root(tmp_path, monkeypatch, "inflight-torn", [_row(t, "user", "x")])
+    with (next((tmp_path / "inflight-torn" / ".claude" / "projects").iterdir()) / "s1.jsonl").open("a") as fh:
+        fh.write('{"type": "assist')
+    assert fs.transcript_turn_in_flight(str(torn)) is True  # the torn line proves nothing
+    assert fs.transcript_turn_in_flight(str(tmp_path / "no-such-project")) is False
+
+
+@pytest.mark.parametrize(("gap", "fires_on_second_beat"), [(100, True), (119, True), (120, True), (99, False)])
+def test_fast_lane_fires_on_a_frozen_countdown_at_the_real_beat_cadence(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", gap: int, fires_on_second_beat: bool
+) -> None:
+    """The owner's requirement: ESC a frozen countdown a couple of minutes after it freezes, NOT
+    after the 15-minute STALE_S gate. Two real beats `gap` seconds apart (no faked 1000 s jump;
+    the transcript age stays far below STALE_S) read the byte-identical `Retrying in 12s`:
+    >=100 s apart confirms on the second beat — 119 s included, the real 120 s beat's
+    whole-second jitter — while 99 s needs one more beat."""
+    root = _fl_root(tmp_path, monkeypatch, "fast", _IN_FLIGHT_ROWS)
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    age = 90
+    assert age < fs.STALE_S
+    first = fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=age, terminal=_FL_TERM, fast_lane=True)
+    assert first[:2] == ("healthy", None), "first sighting is only a baseline"
+    second = fs.diagnose_root(str(root), now=_FL_BASE + gap, transcript_age=age + gap, terminal=_FL_TERM, fast_lane=True)
+    assert (second[:2] == ("retry_wedged", "esc_retry")) is fires_on_second_beat
+    if not fires_on_second_beat:
+        third = fs.diagnose_root(str(root), now=_FL_BASE + 2 * gap, transcript_age=age + 2 * gap, terminal=_FL_TERM, fast_lane=True)
+        assert third[:2] == ("retry_wedged", "esc_retry")
+
+
+def test_fast_lane_never_acts_on_an_attempt_advance_alone(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A retry that is PROGRESSING (attempt advances, countdown ticks) must not be ESCed early:
+    the attempt-advance proof still needs the stale-transcript gate. Control: the same episode
+    DOES diagnose retry_wedged once the transcript is stale."""
+    root = _fl_root(tmp_path, monkeypatch, "advance", _IN_FLIGHT_ROWS)
+    spy = _PaneSpy(None)
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    for k, attempt in enumerate((3, 4, 5, 6)):
+        spy.text = _retry_frame(f"{30 - 5 * k}s", attempt)
+        diag = fs.diagnose_root(str(root), now=_FL_BASE + 120 * k, transcript_age=90 + 120 * k, terminal=_FL_TERM, fast_lane=True)
+        assert diag[:2] == ("healthy", None), k
+    assert spy.reads == 4
+    spy.text = _retry_frame("5s", 7)
+    stale = fs.diagnose_root(str(root), now=_FL_BASE + 700, transcript_age=fs.STALE_S + 5, terminal=_FL_TERM, fast_lane=True)
+    assert stale[:2] == ("retry_wedged", "esc_retry")
+
+
+def test_stale_banner_on_an_idle_session_is_never_read_or_esced(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A session that RECOVERED and sits idle at its prompt can still show its old
+    `Retrying in 12s · attempt 3/10` banner, byte-identical on every read. Its transcript ends
+    on a completed assistant turn, so it is not in flight: across every beat for > 5 minutes the
+    pane is never read and the diagnosis stays healthy."""
+    root = _fl_root(tmp_path, monkeypatch, "stale-banner", _IDLE_ROWS)
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    for k in range(5):
+        diag = fs.diagnose_root(str(root), now=_FL_BASE + 120 * k, transcript_age=400 + 120 * k, terminal=_FL_TERM, fast_lane=True)
+        assert diag[:2] == ("healthy", None), k
+    assert spy.reads == 0
+    assert not _fl_state_file(root).exists()
+
+
+def test_quiet_healthy_session_with_an_old_episode_file_is_never_actuated(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """An episode file left over from an earlier wedge (confirmed, frozen proof) must not turn a
+    healthy quiet session into rearm / reload / esc: an idle session is not read and the file is
+    wiped; an in-flight session whose pane shows no retry banner (the model is just thinking) is
+    read once, diagnosed healthy, and the file is wiped too."""
+    old = {"attempt": 3, "confirmed": True, "retry_in": "12s", "first_seen": _FL_BASE - 5000,
+           "proof": "frozen-countdown"}
+    idle = _fl_root(tmp_path, monkeypatch, "old-idle", _IDLE_ROWS)
+    fs._write_retry_wedge_state(str(idle), old)
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    assert fs.diagnose_root(str(idle), now=_FL_BASE, transcript_age=400, terminal=_FL_TERM, fast_lane=True)[:2] == ("healthy", None)
+    assert spy.reads == 0 and not _fl_state_file(idle).exists()
+
+    busy = _fl_root(tmp_path, monkeypatch, "old-busy", _IN_FLIGHT_ROWS)
+    fs._write_retry_wedge_state(str(busy), old)
+    spy.text = "⏺ working\n✻ Thinking… (95s)\n" + "─" * 40 + "\n❯ \n" + "─" * 40 + "\n"
+    assert fs.diagnose_root(str(busy), now=_FL_BASE, transcript_age=400, terminal=_FL_TERM, fast_lane=True)[:2] == ("healthy", None)
+    assert spy.reads == 1 and not _fl_state_file(busy).exists()
+
+
+def test_advancing_transcript_blocks_the_fast_lane(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A transcript that advanced within FROZEN_PROBE_S means the turn is making progress: the
+    pane is not read, a seeded confirmed episode is wiped, and the diagnosis is healthy — the
+    boundary is exact (59 s: no read, 60 s: read)."""
+    root = _fl_root(tmp_path, monkeypatch, "advancing", _IN_FLIGHT_ROWS)
+    fs._write_retry_wedge_state(str(root), {"attempt": 3, "confirmed": True, "retry_in": "12s",
+                                            "first_seen": _FL_BASE - 500, "proof": "frozen-countdown"})
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    assert fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=fs.FROZEN_PROBE_S - 1, terminal=_FL_TERM, fast_lane=True)[:2] == ("healthy", None)
+    assert spy.reads == 0 and not _fl_state_file(root).exists()
+    fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=fs.FROZEN_PROBE_S, terminal=_FL_TERM, fast_lane=True)
+    assert spy.reads == 1
+
+
+def test_fast_lane_never_reroutes_into_frozen_cron_dead_or_version_and_skips_opt_outs(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The fast lane must not leak into the stale-only diagnoses: with a rate-limited.flag
+    present and an UNCONFIRMED wedge read, a quiet in-flight session stays healthy (not frozen /
+    cron_dead -> rearm). An unreadable pane (None) is "cannot assess": even a persisted confirmed
+    frozen episode does not fire. Unarmed and server_owned instances are never read."""
+    root = _fl_root(tmp_path, monkeypatch, "noleak", _IN_FLIGHT_ROWS)
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "rate-limited.flag").write_text("", encoding="utf-8")
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    assert fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=200, terminal=_FL_TERM, fast_lane=True)[:2] == ("healthy", None)
+
+    fs._write_retry_wedge_state(str(root), {"attempt": 3, "confirmed": True, "retry_in": "12s",
+                                            "first_seen": _FL_BASE - 500, "proof": "frozen-countdown"})
+    spy.text = None
+    assert fs.diagnose_root(str(root), now=_FL_BASE + 120, transcript_age=320, terminal=_FL_TERM, fast_lane=True)[:2] == ("healthy", None)
+    assert _fl_state_file(root).exists(), "a blind read leaves the episode untouched"
+
+    reads = spy.reads
+    (sdir / "disarmed.flag").write_text("", encoding="utf-8")
+    assert fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=200, terminal=_FL_TERM, fast_lane=True)[:2] == ("unarmed", None)
+    (sdir / "disarmed.flag").unlink()
+    assert fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=200, terminal=_FL_TERM, fast_lane=True, server_owned=True)[:2] == ("server_owned", None)
+    assert spy.reads == reads
+
+
+
+def test_fast_lane_is_off_unless_the_caller_opts_in(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-RJJGXPIK rule (a): `diagnose_root` defaults to stale-only pane reads. A quiet
+    in-flight session (the fast-lane shape) is NOT read unless `fast_lane=True`, so fleet_status,
+    cold-cache and the peer-freeze detector never trigger a pane read (an iTerm Apple Event)."""
+    root = _fl_root(tmp_path, monkeypatch, "optin", _IN_FLIGHT_ROWS)
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    assert fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=200, terminal=_FL_TERM)[:2] == ("healthy", None)
+    assert spy.reads == 0
+    fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=200, terminal=_FL_TERM, fast_lane=True)
+    assert spy.reads == 1
+
+
+def test_gather_fleet_gives_the_fast_lane_only_to_an_opted_in_scan_of_a_single_instance_root(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The REAL `gather_fleet` loop, with only the process-table / tmux / lsof / pane-read
+    boundary replaced. Rule (a): `fast_lane` defaults to False, so a default scan reads no pane.
+    Rule (b): the transcript is per root but the pane per instance — with TWO live claude
+    instances in one root (idle A with an old banner, in-flight B) the fast lane is withheld for
+    both, so A is never read; a root with ONE instance, opted in, is read once."""
+    now = 1_790_000_000
+    root, tdir = _activity_root(tmp_path, monkeypatch, "gather")
+    (root / ".janitor" / "state").mkdir(parents=True)
+    path = tdir / "s1.jsonl"
+    path.write_text(_row(now - 200, "user", "say hi") + "\n", encoding="utf-8")
+    os.utime(path, (now - 200, now - 200))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    ps = {"text": "  101 ttys001 claude\n"}
+    tmux_out = "/dev/ttys001 %5\n/dev/ttys002 %6\n"
+    monkeypatch.setattr(
+        fs, "_run", lambda cmd, **_k: ps["text"] if cmd[0] == "ps" else (tmux_out if cmd[0] == "tmux" else "")
+    )
+    monkeypatch.setattr(fs, "_cwd_of", lambda _pid: str(root))
+    monkeypatch.setattr(fs, "_aimaestro_agents", lambda *_a, **_k: (None, [], False))
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+
+    assert [i.diagnosis for i in fs.gather_fleet(now=now)] == ["healthy"]
+    assert spy.reads == 0, "a default scan is stale-only"
+    assert [i.diagnosis for i in fs.gather_fleet(now=now, fast_lane=True)] == ["healthy"]
+    assert spy.reads == 1, "one instance in the root, opted in: read once"
+
+    ps["text"] = "  101 ttys001 claude\n  102 ttys002 claude\n"
+    fleet = fs.gather_fleet(now=now, fast_lane=True)
+    assert [i.diagnosis for i in fleet] == ["healthy", "healthy"]
+    assert spy.reads == 1, "a root shared by two instances is stale-lane only"

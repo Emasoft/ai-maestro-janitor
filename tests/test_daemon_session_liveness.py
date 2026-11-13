@@ -74,7 +74,7 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> Plan
     monkeypatch.setattr(
         daemon.fleet_scan,
         "gather_fleet",
-        lambda *, now, sweep_stale_rate_limit_s=None: fleet,
+        lambda *, now, sweep_stale_rate_limit_s=None, fast_lane=False: fleet,
     )
     return recorded
 
@@ -528,7 +528,10 @@ def test_field_busy_guard_gates_command_typing_never_esc(tmp_path, monkeypatch) 
             {"aimaestro_session": "agent-foo", "aimaestro_cli": "/usr/bin/aimaestro-agent.sh"},
         ),
     ]
-    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", lambda *, now, sweep_stale_rate_limit_s=None: fleet2)
+    monkeypatch.setattr(
+        daemon.fleet_scan, "gather_fleet",
+        lambda *, now, sweep_stale_rate_limit_s=None, fast_lane=False: fleet2,
+    )
     monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("Allow?"))
     daemon.task_session_liveness()
     assert any(p["command"] == "/janitor-arm" and p["channel"] == "aimaestro" for p in fired)
@@ -1279,3 +1282,76 @@ def test_frozen_give_up_keeps_its_own_finding_and_adds_no_generic_one(tmp_path, 
     daemon.task_session_liveness()
     assert [f["code"] for f in findings].count("HEARTBEAT-FIRES-STALL") == 1
     assert _give_ups(findings) == [] and _give_ups(pushes) == []
+
+
+
+def test_fast_lane_wedge_on_a_recent_transcript_is_escaped_through_the_real_beat(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-RJJGXPIK fast lane, END TO END (nothing between the scan and the keystroke is
+    skipped): the Instance comes from the REAL `fleet_scan.diagnose_root` fed two beats 120 s
+    apart whose pane shows a byte-identical `Retrying in 12s` — with a transcript only 100-220 s
+    quiet, an `active` session (below ACTIVE_FRESH_S), far from the 15-minute STALE_S gate — and
+    the REAL `task_session_liveness` must fire an Escape plan at it. The negative control is a
+    session of the same age that sits idle at its prompt with the same stale banner on screen:
+    same pane text, same ages, and no keystroke at all."""
+    banner = (
+        "⏺ earlier output\n✻ Rate limited · Retrying in 12s · attempt 3/300\n"
+        + "─" * 40 + "\n❯ \n" + "─" * 40 + "\n"
+    )
+    fleet: list = []
+    fired = _setup(monkeypatch, tmp_path, fleet)
+
+    def _beats(name: str, rows: list[tuple[int, str, str]]) -> "fleet_scan.Instance":
+        proj = tmp_path / name
+        (proj / ".janitor" / "state").mkdir(parents=True)
+        _write_transcript(tmp_path, monkeypatch, proj, rows)
+        term = {"tmux_pane": "%5"}
+        # The banner is patched in ONLY around the scan: the daemon's own pane reads (policy,
+        # read-back) must keep seeing the LivePane composer, or the typed `resume` never reads back.
+        with monkeypatch.context() as scan:
+            scan.setattr(fleet_scan, "capture_pane_text", lambda _t: banner)
+            first = fleet_scan.diagnose_root(
+                str(proj), now=_T0, transcript_age=100, terminal=term, fast_lane=True
+            )
+            assert first[0] == "healthy", "first sighting is only a baseline"
+            diag, recovery, _ = fleet_scan.diagnose_root(
+                str(proj), now=_T0 + 120, transcript_age=220, terminal=term, fast_lane=True
+            )
+        inst = fleet_scan.Instance(
+            pid=1, command="claude", tty="ttys1", project_root=str(proj), terminal=term,
+            diagnosis=diag, recovery=recovery, dispatch_age_s=None,
+            active=220 < fleet_scan.ACTIVE_FRESH_S, transcript_age_s=220,
+        )
+        assert inst.active
+        return inst
+
+    busy = _beats("proj-fast", [(_T0 - 100, "user", "say hi")])
+    assert busy.diagnosis == "retry_wedged"
+    fleet[:] = [busy]
+    daemon.task_session_liveness()
+    assert esc_plans(fired), "the fast-lane wedge must reach an Escape keystroke"
+    assert "FIRED esc_nudge" in _log(tmp_path)
+
+    fired.clear()
+    idle = _beats("proj-idle", [(_T0 - 100, "user", "say hi"), (_T0 - 97, "assistant", "hi")])
+    assert idle.diagnosis == "healthy"
+    fleet[:] = [idle]
+    daemon.task_session_liveness()
+    assert list(fired) == [], "an idle session with a stale banner must receive no keystroke at all"
+
+
+
+def test_only_the_liveness_beat_opts_into_the_fast_lane(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK rule (a): `task_session_liveness` calls `gather_fleet(fast_lane=True)`;
+    the opt-in is what lets the scan read quiet in-flight panes, and no other caller passes it."""
+    seen: list[dict] = []
+    _setup(monkeypatch, tmp_path, [])
+
+    def _spy_scan(**kw):
+        seen.append(kw)
+        return []
+
+    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", _spy_scan)
+    daemon.task_session_liveness()
+    assert [kw.get("fast_lane") for kw in seen] == [True]

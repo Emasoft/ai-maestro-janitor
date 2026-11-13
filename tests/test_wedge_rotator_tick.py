@@ -220,7 +220,7 @@ def test_a_confirmed_retry_wedge_requests_a_tick(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: True)
     monkeypatch.setattr(
         daemon.fleet_scan, "gather_fleet",
-        lambda *, now, sweep_stale_rate_limit_s=None: [inst],
+        lambda *, now, sweep_stale_rate_limit_s=None, fast_lane=False: [inst],
     )
     monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 600.0)
     monkeypatch.setattr(daemon.pane_actuate, "act", lambda *a, **k: daemon.pane_actuate.Outcome(

@@ -45,6 +45,14 @@ import terminal_trigger
 # — is the reliable liveness signal that also works on old instances.
 STALE_S = 15 * 60
 
+
+# TRDD-RJJGXPIK fast lane: a transcript quiet for this long, whose turn is still in flight, makes
+# `diagnose_root` READ the pane (not act) — a frozen retry countdown is then provable in ~2 beats
+# instead of waiting out STALE_S. 60 s is below the liveness beat (120 s), so every quiet
+# in-flight session is read on the first beat after it goes quiet; shorter would read sessions
+# that are merely between two appends of a healthy turn.
+FROZEN_PROBE_S = 60
+
 # A transcript advanced this recently means the session is BUSY working (continuous
 # tool-call appends) — a display nuance over the merely-alive idle-but-cron-firing
 # case. Both are "fresh" (< STALE_S) and never flagged; this just distinguishes
@@ -802,13 +810,20 @@ def _is_interrupt_record(rec: dict) -> bool:
     with (six of this incident's cancels landed 2-7s after such a record)."""
     if rec.get("type") != "user":
         return False
+    text = _user_row_text(rec)
+    return isinstance(text, str) and text.strip() == _INTERRUPT_MARKER
+
+
+def _user_row_text(rec: dict) -> str | None:
+    """The text of a transcript row's message: the content itself when it is a string, else the
+    joined `text` blocks of a block list; None when it has no text (e.g. a tool_result row)."""
     msg = rec.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None
     text: str | None = content if isinstance(content, str) else None
     if text is None and isinstance(content, list):
         parts = [b.get("text") for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
         text = "\n".join(p for p in parts if p) or None
-    return isinstance(text, str) and text.strip() == _INTERRUPT_MARKER
+    return text
 
 
 def human_activity_scan(
@@ -1091,6 +1106,90 @@ def transcript_activity_since(root: str, since: float) -> bool:
     return False
 
 
+# `user` rows that are NOT a request to the model, so a transcript ending on one is idle at its
+# prompt (TRDD-RJJGXPIK). Taken from the last `user` row of real Claude Code 2.1.322/2.1.323
+# transcripts idle for over an hour: `[Request interrupted by user]` and `[Request interrupted
+# by user for tool use]` (an ESC), and the three rows a LOCAL slash command writes
+# (`<local-command-caveat>`, `<command-name>`, `<local-command-stdout>`; `<local-command-stderr>`
+# by symmetry) — `/model`, `/exit` and `/clear` leave the session at its prompt with a `user` row
+# last and no model call. A prompt-type slash command (a skill) writes its expanded prompt right
+# after `<command-name>`, so a trailing bare `<command-name>` costs at most the first instant of
+# such a turn. A heartbeat prompt (`[janitor-heartbeat]`, isMeta) is NOT listed: it starts a real
+# model turn. Also checked against the real transcripts: the `!` shell rows (`<bash-input>`,
+# `<bash-stdout>` — 26 and 23 sessions; `<bash-stderr>` by symmetry, none seen as a row start) end
+# a shell escape with no model call, and `/compact` leaves a summary row (`isCompactSummary`,
+# `isVisibleInTranscriptOnly`, text "This session is being continued…", 3434 rows, always
+# followed by the `<local-command-*>` rows) — an AUTO-compact mid-task also ends on that summary
+# before the model call resumes, which this fail-closed list gives up (the stale lane covers it).
+_NOT_A_MODEL_REQUEST_PREFIXES = (
+    "[Request interrupted by user",
+    "<local-command-caveat>",
+    "<command-name>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "This session is being continued",
+)
+
+
+def transcript_turn_in_flight(root: str) -> bool:
+    """True iff the newest transcript of `root` ends with a turn still IN FLIGHT: its newest
+    `user`/`assistant` row is a `user` row that asked the model for something — a prompt, or a
+    tool_result handing control back to the model (TRDD-RJJGXPIK fast lane). A user row that is
+    Claude Code's own interrupt marker, or a LOCAL slash command's record, asked nothing: see
+    `_NOT_A_MODEL_REQUEST_PREFIXES`.
+
+    Why this and not just "the transcript is quiet": a quiet transcript is the NORMAL state of
+    an idle session, and the screen of a session that recovered from an API-error retry can
+    still show its old `Retrying in … attempt N` banner — reading such a pane would feed a
+    stale banner into the wedge proof. A session idle at its prompt ends on an `assistant` row
+    (`end_turn`) followed only by bookkeeping (`system`/`turn_duration`, `attachment`,
+    `api-request`, `queue-operation` …) — or, after an ESC or a local slash command (`/model`,
+    `/exit`, `/clear`), on one of those non-request `user` rows — so it is never "in flight". A
+    turn waiting on a retried API call has just written its `user` row and nothing after it,
+    because Claude Code retries WITHOUT appending to the transcript. An `assistant` `tool_use`
+    row is NOT in flight here: the tool is running, not a model request being retried.
+
+    Shapes verified against real Claude Code 2.1.322/2.1.323 transcripts, including the last
+    `user` row of ~4800 sessions idle for over an hour: `user` rows carry a `str`, `text` or
+    `tool_result` content; `assistant` rows end with `end_turn` or `tool_use`; every other row
+    Fail closed: no transcript, no user/assistant row in the 64 KiB tail window — so a last row
+    bigger than 64 KiB (a huge tool_result) whose head is cut off the window also reads False —
+    or an I/O error ⇒ False (the pane is not read; the stale lane still covers the session at
+    STALE_S).
+
+    Per-root rule: this reads the project's NEWEST transcript, but a pane belongs to one
+    INSTANCE, so `gather_fleet` hands the fast lane only to a root with exactly ONE live claude
+    instance; a shared root is diagnosed by the stale lane alone."""
+    tdir = _transcript_dir(root)
+    newest: tuple[float, str] | None = None
+    try:
+        for name in os.listdir(tdir):
+            if name.endswith(".jsonl"):
+                path = os.path.join(tdir, name)
+                mtime = os.path.getmtime(path)
+                if newest is None or mtime > newest[0]:
+                    newest = (mtime, path)
+    except OSError:
+        return False
+    if newest is None:
+        return False
+    for raw in reversed(_tail_lines(newest[1])):
+        try:
+            row = json.loads(raw)
+        except ValueError:
+            continue  # a torn line proves nothing; the newest whole message row decides
+        if not isinstance(row, dict) or row.get("type") not in ("user", "assistant"):
+            continue
+        if row["type"] == "assistant":
+            return False
+        text = (_user_row_text(row) or "").lstrip()
+        return not text.startswith(_NOT_A_MODEL_REQUEST_PREFIXES)
+    return False
+
+
 def transcript_human_idle(path: str, now: int) -> tuple[int, bool] | None:
     """``(age_seconds, exact)`` since the newest HUMAN (or agent-typed) turn of ONE named
     transcript; ``None`` when the file is absent or has no timestamped line. ``exact`` is False
@@ -1340,6 +1439,7 @@ def diagnose_root(
     stale_s: int = STALE_S,
     server_owned: bool = False,
     terminal: Mapping[str, str] | None = None,
+    fast_lane: bool = False,
 ) -> tuple[str, str | None, int | None]:
     """Read a project's ``.janitor`` state + the session's ``transcript_age`` and
     diagnose its janitor health. Returns ``(diagnosis, recovery, dispatch_age_s)``
@@ -1371,17 +1471,43 @@ def diagnose_root(
     effective_stale_s = stale_threshold_for(armed, stale_s)
     transcript_stale = transcript_age is not None and transcript_age >= effective_stale_s
     # TRDD-WKTD5JTC §1: only poll the pane (a subprocess) when the FP guard the design
-    # requires is already satisfied — a transcript that is NOT stale can never be a
-    # retry-wedge (CC's watchdog keeps the turn alive without appending, so 1a proved
-    # transcript_stale DOES trip during a real wedge). This also keeps a healthy host at
-    # ≈0 captures/beat (advisor correction #4). Any prior episode is cleared the moment
-    # the transcript is fresh again — the wedge already broke (or never existed here).
+    # requires is already satisfied. Two lanes qualify:
+    #  * STALE lane (original): a stale transcript — CC's watchdog keeps the turn alive without
+    #    appending, so 1a proved transcript_stale DOES trip during a real wedge.
+    #  * FAST lane (TRDD-RJJGXPIK, owner: ESC once the countdown has been frozen 1-2 minutes, not
+    #    after the 15-minute STALE_S gate): a transcript quiet for >= FROZEN_PROBE_S whose turn is
+    #    still IN FLIGHT (newest user/assistant row is a user prompt or tool_result, see
+    #    `transcript_turn_in_flight`). An idle-at-prompt session — the normal quiet state, and the
+    #    one whose screen may still hold an OLD `Retrying in … attempt` banner — never qualifies,
+    #    so it is never read. The fast lane may only ACT on the frozen-countdown proof (the
+    #    attempt-advance proof still needs the stale gate, see `diagnose_instance`).
+    #    The fast lane runs only when the caller opts in with `fast_lane=True` — the liveness beat
+    #    alone; `gather_fleet` also withholds it from a root shared by several claude instances.
+    # Cost: the stale lane reads only stale sessions (≈0 captures/beat on a healthy host, advisor
+    # correction #4); the fast lane adds one capture per liveness beat for every session whose
+    # current turn has waited on the model for more than FROZEN_PROBE_S. An idle host still reads
+    # nothing. Any prior episode is cleared the moment neither lane applies — the wedge already
+    # broke (or never existed here).
     # Guardrail (never touch an unarmed/server_owned instance): skip the pane poll
     # entirely for those — reading its content is a real Apple Event / tmux call and
     # the result would be discarded anyway (diagnose_instance returns unarmed/
     # server_owned before ever consulting retry_wedged).
     retry_wedged = False
-    if transcript_stale and terminal and not deliberately_unarmed and not server_owned:
+    fast_wedge = False
+    if (
+        terminal
+        and not deliberately_unarmed
+        and not server_owned
+        and (
+            transcript_stale
+            or (
+                fast_lane
+                and transcript_age is not None
+                and transcript_age >= FROZEN_PROBE_S
+                and transcript_turn_in_flight(root)
+            )
+        )
+    ):
         pane_text = capture_pane_text(terminal)
         prev = _read_retry_wedge_state(root)
         if pane_text is None:
@@ -1392,19 +1518,27 @@ def diagnose_root(
             # is gone" and CLEARS the episode, so a single flaky read resets the advance-across-
             # polls counter and a genuine wedge on a flaky channel could never reach `confirmed`.
             # Leave the episode exactly as it stands and report only what it has already proven.
+            # `fast_wedge` stays False: a read that did not happen cannot re-prove a frozen
+            # countdown, so the fast lane never acts on a blind beat.
             retry_wedged = bool(prev and prev.get("confirmed"))
         else:
+            # `now` (not the wall clock) so the episode timeline follows the caller's clock —
+            # in production they are the same instant; a test can step it by the real beat.
             new_state, retry_wedged = session_liveness.retry_wedge_state_update(
                 prev=prev,
                 current_attempt=session_liveness.retry_wedge_attempt(pane_text),
                 current_retry_in=session_liveness.retry_wedge_retry_in(pane_text),
-                now=int(time.time()),
+                now=now,
+            )
+            fast_wedge = bool(
+                new_state and new_state.get("proof") == session_liveness.PROOF_FROZEN_COUNTDOWN
             )
             _write_retry_wedge_state(root, new_state)
     else:
         _write_retry_wedge_state(root, None)
     diagnosis = session_liveness.diagnose_instance(
         retry_wedged=retry_wedged,
+        fast_wedge=fast_wedge,
         deliberately_unarmed=deliberately_unarmed,
         pane_alive=True,  # the caller only diagnoses processes found alive in ps
         transcript_stale=transcript_stale,
@@ -1677,7 +1811,9 @@ def tag_linux_gui_identity(terminal: dict[str, str], *, channel: str | None) -> 
         terminal["linux_gui_channel"] = channel
 
 
-def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> list[Instance]:
+def gather_fleet(
+    *, now: int, sweep_stale_rate_limit_s: int | None = None, fast_lane: bool = False
+) -> list[Instance]:
     """Scan the whole host: every running claude instance whose cwd resolves to a
     ``.janitor`` project, with its terminal (by TTY) and diagnosed janitor health.
 
@@ -1696,6 +1832,13 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     instead of a false `frozen` (janitor#77 item C). The daemon passes it; ``fleet_status``
     must not — a status table that mutates the thing it reports on is a status table nobody
     can trust.
+
+    ``fast_lane`` (TRDD-RJJGXPIK) enables the frozen-countdown FAST LANE of `diagnose_root`: pane
+    reads for quiet in-flight sessions, not only stale ones. Default False — only the liveness
+    beat (`daemon.task_session_liveness`) passes True, because a pane read through iTerm is an
+    Apple Event (TCC prompt, cost) that no other caller (fleet_status, cold-cache, the
+    peer-freeze detector, hooks) should ever trigger. It is also withheld per root that has more
+    than one live claude instance (see the comment at the pre-pass below).
     """
     ps_text = _run(["ps", "-eo", "pid=,tty=,command="])
     claude = parse_ps_claude(ps_text)
@@ -1779,9 +1922,19 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
         else None
     )
 
+    # TRDD-RJJGXPIK fast lane, rule (b): the transcript is per project ROOT but the pane is per
+    # INSTANCE. With two live claude instances in one root, a quiet in-flight session B would
+    # make idle session A (old `Retrying in …` banner still on its screen) look wedged and get
+    # ESC + `resume`. So a root shared by several instances is diagnosed by the STALE lane only.
+    root_of_pid = {pid: find_janitor_root(_cwd_of(pid)) for pid, _tty, _cmd in claude}
+    instances_per_root = {
+        r: sum(1 for other in root_of_pid.values() if other == r)
+        for r in set(root_of_pid.values())
+        if r
+    }
     fleet: list[Instance] = []
     for pid, tty, cmd in claude:
-        root = find_janitor_root(_cwd_of(pid))
+        root = root_of_pid[pid]
         if not root:
             continue
         tr_age, trailing_enqueues, awaiting_user = transcript_activity(root, now)
@@ -1814,7 +1967,8 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
             under_agents_home=harness_backend.root_under_agents_home(root),
         )
         diagnosis, recovery, dispatch_age = diagnose_root(
-            root, now=now, transcript_age=tr_age, server_owned=server_owned, terminal=terminal
+            root, now=now, transcript_age=tr_age, server_owned=server_owned, terminal=terminal,
+            fast_lane=fast_lane and instances_per_root[root] == 1,
         )
         fleet.append(
             Instance(

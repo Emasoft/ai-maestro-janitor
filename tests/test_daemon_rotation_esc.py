@@ -76,7 +76,7 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, frame: str | None = WEDG
     recorded: list = []
     monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True)
     monkeypatch.setattr(daemon.fleet_scan, "gather_fleet",
-                        lambda *, now, sweep_stale_rate_limit_s=None: fleet)
+                        lambda *, now, sweep_stale_rate_limit_s=None, fast_lane=False: fleet)
     monkeypatch.setattr(daemon.fleet_scan, "capture_pane_text", lambda terminal: frame)
     # hid_idle 0.0 = the owner is typing RIGHT NOW — the condition that deferred every beat on
     # 2026-09-02. The ESC pass must not care.
