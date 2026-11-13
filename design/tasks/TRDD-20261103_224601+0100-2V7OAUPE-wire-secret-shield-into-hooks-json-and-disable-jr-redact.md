@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-13T17:39:28+0100
+updated: 2026-11-13T20:47:46+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T22:46:01+0100
-blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, HF7GNHNF, J0TBHZ15]
+blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, J0TBHZ15]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, decision:owner-answers-TEP6F3A3-wiring-gate]
 pre-block-column: design
 blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
@@ -41,6 +41,7 @@ Split out of TRDD-M1218EMH.
 
 - 2026-11-03T22:46:01+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-03T22:46:10+0100 — column → blocked. waits for the write-back guard and the pre-wiring checks
+- 2026-11-13 — removed HF7GNHNF from blocked-by: it is complete (URL_PASSWORD step gone, OLD red 3/3 vs NEW linear 3/3). The other blockers and the owner-decision unblock-when still hold.
 
 ## Notes
 

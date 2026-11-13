@@ -1,10 +1,10 @@
 ---
 trdd-id: HF7GNHNF
 title: URL_PASSWORD slows by a large step between 96 KB and 128 KB of URL-shaped text
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-11-05T02:40:38+0100
-updated: 2026-11-05T05:39:15+0100
+updated: 2026-11-13T20:46:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -22,16 +22,29 @@ implementation-commits: [7d54b062, b3363706, 0495dbcb]
 
 # URL_PASSWORD slows by a large step between 96 KB and 128 KB of URL-shaped text
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
+
+- STATE: fix landed (7d54b062, b3363706, 0495dbcb). Done-when 3 ratio half measured 2026-11-13 on the plugin engine at low load: OLD red 3/3, NEW linear 3/3. Closing as complete. No NEXT ACTION on this card.
+- METHOD: `claude plugin test` (the plugin engine; system Bun never shows the step), hooks.json {"modules":["./secret-shield/register.ts"]}, scratch copies only (no repo writes). OLD = hooks/secret-shield at 7d54b062^, NEW = hooks/secret-shield at HEAD ff10cabf (git archive, other tests removed, same meas.test.ts in both, cmp-identical). Shapes: a = grown() (url-shaped, no password), b = a + short URL password tail, ctl = x-only, no URL. Sizes 64/96/128/512/1024 KB, all sizes interleaved in every round, warm-up, best of 15 ms, 3 runs per build. A first NEW-only run (64 vs 512 KB, same method) gave the same ratios.
+- LOAD during runs: 1-min 3.9-7.6, 5-min 6.6-7.1 (gate: both under 50 — met).
+- OLD (red 3/3): 96 to 128 KB jump 12.9-15.2x on a and b (ctl 1.3); 64 to 512 KB ratio 86-115 (rule: under 12, or big run under 2 ms); b at 512 KB 90-98 ms vs ctl 3.1-3.9 ms, at 1 MB 191-212 ms vs ctl 6.4-7.9 ms. All 3 OLD runs exit 1: engine test timeout "timed out after 5000 ms"; the numbers were still printed.
+- NEW (linear 3/3, exit 0 each): 96 to 128 KB about 1.3x; 64 to 512 KB ratio 7.6-7.7 (8x size step = linear), same as ctl 7.5-7.6; b at 512 KB 8.0-10.9 ms vs ctl 3.0-4.2 ms. In the NEW-only run: a 7.55-7.72, b 7.72-7.78, ctl 7.69-7.82, big run 9.1-9.7 ms.
+- PASSWORD HIDDEN: on shape b NEW hides it at all 5 sizes up to 1 MB in every run (hidden=true); OLD also hides it (slow, not leaky); shape a (no password) hidden=false in both, correct. The first-iteration expect(hits url-password == 1) passed at 512 KB.
+- SUITE: full secret-shield suite (5 test files from HEAD) under `claude plugin test`: 642 pass, 0 fail.
+- CAVEATS (still true): the 96 to 128 KB step was not bisected finer here (the 63,808 / 63,824 character bisect of 2026-11-05 stands); OLD shape a is also slow, so the slowdown is the URL_PASSWORD scan on url-shaped text, not the matched password; mechanism (a fast and a slow engine mode) is still inferred, not measured; ratio evidence runs 64 KB to 1 MB, timing absolute values depend on the host.
+- EVIDENCE (not tracked): reports_dev/sonnet-worker/20261113_204106+0100-hf7gnhnf-assess.md (NEW run, 642/0), reports_dev/sonnet-worker/20261113_204503+0100-hf7gnhnf-redrun.md (OLD vs NEW, tables), reports_dev/orchestrator/HF7GNHNF-closed-draft.md (earlier draft of this block).
+
 Owner decision 2026-11-05 (quoted on TRDD-2V7OAUPE): measure and fix this here, no upstream report. Measured 2026-11-04 under claude plugin test (TRDD-OD5Z90YL, Known before starting): redact() on the grown() shape b of tests/patterns.test.ts takes about 3 ms at 96 KB, 75 ms at 128 KB, 188 ms at 256 KB and 615 ms at 512 KB (load about 67); the password stays hidden at every size up to 1 MB. A diagnosis run started 2026-11-05 (report in reports_dev/sonnet-worker, name ends -urlpw-diagnosis.md). TRDD-OD5Z90YL stays the ReDoS harness; this card is the fix.
 ## Done when
  - [x] The cause is named with a measurement that rules out the alternatives.
  - [x] A test fails on the current URL_PASSWORD and passes after the fix.
- - [ ] On the grown() shapes, redact() meets the ratio rule of TRDD-Q6LPJTPO (under 12 across an 8x size step, or under 2 ms at the larger size) up to 512 KB, and the password stays hidden at every measured size.
+ - [x] On the grown() shapes, redact() meets the ratio rule of TRDD-Q6LPJTPO (under 12 across an 8x size step, or under 2 ms at the larger size) up to 512 KB, and the password stays hidden at every measured size.
 
 ## Approval log
 
 - 2026-11-05T02:40:38+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-05T05:26:43+0100 — column → testing. code landed in 7d54b062 and b3363706; Done-when 3 ratio half needs a low-load measurement
+- 2026-11-13T20:46:00+0100 — COMPLETE by main-agent@ai-maestro-janitor. OLD red 3/3, NEW linear 3/3 on plugin engine at low load; suite 642/0.
 
 ## Notes
 
