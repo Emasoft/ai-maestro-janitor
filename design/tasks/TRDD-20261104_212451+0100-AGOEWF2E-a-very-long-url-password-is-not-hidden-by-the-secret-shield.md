@@ -4,7 +4,7 @@ title: A very long URL password is not hidden by the secret shield
 column: dev
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-13T23:23:35+0100
+updated: 2026-11-14T00:48:05+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T21:24:51+0100
-implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706, bcc3b377]
+implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706, bcc3b377, f1a26c0b]
 ---
 
 # A very long URL password is not hidden by the secret shield
@@ -38,6 +38,7 @@ implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706, bcc3b377]
 - NEXT ACTION: propose change 2.
 
 Measured on 2026-11-04 under claude plugin test: one URL whose password alone is 1,048,576 mixed characters ('https://u:' + 'aB3dE5fG7hJ9kL1m' repeated + '@h'; the alphabet has no colon, at sign, slash, whitespace, quote or backtick) is not hidden: redact() reports no url-password hit and returns the text unchanged, and URL_PASSWORD alone gives 0 matches, with the regex of 133a766a and with that of 6decd71d alike. The same URL at 256 KB and at 512 KB is hidden. Above 512 KB only this one shape, alone in its text, was measured, and only at 1 MB; a larger size, or a long password inside other text, was not run. An earlier measurement in system Bun saw a miss from about 385 KB (133a766a) and about 360 KB (the regex of 6decd71d) on a shape not recorded here. The direct 0 matches rule out looksSecret and every other redact() filter, the hits at 256 KB and 512 KB rule out the alphabet, and the known-defect test in tests/patterns.test.ts would fail if the regex threw, so the regex returns no match. Inferred, not shown: the regex engine gives up on a match this long. The shield is not wired yet (TRDD-2V7OAUPE); once it is, a URL password past that size would reach the model unhidden. Related: TRDD-OD5Z90YL (a step in URL_PASSWORD's time between 96 KB and 128 KB, cause not found), possibly the same engine limit. Done when: (1) a stated cause predicts by how much the size where hiding stops moves when one named variable changes (the text before the URL, or the runtime), and one run confirms that amount; the runs vary one thing at a time: the password length alone, the same text and regex under Node (V8), and system Bun against claude plugin test; (2) either the miss is fixed, shown by a test that hides the password at every power of two from 256 KB to 4 MB, or the size limit is measured in the runtime the mod runs in, written down in hooks/secret-shield, and the shield fails closed past it: a length or work bound checked before or around the regex, never the regex's own empty result, withholds a value it cannot finish scanning, shown by a test; (3) every rule in hooks/secret-shield (the rules/ exports and the module-private regexes of patterns.ts) that can match a value longer than 64 KB is checked the same way, with the result per rule recorded on this card.
+f1a26c0b (2026-11-14): jsonPair change 2 landed. JSON_PLAIN's escape loop is bounded at JSON_ESCAPE_BOUND=49152 (timing: flat to 49,152, 41x slow step at 65,536; detector flat to 49,153). Above the bound a linear pass hides the value of every secret-named key. Mechanism confirmed in JavaScriptCore with a 32,768 test bound: the bounded form stops matching at B+1 and the detector fires; the unbounded regex matched to 589,822 and silently missed at 589,823. Over-hide relative to the old code: non-secret-looking values under secret-named keys with 49,153 to 589,822 escapes are now hidden; above 589,822 it is a fix (the old code leaked). Non-secret-named keys are unaffected (hideJsonPair returns early unless isSecretName, patterns.ts:520). Known miss: nested JSON above the bound. Done-when 3 met for the JSON pair in this scope: value alone in its text, plugin engine (JavaScriptCore), inputs up to 4 MB (largest tested). Tooling commit 84f8fa7c (not an implementation commit): .ubsignore excludes patterns.ts from ubs, because its JS taint analyzer does not converge on the file. patterns.ts therefore has NO ubs coverage in the pre-commit hook, scripts/publish.py or weekly-audit.yml until TRDD-AQ8IM083 closes.
 
 ## Approval log
 
