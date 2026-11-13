@@ -4,7 +4,7 @@ title: A retry banner stuck at Retrying in 0s is never escaped by the fast lane
 column: todo
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-13T21:32:49+0100
+updated: 2026-11-13T22:15:06+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,3 +39,11 @@ Child of TRDD-RJJGXPIK (EHT). Blocks RJJGXPIK reaching complete: the owner's rep
 ## Approval log
 
 - 2026-11-13T21:32:49+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-11-13 investigation (reports_dev/sonnet-worker/20261113_221409+0100-xvj30m61-0s-investigation.md): a static `0s` + static attempt is never wedge-confirmed; neither the fast lane nor the stale lane sends ESC. The only ESC is daemon.py _rotation_esc_pass, within 600 s of an OAuth rotation.
+A live 0s retry loop advances the attempt (ARCHITECTURE.md:392); the uncovered shape is 0s with a STATIC attempt, i.e. a request in flight or hung, indistinguishable on screen from a slow request.
+API_TIMEOUT_MS on this machine is 19000000 ms (5 h 17 min). A bar tied to it fires after about 5 h 21 min. A bar of about 540 s needs proof that Claude Code's 5-min stream idle watchdog aborts and bumps the attempt of a no-first-byte request (unverified, needs a captured frame).
+Countdown text is not logged today, so past 0s episodes cannot be counted. Cheap prerequisite: log `retry_wedge@<attempt>[<retry_in>]` on each pane read.
+OWNER DECISION NEEDED: (a) safe bar from API_TIMEOUT_MS (~5.3 h here), (b) verify the stream idle watchdog first and use ~540 s, or (c) accept the risk of ESCing a slow request with a short bar.
