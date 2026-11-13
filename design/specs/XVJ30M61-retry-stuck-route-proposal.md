@@ -1,6 +1,6 @@
-# XVJ30M61 retry_stuck route proposal (draft, not reviewed)
-Status: DRAFT, 2026-11-13. Advisor corrections to apply before review: (a) decouple the hold from the scope bar: hold must only prove the countdown elapsed with the attempt unchanged (hold >= countdown + 2 beats), transcript_stale already supplies the 15-minute bar, so the first stale beat does not decline and stamp the 900 s cooldown; recompute time-to-ESC; (b) countdown logging lands FIRST as its own commit; (c) the clause "a second-scale banner whose 3 s recheck keeps failing" never matures and is dropped; (d) the review must also cover pane_policy._flush_wedge and how detectors/peer-freeze-recovery.py consumes diagnosis strings.
-# XVJ30M61 proposal: retry_stuck route (read-only design; nothing changed)
+# XVJ30M61 retry_stuck route proposal
+Status: REVIEWED 2026-11-13. Decision: build ONLY the countdown logging (`retry_wedge@<attempt>[<retry_in>]`, section 4) now, as its own commit. The retry_stuck route is DEFERRED until a real `retry_wedge@N[0s]` line with a static attempt appears in daemon.log on the running Claude Code build (the only static-0s frame on record is from 2.1.258). Advisor corrections, applied to any later build of the route: (a) decouple the hold from the scope bar: the hold only proves the countdown elapsed with the attempt unchanged (hold >= countdown + 2 beats); transcript_stale supplies the 15-minute bar; time-to-ESC for 0s becomes roughly 15-17 min (recompute when built); sections 1, 2 and test 3 below use hold >= W and the 30-34 min arithmetic and are SUPERSEDED by (a); (b) logging first; (c) the "second-scale banner whose 3 s recheck keeps failing" clause never matures and is dropped; (d) read pane_policy._flush_wedge and detectors/peer-freeze-recovery.py before building.
+## Original draft (read-only design; nothing changed)
 
 Everything below traced in source unless marked UNVERIFIED. Paths under scripts/.
 
@@ -70,3 +70,11 @@ Prod ~125 lines: session_liveness.py ~55 (parse, stuck fn, state field, rank, to
 Strongest reason it ESCs a healthy session: a legitimately long in-flight request (a retry whose response streams or runs > 30 min with no transcript write) shows a static `Retrying in 0s attempt N`; ESC cancels it and `resume` reissues. Cost = one request. Root premises UNVERIFIED: no captured frame shows a live 0s loop advancing the attempt (ARCHITECTURE.md:392 is prose), and no frame proves CC's request timeout aborts and bumps the attempt; API_TIMEOUT_MS here is 19000000 ms. Mitigations: in-flight gate, fresh-pair guard, 4-attempt budget, give-up alert.
 Tension to resolve (do not pick silently): STATE says the route also covers "a second-scale banner whose 3 s recheck keeps failing". A recheck that is parsed-and-different means a MOVING countdown, which STATE also forbids escaping (this design resets and excludes it). Only an UNREADABLE recheck can stay in scope, and it never matures either. Effective coverage: static 0s and any static countdown without a seconds token (e.g. `3m`). Confirm the STATE wording.
 Also for the owner: ESC arrives ~30-34 min after the banner (cooldown-bound), not ~16.
+
+## Review findings to resolve before building the route (2026-11-13)
+- Freshness guard compares pane_state.read's (attempt, retry_in) with the persisted pair from session_liveness.retry_wedge_retry_in: two parsers; add a test feeding each real fixture through both and asserting equality (session-limit frame has a `(2:10pm)` suffix).
+- retry_in_seconds must be tested on the retry_in extracted from all three real fixtures, not hand-typed strings.
+- stuck_since faces the same wipe by non-liveness gather_fleet callers as the fast-lane episode; test the interleaving.
+- State whether the restored-prompt clearing ESCs (RJJGXPIK round 3) are part of the reused resume_after_esc path.
+- Weak tests: #9, #15, #19 are true by construction or today's behaviour (keep only with their mutations); #21 must seed an episode file.
+- Shared roots (2+ instances) never get this route; MAX_RETRIES=100 vs /300 on screen unresolved; no natural capture exists.
