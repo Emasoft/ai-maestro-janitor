@@ -72,6 +72,12 @@ _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 # one bound, so the two callers can never disagree about how long "delivered" may take.
 AIMAESTRO_CLI_TIMEOUT_S = 6.0
 
+# The seconds an ESC-only plan sleeps BEFORE it sends (the `delay_s` default of build_esc_plan).
+# Public because a caller that READS the pane right after firing such a plan (TRDD-RJJGXPIK,
+# pane_actuate.resume_after_esc) must wait at least this long first, or it re-reads the
+# PRE-keystroke frame; one constant keeps that wait from drifting from the plan it follows.
+ESC_PLAN_DELAY_S = 2.0
+
 # The command-typing rungs → the slash-command each injects. `update` re-arms,
 # which re-bakes the rolled stub and picks up the new version. `esc_nudge`
 # (ESC only) and the hard-restart rungs are deliberately absent — they don't type a
@@ -94,12 +100,25 @@ _ACTION_COMMAND = {
     # makes reachability self-verifying (the command turn completes only when the API is
     # reachable).
     "resume": "/janitor-resume",
+    # TRDD-RJJGXPIK: esc_nudge_resume = ESC, then (daemon-side, pane_actuate.resume_after_esc)
+    # read the composer, clear a restored draft with Esc Esc, type `resume`, read it back and
+    # only then press Enter. The owner directed this override of the ESC-only design
+    # (TRDD-P7WU40G9): "after pressing esc it should also inject the command resume or retry".
+    # The map entry only NAMES the command; the typing is NOT a fused build_command_plan,
+    # because CC 2.1.323 puts the interrupted prompt back in the composer on ESC (a fused plan
+    # submitted "say hiresume"). The resume_sent episode flag prevents stacking. NOT an
+    # ESC-only action: it carries a command, so it is absent from _ESC_ONLY_ACTIONS below.
+    "esc_nudge_resume": "resume",
 }
 
 
 def action_to_command(action: str) -> str | None:
-    """The slash-command a command-typing recovery `action` injects, or None when
-    the action types no command (esc_nudge = ESC only; hard-restart rungs = daemon)."""
+    """The command a command-typing recovery `action` injects, or None when the action
+    types no command (esc_nudge = ESC only; hard-restart rungs = daemon).
+
+    `esc_nudge_resume` (TRDD-RJJGXPIK) returns the bare ``resume``: it is ESC-first AND
+    types the resume command after the settle, so it IS a command-typing action whose
+    payload is deliberately not slash-prefixed."""
     return _ACTION_COMMAND.get(action)
 
 
@@ -116,7 +135,7 @@ def is_esc_only(action: str) -> bool:
     return action in _ESC_ONLY_ACTIONS
 
 
-def iterm_esc_only_osascript(session_id: str, *, delay_s: float = 2.0) -> str:
+def iterm_esc_only_osascript(session_id: str, *, delay_s: float = ESC_PLAN_DELAY_S, esc_count: int = 1) -> str:
     """AppleScript that targets ONLY the iTerm session whose id == `session_id` and sends
     ONE ESC (TRDD-L32WC0H7 / F2) with NO `write text` — the flood-safe recovery for a
     rate-limited session. The caller MUST have validated `session_id` (`valid_session_id`).
@@ -125,7 +144,7 @@ def iterm_esc_only_osascript(session_id: str, *, delay_s: float = 2.0) -> str:
     fire the first ESC provoked (killing the very heartbeat run the recovery exists to
     unstick) rather than on anything still needing it. `pane_policy`'s own re-read/retry
     loop sends a second press only if the screen still shows the wedge."""
-    esc = "\n".join(terminal_trigger.iterm_esc_lines(count=1)) + "\n"
+    esc = "\n".join(terminal_trigger.iterm_esc_lines(count=esc_count)) + "\n"
     return (
         f"delay {delay_s}\n"
         'tell application "iTerm2"\n'
@@ -144,7 +163,7 @@ def iterm_esc_only_osascript(session_id: str, *, delay_s: float = 2.0) -> str:
     )
 
 
-def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
+def build_esc_plan(terminal: dict, *, delay_s: float = ESC_PLAN_DELAY_S, esc_count: int = 1) -> dict | None:
     """Build an ESC-ONLY injection plan (send ESC, type NO command) for a resolved `terminal`,
     or None when no ESC-capable channel resolves. PURE. Mirrors `build_command_plan`'s channel
     selection MINUS the ai-maestro CLI channel — that channel has no raw-ESC primitive (typing
@@ -164,7 +183,7 @@ def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
             "delay_s": delay_s,
             # esc_count=1 (TRDD-L32WC0H7 / F2): a fixed 2nd ESC was killing the fresh cron
             # fire the 1st provoked, not the wedge — the caller's own re-read loop retries.
-            "steps": terminal_trigger.build_tmux_steps(pane, [], esc_first=True, esc_count=1),
+            "steps": terminal_trigger.build_tmux_steps(pane, [], esc_first=True, esc_count=esc_count),
         }
     sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
     if sid and valid_session_id(sid):
@@ -172,7 +191,7 @@ def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
             "channel": "iterm",
             "command": "",
             "delay_s": delay_s,
-            "osascript": iterm_esc_only_osascript(sid, delay_s=delay_s),
+            "osascript": iterm_esc_only_osascript(sid, delay_s=delay_s, esc_count=esc_count),
         }
     gui_channel = terminal.get("linux_gui_channel", "").strip()
     if gui_channel in ("wtype", "xdotool"):
@@ -185,11 +204,50 @@ def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
             "channel": gui_channel,
             "command": "",
             "delay_s": delay_s,
-            "steps": builder([], esc_first=True, esc_count=1),  # F2: ESC-only = 1 press
+            "steps": builder([], esc_first=True, esc_count=esc_count),  # F2: ESC-only = 1 press
         }
     return None  # no ESC-capable channel resolved
 
 
+# TRDD-RJJGXPIK: the two halves of a VERIFIED send, as fire()-able plans. `build_command_plan`
+# fuses type+Enter into one plan, so by the time anything could look at the field the command
+# has already run. `esc_nudge_resume` needs read-back BETWEEN typing and Enter (measured live,
+# CC 2.1.323: ESC aborts the turn and PUTS THE INTERRUPTED PROMPT BACK in the composer, so a
+# fused type+Enter submitted "say hiresume"), hence these split builders. Read-back channels
+# only (tmux, iTerm): a write-only channel cannot verify, so it gets no plan.
+def _readback_split_plan(terminal: dict, steps_for, *, command: str) -> dict | None:
+    """Resolve `terminal` to a tmux / iTerm read-back identity, build its `steps_for(rt)`
+    steps and wrap them in a fire()-able plan (delay 0: the caller settles before it reads).
+    The iTerm plan carries the osascript text under `osascript`, which is where `fire()`
+    looks for it (a `steps`-only iTerm plan would KeyError there)."""
+    pane = terminal.get("tmux_pane", "").strip()
+    sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
+    if pane and terminal_trigger.valid_tmux_pane(pane):
+        rt = {"kind": "tmux", "pane": pane}
+    elif sid and valid_session_id(sid):
+        rt = {"kind": "iterm", "session_id": sid}
+    else:
+        return None
+    steps = steps_for(rt)
+    if not steps:
+        return None
+    if rt["kind"] == "iterm":
+        return {"channel": "iterm", "command": command, "delay_s": 0.0, "osascript": steps[0][3]}
+    return {"channel": "tmux", "command": command, "delay_s": 0.0, "steps": steps}
+
+
+def build_type_text_plan(terminal: dict, text: str) -> dict | None:
+    """A plan that TYPES `text` into the field and does NOT submit it. PURE. None when the
+    channel has no read-back (the verified send cannot be honoured there)."""
+    return _readback_split_plan(
+        terminal, lambda rt: terminal_trigger.build_type_only_steps(rt, text), command=text
+    )
+
+
+def build_enter_plan(terminal: dict) -> dict | None:
+    """A plan that presses Enter ALONE. PURE. Fired only after a read-back showed exactly the
+    intended text in the field."""
+    return _readback_split_plan(terminal, terminal_trigger.build_submit_steps, command="")
 def valid_session_id(session_id: str) -> bool:
     """True iff `session_id` is a bare iTerm UUID safe to interpolate into an
     osascript string. `$ITERM_SESSION_ID` is `<tty>:<UUID>`; pass the UUID part."""

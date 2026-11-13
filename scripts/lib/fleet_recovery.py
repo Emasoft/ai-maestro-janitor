@@ -34,48 +34,68 @@ COOLDOWN_S = 900
 # situation auto-recovery must yield on.
 MAX_ATTEMPTS = 4
 
-def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> str | None:
+def action_for(
+    diagnosis: str,
+    attempts: int,
+    *,
+    include_hard: bool = False,
+    resume_sent: bool = False,
+) -> str | None:
     """The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
     or None when the diagnosis is not recoverable:
 
     - ``cron_dead``        → ``rearm``  (the in-session cron died → re-arm it)
     - ``version_mismatch`` → ``reload`` (running stale code → reload the new plugin)
-    - ``frozen``           → ``esc_nudge`` UNCONDITIONALLY, at EVERY ``attempts`` value and
-      REGARDLESS of ``include_hard`` (TRDD-P7WU40G9; capped by TRDD-L32WC0H7 / F1 derived 1).
-      ESC-ONLY, NO command typed. ``frozen`` means the session is RATE-LIMITED and sitting in
-      Claude Code's "Retrying in Xm" retry-watchdog state, which BLOCKS the input line. Typing
-      a slash-command there is the 2026-07-18 disaster: the retry-wait buffers the keystrokes,
-      the command TEXT accumulates on the one input line
-      (``/janitor-arm/janitor-arm/janitor-arm…``), and when the wait finally breaks the buffer
-      flushes into a flood that blocks the session and burns tokens. ESC breaks the retry-wait
-      and the session's OWN ``rate-limited.flag → [janitor-resume]`` resumes the work — with NO
-      command to accumulate. It NEVER escalates to a kill rung: the `frozen` shape is
-      indistinguishable from a static CC retry-watchdog frame (`attempt 1/5` unchanged for
-      hours — see ``retry_wedged`` below), so a stall whose cause is unsettled must never reach
-      a kill rung. On exhaustion (``gate()`` → ``crash_loop``) the daemon alerts a human, never
-      a keystroke.
+    - ``frozen``           → ``esc_nudge_resume`` on the FIRST pass, ``esc_nudge`` once
+      ``resume_sent`` is already True (TRDD-P7WU40G9; capped by TRDD-L32WC0H7 / F1
+      derived 1). ESC-FIRST, at EVERY ``attempts`` value and REGARDLESS of ``include_hard``.
+      ``frozen`` means the session is RATE-LIMITED and sitting in [CC]'s "Retrying in Xm"
+      retry-watchdog state, which BLOCKS the input line. Typing a slash-command there is the
+      2026-07-18 disaster: the retry-wait buffers the keystrokes, the command TEXT
+      accumulates on the one input line (``/janitor-arm/janitor-arm/janitor-arm…``), and
+      when the wait finally breaks the buffer flushes into a flood that blocks the session
+      and burns tokens. ESC breaks the retry-wait, and TRDD-RJJGXPIK owner directive —
+      "after pressing esc it should also inject the command resume or retry" — has the daemon
+      type the bare ``resume`` AFTER the ESC: ``pane_actuate.resume_after_esc`` settles, reads
+      the composer (CC 2.1.323 puts the interrupted prompt back there on ESC), clears it with
+      Esc Esc, and only types and submits ``resume`` once the field reads empty. Exactly ONE
+      resume per episode: once the daemon has
+      written ``resume_sent: true`` the routing falls back to ESC-only ``esc_nudge``, which
+      prevents stacking resumes on repeated beats. The marker lapses after
+      ``session_liveness.RESUME_EPISODE_TTL_S`` (30 min, deliberately longer than ``COOLDOWN_S``),
+      and is dropped with the episode state, letting a fresh episode retry. A resume that did not
+      land is finished by the daemon's resume-pending pass, never by a second ESC. It
+      NEVER escalates to a kill rung: the `frozen` shape is indistinguishable from a static
+      CC retry-watchdog frame (`attempt 1/5` unchanged for hours — see ``retry_wedged``
+      below), so a stall whose cause is unsettled must never reach a kill rung. On
+      exhaustion (``gate()`` → ``crash_loop``) the daemon alerts a human, never a keystroke.
     - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session —
       ``include_hard`` NEVER changes this)
     - ``dead``             → ``relaunch`` with ``include_hard`` (no kill — type
       ``claude --continue`` into the surviving pane), else None (A5 unwired view)
-    - ``retry_wedged``     → ``esc_nudge`` UNCONDITIONALLY, at EVERY ``attempts`` value and
-      REGARDLESS of ``include_hard`` (TRDD-WKTD5JTC advisor #1). This is CC's own
-      retry-watchdog wedge (``Retrying in … attempt N/M`` — no ``rate-limited.flag`` involved
-      until the daemon writes one itself, see the caller); it is never a crashed/dead
-      process, so escalating to a kill rung — which ``frozen``'s ``"ladder"`` mapping would
-      eventually reach — is never correct here. Checked BEFORE the ``frozen`` branch so a
-      diagnosis of exactly ``"retry_wedged"`` never falls through to it.
+    - ``retry_wedged``     → ``esc_nudge_resume`` on the first pass then ``esc_nudge``, same
+      two-phase rule as ``frozen`` above, at EVERY ``attempts`` value and REGARDLESS of
+      ``include_hard`` (TRDD-WKTD5JTC advisor #1). This is CC's own retry-watchdog wedge
+      (``Retrying in … attempt N/M`` — no ``rate-limited.flag`` involved until the daemon
+      writes one itself, see the caller); it is never a crashed/dead process, so escalating
+      to a kill rung — which ``frozen``'s ``"ladder"`` mapping would eventually reach — is
+      never correct here. Checked BEFORE the ``frozen`` branch so a diagnosis of exactly
+      ``"retry_wedged"`` never falls through to it.
 
     ``include_hard`` (TRDD-56d24c02 increment 2) only NAMES the hard rungs — the DAEMON gates
     execution on ``fleet_restart.hard_restart_enabled()`` (DEFAULT-OFF dry-run) + ``is_killable``,
-    so this stays pure policy.
+    so this stays pure policy. ``resume_sent`` (TRDD-RJJGXPIK) is read from the persisted
+    retry-wedge episode state; it selects the second phase of the ESC+resume recovery and
+    touches nothing else.
     """
     if diagnosis == "cron_dead":
         return "rearm"
     if diagnosis == "version_mismatch":
         return "reload"
+    wedge_action = "esc_nudge" if resume_sent else "esc_nudge_resume"
     if diagnosis == "retry_wedged":
-        return "esc_nudge"  # ESC-only, at EVERY attempt, include_hard or not — never escalates
+        # ESC(+resume once), at EVERY attempt, include_hard or not — never escalates.
+        return wedge_action
     if diagnosis == "frozen":
         # CAPPED at esc_nudge, unconditionally (TRDD-L32WC0H7 / F1 derived 1): a `frozen`
         # diagnosis is a STALL whose cause is UNSETTLED — it fires on the exact same shape
@@ -86,7 +106,7 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
         # happen on a session no human had been told about yet. Never kill a session whose
         # stall shape has not been confirmed distinct from a benign retry wait; on exhaustion
         # (`gate()` → `crash_loop`) the daemon alerts a human instead — never a keystroke.
-        return "esc_nudge"
+        return wedge_action
     if diagnosis == "dead" and include_hard:
         return "relaunch"
     return None

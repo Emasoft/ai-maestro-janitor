@@ -27,6 +27,7 @@ import fleet_inject  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
 import pane_actuate as pa  # type: ignore[import-not-found]  # noqa: E402
 import pane_state as ps  # type: ignore[import-not-found]  # noqa: E402
+from pane_sim import LivePane  # noqa: E402
 
 _FIXTURES = _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames"
 _TMUX = {"tmux_pane": "%5"}
@@ -909,3 +910,161 @@ def test_wedge_esc_stays_withheld_across_a_self_sent_resume_echo_in_the_target_p
     assert _keys(fired) == []
     assert outcome.status is pa.OutcomeStatus.NOOP
     assert "interrupt-cooldown" in outcome.observed
+
+
+
+# --------------------------------------------------------------------------- #
+# resume_after_esc (TRDD-RJJGXPIK): ESC puts the interrupted prompt back in the composer
+# (measured on Claude Code 2.1.323), so `resume` may only be typed onto a cleared field.
+# --------------------------------------------------------------------------- #
+def _live_pane(monkeypatch, pane: LivePane) -> LivePane:
+    """Route the production keystroke sender and the production pane read to `pane`. Plan
+    building, `pane_state.read`/`parse` and `resume_after_esc` all run for real."""
+    monkeypatch.setattr(fleet_inject, "fire", pane.fire)
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    return pane
+
+
+def _esc_then_resume(pane: LivePane, **kw) -> pa.Outcome:
+    """The daemon sequence: the ESC half (`act`) fires, then `resume_after_esc` runs."""
+    pane.fire(fleet_inject.build_esc_plan(_TMUX))
+    return pa.resume_after_esc(_TMUX, "resume", presence_blocked=kw.pop("presence_blocked", lambda: False), settle_s=0.0, **kw)
+
+
+def test_resume_after_esc_clears_the_restored_prompt_then_types_exactly_resume(monkeypatch) -> None:
+    """ESC restored `say hi` into the composer: Esc Esc clears it, `resume` is typed onto the
+    EMPTY field, read back as exactly `resume`, and only then submitted. What the session
+    receives is `resume`, never `say hiresume`."""
+    pane = _live_pane(monkeypatch, LivePane(restored_prompt="say hi"))
+    out = _esc_then_resume(pane)
+    assert out.status is pa.OutcomeStatus.DONE and pa.RESUMED in out.observed
+    assert pane.submitted == ["resume"]
+    assert [sum(1 for s in p["steps"] if s[-1] == "Escape") for p in pane.plans] == [1, 2, 0, 0]
+
+
+def test_resume_after_esc_gives_up_when_the_draft_survives_esc_esc(monkeypatch) -> None:
+    """A draft that survives Esc Esc is not ours to fight: exactly ONE clear attempt (no loop),
+    nothing typed, no Enter, the outcome is FAILED and carries no RESUMED token."""
+    pane = _live_pane(monkeypatch, LivePane(restored_prompt="say hi", stubborn=True))
+    out = _esc_then_resume(pane)
+    assert out.status is pa.OutcomeStatus.FAILED and pa.RESUMED not in out.observed
+    assert out.touched is True
+    assert pane.submitted == [] and pane.field == "say hi"
+    # [1, 2, 1]: ESC, Esc Esc (clear attempt), then ONE plain ESC that closes a possible rewind
+    # menu the Esc Esc may have opened (TRDD-RJJGXPIK round 2) - still nothing typed, no loop.
+    assert [sum(1 for s in p["steps"] if s[-1] == "Escape") for p in pane.plans] == [1, 2, 1]
+    assert pane.commands() == ["", "", ""], "nothing was typed after the failed clear"
+
+
+def test_resume_after_esc_never_presses_enter_unless_the_field_reads_exactly_resume(monkeypatch) -> None:
+    """Rule 3: the typed text is read back before Enter. A composer that shows anything but
+    exactly `resume` (here a stray keystroke landed with it) gets NO Enter."""
+
+    class _Mangling(LivePane):
+        def fire(self, plan):
+            ok = super().fire(plan)
+            if plan and plan.get("command") == "resume":
+                self.field += "x"  # something else typed into the composer meanwhile
+            return ok
+
+    pane = _live_pane(monkeypatch, _Mangling(restored_prompt=None))
+    out = _esc_then_resume(pane)
+    assert out.status is pa.OutcomeStatus.FAILED and pa.RESUMED not in out.observed
+    assert pane.submitted == [] and pane.field == "resumex"
+    assert "" not in pane.commands()[1:], "no Enter plan was fired"
+
+
+def test_resume_after_esc_defers_without_clearing_when_a_human_is_at_the_keyboard(monkeypatch) -> None:
+    """Rule 2: a present human defers BEFORE the draft is cleared or anything is typed — the
+    non-empty composer might be theirs, and clearing it would delete what they wrote."""
+    pane = _live_pane(monkeypatch, LivePane(restored_prompt="say hi"))
+    out = _esc_then_resume(pane, presence_blocked=lambda: True)
+    assert out.status is pa.OutcomeStatus.DEFERRED and pa.RESUMED not in out.observed
+    assert pane.field == "say hi" and pane.submitted == []
+    assert len(pane.plans) == 1, "only the ESC half ran; no Esc Esc, no typing"
+
+
+def test_resume_after_esc_on_a_write_only_channel_types_nothing(monkeypatch) -> None:
+    """A channel with no read-back (wtype/xdotool/ai-maestro CLI) cannot satisfy the
+    empty-field and exactly-`resume` checks, so it gets the ESC only — no clear, no typing."""
+    pane = _live_pane(monkeypatch, LivePane())
+    out = pa.resume_after_esc(_WRITE_ONLY, "resume", presence_blocked=lambda: False, settle_s=0.0)
+    assert out.status is pa.OutcomeStatus.DONE and pa.RESUMED not in out.observed
+    assert "esc-only-no-readback" in out.observed
+    assert pane.plans == []
+
+
+_PICKER_FRAME = (Path(__file__).resolve().parent / "fixtures" / "pane_frames" / "real-rewind-picker.txt").read_text()
+
+
+def test_the_rewind_picker_is_never_a_place_to_type_resume() -> None:
+    """TRDD-RJJGXPIK round 2: a Rewind picker (what Esc Esc opens on an empty prompt) must not be
+    in the typable set, or `resume` would be typed into the picker's filter."""
+    kind = ps.parse(_PICKER_FRAME).status.kind
+    assert kind is ps.StatusKind.AWAITING_USER and kind not in pa._RESUME_TYPABLE_KINDS
+
+
+def test_resume_after_esc_closes_a_rewind_picker_the_esc_esc_opened_with_one_plain_esc(monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: when the Esc Esc OPENS the Rewind picker instead of clearing the
+    draft, nothing is typed and exactly ONE plain ESC follows to close the picker (so the
+    session is not left parked in a menu); no loop, no Enter."""
+
+    class _Picker(LivePane):
+        picker = False
+
+        def fire(self, plan):
+            ok = super().fire(plan)
+            keys = [s[-1] for s in (plan or {}).get("steps", []) if s[0] == "RUN"]
+            if keys.count("Escape") >= 2:
+                self.picker = True  # Esc Esc opened the menu
+            elif keys.count("Escape") == 1 and self.picker:
+                self.picker = False  # a plain ESC closes it
+            return ok
+
+        def read(self, terminal):
+            return _PICKER_FRAME if self.picker else super().read(terminal)
+
+    pane = _Picker(restored_prompt="say hi", stubborn=True)
+    _live_pane(monkeypatch, pane)
+    out = _esc_then_resume(pane)
+    assert out.status is pa.OutcomeStatus.FAILED and pa.NOT_TYPABLE in out.observed
+    assert pane.submitted == [] and pane.picker is False
+    assert [sum(1 for s in p["steps"] if s[-1] == "Escape") for p in pane.plans] == [1, 2, 1]
+    assert pane.commands() == ["", "", ""]
+
+
+def test_resume_after_esc_never_logs_the_restored_prompt_text(monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: the restored prompt is whatever the user last typed — only its
+    length reaches the log."""
+    pane = _live_pane(monkeypatch, LivePane(restored_prompt="my secret draft"))
+    lines: list[str] = []
+    out = _esc_then_resume(pane, log=lines.append)
+    assert pa.RESUMED in out.observed
+    joined = "\n".join(lines)
+    assert "my secret draft" not in joined and "15 chars" in joined
+
+
+def test_resume_after_esc_on_a_write_only_channel_logs_a_warning(monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: no read-back channel -> ESC only, a WARNING line, NO_READBACK token."""
+    _live_pane(monkeypatch, LivePane())
+    lines: list[str] = []
+    out = pa.resume_after_esc(
+        _WRITE_ONLY, "resume", presence_blocked=lambda: False, settle_s=0.0, log=lines.append
+    )
+    assert pa.NO_READBACK in out.observed and any("esc_resume WARNING" in line for line in lines)
+
+
+def test_resume_after_esc_retry_mode_sends_no_esc_and_stops_on_a_non_typable_screen(monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: `after_esc=False` (the resume-pending retry) never fires an ESC-first
+    plan. On a typable empty composer it types and submits; on a non-typable screen (the picker)
+    it fires NOTHING and reports NOT_TYPABLE so no retry is spent."""
+    pane = _live_pane(monkeypatch, LivePane(restored_prompt=None))
+    out = pa.resume_after_esc(_TMUX, "resume", presence_blocked=lambda: False, settle_s=0.0, after_esc=False)
+    assert pa.RESUMED in out.observed and pane.submitted == ["resume"]
+    assert all(sum(1 for s in p["steps"] if s[-1] == "Escape") == 0 for p in pane.plans)
+
+    pane2 = _live_pane(monkeypatch, LivePane(restored_prompt=None))
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda _t: _PICKER_FRAME)
+    out2 = pa.resume_after_esc(_TMUX, "resume", presence_blocked=lambda: False, settle_s=0.0, after_esc=False)
+    assert out2.status is pa.OutcomeStatus.FAILED and pa.NOT_TYPABLE in out2.observed
+    assert pane2.plans == [] and out2.touched is False

@@ -168,20 +168,53 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-# LOCAL copy of `pane_state._WEDGE_DETAIL_RE` — pane_state imports from THIS module, so
-# importing it back would be a circular import. Keep the two in sync.
+# THE single source of truth for the wedge-detail shape (TRDD-RJJGXPIK review finding #2):
+# `pane_state` IMPORTS this definition. It used to keep a verbatim local copy "kept in sync
+# by comment" — the exact drift hazard that leaves one copy silently stale.
 _WEDGE_DETAIL_RE = re.compile(
     r"retrying\s+in\s+(?P<retry_in>[^·(]+?)\s*(?:\((?P<resets_at>[^)]+)\))?\s*·\s*"
     r"attempt\s+(?P<attempt>\d+)\s*/\s*(?P<total>\d+)",
     re.IGNORECASE,
 )
 
-# Second-level granularity (`0s`, `30s`) is the ONLY countdown shape whose text is expected
+# Second-level granularity (`30s`, `45s`) is the ONLY countdown shape whose text is expected
 # to change every second. An hour-scale wait (`Retrying in 5h`) legitimately holds the same
 # text for hours, so a repeated match there proves nothing — see `retry_wedge_state_update`.
-_SECOND_SCALE_RE = re.compile(r"\d+\s*s", re.IGNORECASE)
-# How long byte-identical second-scale countdown text must persist before it proves a freeze.
+# A ZERO second value (`0s`, `00s`) is excluded on purpose (TRDD-RJJGXPIK): a hung request shows
+# `Retrying in 0s` forever, which is a different failure from a frozen countdown and must not be
+# read as one through this route. (?<!\d) stops a match starting mid-number (`10s` must not be
+# re-read as `0s`); (?!0+\s*s) rejects an all-zero value.
+_SECOND_SCALE_RE = re.compile(r"(?<!\d)(?!0+\s*s)\d+\s*s", re.IGNORECASE)
+# 120 s (TRDD-RJJGXPIK): the owner's words are "more than one or 2 minutes". Only a SECOND-scale
+# countdown reaches this bar (see _SECOND_SCALE_RE), and one that stays byte-identical for 120 s
+# while the clock moves is frozen beyond doubt — a ticking countdown changes every second, so the
+# bar is a margin against the heartbeat's own poll jitter, not against a slow refresh.
 _FROZEN_COUNTDOWN_MIN_S = 120
+# How long a resume_sent marker stays live (TRDD-RJJGXPIK). It must OUTLIVE the per-instance
+# recovery cooldown (fleet_recovery.COOLDOWN_S = 900, stamped by every fire AND every decline):
+# the next rung beat on the same instance cannot come sooner than that, so a shorter TTL
+# (it was 300) expires before the marker is ever consulted and every beat would type another
+# `resume` — dead code. 2x the cooldown keeps the marker live for the very next rung beat and
+# lets it lapse by the one after, so a wedge that persists half an hour gets one more resume.
+# The marker is NOT the only stacking guard: resume_after_esc types onto a read-back-verified
+# EMPTY field and requires the exact text before Enter, so even a lapsed marker cannot stack.
+# For a `frozen` diagnosis that is NOT a wedge (no retry-wedge signature on the pane),
+# `diagnose_root` wipes this whole episode state, marker included, on the very next scan: there
+# the read-back is the ONLY stacking guard, not the TTL (TRDD-RJJGXPIK round 3).
+# (A test pins TTL > COOLDOWN_S; fleet_recovery imports this module, so it cannot be imported here.)
+RESUME_EPISODE_TTL_S = 1800
+
+
+def resume_sent_active(prev: Mapping[str, object] | None, now: int | None) -> bool:
+    """True iff the persisted episode state records a resume already typed for THIS episode
+    and the marker is younger than `RESUME_EPISODE_TTL_S`. PURE (TRDD-RJJGXPIK). `now=None`
+    means the caller has no timeline, so a recorded marker is taken as live."""
+    if not prev or prev.get("resume_sent") is not True:
+        return False
+    sent_at = prev.get("resume_sent_at")
+    if not isinstance(sent_at, int):
+        return False
+    return now is None or now - sent_at <= RESUME_EPISODE_TTL_S
 
 
 def retry_wedge_retry_in(text: str) -> str | None:
@@ -228,9 +261,15 @@ def retry_wedge_state_update(
 
     FROZEN COUNTDOWN (TRDD-RJJGXPIK): a tie that never advances is exactly the shape of a
     retry watchdog stuck while re-printing the SAME countdown, so a second-scale
-    ``current_retry_in`` (``30s``, ``0s``) held byte-identical for >=120s also confirms the
-    wedge. ``now`` is the poll epoch; None skips this path entirely (the caller has no
+    ``current_retry_in`` (``30s``, never ``0s``) held byte-identical for >=120s also confirms
+    the wedge. ``now`` is the poll epoch; None skips this path entirely (the caller has no
     timeline to compare across).
+
+    RESUME MARKER (TRDD-RJJGXPIK): the daemon records ``resume_sent``/``resume_sent_at`` in
+    this same state once it has typed ``resume`` for the episode. The marker is CARRIED across
+    polls of the same episode (first sighting, advance, tie) so later beats stay ESC-only, and
+    DROPPED when the episode ends (None), a new episode starts (attempt decrease) or it is
+    older than `RESUME_EPISODE_TTL_S`.
     """
     if current_attempt is None:
         return None, False
@@ -240,7 +279,26 @@ def retry_wedge_state_update(
     prev_first_seen = prev.get("first_seen") if prev else None
     first_seen = prev_first_seen if isinstance(prev_first_seen, int) else None
     retry_in = current_retry_in if current_retry_in is not None else prev_retry_in
-    if not isinstance(prev_attempt, int) or current_attempt < prev_attempt:
+    resume_carry: dict[str, object] = (
+        {"resume_sent": True, "resume_sent_at": prev["resume_sent_at"]}
+        if prev is not None and resume_sent_active(prev, now)
+        else {}
+    )
+    if not isinstance(prev_attempt, int):
+        # First sighting, or a marker-only state the daemon wrote before any scan saw the
+        # wedge: baseline the episode but keep the marker (same physical wedge).
+        return (
+            {
+                "attempt": current_attempt,
+                "confirmed": False,
+                "retry_in": retry_in,
+                "first_seen": now,
+                **resume_carry,
+            },
+            False,
+        )
+    if current_attempt < prev_attempt:
+        # New episode: the resume marker belonged to the previous one, so it is NOT carried.
         return (
             {
                 "attempt": current_attempt,
@@ -257,6 +315,7 @@ def retry_wedge_state_update(
                 "confirmed": True,
                 "retry_in": retry_in,
                 "first_seen": now,
+                **resume_carry,
             },
             True,
         )
@@ -282,6 +341,7 @@ def retry_wedge_state_update(
             "confirmed": confirmed,
             "retry_in": retry_in,
             "first_seen": first_seen,
+            **resume_carry,
         },
         confirmed,
     )

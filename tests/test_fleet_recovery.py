@@ -36,7 +36,39 @@ def test_frozen_gentle_recovery_is_esc_only() -> None:
     the retry-blocked input line and flood. The old command-typing ladder (rearm/reload/update) is
     gone. Without `include_hard` this is the WHOLE ladder (ESC forever, then the crash-loop guard)."""
     for attempt in (-1, 0, 1, 2, 3, 99):
-        assert fr.action_for("frozen", attempt) == "esc_nudge", attempt
+        assert fr.action_for("frozen", attempt, resume_sent=True) == "esc_nudge", attempt
+
+
+def test_frozen_and_retry_wedged_resume_exactly_once_per_episode() -> None:
+    """TRDD-RJJGXPIK owner directive ("after pressing esc it should also inject the command
+    resume"): the FIRST pass of a frozen / retry_wedged episode is `esc_nudge_resume`
+    (ESC, settle, type `resume`); once the episode state records resume_sent the routing
+    drops to ESC-only `esc_nudge`, so repeated beats never stack resumes. Neither phase is a
+    hard (kill) rung, at any attempt count."""
+    for diagnosis in ("frozen", "retry_wedged"):
+        for attempt in (0, 1, 4, 99):
+            assert fr.action_for(diagnosis, attempt) == "esc_nudge_resume", (diagnosis, attempt)
+            assert fr.action_for(diagnosis, attempt, resume_sent=False) == "esc_nudge_resume"
+            assert fr.action_for(diagnosis, attempt, resume_sent=True) == "esc_nudge"
+            assert not sl.is_hard_rung("esc_nudge_resume")
+    # The flag touches only the ESC wedge phases, never another diagnosis.
+    assert fr.action_for("cron_dead", 0, resume_sent=True) == "rearm"
+    assert fr.action_for("healthy", 0, resume_sent=True) is None
+
+
+
+def test_resume_marker_outlives_the_recovery_cooldown() -> None:
+    """TRDD-RJJGXPIK: the marker TTL must exceed the per-instance recovery cooldown, or the
+    marker is dead code. The soonest the next rung beat can come is COOLDOWN_S after the last
+    fire (every fire and decline stamps it); a TTL below that expires before the marker is ever
+    read and every beat would type another `resume`. At exactly that next beat the marker must
+    still be live and route to ESC-only."""
+    assert sl.RESUME_EPISODE_TTL_S > fr.COOLDOWN_S
+    marked = {"attempt": 1, "confirmed": True, "resume_sent": True, "resume_sent_at": 1000}
+    now = 1000 + fr.COOLDOWN_S
+    assert fr.gate(last_ts=1000, attempts=1, now=now) == "ok"  # the very next possible rung beat
+    assert sl.resume_sent_active(marked, now) is True
+    assert fr.action_for("frozen", 1, resume_sent=sl.resume_sent_active(marked, now)) == "esc_nudge"
 
 
 def test_gate_ok_cooldown_crashloop() -> None:
@@ -64,8 +96,8 @@ def test_include_hard_frozen_never_escalates_past_esc_nudge() -> None:
     is a stall whose cause is unsettled (indistinguishable from a static retry-watchdog frame).
     dead→relaunch (an unrelated diagnosis, unaffected); healthy/unarmed stay None at ANY attempt."""
     for attempt in (0, 1, 2, 3, 4, 99):
-        assert fr.action_for("frozen", attempt, include_hard=True) == "esc_nudge", attempt
-        assert fr.action_for("frozen", attempt, include_hard=False) == "esc_nudge", attempt
+        assert fr.action_for("frozen", attempt, include_hard=True, resume_sent=True) == "esc_nudge", attempt
+        assert fr.action_for("frozen", attempt, include_hard=False, resume_sent=True) == "esc_nudge", attempt
     assert fr.action_for("dead", 0, include_hard=True) == "relaunch"
     assert fr.action_for("dead", 0) is None                    # unwired view preserved
     assert fr.action_for("healthy", 99, include_hard=True) is None
@@ -74,15 +106,19 @@ def test_include_hard_frozen_never_escalates_past_esc_nudge() -> None:
 
 
 def test_frozen_never_TYPES_a_command_even_when_it_hard_restarts() -> None:
-    """The invariant that kills the flood: a frozen session's action is NEVER a command-typing
-    rung — it is ESC-only at every attempt, capped there (never a process-killing rung either;
-    TRDD-L32WC0H7 / F1). So no `/janitor-arm` can ever accumulate on a rate-limited session's
-    input line, at any attempt."""
+    """The invariant that kills the flood: a frozen session is NEVER sent a slash-command
+    rung (no `/janitor-arm` can accumulate on a rate-limited input line), at any attempt, and
+    never a process-killing rung either (TRDD-L32WC0H7 / F1). Once resume_sent is recorded it
+    is ESC-only (no command at all); the one-per-episode first pass types only the bare
+    `resume` (TRDD-RJJGXPIK owner directive), which is not slash-prefixed."""
     import fleet_inject as fi
     for attempt in range(fr.MAX_ATTEMPTS + 2):
-        action = fr.action_for("frozen", attempt, include_hard=True)
+        action = fr.action_for("frozen", attempt, include_hard=True, resume_sent=True)
         assert action is not None
         assert fi.action_to_command(action) is None, (attempt, action)  # never a typed command
+        first = fr.action_for("frozen", attempt, include_hard=True)
+        assert first is not None and not sl.is_hard_rung(first)
+        assert fi.action_to_command(first) == "resume", (attempt, first)  # bare word, no "/"
     assert fr.gate(last_ts=None, attempts=fr.MAX_ATTEMPTS, now=1_000_000) == "crash_loop"
 
 
@@ -108,6 +144,9 @@ def test_action_for_retry_wedged_never_escalates_to_hard_restart() -> None:
     include_hard=True."""
     for attempt in (0, 1, 2, 3, 4, 99):
         for include_hard in (False, True):
-            action = fr.action_for("retry_wedged", attempt, include_hard=include_hard)
+            action = fr.action_for("retry_wedged", attempt, include_hard=include_hard, resume_sent=True)
             assert action == "esc_nudge", (attempt, include_hard, action)
+            first = fr.action_for("retry_wedged", attempt, include_hard=include_hard)
+            assert first == "esc_nudge_resume", (attempt, include_hard, first)
+            assert not sl.is_hard_rung(first)
             assert not sl.is_hard_rung(action)

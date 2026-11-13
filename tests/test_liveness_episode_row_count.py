@@ -27,6 +27,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "oauth_rotator"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import daemon  # type: ignore[import-not-found]  # noqa: E402
+import pane_sim  # noqa: E402
 from test_daemon_session_liveness import _inst, _setup  # noqa: E402
 
 # Every diagnosis the kill-rung guard sweeps — a diagnosis that escapes the one-ESC
@@ -51,9 +52,9 @@ def test_stalled_beats_fire_at_most_one_esc_plan_per_episode(tmp_path, monkeypat
         esc_plans = 0
         for _ in range(n_beats):
             daemon.task_session_liveness()
-            for plan in fired:
-                if plan["command"] == "":  # ESC-only plans are the recovery's keystrokes
-                    esc_plans += 1
+            # Only plans that press Escape make an Interrupted row; the typed `resume` and its
+            # Enter (TRDD-RJJGXPIK) do not.
+            esc_plans += len(pane_sim.esc_plans(fired))
             fired.clear()
         # THE ROW COUNT: one Interrupted row per episode means at most ONE esc plan.
         assert esc_plans <= 1, (diagnosis, esc_plans)
@@ -88,7 +89,7 @@ def test_counter_survives_the_esc_provoked_healthy_beat(tmp_path, monkeypatch) -
 
     # Beat 1: frozen -> the recovery fires and consumes attempt 1.
     daemon.task_session_liveness()
-    assert len(fired) == 1
+    assert len(pane_sim.esc_plans(fired)) == 1
     fired.clear()
     assert _counter().get("attempts") == 1
 
@@ -107,4 +108,4 @@ def test_counter_survives_the_esc_provoked_healthy_beat(tmp_path, monkeypatch) -
     monkeypatch.setattr(daemon.time, "time", lambda: real_time() + daemon.fr.COOLDOWN_S + 1)
     daemon.task_session_liveness()
     assert _counter().get("attempts") == 2, _counter()
-    assert len(fired) <= 1
+    assert len(pane_sim.esc_plans(fired)) <= 1

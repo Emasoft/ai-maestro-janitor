@@ -30,11 +30,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import daemon  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
-
-# A real captured/anonymized IDLE frame — an empty input field, no wedge, no dialog.
-_IDLE_PANE = (
-    _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
-).read_text(encoding="utf-8")
+from pane_sim import LivePane, Plans, esc_plans  # noqa: E402
 
 
 def _inst(
@@ -48,7 +44,7 @@ def _inst(
     )
 
 
-def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> list:
+def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> Plans:
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))   # recovery state
     monkeypatch.setenv("JANITOR_LOG_DIR", str(tmp_path / "logs"))   # mirrors the real daemon main()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED", fire)
@@ -58,8 +54,9 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> list
     for fn in (daemon.state.project_root, daemon.state.janitor_root,
                daemon.state.state_dir, daemon.state.log_dir):
         fn.cache_clear()
-    recorded: list = []
-    monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True)
+    pane = LivePane(restored_prompt=None)
+    recorded = pane.plans
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
     # TRDD-N954KWUC P3 — every keystroke now goes through the pane policy table, which READS
     # the target pane first and (correctly) refuses to type into a readable channel it cannot
     # see. These synthetic instances point at tmux panes that do not exist on this machine, so
@@ -67,7 +64,11 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> list
     # implied, so the tests keep exercising the RECOVERY policy rather than the
     # unreadable-pane guard, which has its own tests in test_pane_actuate.py. Tests that need
     # a different screen re-patch this AFTER `_setup` (monkeypatch: last write wins).
-    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _IDLE_PANE)
+    # TRDD-RJJGXPIK: the frame is a LivePane — an idle composer that REFLECTS what the production
+    # code types into it, so the ESC + type + read-back + Enter sequence of esc_nudge_resume can
+    # complete exactly as it would on a real pane. restored_prompt=None: no aborted turn to put
+    # back, so tests that are not ABOUT the restored prompt see a plain empty composer.
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
     # `sweep_stale_rate_limit_s` is the daemon's opt-in stale-flag sweep (janitor#77 item C);
     # the seam accepts and ignores it — these tests inject a fleet, so there are no real roots.
     monkeypatch.setattr(
@@ -97,9 +98,12 @@ def test_session_liveness_beat_is_default_on_with_the_gate_env_var_unset(
     fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
     fired = _setup(monkeypatch, tmp_path, fleet)
     daemon.task_session_liveness()
-    assert len(fired) == 1
+    assert len(esc_plans(fired)) == 1
     assert fired[0]["channel"] == "tmux"
-    assert fired[0]["command"] == ""  # ESC-only, never a typed command, for a frozen session
+    assert fired[0]["command"] == ""  # the ESC goes first, alone — nothing is typed with it
+    # TRDD-RJJGXPIK: the first pass then types the bare `resume` (never a slash-command) only
+    # after reading the composer back, and submits it.
+    assert fired.pane.submitted == ["resume"]
 
 
 def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
@@ -115,14 +119,14 @@ def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
     fired = _setup(monkeypatch, tmp_path, fleet, fire="0")
     daemon.task_session_liveness()
     assert fired == []                                   # dry-run fires nothing
-    # frozen (rate-limited) → ESC-only recovery since TRDD-P7WU40G9 (never a typed command).
+    # frozen (rate-limited) → ESC-first recovery; first pass also types `resume` (TRDD-RJJGXPIK).
     assert "session-liveness:DRY would esc_nudge" in _log(tmp_path)
     assert "proj-a" in _log(tmp_path)
     persisted = list((tmp_path / "recovery").glob("*.json"))
     assert len(persisted) == 1                           # only the frozen one is decided
     st = json.loads(persisted[0].read_text(encoding="utf-8"))
     assert "attempts" not in st                          # no attempt consumed
-    assert st["last_ts"] and st["last_audit"] == "dry_run:esc_nudge"
+    assert st["last_ts"] and st["last_audit"] == "dry_run:esc_nudge_resume"
 
 
 def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> None:
@@ -136,15 +140,335 @@ def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> Non
     ]
     fired = _setup(monkeypatch, tmp_path, fleet)
     daemon.task_session_liveness()
-    assert sorted(p["channel"] for p in fired) == ["iterm", "tmux"]
-    # The frozen tmux session fires ESC-only (command==""); only the cron_dead session types a
-    # command (TRDD-P7WU40G9 — a rate-limited session is NEVER typed at).
-    assert sorted(p["command"] for p in fired) == ["", "/janitor-arm"]
+    assert {p["channel"] for p in fired} == {"iterm", "tmux"}
+    # The frozen tmux session gets ESC, then (read back clean) the bare `resume` and Enter
+    # (TRDD-RJJGXPIK, first pass of the episode — never a slash-command); the cron_dead iTerm
+    # session types /janitor-arm. Exactly one plan carries each of the two commands.
+    assert fired.pane.submitted == ["resume"]
+    assert [p["command"] for p in fired].count("/janitor-arm") == 1
+    assert len(esc_plans(fired)) == 1
     assert "UNREACHABLE" in _log(tmp_path)
     # an immediate 2nd beat is blocked by the per-instance cooldown
     fired.clear()
     daemon.task_session_liveness()
     assert fired == []
+
+
+
+def test_frozen_restored_prompt_is_cleared_then_resume_once_per_episode(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK, through the REAL daemon path and the real plan builders, against a
+    simulated composer that behaves as MEASURED on Claude Code 2.1.323: ESC aborts the turn
+    and PUTS THE INTERRUPTED PROMPT (`say hi`) BACK IN THE COMPOSER.
+
+    Beat 1 must therefore be ESC, then (field read back as non-empty) Esc Esc to clear the
+    draft, then the bare `resume`, read back as exactly `resume`, then Enter — what reaches
+    the session is `resume`, never `say hiresume`. The resume_sent marker is persisted
+    atomically (no temp file); later beats of the SAME episode are ESC-only; once the episode
+    state is cleared and a fresh turn is aborted, the new episode gets its one resume."""
+    proj = tmp_path / "proj-once"
+    fleet = [_inst("frozen", str(proj), {"tmux_pane": "%5"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    pane = LivePane(restored_prompt="say hi")
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    ep = proj / ".janitor" / "state" / "retry-wedge-episode.json"
+
+    def _next_beat() -> None:
+        for f in (tmp_path / "recovery").glob("*.json"):
+            f.unlink()  # skip the per-instance cooldown so the next beat decides afresh
+        pane.plans.clear()
+        daemon.task_session_liveness()
+
+    def _escapes() -> list[int]:
+        return [sum(1 for s in p["steps"] if s[-1] == "Escape") for p in pane.plans]
+
+    daemon.task_session_liveness()
+    assert _escapes() == [1, 2, 0, 0], "ESC, Esc Esc to clear the restored prompt, type, Enter"
+    assert pane.commands() == ["", "", "resume", ""]
+    assert pane.submitted == ["resume"], "the restored prompt must be cleared, never typed onto"
+    st = json.loads(ep.read_text(encoding="utf-8"))
+    assert st["resume_sent"] is True and isinstance(st["resume_sent_at"], int)
+    assert list(ep.parent.glob("*.tmp.*")) == [], "atomic write left a temp file behind"
+
+    _next_beat()
+    assert pane.commands() == [""], "same episode: ESC only, never a second resume"
+    _next_beat()
+    assert pane.commands() == [""]
+    assert pane.submitted == ["resume"]
+
+    ep.unlink()  # diagnose_root clears the state when the wedge signature is gone
+    pane.turn_running = True  # a new turn is retrying, and the next ESC aborts it again
+    _next_beat()
+    assert pane.submitted == ["resume", "resume"], "a fresh episode gets its one resume"
+
+
+def _beat_at(clock: dict, t: int) -> None:
+    """Advance the fake daemon clock to `t` and run one beat."""
+    clock["t"] = t
+    daemon.task_session_liveness()
+
+
+def test_failed_resume_is_retried_on_a_later_beat_with_no_second_esc(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2 (continuity): beat 1's ESC lands but the restored draft survives
+    Esc Esc, so `resume` is NOT submitted. The ESC aborts the turn, so the pane no longer looks
+    wedged and the episode state is wiped by `diagnose_root` — a separate resume-pending marker
+    must therefore survive, and the NEXT beat (still inside the 900 s cooldown, so the main loop
+    declines) re-runs ONLY the resume half: it clears the draft, types `resume`, submits it, and
+    fires NO new ESC-first plan beyond the Esc Esc clear. The restored prompt's text is never
+    logged."""
+    proj = tmp_path / "proj-retry"
+    fleet = [_inst("frozen", str(proj), {"tmux_pane": "%5"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    pane = LivePane(restored_prompt="say hi", stubborn=True)
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    t0 = 1_800_000_000
+    clock = _wedged_clock(monkeypatch, t0)
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    episode = proj / ".janitor" / "state" / "retry-wedge-episode.json"
+
+    _beat_at(clock, t0)
+    assert pane.submitted == [] and pane.field == "say hi", "the draft survived: nothing typed"
+    assert pending.exists(), "the failed resume must leave a marker that outlives the episode wipe"
+    assert not episode.exists() or json.loads(episode.read_text(encoding="utf-8")).get("resume_sent") is not True
+    assert json.loads(pending.read_text(encoding="utf-8"))["tries"] == 1
+
+    pane.stubborn = False  # the next Esc Esc will clear it
+    pane.plans.clear()
+    _beat_at(clock, t0 + 60)
+    assert pane.submitted == ["resume"], "the retry beat must finish the resume"
+    assert not pending.exists(), "RESUMED clears the marker"
+    esc_first = [p for p in pane.plans if sum(1 for s in p["steps"] if s[-1] == "Escape") == 1]
+    assert esc_first == [], "the retry beat must never send a fresh ESC-first plan (only Esc Esc)"
+    assert "say hi" not in _log(tmp_path), "the restored prompt text must not be logged"
+
+
+def test_three_failed_resume_tries_raise_one_alert_and_never_a_fourth_try(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: when the draft never clears, the resume-pending pass spends at most
+    3 failed tries one beat apart, then writes ONE findings-ledger HIGH alert and a daemon.log
+    line naming the project, drops the marker, and types nothing ever again."""
+    proj = tmp_path / "proj-giveup"
+    fleet = [_inst("frozen", str(proj), {"tmux_pane": "%5"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    pane = LivePane(restored_prompt="say hi", stubborn=True)
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+    t0 = 1_800_000_000
+    clock = _wedged_clock(monkeypatch, t0)
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+
+    _beat_at(clock, t0)  # the ESC beat: failed try 1
+    _beat_at(clock, t0 + 60)  # failed try 2
+    assert pending.exists() and findings == []
+    _beat_at(clock, t0 + 120)  # failed try 3 -> give up
+    assert not pending.exists()
+    stall = [f for f in findings if f["code"] == "FLEET-RESUME-STALL"]
+    assert len(stall) == 1 and stall[0]["sev"] == "HIGH"
+    assert "GIVING UP on the resume" in _log(tmp_path) and "proj-giveup" in _log(tmp_path)
+
+    typed_before = len(pane.plans)
+    for i in (3, 4, 5):
+        _beat_at(clock, t0 + 60 * i)
+    assert len(pane.plans) == typed_before, "no fourth try, no loop after the alert"
+    assert pane.submitted == []
+    assert len([f for f in findings if f["code"] == "FLEET-RESUME-STALL"]) == 1
+
+
+def test_write_only_channel_gets_esc_only_with_a_warning_and_a_ledger_line(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 2: a channel with no read-back cannot verify the composer, so the
+    daemon stays ESC-only, logs a WARNING and writes ONE findings-ledger MEDIUM line saying
+    resume is not possible on that channel; the episode is marked resumed so later beats do not
+    repeat the alert."""
+    proj = tmp_path / "proj-blind"
+    fleet = [_inst("frozen", str(proj), {"linux_gui_channel": "wtype"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+    daemon.task_session_liveness()
+    log = _log(tmp_path)
+    assert "WARNING" in log and "resume not possible on channel" in log and "ESC only" in log
+    no_rb = [f for f in findings if f["code"] == "FLEET-RESUME-NO-READBACK"]
+    assert len(no_rb) == 1 and no_rb[0]["sev"] == "MEDIUM"
+    st = json.loads((proj / ".janitor" / "state" / "retry-wedge-episode.json").read_text(encoding="utf-8"))
+    assert st["resume_sent"] is True
+
+
+_PICKER_FRAME = (
+    Path(__file__).resolve().parent / "fixtures" / "pane_frames" / "real-rewind-picker.txt"
+).read_text()
+_T0 = 1_800_000_000
+
+
+def _stubborn_session(monkeypatch, tmp_path: Path, name: str):
+    """A frozen session whose restored draft survives Esc Esc, so beat 1 ends with a
+    resume-pending marker. Returns (proj, fleet, pane, clock, findings)."""
+    proj = tmp_path / name
+    fleet = [_inst("frozen", str(proj), {"tmux_pane": "%5"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    pane = LivePane(restored_prompt="say hi", stubborn=True)
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+    clock = _wedged_clock(monkeypatch, _T0)
+    return proj, fleet, pane, clock, findings
+
+
+def _write_transcript(tmp_path: Path, monkeypatch, proj: Path, rows: list[tuple[int, str, str]]) -> None:
+    """Write `(epoch, type, text)` rows as the project's Claude Code transcript under a scratch HOME,
+    mtime set to the newest row (the real file would have it), so the locator under test is real."""
+    import os
+    from datetime import datetime, timezone
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    tdir = Path(fleet_scan._transcript_dir(str(proj)))
+    tdir.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for epoch, rtype, text in rows:
+        ts = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        msg = {"role": rtype, "content": text} if rtype in ("user", "assistant") else {}
+        lines.append(json.dumps({"type": rtype, "timestamp": ts, "message": msg}))
+    path = tdir / "session.jsonl"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.utime(path, (max(r[0] for r in rows), max(r[0] for r in rows)))
+
+
+def test_pending_marker_carries_the_shared_session_identity_and_a_changed_one_is_logged(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-RJJGXPIK round 3: the marker written through the REAL beat carries exactly
+    `_session_identity(inst)` (one builder, both sites). When the occupant changes (new pid), the
+    retry pass drops the marker AND says so in daemon.log — it used to drop it silently."""
+    proj, fleet, pane, clock, _ = _stubborn_session(monkeypatch, tmp_path, "proj-ident")
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    _beat_at(clock, _T0)
+    assert json.loads(pending.read_text(encoding="utf-8"))["identity"] == daemon._session_identity(fleet[0])
+    # New pid = a restarted session. Healthy, so the main loop leaves it alone (a frozen new
+    # occupant would legitimately get its own fresh ESC rung) and only the retry pass sees it.
+    fleet[0] = dataclasses.replace(fleet[0], pid=2, diagnosis="healthy")
+    pane.stubborn = False
+    _beat_at(clock, _T0 + 60)
+    assert not pending.exists() and pane.submitted == []
+    assert "session identity changed" in _log(tmp_path) and "marker dropped" in _log(tmp_path)
+
+
+def test_retry_does_not_type_when_the_session_showed_activity_after_the_esc(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 3: a human (or the cron resume) may have got the session going between
+    beats, after which it sits idle again. A user/assistant transcript row newer than the ESC
+    clears the marker and NO `resume` is typed — even though the pane reads typable and empty."""
+    proj, fleet, pane, clock, _ = _stubborn_session(monkeypatch, tmp_path, "proj-active")
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    _beat_at(clock, _T0)
+    assert pending.exists()
+    _write_transcript(tmp_path, monkeypatch, proj, [(_T0 + 30, "user", "carry on please")])
+    pane.stubborn = False
+    pane.plans.clear()
+    _beat_at(clock, _T0 + 60)
+    assert pane.submitted == [] and pane.plans == [], "no keystroke at all after activity"
+    assert not pending.exists()
+    assert "showed activity after the ESC" in _log(tmp_path)
+
+
+def test_rows_that_are_not_post_esc_activity_do_not_block_the_retry(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 3 (negative control for the activity guard): a row from BEFORE the ESC,
+    Claude Code's own `[Request interrupted by user]` row, and api-request bookkeeping are not
+    activity, so the retry still types `resume`."""
+    proj, fleet, pane, clock, _ = _stubborn_session(monkeypatch, tmp_path, "proj-quiet")
+    _beat_at(clock, _T0)
+    _write_transcript(
+        tmp_path, monkeypatch, proj,
+        [
+            (_T0 - 100, "user", "say hi"),
+            (_T0 + 10, "user", "[Request interrupted by user]"),
+            (_T0 + 20, "api-request", ""),
+        ],
+    )
+    pane.stubborn = False
+    _beat_at(clock, _T0 + 60)
+    assert pane.submitted == ["resume"]
+
+
+def test_expiry_without_resume_raises_the_same_high_alert_once(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 3: a marker that lapses (1 h) without RESUMED is a session left idle,
+    so it raises the same HIGH FLEET-RESUME-STALL alert (plus the daemon.log line) instead of
+    expiring silently, and types nothing."""
+    proj, fleet, pane, clock, findings = _stubborn_session(monkeypatch, tmp_path, "proj-expire")
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    _beat_at(clock, _T0)
+    fleet[0] = dataclasses.replace(fleet[0], diagnosis="healthy")  # the ESC ended the wedge
+    pane.stubborn = False
+    _beat_at(clock, _T0 + daemon._RESUME_PENDING_MAX_AGE_S + 5)
+    stall = [f for f in findings if f["code"] == "FLEET-RESUME-STALL"]
+    assert len(stall) == 1 and stall[0]["sev"] == "HIGH" and "proj-expire" in _log(tmp_path)
+    assert not pending.exists() and pane.submitted == []
+    _beat_at(clock, _T0 + daemon._RESUME_PENDING_MAX_AGE_S + 65)
+    assert len([f for f in findings if f["code"] == "FLEET-RESUME-STALL"]) == 1
+
+
+def test_three_beats_on_a_non_typable_screen_alert_once_and_type_nothing(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 3: a pane parked on a screen `resume` cannot be typed into (here the
+    Rewind picker) spends no try, but 3 consecutive such beats raise ONE HIGH alert, counted in
+    the marker; later beats stay quiet, the marker survives until it expires, nothing is typed."""
+    proj, fleet, pane, clock, findings = _stubborn_session(monkeypatch, tmp_path, "proj-menu")
+    # The pane policy reads the composer BEFORE the ESC (typable) and the picker appears after it:
+    # only then does the ESC land and resume_after_esc meet a screen it cannot type into.
+    monkeypatch.setattr(
+        daemon.fleet_inject.terminal_trigger,
+        "read_pane_text",
+        lambda t: _PICKER_FRAME if pane.plans else pane.read(t),
+    )
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    _beat_at(clock, _T0)  # ESC beat, screen not typable: streak 1
+    fleet[0] = dataclasses.replace(fleet[0], diagnosis="healthy")
+    plans_after_esc = len(pane.plans)
+    _beat_at(clock, _T0 + 60)  # streak 2
+    assert not [f for f in findings if f["code"] == "FLEET-RESUME-STALL"]
+    _beat_at(clock, _T0 + 120)  # streak 3 -> alert
+    stall = [f for f in findings if f["code"] == "FLEET-RESUME-STALL"]
+    assert len(stall) == 1 and stall[0]["sev"] == "HIGH"
+    marker = json.loads(pending.read_text(encoding="utf-8"))
+    assert marker["not_typable_beats"] == 3 and marker["alerted"] is True and marker["tries"] == 0
+    for i in (3, 4):
+        _beat_at(clock, _T0 + 60 * i)
+    assert len([f for f in findings if f["code"] == "FLEET-RESUME-STALL"]) == 1, "alert once"
+    assert len(pane.plans) == plans_after_esc and pane.submitted == [], "nothing typed or pressed"
+
+
+@pytest.mark.parametrize("optout", ["unarmed", "server_owned", "dead", "disarmed.flag", "kill-switch"])
+def test_retry_pass_honours_the_opt_outs_and_drops_the_marker(tmp_path, monkeypatch, optout) -> None:
+    """TRDD-RJJGXPIK round 3: an unarmed / server-owned / dead session, a `disarmed.flag`
+    project and the machine-wide kill switch each stop the retry pass: no keystroke, the marker
+    is dropped, and the drop is logged."""
+    proj, fleet, pane, clock, _ = _stubborn_session(monkeypatch, tmp_path, f"proj-{optout.replace('.', '-')}")
+    pending = proj / ".janitor" / "state" / "resume-pending.json"
+    _beat_at(clock, _T0)
+    assert pending.exists()
+    if optout in ("unarmed", "server_owned", "dead"):
+        fleet[0] = dataclasses.replace(fleet[0], diagnosis=optout)
+    elif optout == "disarmed.flag":
+        (proj / ".janitor" / "state" / "disarmed.flag").write_text("x", encoding="utf-8")
+    else:
+        monkeypatch.setattr(daemon.gs, "kill_switch_present", lambda: True)
+    pane.stubborn = False
+    pane.plans.clear()
+    _beat_at(clock, _T0 + 60)
+    assert not pending.exists() and pane.submitted == [] and pane.plans == []
+    assert "marker dropped" in _log(tmp_path)
+
+
+def test_a_findings_ledger_fault_is_logged_not_swallowed_silently(tmp_path, monkeypatch) -> None:
+    """TRDD-RJJGXPIK round 3: a failing ledger write stays non-fatal but leaves a daemon.log line
+    naming the code and the exception, so a lost alert is visible."""
+    _setup(monkeypatch, tmp_path, [])
+
+    def _boom(**_kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(daemon.findings_ledger, "record", _boom)
+    daemon._ledger_record(str(tmp_path), sev="HIGH", code="FLEET-RESUME-STALL", msg="m")
+    assert "ledger write FAILED (FLEET-RESUME-STALL): disk full" in _log(tmp_path)
 
 
 def _pane(field_body: str) -> str:
@@ -343,7 +667,7 @@ def test_restarted_session_gets_a_fresh_budget(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
     daemon.task_session_liveness()
-    assert len(fired) == 1                      # recovered, NOT refused by a stale budget
+    assert len(esc_plans(fired)) == 1               # recovered, NOT refused by a stale budget
     st = json.loads(sf.read_text(encoding="utf-8"))
     assert st["identity"] == "1:ttys1"          # budget rebound to the NEW session
     assert st["attempts"] == 1                  # fresh budget (1st attempt), not the old MAX
@@ -359,7 +683,7 @@ def test_corrupt_state_file_does_not_crash_the_beat(tmp_path, monkeypatch) -> No
     sf = daemon._recovery_state_path(rec, "/p/proj-c")
     sf.write_text("[1, 2, 3]", encoding="utf-8")   # valid JSON, NOT a dict
     daemon.task_session_liveness()                 # must not raise
-    assert len(fired) == 1                          # treated as fresh → recovered
+    assert len(esc_plans(fired)) == 1               # treated as fresh → recovered
 
 
 def test_an_unreachable_instance_is_not_re_audited_on_every_beat(tmp_path, monkeypatch) -> None:
@@ -460,7 +784,7 @@ def test_wedged_short_circuit_exempts_esc_first_rungs(tmp_path, monkeypatch) -> 
     fleet = [_inst("frozen", "/p/proj-f", {"tmux_pane": "%6"}, trailing=3)]
     fired = _setup(monkeypatch, tmp_path, fleet)
     daemon.task_session_liveness()
-    assert len(fired) == 1                                # still fired: ESC unwedges
+    assert len(esc_plans(fired)) == 1                     # still fired: ESC unwedges
 
 
 def test_awaiting_user_present_never_esc_dismisses(tmp_path, monkeypatch) -> None:
@@ -512,8 +836,8 @@ def test_retry_wedged_trailing_enqueues_does_not_decline(tmp_path, monkeypatch) 
     pushes: list = []
     monkeypatch.setattr(daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED")
     daemon.task_session_liveness()
-    assert len(fired) == 1, "the ESC must fire despite trailing enqueues"
-    assert fired[0]["command"] == "", "retry_wedged is ESC-only, never a typed command"
+    assert len(esc_plans(fired)) == 1, "the ESC must fire despite trailing enqueues"
+    assert fired.pane.submitted == ["resume"], "first pass types only the bare `resume` (TRDD-RJJGXPIK), never a slash-command"
     assert "WEDGED" not in _log(tmp_path)
     assert pushes == [], "no human paging — the ESC itself is the recovery"
 
@@ -531,7 +855,7 @@ def test_retry_wedged_writes_rate_limited_flag_before_the_esc(tmp_path, monkeypa
     since = proj / ".janitor" / "state" / "rate-limited-since.ts"
     assert not flag.exists()
     daemon.task_session_liveness()
-    assert len(fired) == 1
+    assert len(esc_plans(fired)) == 1
     assert flag.is_file(), "rate-limited.flag must exist once the ESC has fired"
     assert since.read_text(encoding="utf-8").strip().isdigit()
 
@@ -564,8 +888,8 @@ def test_retry_wedged_never_escalates_even_at_max_attempts(tmp_path, monkeypatch
         encoding="utf-8",
     )
     daemon.task_session_liveness()
-    assert len(fired) == 1
-    assert fired[0]["command"] == "", "still ESC-only at a high attempt count — never a kill"
+    assert len(esc_plans(fired)) == 1
+    assert fired.pane.submitted == ["resume"], "first pass is ESC + bare `resume` (TRDD-RJJGXPIK) — never a kill"
 
 
 def test_awaiting_user_unknown_idle_never_esc_dismisses(tmp_path, monkeypatch) -> None:
@@ -723,7 +1047,7 @@ def test_fired_line_names_the_pane_class_so_box6_is_answerable(tmp_path, monkeyp
     fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
     fired = _setup(monkeypatch, tmp_path, fleet)          # _setup serves the IDLE frame
     daemon.task_session_liveness()
-    assert len(fired) == 1
+    assert len(esc_plans(fired)) == 1
     log = _log(tmp_path)
     assert "FIRED esc_nudge" in log
     assert "pane=idle" in log, "the FIRED line must name the pane class, not only the diagnosis"

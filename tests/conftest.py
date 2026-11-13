@@ -1325,6 +1325,24 @@ def _pin_hid_probe_unavailable(monkeypatch):
 
 
 
+@pytest.fixture(autouse=True)
+def _no_real_settle_waits_in_resume_after_esc(monkeypatch):
+    """`pane_actuate.resume_after_esc` (TRDD-RJJGXPIK) sleeps `_SETTLE_S` (+ the ESC plan own
+    2 s delay) before EVERY composer read, because a real terminal needs that long to repaint.
+    Tests drive it against a simulated terminal that answers instantly, so zero both: otherwise
+    each beat costs 10-20 s of wall clock. Only the two module constants are touched, and only
+    `resume_after_esc` reads them at call time (`act` binds its own default at def time), so
+    no other settle behaviour changes."""
+    import importlib
+    try:
+        mod = importlib.import_module("pane_actuate")
+    except ImportError:
+        return
+    monkeypatch.setattr(mod, "_SETTLE_S", 0.0)
+    monkeypatch.setattr(mod, "_ESC_PLAN_DELAY_S", 0.0)
+
+
+
 # Same four names as `state._PANE_ID_ENV_VARS` (scripts/lib/state.py); tests/test_pane_state.py
 # asserts the two lists are equal so they cannot drift.
 _PANE_ID_ENV_NAMES = ("TMUX_PANE", "ITERM_SESSION_ID", "KITTY_WINDOW_ID", "WEZTERM_PANE")

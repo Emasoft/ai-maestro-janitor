@@ -1552,6 +1552,14 @@ def _recovery_state_path(rec_dir: Path, project_root: str) -> Path:
     return rec_dir / f"{slug}.json"
 
 
+def _session_identity(inst) -> str:
+    """The pid+tty string that binds persisted per-session state (recovery budget, the
+    resume-pending marker) to ONE session occupant. The single builder: the recovery budget and
+    the resume-pending pass used to format it separately, so a drift in either would have made
+    the marker silently never match (TRDD-RJJGXPIK round 3)."""
+    return f"{inst.pid}:{inst.tty or ''}"
+
+
 def _read_recovery_state(path: Path) -> dict:
     """Load an instance's {attempts, last_ts, alerted, identity}; {} when absent or
     corrupt. Valid-JSON-but-not-an-object (e.g. a bare list/number from external
@@ -1956,7 +1964,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # stored identity differs (a restart → new pid, or a stale file a vanished
         # session left behind), discard it — a freshly-restarted session must never
         # inherit the previous occupant's spent/alerted budget and be refused help.
-        identity = f"{inst.pid}:{inst.tty or ''}"
+        identity = _session_identity(inst)
         if st.get("identity") != identity:
             st = {}
         attempts = state.coerce_int(
@@ -2109,7 +2117,14 @@ def task_session_liveness(fleet: list | None = None) -> None:
             continue
         if decision == "cooldown":
             continue
-        action = fr.action_for(inst.diagnosis, attempts, include_hard=True)
+        # TRDD-RJJGXPIK: frozen/retry_wedged recovery is ESC + ONE `resume` per episode; the
+        # episode state records whether this episode already got its resume.
+        action = fr.action_for(
+            inst.diagnosis,
+            attempts,
+            include_hard=True,
+            resume_sent=fleet_scan.retry_wedge_resume_sent(inst.project_root, now),
+        )
         if action is None:
             # Unknown / unrecoverable diagnosis — we never invent an action for a
             # state we don't recognize. (Since increment 2 wired A5, `dead` maps to
@@ -2330,8 +2345,14 @@ def task_session_liveness(fleet: list | None = None) -> None:
             continue
         # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
         # session gets a soft enqueue so its in-flight turn survives (TRDD-0GPQROC1).
+        # TRDD-RJJGXPIK: `esc_nudge_resume` plans as the ESC-ONLY `esc_nudge` — no fused
+        # ESC+type plan exists anywhere on this path. The resume is typed afterwards by
+        # `pane_actuate.resume_after_esc`, which reads the composer first (CC puts the
+        # interrupted prompt back there on ESC). `action` stays `esc_nudge_resume` for routing.
         plan = fleet_inject.build_injection(
-            inst.terminal, action, esc_first=fr.injection_is_hard(inst.diagnosis)
+            inst.terminal,
+            "esc_nudge" if action == "esc_nudge_resume" else action,
+            esc_first=fr.injection_is_hard(inst.diagnosis),
         )
         if plan is None:
             state.log_line(
@@ -2450,16 +2471,34 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # resolved and the hard/soft law its DIAGNOSIS dictates (a 15-minute-stale transcript
         # is invisible on screen). `command_plan=plan` fires the very plan built above, so the
         # channel walk and `esc_first` atomicity are byte-identical to before the migration.
+        esc_resume = action == "esc_nudge_resume"
+        # The instant just BEFORE the ESC, not the beat's `now`: the resume-pending pass compares
+        # transcript rows against it to detect activity AFTER our ESC, and `now` is stamped at the
+        # start of the beat, up to a whole fleet of pane settles earlier (TRDD-RJJGXPIK round 3).
+        esc_at = int(time.time())
         outcome = pane_actuate.act(
             inst.terminal,
             pane_actuate.Event.RECOVERY_RUNG,
             state=pane,
-            command=fleet_inject.action_to_command(action),
+            # TRDD-RJJGXPIK: esc_nudge_resume is TWO acts, not one fused ESC+type plan. This
+            # call is the ESC half only (command=None keeps every policy gate of esc_nudge);
+            # the resume is typed by `resume_after_esc` below, AFTER reading the composer —
+            # CC 2.1.323 puts the interrupted prompt back in the composer on ESC, so a fused
+            # plan typed `resume` onto it ("say hiresume").
+            command=None if esc_resume else fleet_inject.action_to_command(action),
             esc_first=fr.injection_is_hard(inst.diagnosis),
             command_plan=plan,
             project_dir=inst.project_root,
             log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
         )
+        resume_out = None
+        if esc_resume and outcome.status is pane_actuate.OutcomeStatus.DONE:
+            resume_out = pane_actuate.resume_after_esc(
+                inst.terminal,
+                fleet_inject.action_to_command(action) or "",
+                project_dir=inst.project_root,
+                log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
+            )
         # A decision that typed NOTHING must not spend a recovery attempt — that is the
         # `_decline` contract (F9), and spending budget for an action never tried is what
         # walks the ladder to the hard, killing rungs. NOOP = the table refused on what the
@@ -2495,6 +2534,13 @@ def task_session_liveness(fleet: list | None = None) -> None:
             _decline("channel_rejected", action, str(plan["channel"]))
             continue
         ok = outcome.status is pane_actuate.OutcomeStatus.DONE
+        if resume_out is not None:
+            # TRDD-RJJGXPIK: the ESC landed; book-keep the resume half (resume_sent on
+            # RESUMED, a resume-pending marker when it did not land) — see _after_esc_resume.
+            _after_esc_resume(
+                inst, resume_out, tag=tag, channel=str(plan["channel"]), now=now, identity=identity,
+                esc_at=esc_at,
+            )
         _write_recovery_state(
             sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity}
         )
@@ -2510,10 +2556,217 @@ def task_session_liveness(fleet: list | None = None) -> None:
         )
         _audit(inst, "fired" if ok else "fire_failed", action, str(plan["channel"]))
 
+    # TRDD-RJJGXPIK: finish any `resume` whose ESC landed on an earlier beat but whose typing
+    # did not (the marker outlives the episode wipe). Before the wake pass; only the resume
+    # half, never a new ESC.
+    _resume_pending_pass(fleet, now, fire=fire)
     # The FREE half of the rate-limit recovery (TRDD-X07E7HTN, D1 v1). Same scanned fleet,
     # same beat — so it inherits the SESSION_LIVENESS_ENABLED gate above AND the typing gate
     # (the whole beat already returned if the user is at the keyboard). DEFAULT-OFF.
     _resume_wake_pass(fleet, now, fire=fire)
+
+
+# TRDD-RJJGXPIK continuity backstop for `esc_nudge_resume`. The ESC aborts the turn, so the pane
+# stops looking wedged and `diagnose_root` wipes the episode state; a resume that did not land
+# would then never be re-sent. A separate `resume-pending.json` marker (fleet_scan) survives that
+# wipe, and `_resume_pending_pass` re-runs ONLY the resume half — never a new ESC — on later beats.
+_RESUME_PENDING_MAX_TRIES = 3
+# A marker older than this is abandoned: the screen has been un-typable or the human present
+# for an hour, and a stale resume typed into whatever the pane became by then is worse than
+# none. Expiring without RESUMED raises the same HIGH alert as running out of tries — a silent
+# lapse would leave an idle session nobody was told about (TRDD-RJJGXPIK round 3).
+_RESUME_PENDING_MAX_AGE_S = 3600
+# Consecutive beats the pane sat on a screen `resume` cannot be typed into (a menu, an
+# unreadable composer, a dialog) before the stall is reported once; such beats spend no try.
+_RESUME_PENDING_NOT_TYPABLE_BEATS = 3
+
+
+def _ledger_record(root: str | None, *, sev: str, code: str, msg: str) -> None:
+    """One findings-ledger line for a project. A ledger fault must never break the beat, but it
+    is written to daemon.log so a lost alert is not invisible."""
+    try:
+        findings_ledger.record(sev=sev, code=code, src="daemon", msg=msg, project_dir=root)
+    except Exception as exc:  # noqa: BLE001 -- a finding write must never crash the beat
+        state.log_line("daemon", f"session-liveness: findings ledger write FAILED ({code}): {exc}")
+
+
+def _resume_stall_alert(root: str, tag: str, msg: str) -> None:
+    """The one HIGH alert for an idle session whose `resume` never landed: a daemon.log line
+    naming the project plus a findings-ledger entry. Shared by every give-up path."""
+    state.log_line("daemon", f"session-liveness: {tag} GIVING UP on the resume: {msg}")
+    _ledger_record(root, sev="HIGH", code="FLEET-RESUME-STALL", msg=msg)
+
+
+def _after_esc_resume(
+    inst,
+    resume_out: "pane_actuate.Outcome",
+    *,
+    tag: str,
+    channel: str,
+    now: int,
+    identity: str,
+    esc_at: int,
+) -> None:
+    """Book-keep the outcome of `pane_actuate.resume_after_esc` right after its ESC landed
+    (TRDD-RJJGXPIK): `resume_sent` once the resume was submitted (or can never be, on a
+    write-only channel), nothing when the session is already working, and otherwise a
+    resume-pending marker so a later beat can finish the job. `tries` counts only failures
+    that reached the typing logic — a screen that could not be typed into, or a human at the
+    keyboard, attempted nothing and must not burn the retry budget. `esc_at` is the instant
+    just before the ESC, the reference the retry pass measures later activity against."""
+    root = inst.project_root
+    observed = resume_out.observed
+    if pane_actuate.RESUMED in observed:
+        fleet_scan.write_resume_pending(root, None)
+        fleet_scan.mark_retry_wedge_resume_sent(root, now)
+        return
+    if pane_actuate.NO_READBACK in observed:
+        # Resume is impossible here, so mark the episode as resumed: later beats then take the
+        # plain ESC-only `esc_nudge`, and this alert is raised once per episode, not per beat.
+        fleet_scan.mark_retry_wedge_resume_sent(root, now)
+        msg = f"resume not possible on channel {channel} — ESC only"
+        state.log_line("daemon", f"session-liveness: WARNING {tag} {msg}")
+        _ledger_record(root, sev="MEDIUM", code="FLEET-RESUME-NO-READBACK", msg=msg)
+        return
+    if "working" in observed:
+        fleet_scan.write_resume_pending(root, None)
+        return
+    not_typable = pane_actuate.NOT_TYPABLE in observed
+    typed_failure = resume_out.status is pane_actuate.OutcomeStatus.FAILED and not not_typable
+    fleet_scan.write_resume_pending(
+        root,
+        {
+            "esc_at": esc_at,
+            "tries": 1 if typed_failure else 0,
+            "not_typable_beats": 1 if not_typable else 0,
+            "alerted": False,
+            "last_try_at": now,
+            "identity": identity,
+        },
+    )
+    state.log_line(
+        "daemon",
+        f"session-liveness: {tag} ESC landed but `resume` was NOT submitted "
+        f"({resume_out.status.value}) — resume-pending marker written, a later beat retries",
+    )
+
+
+def _resume_pending_pass(fleet: list, now: int, *, fire: bool) -> None:
+    """Re-run ONLY the resume half for panes whose ESC landed on an earlier beat but whose
+    resume did not (TRDD-RJJGXPIK). One try per beat, at most `_RESUME_PENDING_MAX_TRIES`
+    failed tries, and never a new ESC. Cleared on RESUMED or when the pane is WORKING; after
+    the last failed try, on expiry, or after `_RESUME_PENDING_NOT_TYPABLE_BEATS` beats on a
+    non-typable screen, a findings-ledger alert and a daemon.log line name the project, so a
+    session left idle is never silent. The marker is dropped, with a log line, when the session
+    changed occupant, was opted out (`unarmed`/`server_owned`/`dead`, a `disarmed.flag`, the
+    kill switch), or showed user/assistant activity newer than the ESC (a human or the cron
+    resume already got it going: typing `resume` now would land on a live conversation)."""
+    if not fire:
+        return
+    for inst in fleet:
+        root = inst.project_root
+        if not root or not inst.terminal:
+            continue
+        pend = fleet_scan.read_resume_pending(root)
+        if pend is None:
+            continue
+        name = os.path.basename(root)
+        tag = f"{name} [resume-pending]"
+
+        def _drop(why: str, *, _root=root, _tag=tag) -> None:
+            state.log_line("daemon", f"session-liveness: {_tag} {why} — resume-pending marker dropped")
+            fleet_scan.write_resume_pending(_root, None)
+
+        identity = _session_identity(inst)
+        if pend.get("identity") != identity:
+            # A restarted session (new pid/tty) is a different occupant: typing the old one's
+            # pending resume into it would be a stray keystroke it never asked for.
+            _drop(f"session identity changed ({pend.get('identity')!r} -> {identity!r})")
+            continue
+        # The same opt-outs the main loop honours: an unarmed/server-owned/dead session is never
+        # touched, a `disarmed.flag` project is sacrosanct, and the kill switch is the machine-
+        # wide stop. (No pause flag exists any more — owner directive 2026-07-31.)
+        if inst.diagnosis in ("unarmed", "server_owned", "dead"):
+            _drop(f"diagnosis is {inst.diagnosis}")
+            continue
+        if (Path(root) / ".janitor" / "state" / state.DISARMED_FLAG).is_file():
+            _drop("project is disarmed")
+            continue
+        if gs.kill_switch_present():
+            _drop("kill switch is set")
+            continue
+        esc_at = state.coerce_int(str(pend.get("esc_at", 0)), 0, detector_name="resume-pending", var_name="esc_at")
+        tries = state.coerce_int(str(pend.get("tries", 0)), 0, detector_name="resume-pending", var_name="tries")
+        not_typable_beats = state.coerce_int(
+            str(pend.get("not_typable_beats", 0)), 0, detector_name="resume-pending", var_name="not_typable_beats"
+        )
+        last_try_at = state.coerce_int(
+            str(pend.get("last_try_at", 0)), 0, detector_name="resume-pending", var_name="last_try_at"
+        )
+        alerted = pend.get("alerted") is True
+        if now - esc_at > _RESUME_PENDING_MAX_AGE_S:
+            if not alerted:
+                _resume_stall_alert(
+                    root,
+                    tag,
+                    f"ESC aborted the turn but `resume` was never submitted within {now - esc_at}s — "
+                    "the session is idle, a human must resume it",
+                )
+            _drop(f"expired after {now - esc_at}s")
+            continue
+        if last_try_at >= now:
+            continue  # the beat that wrote it: one beat apart, never twice in the same beat
+        if fleet_scan.transcript_activity_since(root, esc_at):
+            _drop("the session showed activity after the ESC, so it is no longer idle")
+            continue
+        out = pane_actuate.resume_after_esc(
+            inst.terminal,
+            fleet_inject.action_to_command("esc_nudge_resume") or "",
+            project_dir=root,
+            log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
+            after_esc=False,
+        )
+        observed = out.observed
+        if pane_actuate.RESUMED in observed:
+            state.log_line("daemon", f"session-liveness: {tag} resume submitted on the retry beat")
+            fleet_scan.write_resume_pending(root, None)
+            fleet_scan.mark_retry_wedge_resume_sent(root, now)
+            continue
+        if "working" in observed or pane_actuate.NO_READBACK in observed:
+            fleet_scan.write_resume_pending(root, None)  # recovered by itself / cannot be verified
+            continue
+        if out.status is not pane_actuate.OutcomeStatus.FAILED:
+            continue  # deferred to a human: no try spent, nothing changed
+        marker = {
+            "esc_at": esc_at, "tries": tries, "not_typable_beats": not_typable_beats,
+            "alerted": alerted, "last_try_at": now, "identity": identity,
+        }
+        if pane_actuate.NOT_TYPABLE in observed:
+            # Nothing was attempted, so no try is spent — but a pane parked on a menu or dialog
+            # for several beats in a row is an idle session nobody knows about: alert ONCE.
+            marker["not_typable_beats"] = not_typable_beats + 1
+            if marker["not_typable_beats"] >= _RESUME_PENDING_NOT_TYPABLE_BEATS and not alerted:
+                _resume_stall_alert(
+                    root,
+                    tag,
+                    f"ESC aborted the turn but the screen has not allowed `resume` for "
+                    f"{marker['not_typable_beats']} beats in a row — the session is idle, a human must resume it",
+                )
+                marker["alerted"] = True
+            fleet_scan.write_resume_pending(root, marker)
+            continue
+        marker["not_typable_beats"] = 0  # a typable screen again: the NOT_TYPABLE streak is broken
+        marker["tries"] = tries + 1
+        if marker["tries"] >= _RESUME_PENDING_MAX_TRIES:
+            _resume_stall_alert(
+                root,
+                tag,
+                f"ESC aborted the turn but `resume` could not be submitted after {marker['tries']} tries — "
+                "the session is idle, a human must resume it",
+            )
+            fleet_scan.write_resume_pending(root, None)
+            continue
+        fleet_scan.write_resume_pending(root, marker)
 
 
 # Daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1) — env knob + window key.

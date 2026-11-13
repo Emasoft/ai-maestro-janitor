@@ -24,7 +24,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from session_liveness import _INPUT_BOX_BORDER_RE, _RETRY_WEDGE_RE, status_row_text_at_tail
+from session_liveness import (
+    _INPUT_BOX_BORDER_RE,
+    _RETRY_WEDGE_RE,
+    _WEDGE_DETAIL_RE,
+    status_row_text_at_tail,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -35,15 +40,11 @@ if TYPE_CHECKING:
 # module's queue-counting is its own concern, not `session_liveness`'s.
 _QUEUE_WINDOW_ROWS = 8
 
-# The richer wedge-detail regex `session_liveness._RETRY_WEDGE_RE` doesn't capture: total
-# attempts, the retry-in duration, and the optional wall-clock reset time. Anchored on the
-# SAME `retrying in … attempt N/M` shape (reuses `_RETRY_WEDGE_RE`'s own vocabulary), just
-# with capture groups `session_liveness` has no reason to carry itself.
-_WEDGE_DETAIL_RE = re.compile(
-    r"retrying\s+in\s+(?P<retry_in>[^·(]+?)\s*(?:\((?P<resets_at>[^)]+)\))?\s*·\s*"
-    r"attempt\s+(?P<attempt>\d+)\s*/\s*(?P<total>\d+)",
-    re.IGNORECASE,
-)
+# How many non-empty rows ABOVE the input box's top border can hold a LIVE `API Error` banner
+# (TRDD-RJJGXPIK): the banner sits just above the box, so anything further up is scrollback.
+_API_ERROR_TAIL_ROWS = 8
+# Fallback window when no input box is on screen to anchor to: the last N non-empty rows.
+_API_ERROR_NO_BOX_ROWS = 15
 
 _MODEL_LINE_RE = re.compile(r"🤖\s*(?P<model>.+?)\s*\|\s*📁")
 _CONTEXT_PCT_RE = re.compile(r"(?P<pct>\d{1,3})%\s*context", re.IGNORECASE)
@@ -87,7 +88,7 @@ class Status:
     retry_in: str | None = None
     resets_at: str | None = None
     scope: str | None = None  # "session-limit" | "rate-limit" | "usage-limit" | None
-    awaiting_kind: str | None = None  # "permission" | "ask-user-menu" | "model-confirm"
+    awaiting_kind: str | None = None  # "permission" | "ask-user-menu" | "model-confirm" | "rewind-menu"
 
 
 @dataclass(frozen=True)
@@ -125,9 +126,48 @@ def _wedge_scope(status_row: str) -> str:
     return "usage-limit"
 
 
+def _api_error_on_screen(text: str, status_row: str | None) -> bool:
+    """True iff a LIVE `API Error` banner is on screen (TRDD-RJJGXPIK) — never one that has
+    scrolled away. Live means the status row, or one of the `_API_ERROR_TAIL_ROWS` non-empty
+    rows directly ABOVE the input box's top border. Anchoring to the box, not to the end of
+    the frame, is the point: everything BELOW the top border (a multi-line draft, a todo list,
+    the footer) is a block of variable height, and counting it would push a real banner out of
+    a fixed trailing window. With no input box on screen (fewer than two borders) there is no
+    anchor, so fall back to the last `_API_ERROR_NO_BOX_ROWS` non-empty rows."""
+    if status_row is not None and "api error" in status_row.lower():
+        return True
+    rows = [ln for ln in text.splitlines() if ln.strip()]
+    borders = [i for i, r in enumerate(rows) if _INPUT_BOX_BORDER_RE.match(r.rstrip())]
+    if len(borders) >= 2:
+        window = rows[max(0, borders[-2] - _API_ERROR_TAIL_ROWS) : borders[-2]]
+    else:
+        window = rows[-_API_ERROR_NO_BOX_ROWS:]
+    return any("api error" in ln.lower() for ln in window)
+
+
+def _rewind_menu_on_screen(text: str) -> bool:
+    """True iff Claude Code's Rewind picker is open (TRDD-RJJGXPIK, measured live on 2.1.323:
+    Esc Esc on an EMPTY prompt opens it). It REPLACES the input box, so no border/field is
+    parsed and the frame used to read as IDLE with an EMPTY field — a screen a caller would
+    happily type into, with Enter one keystroke from confirming a restore point. Both landmarks
+    must sit in the last `_API_ERROR_TAIL_ROWS` non-empty rows: the title and its `Esc to
+    cancel` footer."""
+    tail = [ln.lower() for ln in text.splitlines() if ln.strip()][-_API_ERROR_TAIL_ROWS:]
+    return any(ln.strip() == "rewind" for ln in tail) and any("esc to cancel" in ln for ln in tail)
+
+
 def _classify_status(text: str, status_row: str | None, agents_running: int) -> Status:
     low = text.lower()
-    if "api error" in low:
+    # TRDD-RJJGXPIK: the Rewind picker overlays everything else on screen and a human decision
+    # is pending in it (Enter confirms a restore point), so it outranks every other status.
+    if _rewind_menu_on_screen(text):
+        return Status(kind=StatusKind.AWAITING_USER, awaiting_kind="rewind-menu")
+    # TRDD-RJJGXPIK: anchor the API-error test to where Claude Code prints a LIVE error — the
+    # status row, or the last few non-empty rows just above the input box. A whole-pane
+    # substring test also matched an "API Error" line that merely scrolled past (an old
+    # error, or a transcript/doc quoting one), so a session that had long recovered kept
+    # classifying as API_ERROR and the policy table acted on a screen that no longer said so.
+    if _api_error_on_screen(text, status_row):
         return Status(kind=StatusKind.API_ERROR)
     if status_row is not None:
         m = _RETRY_WEDGE_RE.search(status_row)

@@ -51,7 +51,11 @@ from pane_policy import Event, Expect, Outcome, OutcomeStatus, Step, execute, pl
 if TYPE_CHECKING:
     from pane_state import PaneState
 
-__all__ = ["Event", "Expect", "Outcome", "OutcomeStatus", "Step", "act", "build_step_plan", "presence_blocked_now"]
+__all__ = [
+    "Event", "Expect", "NOT_TYPABLE", "NO_READBACK", "Outcome", "OutcomeStatus", "RESUMED", "Step", "act",
+    "build_step_plan",
+    "presence_blocked_now", "resume_after_esc",
+]
 
 # How long to wait for the terminal to REPAINT before re-reading it. Must exceed the plans'
 # own `delay_s` (fleet_inject builds them with 2.0 s): the osascript/tmux child sleeps that
@@ -307,3 +311,173 @@ def act(
     if outcome.status is OutcomeStatus.DONE and not all(accepted):
         return Outcome(status=OutcomeStatus.FAILED, steps_done=outcome.steps_done, observed=outcome.observed, touched=touched)
     return Outcome(status=outcome.status, steps_done=outcome.steps_done, observed=outcome.observed, touched=touched)
+
+
+
+# How long fleet_inject.build_esc_plan sleeps BEFORE it sends its ESC. resume_after_esc starts
+# reading only after this plus the settle, or it would re-read the PRE-ESC frame and mistake
+# "the ESC has not landed yet" for "nothing was restored". Taken from fleet_inject so the wait
+# cannot drift from the plan it follows.
+_ESC_PLAN_DELAY_S = fleet_inject.ESC_PLAN_DELAY_S
+
+# Pane states in which the post-ESC composer may be typed into: a quiet prompt. API_ERROR is
+# included because the red banner stays in the last rows after the ESC aborts the retry; the
+# composer under it is just as free. WORKING is handled separately (the session recovered by
+# itself); everything else (a dialog, the Rewind picker, compacting, a wedge that survived, no
+# input box visible) is a screen we must not type into.
+_RESUME_TYPABLE_KINDS = frozenset({pane_state.StatusKind.IDLE, pane_state.StatusKind.API_ERROR})
+
+# The token resume_after_esc puts in Outcome.observed ONLY when the resume was typed, read
+# back as exactly the command, and submitted. The daemon keys its resume_sent marker on it.
+RESUMED = "resumed"
+# Put in Outcome.observed when the pane could not be typed into at all (a dialog, a wedge that
+# survived the ESC, an unreadable frame). The daemon does NOT count such an outcome as a failed
+# resume try: nothing was attempted, so it must not burn the retry budget.
+NOT_TYPABLE = "not-typable"
+# Put in Outcome.observed when the channel has no read-back, so the resume cannot be verified
+# and only the ESC was sent.
+NO_READBACK = "esc-only-no-readback"
+
+
+def resume_after_esc(
+    terminal: dict,
+    command: str,
+    *,
+    project_dir: str | None = None,
+    log: Callable[[str], None] | None = None,
+    presence_blocked: Callable[[], bool] | None = None,
+    settle_s: float | None = None,
+    after_esc: bool = True,
+) -> Outcome:
+    """The second half of `esc_nudge_resume` (TRDD-RJJGXPIK): the ESC has ALREADY been sent
+    (by `act`, with every policy gate); settle, look at the composer, make it empty, and only
+    then type `command` and submit it. With `after_esc=False` (the retry pass: the ESC was sent
+    on an earlier beat) no ESC-plan wait is added and `touched` reports only what this call
+    itself fired.
+
+    WHY the field is read instead of assumed empty (measured live on Claude Code 2.1.323,
+    mods-expert-developer report reports_dev/mods-expert-developer/20261113_171403+0100-
+    liveness-mod.md, "Live measurements"; reproduced live by the TRDD-RJJGXPIK round-2 run):
+    ESC aborts the turn and PUTS THE INTERRUPTED PROMPT BACK IN THE COMPOSER. Typing straight
+    after the ESC therefore submitted `say hiresume` (the old fused type+Enter plan), and a
+    caller that waits for an empty field would stall forever. The sequence, each step read
+    back after `settle_s`:
+
+      1. read the composer. Text there (or queued messages) is the restored prompt: send
+         Esc Esc, which CC documents as "clear the draft, saved to history" on a NON-empty
+         prompt (it is rewind only on an EMPTY one — see claude-code-esc-input-semantics).
+         The Esc Esc is only ever sent against a field just read as non-empty.
+      2. re-read; the field must now be EMPTY. If it is not, STOP: log it and type nothing.
+         No loop — a draft that survives Esc Esc is not ours to fight. Because that Esc Esc
+         may have OPENED the Rewind picker on a misread-empty field (measured live: the picker
+         is what Esc Esc does on an empty prompt), a failure here sends ONE plain ESC, which
+         cancels the picker and is a no-op on a quiet prompt.
+      3. type `command` WITHOUT Enter, re-read, and require the field to show EXACTLY
+         `command` (input-injection rule 3). Anything else: STOP, no Enter.
+      4. Enter alone, then a last read that must no longer show the command sitting there.
+
+    No read-back channel (wtype / xdotool / ai-maestro CLI) cannot satisfy steps 1-3, so it
+    gets the ESC only — what `esc_nudge` always did (`NO_READBACK` in `observed`). A human at
+    the keyboard defers before anything is cleared or typed (rule 2: stop, no cleanup).
+
+    The restored prompt's TEXT is never logged — it is whatever the user last typed and may
+    hold a secret; only its length is.
+
+    `Outcome.observed` holds `RESUMED` iff the resume was submitted, `NOT_TYPABLE` when the
+    screen could not be typed into.
+    """
+    settle = _SETTLE_S if settle_s is None else settle_s
+    observed: list[str] = []
+    fired_any = after_esc  # the ESC the caller sent already touched the pane
+
+    def _log(message: str) -> None:
+        line = f"pane-policy: esc_resume {message}"
+        if log is not None:
+            log(line)
+        _append_ledger(project_dir, line)
+
+    def _out(status: OutcomeStatus, steps: int) -> Outcome:
+        return Outcome(status=status, steps_done=steps, observed=tuple(observed), touched=fired_any)
+
+    def _fire(plan: dict | None) -> bool:
+        nonlocal fired_any
+        fired_any = True
+        return fleet_inject.fire(plan)
+
+    def _read(extra_wait_s: float = 0.0) -> PaneState | None:
+        time.sleep(settle + extra_wait_s)
+        state = pane_state.read(terminal)
+        observed.append(state.input_field.kind.value if state is not None else "unreadable")
+        return state
+
+    def _fail_after_clear(steps: int, state: PaneState | None) -> Outcome:
+        """A failure that FOLLOWED the Esc Esc: close any Rewind picker it may have opened."""
+        if state is not None and state.status.kind is not pane_state.StatusKind.WORKING:
+            _log("sending one plain ESC to close a Rewind picker the Esc Esc may have opened")
+            _fire(fleet_inject.build_esc_plan(terminal, delay_s=0.0, esc_count=1))
+        return _out(OutcomeStatus.FAILED, steps)
+
+    if not channel_has_readback(terminal):
+        _log("WARNING no read-back channel — the ESC was sent, `resume` NOT typed (cannot be verified)")
+        observed.append(NO_READBACK)
+        return _out(OutcomeStatus.DONE, 1)
+
+    state = _read(_ESC_PLAN_DELAY_S if after_esc else 0.0)
+    if state is None:
+        _log("composer unreadable — `resume` NOT typed")
+        observed.append(NOT_TYPABLE)
+        return _out(OutcomeStatus.FAILED, 1)
+    if state.status.kind is pane_state.StatusKind.WORKING:
+        _log("session is already working — `resume` not needed")
+        observed.append("working")
+        return _out(OutcomeStatus.DONE, 1)
+    if state.status.kind not in _RESUME_TYPABLE_KINDS:
+        _log(f"pane shows {state.status.kind.value} — `resume` NOT typed")
+        observed.append(NOT_TYPABLE)
+        return _out(OutcomeStatus.FAILED, 1)
+
+    gate = presence_blocked if presence_blocked is not None else presence_blocked_now
+    if state.input_field.kind is not pane_state.InputFieldKind.EMPTY:
+        if gate():
+            _log("composer holds text and a human is at the keyboard — deferred, nothing cleared")
+            return _out(OutcomeStatus.DEFERRED, 1)
+        draft_len = len(state.input_field.text or "")
+        _log(f"composer holds a restored prompt ({draft_len} chars) — Esc Esc to clear it")
+        # delay_s=0: the settle below already covers the two ESCs and their 0.6 s gaps.
+        if not _fire(fleet_inject.build_esc_plan(terminal, delay_s=0.0, esc_count=2)):
+            _log("the Esc Esc plan was not accepted — `resume` NOT typed")
+            return _out(OutcomeStatus.FAILED, 2)
+        state = _read()
+        if state is None or state.input_field.kind is not pane_state.InputFieldKind.EMPTY:
+            _log("composer is still not empty after Esc Esc — `resume` NOT typed, not retrying")
+            return _fail_after_clear(2, state)
+        if state.status.kind not in _RESUME_TYPABLE_KINDS:
+            _log(f"pane shows {state.status.kind.value} after Esc Esc — `resume` NOT typed")
+            observed.append(NOT_TYPABLE)
+            return _fail_after_clear(2, state)
+    elif gate():
+        _log("a human is at the keyboard — `resume` deferred")
+        return _out(OutcomeStatus.DEFERRED, 1)
+
+    if project_dir:
+        # Same machine-typed crumb `act._type` leaves (TRDD-9ORKPQCX): the target session's own
+        # UserPromptSubmit hook must not read this keystroke as the owner's consent or presence.
+        user_intent.note_machine_typed(command, user_intent.target_state_dir(project_dir), uuid.uuid4().hex)
+    if not _fire(fleet_inject.build_type_text_plan(terminal, command)):
+        _log(f"typing {command!r} was not accepted — Enter NOT sent")
+        return _out(OutcomeStatus.FAILED, 3)
+    state = _read()
+    shown = (state.input_field.text or "").strip() if state is not None else None
+    if state is None or state.input_field.kind is not pane_state.InputFieldKind.TEXT or shown != command:
+        _log(f"composer reads {len(shown) if shown is not None else 0} chars, expected exactly {command!r} — Enter NOT sent")
+        return _out(OutcomeStatus.FAILED, 3)
+    if not _fire(fleet_inject.build_enter_plan(terminal)):
+        _log("the Enter plan was not accepted")
+        return _out(OutcomeStatus.FAILED, 4)
+    state = _read()
+    if state is not None and state.input_field.kind is pane_state.InputFieldKind.TEXT and (state.input_field.text or "").strip() == command:
+        _log(f"{command!r} is still sitting in the composer after Enter")
+        return _out(OutcomeStatus.FAILED, 4)
+    observed.append(RESUMED)
+    _log(f"ok — {command!r} submitted")
+    return _out(OutcomeStatus.DONE, 4)

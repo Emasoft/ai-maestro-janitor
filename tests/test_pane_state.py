@@ -41,6 +41,11 @@ _CASES: list[tuple[str, ps.StatusKind, ps.InputFieldKind]] = [
     ("synthetic-awaiting-model-confirm.txt", ps.StatusKind.AWAITING_USER, ps.InputFieldKind.EMPTY),
     ("synthetic-awaiting-ask-user-menu.txt", ps.StatusKind.AWAITING_USER, ps.InputFieldKind.EMPTY),
     ("synthetic-api-error.txt", ps.StatusKind.API_ERROR, ps.InputFieldKind.EMPTY),
+    # Measured live on Claude Code 2.1.323 (TRDD-RJJGXPIK round 2): a final `API Error: 400`, the
+    # Rewind picker Esc Esc opens on an EMPTY prompt, and the composer ESC restores `say hi` into.
+    ("real-api-error-400-banner.txt", ps.StatusKind.API_ERROR, ps.InputFieldKind.EMPTY),
+    ("real-rewind-picker.txt", ps.StatusKind.AWAITING_USER, ps.InputFieldKind.EMPTY),
+    ("real-esc-restored-prompt.txt", ps.StatusKind.IDLE, ps.InputFieldKind.TEXT),
     ("synthetic-compacting-with-queued.txt", ps.StatusKind.COMPACTING, ps.InputFieldKind.QUEUED),
     ("synthetic-reloading.txt", ps.StatusKind.RELOADING, ps.InputFieldKind.EMPTY),
     ("synthetic-session-limit-terminal.txt", ps.StatusKind.SESSION_LIMIT, ps.InputFieldKind.EMPTY),
@@ -78,6 +83,56 @@ def test_parse_classifies_the_fixture_frame(name: str, expected_status: ps.Statu
     state = ps.parse(frame)
     assert state.status.kind == expected_status, f"{name}: status {state.status.kind} != {expected_status}"
     assert state.input_field.kind == expected_field, f"{name}: field {state.input_field.kind} != {expected_field}"
+
+
+
+_LIVE_BOX = "─" * 40 + "\n❯ \n" + "─" * 40 + "\n  🤖 Sonnet 5 | 📁 proj\n"
+
+
+def test_api_error_in_the_last_rows_is_classified() -> None:
+    """A live `API Error` banner just above the input box (within the last 8 non-empty
+    rows) still classifies as API_ERROR (TRDD-RJJGXPIK position anchor)."""
+    frame = "⏺ Running lint\n✖ API Error: 529 Overloaded — the request could not be completed\n" + _LIVE_BOX
+    assert ps.parse(frame).status.kind == ps.StatusKind.API_ERROR
+
+
+def test_api_error_only_in_old_scrollback_is_not_classified() -> None:
+    """An `API Error` line that scrolled far above the live chrome (>8 non-empty rows back)
+    must NOT make a recovered, idle session read as API_ERROR (TRDD-RJJGXPIK). The old
+    whole-pane substring test did."""
+    scrollback = "".join(f"⏺ finished step {i}\n" for i in range(12))
+    frame = "✖ API Error: 529 Overloaded — the request could not be completed\n" + scrollback + _LIVE_BOX
+    assert ps.parse(frame).status.kind == ps.StatusKind.IDLE
+
+
+
+def test_api_error_banner_survives_a_tall_bottom_block() -> None:
+    """TRDD-RJJGXPIK: the banner is anchored to the input box's TOP border, not to the end of the
+    frame, so a 4-line draft box plus a 2-line footer cannot push a real banner out of the window."""
+    box = "─" * 40
+    frame = (
+        "✖ API Error: 529 Overloaded — the request could not be completed\n"
+        + box + "\n❯ line one\n  line two\n  line three\n  line four\n" + box
+        + "\n  footer one\n  footer two\n"
+    )
+    assert ps.parse(frame).status.kind == ps.StatusKind.API_ERROR
+
+
+def test_api_error_without_an_input_box_uses_the_last_fifteen_rows() -> None:
+    """No input box on screen means no anchor: fall back to the last 15 non-empty rows — a banner
+    inside that window classifies, one further back is scrollback and does not."""
+    near = "✖ API Error: 529 Overloaded\n" + "".join(f"⏺ step {i}\n" for i in range(12))
+    far = "✖ API Error: 529 Overloaded\n" + "".join(f"⏺ step {i}\n" for i in range(20))
+    assert ps.parse(near).status.kind == ps.StatusKind.API_ERROR
+    assert ps.parse(far).status.kind != ps.StatusKind.API_ERROR
+
+
+def test_rewind_picker_is_awaiting_user_not_a_quiet_idle_prompt() -> None:
+    """Measured live: the Rewind picker REPLACES the input box, so it used to parse as IDLE with
+    an EMPTY field — a screen that looks typable with Enter one key from confirming a restore
+    point. It must classify as a pending human decision (TRDD-RJJGXPIK)."""
+    st = ps.parse((_FIXTURES / "real-rewind-picker.txt").read_text())
+    assert st.status.kind == ps.StatusKind.AWAITING_USER and st.status.awaiting_kind == "rewind-menu"
 
 
 def test_the_fable_limit_wedge_carries_the_full_wedge_detail() -> None:

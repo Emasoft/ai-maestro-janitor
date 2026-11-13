@@ -1238,6 +1238,82 @@ def test_diagnose_root_retry_wedged_requires_advance_across_polls(tmp_path: Path
     assert not (sdir / fs._RETRY_WEDGE_STATE_FILE).exists()
 
 
+
+def test_resume_sent_marker_merges_into_episode_state_expires_and_writes_atomically(
+    tmp_path: Path,
+) -> None:
+    """TRDD-RJJGXPIK: marking resume_sent MERGES into the existing episode state (the
+    attempt/confirmed fields the next poll advances from survive), reads back True only
+    within RESUME_EPISODE_TTL_S, and the write is tmp-then-os.replace — no temp file is left in the
+    state directory."""
+    root = str(tmp_path / "p")
+    fs._write_retry_wedge_state(root, {"attempt": 2, "confirmed": True, "retry_in": "30s", "first_seen": 900})
+    assert fs.retry_wedge_resume_sent(root, 1000) is False
+    fs.mark_retry_wedge_resume_sent(root, 1000)
+    st = fs._read_retry_wedge_state(root)
+    assert st == {
+        "attempt": 2, "confirmed": True, "retry_in": "30s", "first_seen": 900,
+        "resume_sent": True, "resume_sent_at": 1000,
+    }
+    ttl = fs.session_liveness.RESUME_EPISODE_TTL_S
+    assert fs.retry_wedge_resume_sent(root, 1000 + ttl) is True
+    assert fs.retry_wedge_resume_sent(root, 1000 + ttl + 1) is False  # TTL: a fresh episode may resume again
+    leftovers = [p.name for p in (tmp_path / "p" / ".janitor" / "state").iterdir()]
+    assert leftovers == [fs._RETRY_WEDGE_STATE_FILE], leftovers
+    # No prior state at all: the marker alone is still recorded (daemon fired before any scan).
+    root2 = str(tmp_path / "q")
+    fs.mark_retry_wedge_resume_sent(root2, 50)
+    assert fs.retry_wedge_resume_sent(root2, 60) is True
+
+
+def test_diagnose_root_carries_the_resume_marker_until_the_wedge_clears(tmp_path: Path) -> None:
+    """Through `diagnose_root`: a recorded resume_sent survives the next poll of the SAME
+    wedged pane (so the daemon stays ESC-only), and is gone once the pane no longer shows the
+    wedge — the episode ended, so a fresh one may resume again (TRDD-RJJGXPIK)."""
+    import time
+
+    root = tmp_path / "p"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    terminal = {"tmux_pane": "%5"}
+    orig = fs.capture_pane_text
+    try:
+        fs.capture_pane_text = lambda t: "429 Rate limited · Retrying in 5h · attempt 5/300"  # type: ignore[assignment]
+        fs.diagnose_root(str(root), now=1_000_000, transcript_age=3600, terminal=terminal)
+        fs.mark_retry_wedge_resume_sent(str(root), int(time.time()))
+        fs.diagnose_root(str(root), now=1_000_000, transcript_age=3600, terminal=terminal)
+        assert fs.retry_wedge_resume_sent(str(root), int(time.time())) is True
+        fs.capture_pane_text = lambda t: "⏺ all quiet, no retry banner here"  # type: ignore[assignment]
+        fs.diagnose_root(str(root), now=1_000_000, transcript_age=3600, terminal=terminal)
+        assert fs.retry_wedge_resume_sent(str(root), int(time.time())) is False
+    finally:
+        fs.capture_pane_text = orig  # type: ignore[assignment]
+
+
+
+def test_resume_pending_marker_is_atomic_and_survives_the_episode_wipe(tmp_path: Path) -> None:
+    """TRDD-RJJGXPIK continuity backstop: the resume-pending marker lives in its OWN file, so
+    the episode wipe `diagnose_root` performs the moment the pane stops looking wedged (the ESC
+    aborted the turn!) does not erase it. The write leaves no temp file, a corrupt file reads as
+    "nothing pending", and None clears it."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    marker = {"esc_at": 1000, "tries": 1, "last_try_at": 1000, "identity": "1:ttys1"}
+    fs.write_resume_pending(str(root), marker)
+    fs._write_retry_wedge_state(str(root), {"attempt": 2, "confirmed": True})
+    # A healthy (non-stale transcript) poll wipes the EPISODE state ...
+    assert fs.diagnose_root(str(root), now=2000, transcript_age=10, terminal={"tmux_pane": "%5"})[:2] == ("healthy", None)
+    assert not (sdir / fs._RETRY_WEDGE_STATE_FILE).exists()
+    # ... and leaves the resume-pending marker alone.
+    assert fs.read_resume_pending(str(root)) == marker
+    assert sorted(p.name for p in sdir.iterdir()) == [fs._RESUME_PENDING_FILE]
+    (sdir / fs._RESUME_PENDING_FILE).write_text("{not json", encoding="utf-8")
+    assert fs.read_resume_pending(str(root)) is None
+    fs.write_resume_pending(str(root), marker)
+    fs.write_resume_pending(str(root), None)
+    assert fs.read_resume_pending(str(root)) is None
+
+
 def test_diagnose_root_never_polls_a_static_string_into_wedged(tmp_path: Path) -> None:
     """The self-trigger hazard, exercised through `diagnose_root`: a pane statically
     showing this TRDD's own quoted wedge line matches the regex every poll, but never
@@ -1538,3 +1614,42 @@ def test_transcript_activity_zero_byte_and_short_files_keep_their_results(
     lines = [_substantive_line(now - 4000), _enqueue_line(now - 20)]
     (tdir2 / "s1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert fs.transcript_activity(str(root2), now) == (4000, 1, False)
+
+
+def _row(epoch: int, rtype: str, content: object = "x") -> str:
+    import json
+    from datetime import datetime, timezone
+
+    ts = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return json.dumps({"type": rtype, "timestamp": ts, "message": {"role": rtype, "content": content}})
+
+
+def test_transcript_activity_since_sees_only_user_or_assistant_rows_after_the_instant(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-RJJGXPIK round 3: activity = a `user`/`assistant` row stamped AFTER `since`. A row
+    from before, an `api-request` row, an attachment, and Claude Code's own interrupt marker
+    (text or block form) are not; neither is a missing or empty transcript directory."""
+    since = 1_790_000_000
+    root, tdir = _activity_root(tmp_path, monkeypatch, "act-since")
+    path = tdir / "s1.jsonl"
+
+    def _write(*rows: str) -> None:
+        path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        os.utime(path, (since + 100, since + 100))  # newer than `since`, so the file is read
+
+    assert fs.transcript_activity_since(str(root), since) is False  # no rows at all
+    _write(_row(since - 50, "user"), _row(since + 5, "api-request"), _row(since + 6, "attachment"))
+    assert fs.transcript_activity_since(str(root), since) is False
+    _write(_row(since + 7, "user", "[Request interrupted by user]"))
+    assert fs.transcript_activity_since(str(root), since) is False
+    _write(_row(since + 7, "user", [{"type": "text", "text": "[Request interrupted by user]"}]))
+    assert fs.transcript_activity_since(str(root), since) is False
+    _write(_row(since + 8, "user", "carry on"))
+    assert fs.transcript_activity_since(str(root), since) is True
+    _write(_row(since + 8, "assistant", [{"type": "text", "text": "ok"}]))
+    assert fs.transcript_activity_since(str(root), since) is True
+    # A file whose mtime is not past `since` cannot hold a newer row: skipped unread.
+    os.utime(path, (since - 1, since - 1))
+    assert fs.transcript_activity_since(str(root), since) is False
+    assert fs.transcript_activity_since(str(tmp_path / "no-such-project"), since) is False

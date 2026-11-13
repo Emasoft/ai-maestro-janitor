@@ -26,13 +26,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import daemon  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
-
-# A real captured/anonymized IDLE frame — an empty input field, no wedge, no dialog.
-# Needed only by the gentle esc_nudge path (the pane-policy read); the hard rungs never
-# reach it.
-_IDLE_PANE = (
-    _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
-).read_text(encoding="utf-8")
+from pane_sim import LivePane, esc_plans  # noqa: E402
 
 
 def _inst(
@@ -71,12 +65,10 @@ def _setup(monkeypatch, tmp_path: Path, *, fire: str = "1", hard: str | None = N
     # would make every frozen/esc_nudge test fail for a reason unrelated to what it
     # tests. Pin it to a real idle frame — same fixture test_daemon_session_liveness.py
     # uses. The hard rungs never read this.
-    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _IDLE_PANE)
-    recorded: list = []
-    monkeypatch.setattr(
-        daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True
-    )
-    return recorded
+    pane = LivePane(restored_prompt=None)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
+    return pane.plans
 
 
 def _log(tmp_path: Path) -> str:
@@ -141,7 +133,7 @@ def test_frozen_exhausted_stays_esc_nudge_then_crash_loop(tmp_path, monkeypatch)
     frozen = _inst("frozen", root, {"tmux_pane": "%7"})
     daemon.task_session_liveness(fleet=[frozen])
     assert "DRY_RUN:relaunch" not in _log(tmp_path)
-    assert len(gentle) == 1  # esc_nudge routed through the GENTLE injector, not a hard rung
+    assert len(esc_plans(gentle)) == 1  # esc_nudge routed through the GENTLE injector, not a hard rung
     assert _state(tmp_path, root)["attempts"] == 4
     daemon.task_session_liveness(fleet=[frozen])  # budget spent → give up + alert once
     assert "GIVING UP" in _log(tmp_path)
@@ -211,4 +203,5 @@ def test_no_diagnosis_ever_routes_to_a_kill_rung() -> None:
             for hard in (True, False):
                 action = daemon.fr.action_for(diagnosis, attempts, include_hard=hard)
                 assert action not in ("force_restart", "resurrect"), (diagnosis, attempts, hard, action)
-    assert daemon.fr.action_for("frozen", 9, include_hard=True) == "esc_nudge"
+    assert daemon.fr.action_for("frozen", 9, include_hard=True) == "esc_nudge_resume"
+    assert daemon.fr.action_for("frozen", 9, include_hard=True, resume_sent=True) == "esc_nudge"

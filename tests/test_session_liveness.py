@@ -245,6 +245,7 @@ def test_frozen_countdown_below_threshold_no_confirm() -> None:
         prev=st1, current_attempt=1, current_retry_in="30s", now=1060
     )
     assert wedged2 is False
+    assert st2 is not None
     assert st2["confirmed"] is False
     assert st2["first_seen"] == 1000  # still counting from the first sighting
 
@@ -259,6 +260,7 @@ def test_frozen_countdown_hour_scale_excluded() -> None:
         prev=st1, current_attempt=1, current_retry_in="5h", now=1120
     )
     assert wedged2 is False
+    assert st2 is not None
     assert st2["confirmed"] is False
     assert st2["first_seen"] is None
 
@@ -273,9 +275,82 @@ def test_frozen_countdown_different_retry_in_resets() -> None:
         prev=st1, current_attempt=1, current_retry_in="25s", now=1120
     )
     assert wedged2 is False
+    assert st2 is not None
     assert st2["confirmed"] is False
     assert st2["retry_in"] == "25s"
     assert st2["first_seen"] == 1120
+
+
+
+def test_frozen_countdown_boundary_119_not_120_confirmed() -> None:
+    """The confirmation bar is exactly 120 s (TRDD-RJJGXPIK): 119 s of identical text is not
+    enough, 120 s is. The owner's words are "more than one or 2 minutes", and only a
+    second-scale countdown reaches this bar, so 120 s byte-identical is unambiguously frozen."""
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="30s", now=1000
+    )
+    _, wedged119 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1119
+    )
+    _, wedged120 = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="30s", now=1120
+    )
+    assert wedged119 is False
+    assert wedged120 is True
+
+
+def test_frozen_countdown_zero_seconds_never_confirms() -> None:
+    """A hung request shows `Retrying in 0s` forever; that is a different failure and must
+    not be read as a frozen countdown (TRDD-RJJGXPIK). `0s` and `00s` never confirm, however
+    long they persist, while `10s` (which merely ENDS in 0s) still does."""
+    for zero in ("0s", "00s"):
+        st1, _ = sl.retry_wedge_state_update(
+            prev=None, current_attempt=1, current_retry_in=zero, now=1000
+        )
+        st2, wedged2 = sl.retry_wedge_state_update(
+            prev=st1, current_attempt=1, current_retry_in=zero, now=5000
+        )
+        assert wedged2 is False, zero
+        assert st2 is not None
+        assert st2["confirmed"] is False, zero
+    st1, _ = sl.retry_wedge_state_update(
+        prev=None, current_attempt=1, current_retry_in="10s", now=1000
+    )
+    _, wedged = sl.retry_wedge_state_update(
+        prev=st1, current_attempt=1, current_retry_in="10s", now=1120
+    )
+    assert wedged is True
+
+
+def test_resume_marker_carried_within_episode_and_dropped_outside() -> None:
+    """The daemon-written resume_sent marker survives polls of the SAME episode (tie and
+    advance) so later beats stay ESC-only, and is dropped when the episode ends (no wedge on
+    screen), restarts (attempt decreases) or the marker is older than RESUME_EPISODE_TTL_S
+    (TRDD-RJJGXPIK)."""
+    marked = {
+        "attempt": 3, "confirmed": True, "retry_in": "30s", "first_seen": 1000,
+        "resume_sent": True, "resume_sent_at": 2000,
+    }
+    assert sl.resume_sent_active(marked, 2000 + sl.RESUME_EPISODE_TTL_S) is True
+    assert sl.resume_sent_active(marked, 2000 + sl.RESUME_EPISODE_TTL_S + 1) is False
+    assert sl.resume_sent_active({"attempt": 3}, 2000) is False
+    tie, _ = sl.retry_wedge_state_update(prev=marked, current_attempt=3, current_retry_in="30s", now=2100)
+    assert tie is not None and tie["resume_sent"] is True and tie["resume_sent_at"] == 2000
+    adv, _ = sl.retry_wedge_state_update(prev=marked, current_attempt=4, current_retry_in="30s", now=2100)
+    assert adv is not None and adv["resume_sent"] is True
+    # Marker-only state (daemon wrote it before any scan saw the wedge): kept at baseline.
+    first, _ = sl.retry_wedge_state_update(
+        prev={"resume_sent": True, "resume_sent_at": 2000}, current_attempt=3, now=2100
+    )
+    assert first is not None and first["resume_sent"] is True
+    # Dropped: episode ended, new episode (attempt decrease), expired TTL.
+    assert sl.retry_wedge_state_update(prev=marked, current_attempt=None, now=2100) == (None, False)
+    new_ep, _ = sl.retry_wedge_state_update(prev=marked, current_attempt=1, current_retry_in="30s", now=2100)
+    assert new_ep is not None and "resume_sent" not in new_ep
+    stale, _ = sl.retry_wedge_state_update(
+        prev=marked, current_attempt=3, current_retry_in="30s", now=2000 + sl.RESUME_EPISODE_TTL_S + 1
+    )
+    assert stale is not None and "resume_sent" not in stale
 
 
 def test_advance_still_confirms() -> None:
@@ -285,6 +360,7 @@ def test_advance_still_confirms() -> None:
         prev=st1, current_attempt=2, current_retry_in="30s", now=1001
     )
     assert wedged2 is True
+    assert st2 is not None
     assert st2["attempt"] == 2
     assert st2["confirmed"] is True
 

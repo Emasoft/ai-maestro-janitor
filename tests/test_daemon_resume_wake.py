@@ -30,11 +30,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 import daemon  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
 import global_state as gs  # type: ignore[import-not-found]  # noqa: E402
-
-# A real captured/anonymized IDLE frame — an empty input field, no wedge, no dialog.
-_IDLE_PANE = (
-    _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
-).read_text(encoding="utf-8")
+from pane_sim import LivePane, Plans, esc_plans  # noqa: E402
 
 
 def _inst(diagnosis: str, root: Path, terminal: dict, *, trailing: int = 0) -> "fleet_scan.Instance":
@@ -46,7 +42,7 @@ def _inst(diagnosis: str, root: Path, terminal: dict, *, trailing: int = 0) -> "
     )
 
 
-def _setup(monkeypatch, tmp_path: Path, fleet: list, *, enabled: str = "1", fire: str = "1") -> list:
+def _setup(monkeypatch, tmp_path: Path, fleet: list, *, enabled: str = "1", fire: str = "1") -> Plans:
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
     monkeypatch.setenv("JANITOR_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", enabled)
@@ -57,15 +53,18 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, enabled: str = "1", fire
     for fn in (daemon.state.project_root, daemon.state.janitor_root,
                daemon.state.state_dir, daemon.state.log_dir):
         fn.cache_clear()
-    recorded: list = []
-    monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True)
+    pane = LivePane(restored_prompt=None)
+    recorded = pane.plans
+    monkeypatch.setattr(daemon.fleet_inject, "fire", pane.fire)
     # TRDD-N954KWUC P3 — every keystroke now goes through the pane policy table, which READS
     # the target pane first and (correctly) refuses to type into a readable channel it cannot
     # see. These synthetic instances point at tmux panes that do not exist on this machine, so
     # the real capture returns None. Hand them the plain IDLE frame these fixtures always
     # implied, so the tests keep exercising the resume-wake policy rather than the
     # unreadable-pane guard, which has its own tests in test_pane_actuate.py.
-    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _IDLE_PANE)
+    # TRDD-RJJGXPIK: a LivePane renders as that idle frame but also REFLECTS what the production
+    # code types into it, so the read-back that esc_nudge_resume requires can succeed.
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", pane.read)
     monkeypatch.setattr(
         daemon.fleet_scan, "gather_fleet",
         lambda *, now, sweep_stale_rate_limit_s=None: fleet,
@@ -121,7 +120,7 @@ def test_feature_off_is_total_noop(tmp_path, monkeypatch) -> None:
 
 def test_frozen_pane_gets_esc_only_never_a_resume_command(tmp_path, monkeypatch) -> None:
     """MF1: a `frozen` (rate-limited, wedged) pane is recovered ONLY by the recovery loop's
-    ESC-only esc_nudge; the resume pass SKIPS it (diagnosis != healthy). A command is NEVER
+    ESC-first esc_nudge_resume; the resume pass SKIPS it (diagnosis != healthy). A SLASH-command is NEVER
     typed into a frozen pane — that is the flood (TRDD-P7WU40G9) — and no resume coverage is
     stamped for it."""
     root = tmp_path / "proj"
@@ -129,7 +128,10 @@ def test_frozen_pane_gets_esc_only_never_a_resume_command(tmp_path, monkeypatch)
     fired = _setup(monkeypatch, tmp_path, [_inst("frozen", root, {"tmux_pane": "%5"})])
     daemon.task_session_liveness()
     assert _resume_fires(fired) == []          # no /janitor-resume into a frozen pane
-    assert [p["command"] for p in fired] == [""]  # only the ESC-only nudge from the recovery loop
+    # Only the recovery loop acts: ESC then the BARE `resume` (TRDD-RJJGXPIK, first pass of
+    # the episode) — never the slash-command /janitor-resume the resume pass would type.
+    assert len(esc_plans(fired)) == 1
+    assert fired.pane.submitted == ["resume"]
     assert not (sd / "daemon-wake-covered.ts").exists()
 
 

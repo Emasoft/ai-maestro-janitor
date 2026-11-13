@@ -28,6 +28,7 @@ import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import cron_period
@@ -974,13 +975,7 @@ def transcript_activity(root: str, now: int) -> tuple[int | None, int, bool]:
     read of the same tail. The transcript lives
     outside ``.janitor`` (``~/.claude/projects/<dashed-cwd>/*.jsonl``), so this maps
     the project root to its harness slug the same way the memory scopes do."""
-    # SSOT slug (memory_scopes.project_slug): the harness dashes EVERY non-alphanumeric
-    # char, not just "/" — a separators-only replace returned None for any dotted or
-    # underscored project path, so the fleet guardian never saw those sessions' activity.
-    import memory_scopes
-
-    slug = memory_scopes.project_slug(os.path.realpath(root))
-    tdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
+    tdir = _transcript_dir(root)
     ages: list[tuple[int, str]] = []
     try:
         for name in os.listdir(tdir):
@@ -1016,10 +1011,7 @@ def human_activity_age(root: str, now: int) -> int | None:
     walk — so a heartbeat-armed session can still be diagnosed idle, without touching
     ``transcript_activity`` itself (that stays the liveness signal ``session_liveness`` needs
     unchanged)."""
-    import memory_scopes
-
-    slug = memory_scopes.project_slug(os.path.realpath(root))
-    tdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
+    tdir = _transcript_dir(root)
     ages: list[tuple[int, str]] = []
     try:
         for name in os.listdir(tdir):
@@ -1039,6 +1031,64 @@ def human_activity_age(root: str, now: int) -> int | None:
     if human_age is not None:
         candidates.append(human_age)
     return min(candidates) if candidates else None
+
+
+def _transcript_dir(root: str) -> str:
+    """The harness transcript directory (`~/.claude/projects/<slug>`) for project `root` —
+    the ONE place the slug is derived, shared by every transcript reader in this module. SSOT
+    slug (memory_scopes.project_slug): the harness dashes EVERY non-alphanumeric char, not just
+    "/" — a separators-only replace returned None for any dotted or underscored project path,
+    so the fleet guardian never saw those sessions' activity."""
+    import memory_scopes
+
+    slug = memory_scopes.project_slug(os.path.realpath(root))
+    return os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
+
+
+def _row_epoch(row: dict) -> float | None:
+    """The transcript row's `timestamp` (ISO 8601, `Z`) as epoch seconds, None if absent."""
+    ts = row.get("timestamp")
+    if not isinstance(ts, str):
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def transcript_activity_since(root: str, since: float) -> bool:
+    """True iff any of this project's transcripts holds a `user` or `assistant` row stamped
+    AFTER `since` (epoch seconds), excluding Claude Code's own interrupt marker (TRDD-RJJGXPIK
+    round 3). Used to tell, before the daemon types `resume`, whether a human (or the cron
+    resume) already got the session going again after our ESC: such a session is no longer
+    idle and a typed `resume` would land on a live conversation. Reads each file's tail with
+    the same `_tail_lines` window as the other readers; a file whose mtime is not past `since`
+    cannot hold a newer row and is skipped without being read. `api-request`, attachment and
+    bookkeeping rows are not activity. No transcript directory or no rows ⇒ False (nothing
+    proves activity; the composer read-back remains the guard)."""
+    tdir = _transcript_dir(root)
+    try:
+        names = [n for n in os.listdir(tdir) if n.endswith(".jsonl")]
+    except OSError:
+        return False
+    for name in names:
+        path = os.path.join(tdir, name)
+        try:
+            if os.path.getmtime(path) <= since:
+                continue
+        except OSError:
+            continue
+        for line in _tail_lines(path):
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict) or row.get("type") not in ("user", "assistant"):
+                continue
+            epoch = _row_epoch(row)
+            if epoch is not None and epoch > since and not _is_interrupt_record(row):
+                return True
+    return False
 
 
 def transcript_human_idle(path: str, now: int) -> tuple[int, bool] | None:
@@ -1161,6 +1211,65 @@ def _write_retry_wedge_state(root: str, value: dict | None) -> None:
     """Persist (or clear, on None) the retry-wedge episode state for `root`. Best-effort —
     a write failure must never break the fleet scan; the next poll simply re-derives it."""
     path = os.path.join(root, ".janitor", "state", _RETRY_WEDGE_STATE_FILE)
+    try:
+        if value is None:
+            os.unlink(path)
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        state.atomic_write(path, json.dumps(value))
+    except OSError:
+        pass
+
+
+def retry_wedge_resume_sent(root: str, now: int) -> bool:
+    """True iff a `resume` was already typed for the CURRENT retry-wedge episode of `root`
+    (TRDD-RJJGXPIK). Feeds `fleet_recovery.action_for(resume_sent=...)`: True routes the
+    beat to the ESC-only `esc_nudge`, so a wedge that outlives one beat never stacks a
+    second `resume` on the input line. Expires after `RESUME_EPISODE_TTL_S` (see
+    `session_liveness.resume_sent_active`) so a fresh episode can send one more."""
+    return session_liveness.resume_sent_active(_read_retry_wedge_state(root), now)
+
+
+def mark_retry_wedge_resume_sent(root: str, now: int) -> None:
+    """Record in the episode state that `resume` was typed for the current episode
+    (TRDD-RJJGXPIK). Merged INTO the existing episode state, never replacing it, so the
+    attempt/confirmed/countdown fields the next poll advances from survive. The state is
+    cleared (marker included) by `diagnose_root` the moment the wedge signature is gone,
+    which is what ends the episode. Written through `_write_retry_wedge_state`, whose
+    `state.atomic_write` is tmp-in-same-dir + `os.replace`, so a concurrent scan reads
+    either the old state or the new one, never a torn file."""
+    prev = _read_retry_wedge_state(root) or {}
+    _write_retry_wedge_state(root, {**prev, "resume_sent": True, "resume_sent_at": now})
+
+
+# TRDD-RJJGXPIK continuity backstop. The ESC of `esc_nudge_resume` ABORTS the turn, so the
+# very next scan finds a session that is no longer wedged: `diagnose_root` then wipes
+# `retry-wedge-episode.json` (it reads "the episode is over"). If the resume that was meant to
+# follow the ESC did not land (field would not clear, read-back mismatch, a human at the
+# keyboard), nothing would ever re-send it and the session would sit idle forever. This marker
+# lives in its OWN file, which `diagnose_root` never touches, so it survives that wipe.
+_RESUME_PENDING_FILE = "resume-pending.json"
+
+
+def read_resume_pending(root: str) -> dict | None:
+    """The persisted resume-pending marker for `root` (`esc_at`, `tries`, `last_try_at`), or
+    None when there is none / it is unreadable (both mean: nothing is pending)."""
+    path = os.path.join(root, ".janitor", "state", _RESUME_PENDING_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_resume_pending(root: str, value: dict | None) -> None:
+    """Persist (or clear, on None) the resume-pending marker for `root`. Written through
+    `state.atomic_write` (tmp file in the same directory + `os.replace`), so a concurrent
+    reader sees the old marker or the new one, never a torn file. Best-effort like its
+    sibling `_write_retry_wedge_state`: a write failure must not break the beat — the worst
+    case is one lost retry, and the next ESC rung writes a fresh marker."""
+    path = os.path.join(root, ".janitor", "state", _RESUME_PENDING_FILE)
     try:
         if value is None:
             os.unlink(path)

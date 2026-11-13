@@ -1,0 +1,45 @@
+
+ ▐▛███▛█   Claude Code v2.1.323
+▝▜██████▀  Opus 5.5 with xhigh effort · API Usage Billing
+ ▝▝   ▝▝   /tmp/proj
+
+
+❯ say hi
+
+⏺ API Error: 400 liveness probe fixture
+
+✻ Brewed for 10s · done 6:14 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Rewind
+
+   Restore the code and/or conversation to the point before…
+
+     say hi
+     No code changes
+
+   ❯ (current)
+
+
+
+   Enter to continue · Esc to cancel

@@ -154,6 +154,22 @@ def test_build_injection_esc_nudge_builds_an_esc_only_plan() -> None:
     assert fi.build_injection({}, "esc_nudge") is None  # no channel → still declines
 
 
+
+def test_esc_nudge_resume_is_a_command_typing_action_not_esc_only() -> None:
+    """TRDD-RJJGXPIK: `esc_nudge_resume` types the BARE word `resume` (no slash) and is
+    deliberately NOT in the ESC-only set, so it never takes the `build_esc_plan` route that
+    would drop the command. With the hard law (esc_first) the tmux plan sends Escape BEFORE
+    the typed `resume` and submits it with Enter; `esc_nudge` stays command-free."""
+    assert fi.action_to_command("esc_nudge_resume") == "resume"
+    assert fi.is_esc_only("esc_nudge_resume") is False
+    assert fi.is_esc_only("esc_nudge") is True
+    plan = fi.build_injection({"tmux_pane": "%9"}, "esc_nudge_resume", esc_first=True)
+    assert plan is not None and plan["channel"] == "tmux" and plan["command"] == "resume"
+    keys = [s[-1] for s in plan["steps"] if s[0] == "RUN"]
+    assert keys[0] == "Escape" and keys.index("Escape") < keys.index("resume")
+    assert keys[-1] == "Enter"
+
+
 def test_build_injection_rejects_malformed_tmux_pane() -> None:
     """A tmux pane that isn't a bare %<n> (e.g. a leading '-', which tmux would parse
     as a FLAG, or an injection-shaped value) is REJECTED — symmetric with the iTerm
