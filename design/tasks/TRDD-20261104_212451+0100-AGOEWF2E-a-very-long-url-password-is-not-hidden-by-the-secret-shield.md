@@ -4,7 +4,7 @@ title: A very long URL password is not hidden by the secret shield
 column: todo
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-13T23:07:17+0100
+updated: 2026-11-13T23:21:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T21:24:51+0100
-implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706]
+implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706, bcc3b377]
 ---
 
 # A very long URL password is not hidden by the secret shield
@@ -39,3 +39,4 @@ Measured on 2026-11-04 under claude plugin test: one URL whose password alone is
 - 2026-11-05 — Still open: Done-when 1 (a prediction, then one confirming run) and Done-when 3 (every rule and module-private regex that can match more than 64 KB, for example jsonPair). This card does not close on 7d54b062.
 - 2026-11-05 — Board: this card stays in todo because Done-when 1 and 3 are not started; the code for Done-when 2 has landed (7d54b062, b3363706).
 - 2026-11-13 — Done-when 3 measured under claude plugin test (scratch copy of HEAD 2637e7f7; load 10 to 156; raw data reports_dev/sonnet-worker/20261113_230623+0100-agoewf2e-long-value-rules.md, not tracked). 58 cases, sizes 64 KB to 4 MB, value alone in its text, regex alone and redact(). Two silent misses (0 matches, no error, value left visible by redact()), both group loops: the privateKey header loop first misses at 1,474,557 iterations (2,949,114 characters with a 2-character unit) and the jsonPair JSON_PLAIN escape loop first misses at 589,823 iterations at 3 densities (1,179,646 / 1,769,469 / 37,748,672 characters). Every other rules/ export and private regex with a possible match over 64 KB was hidden at every size; the rest cannot match over 64 KB (fixed or bounded length, listed in the report). Both misses need adversarial shapes (a 1.4M-token PEM header; 590K escapes in one JSON string). Not measured: a long value inside other text; system Bun and Node. Side finding, unrelated to size: a JSON string value whose last escape swallows the closing quote (malformed) is left visible. NEXT: bound both loops so the shield fails closed, as URL_PASSWORD_BOUND does.
+- 2026-11-13 — Change 1 of 2 landed in bcc3b377: the privateKey header loop is now one character class between lookarounds that accept exactly the old header language (no leading space, no double space, a space right before PRIVATE), so no group repeats. A plain wider class was rejected in review: a header the old rule refused could end inside another block and leave that block's tail visible. Scratch suite under claude plugin test 646 pass, 0 fail (load 7 to 10); the 3 MB tests are red on the old rule; a 3000-text differential against the old pattern gives identical index, match and group 1; four mutations each red. One-offs (not in the repo): headers of 6,291,467 and 12,582,923 characters hidden with 1 hit in 140 ms or less. TypeScript tests are not type-checked. Still open: change 2, the JSON_PLAIN escape loop (first miss at 589,823 iterations), which needs a count before the regex and a fail-closed path for secret-named keys only, keeping the placeholder exemption; and Done-when 1. Possible route to Done-when 1: 1,474,557 x 2 = 2,949,114 and 589,823 x 5 = 2,949,115, which suggests one fixed budget per regex divided by a per-iteration cost; predict a third loop shape, then confirm it with one run.
