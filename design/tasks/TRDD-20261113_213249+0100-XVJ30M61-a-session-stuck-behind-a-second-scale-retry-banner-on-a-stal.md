@@ -1,10 +1,10 @@
 ---
 trdd-id: XVJ30M61
-title: A retry banner stuck at Retrying in 0s is never escaped by the fast lane
+title: A session stuck behind a second-scale retry banner on a stale transcript is declined, never escaped
 column: dev
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-13T22:16:42+0100
+updated: 2026-11-13T22:18:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -21,7 +21,7 @@ parent-trdd: RJJGXPIK
 derived: true
 ---
 
-# A retry banner stuck at Retrying in 0s is never escaped by the fast lane
+# A session stuck behind a second-scale retry banner on a stale transcript is declined, never escaped
 
 Child of TRDD-RJJGXPIK (EHT). Blocks RJJGXPIK reaching complete: the owner's reported freeze may be this shape.
 
@@ -53,9 +53,11 @@ OWNER DECISION NEEDED: (a) safe bar from API_TIMEOUT_MS (~5.3 h here), (b) verif
 - Rejected: a bar from API_TIMEOUT_MS (~5 h 21 min here): it leaves a session idle for hours, the very symptom reported. Optional follow-up only: capture a frame proving the 5-min stream idle watchdog aborts a no-first-byte request.
 - Unverified premises: "a live 0s loop advances the attempt" comes from ARCHITECTURE.md:392 prose, not captured frames; the esc_nudge_resume route has no observed run on a retry-wedged pane; MAX_RETRIES=100 in settings vs /300 on the 2.1.258 frame is unresolved.
 2026-11-13 CORRECTION to the investigation note above: "neither lane sends ESC" is too strong. The stale lane DOES ESC via the `frozen` diagnosis (esc_nudge_resume) when a rate-limited.flag is present; that flag is written only by turn-ending hooks or the daemon's own ESC, so a hung request normally has none. "A live 0s retry loop advances the attempt" is janitor prose (ARCHITECTURE.md:392), not captured frames: unverified. The reports_dev/ path is a local gitignored file; its decisive facts are quoted inline in the decision line.
-2026-11-13 The "OWNER DECISION NEEDED" line above is SUPERSEDED by the option-0 decision below.
+2026-11-13 The "OWNER DECISION NEEDED" line above is SUPERSEDED by the option-0 decision above.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
 
 Investigation done (2f6d9294). Decision: option 0 (ESC + resume on stale cron_dead declined for retry_wedge_on_screen) plus countdown logging. Not implemented yet.
 NEXT ACTION: propose the code change (PROPOSAL FOR ACTION marker, adversarial review), then implement with tests: the stale-lane decline path becomes ESC+resume; one test per banner shape (0s, 2m 50s, 5h) using tests/fixtures/pane_frames/real-wedged-*.txt; the fast lane unchanged.
+2026-11-13 SCOPE CORRECTION (review of 5c4083b6), supersedes "works for every banner shape" and "one test per banner shape (0s, 2m 50s, 5h)": option 0 applies ONLY to a second-scale or 0s countdown (no ESC while the countdown is longer than the stale gate). An hour-scale wall (`Retrying in 5h … attempt 1/5`, fixture real-wedged-fable-limit.txt) is a legitimate limit, not a stall: ESC + resume would loop every cooldown for hours; it stays with rotation and escalation. Tests: 0s and 2m 50s fixtures ESC; the 5h fixture must NOT ESC.
+GUARD required (TRDD-P7WU40G9: typed input into a wedged pane only buffers): the ESC must be confirmed landed (pane re-read shows the wedge gone) before `resume` is typed, with a read-back, as in RJJGXPIK; never swap `rearm` for a bare typed resume.
