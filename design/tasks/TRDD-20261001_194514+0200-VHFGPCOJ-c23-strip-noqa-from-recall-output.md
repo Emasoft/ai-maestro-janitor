@@ -4,7 +4,7 @@ title: C23 — strip noqa from recall output
 column: todo
 status: tasked
 created: 2026-10-01T19:45:14+0200
-updated: 2026-11-13T20:30:43+0100
+updated: 2026-11-13T20:32:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -40,3 +40,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-11-13 — unblocked from TRDD-JD2QR5SQ (C22): proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; if JD2QR5SQ's field run finds a defect, re-check this card
 - 2026-11-13T20:30:41+0100 — column → todo by main-agent@ai-maestro-janitor. proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; see TRDD-JD2QR5SQ Cleared blocked-by (--clear-blocker override).
 - 2026-11-13 — note: this card writes src/memory.rs; C22 (TRDD-JD2QR5SQ) still has undecided DECISION items (C21-(c), unused-noqa label) that may also touch memory.rs; serialize, do not run in parallel with them.
+- 2026-11-13 — why todo and not blocked like EMZUVIBK: the memory.rs overlap with C22's undecided items is speculative, while EMZUVIBK's cli.rs overlap is certain (C21-(c) and the unused-noqa label would change cli.rs lint tests). Check C22's DECISION items before starting this card.
