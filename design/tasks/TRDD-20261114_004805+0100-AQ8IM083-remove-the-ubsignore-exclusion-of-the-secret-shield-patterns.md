@@ -1,10 +1,10 @@
 ---
 trdd-id: AQ8IM083
 title: Remove the ubsignore exclusion of the secret-shield patterns file once ubs converges on it
-column: backburner
+column: todo
 status: tasked
 created: 2026-11-14T00:48:05+0100
-updated: 2026-11-14T00:48:27+0100
+updated: 2026-11-14T00:49:45+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -27,7 +27,7 @@ approval-datetime: 2026-11-14T00:48:05+0100
 
 ## Why
 
-84f8fa7c added a root .ubsignore line, hooks/secret-shield/patterns.ts, because the ubs 5.4.17 JS taint analyzer (~/.local/share/ubs/modules/helpers/ubs_core/analyzers/taint_js.py) did not converge on that file: 12 GB RSS in 9 min in the pre-commit hook, then 'Partial run: js: error', which blocks every commit touching the file. A worker bisected it to redactUrlPasswords plus hasScheme analysed together; HEAD runs away too; the full-file cause is not localized. Causation is not isolated: the file last committed cleanly on 2026-11-05 (b3363706); taint_js.py changed 2026-11-10 and the hook 2026-11-09. Raw evidence: reports_dev/sonnet-worker/20261114_004229+0100-ubs-runaway.md. While the line exists, patterns.ts has NO ubs coverage in the pre-commit hook, scripts/publish.py and .github/workflows/weekly-audit.yml.
+84f8fa7c added a root .ubsignore line, hooks/secret-shield/patterns.ts, because the ubs 5.4.17 JS taint analyzer (~/.local/share/ubs/modules/helpers/ubs_core/analyzers/taint_js.py) did not converge on that file: 12 GB RSS in 9 min in the pre-commit hook, then 'Partial run: js: error', which blocks every commit touching the file. A worker bisected it to redactUrlPasswords plus hasScheme analysed together; HEAD runs away too; the full-file cause is not localized. Causation is not isolated: the file last committed cleanly on 2026-11-05 (b3363706); taint_js.py changed 2026-11-10 and the hook 2026-11-09. Raw evidence: reports_dev/sonnet-worker/20261114_004229+0100-ubs-runaway.md. While the line exists, patterns.ts has NO ubs coverage in the pre-commit hook or a manual ubs run from the repo root (neither scripts/publish.py nor the workflows run ubs).
 
 ## Done when
 
