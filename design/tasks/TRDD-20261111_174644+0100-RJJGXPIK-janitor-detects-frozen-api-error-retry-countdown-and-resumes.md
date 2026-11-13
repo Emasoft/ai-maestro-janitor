@@ -4,7 +4,7 @@ title: janitor detects frozen API-error retry countdown and resumes
 column: testing
 status: tasked
 created: 2026-11-11T17:46:44+0100
-updated: 2026-11-13T19:56:10+0100
+updated: 2026-11-13T21:33:18+0100
 current-owner: user
 created-by: user
 task-type: bugfix
@@ -18,6 +18,8 @@ approved: true
 approval-judge: user
 approval-datetime: 2026-11-11T17:46:44+0100
 relevant-rules: [1]
+eht: XVJ30M61
+implementation-commits: [ee837c54, 88d2d9db, 07f34be0]
 ---
 
 # janitor detects frozen API-error retry countdown and resumes
@@ -30,12 +32,14 @@ relevant-rules: [1]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
 
-CURRENT (2026-11-13) — implemented, gated, live-tested with a SEEDED freeze; not released.
+CURRENT (2026-11-13) — three commits, gated, fast lane live-tested with a SEEDED freeze; not released. Blocked from complete by EHT XVJ30M61 (0s banner gap).
 
-- Implemented and committed in ee837c54 (feat(liveness): ESC + resume recovery for a frozen API-error countdown) on branch fix/gitlab-cookie-review-20261105_152903. The liveness module is committed unwired in 3a73c1b9; its wiring is blocked on TRDD-2V7OAUPE (one modules entry per plugin).
-- Gates on the final tree: ruff clean, mypy clean (540 files), pyright 0 errors, pytest 19000 passed 2 skipped.
-- Live end-to-end: real daemon task_session_liveness against a real Claude Code 2.1.323 pane submitted `resume` exactly once (transcript rows 'say hi', 'resume'). The freeze was SEEDED, not natural. Evidence: reports_dev/sonnet-worker/20261113_192000+0100-rjjgxpik-round3.md.
-- Not yet verified live: the resume-pending retry pass (tests only); a natural (unseeded) frozen countdown.
-- First-pass false-positive guard: diagnose_instance returns `healthy` whenever the transcript is advancing (scripts/lib/session_liveness.py ~line 584), before retry_wedged/frozen, so ESC never hits a session whose transcript moves.
-- NOT released yet: the release branch question (feature branch 391 commits ahead of main) is open.
-- NEXT ACTION: observe one natural frozen countdown recovered live after the release is installed; then move to complete.
+- Commits on branch fix/gitlab-cookie-review-20261105_152903: ee837c54 (ESC + resume), 88d2d9db (fast lane), 07f34be0 (3 s recheck). The liveness module is committed unwired in 3a73c1b9; its wiring is blocked on TRDD-2V7OAUPE (one modules entry per plugin).
+- Gates on the 07f34be0 tree: ruff, mypy (540 files), pyright clean; pytest 19041 passed 2 skipped.
+- Fast lane: transcript quiet >= 60 s with a turn in flight, single-instance root, liveness beat only; frozen bar 100 s (stale lane too); injectable `now` clock; the frozen proof is confirmed by a 3 s recheck on both lanes; a rejected recheck reverts the episode, an unreadable recheck leaves it unchanged.
+- Real freeze-to-ESC latency is about 3-4 min (the 88d2d9db subject '~2 beats' overstates it).
+- The old line 'diagnose_instance returns healthy whenever the transcript is advancing' no longer holds: a confirmed frozen-countdown proof is diagnosed while the transcript is not stale.
+- Accepted trade-offs: 3 s plus one capture per wedged instance per beat while a wedge lasts; a channel whose recheck keeps failing never confirms (the 15-min path remains).
+- Unverified: a live countdown changes within 3 s (unmeasured on a real 2.1.32x pane); a natural unseeded freeze; the resume-pending retry pass (tests only).
+- Open: the 0s gap, see EHT XVJ30M61. NOT released; the release-branch question (feature branch 391 commits ahead of main) is the owner's.
+- NEXT ACTION: work the 0s EHT XVJ30M61; observe one natural freeze recovered live after a release.
