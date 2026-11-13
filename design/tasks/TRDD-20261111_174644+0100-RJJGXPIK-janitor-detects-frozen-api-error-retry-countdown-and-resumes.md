@@ -4,7 +4,7 @@ title: janitor detects frozen API-error retry countdown and resumes
 column: testing
 status: tasked
 created: 2026-11-11T17:46:44+0100
-updated: 2026-11-13T21:33:18+0100
+updated: 2026-11-13T23:32:04+0100
 current-owner: user
 created-by: user
 task-type: bugfix
@@ -19,7 +19,7 @@ approval-judge: user
 approval-datetime: 2026-11-11T17:46:44+0100
 relevant-rules: [1]
 eht: XVJ30M61
-implementation-commits: [ee837c54, 88d2d9db, 07f34be0]
+implementation-commits: [ee837c54, 88d2d9db, 07f34be0, 6ad75042]
 ---
 
 # janitor detects frozen API-error retry countdown and resumes
@@ -32,10 +32,10 @@ implementation-commits: [ee837c54, 88d2d9db, 07f34be0]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
 
-CURRENT (2026-11-13) — three commits, gated, fast lane live-tested with a SEEDED freeze; not released. Blocked from complete by EHT XVJ30M61 (0s banner gap).
+CURRENT (2026-11-13) — four commits, gated, fast lane live-tested with a SEEDED freeze; not released. Blocked from complete by EHT XVJ30M61 (0s banner gap). Until 6ad75042 the fast lane could not fire in production: any fast_lane=False scan (rotation-ESC tick, fleet-stop, cold-cache-clear, peer-freeze-recovery, fleet_status) landing between two liveness beats on a quiet in-flight turn cleared the episode, so the 100 s baseline never survived. The seeded live test did not show this because no other caller interleaved.
 
-- Commits on branch fix/gitlab-cookie-review-20261105_152903: ee837c54 (ESC + resume), 88d2d9db (fast lane), 07f34be0 (3 s recheck). The liveness module is committed unwired in 3a73c1b9; its wiring is blocked on TRDD-2V7OAUPE (one modules entry per plugin).
-- Gates on the 07f34be0 tree: ruff, mypy (540 files), pyright clean; pytest 19041 passed 2 skipped.
+- Commits on branch fix/gitlab-cookie-review-20261105_152903: ee837c54 (ESC + resume), 88d2d9db (fast lane), 07f34be0 (3 s recheck), 6ad75042 (a non-polling scan spares the episode only for the same quiet in-flight turn, bounded by a transcript anchor within 2 s). The liveness module is committed unwired in 3a73c1b9; its wiring is blocked on TRDD-2V7OAUPE (one modules entry per plugin).
+- Gates on the 6ad75042 tree (worker run): ruff, mypy (540 files), pyright clean; pytest 19056 passed 2 skipped. Follow-ups not done: the fast-lane beat's own re-baseline can still reuse a stale baseline for one beat; peer-freeze-recovery gathers with fast_lane=False, so the fast lane never runs while the daemon is dark; a multi-instance root never gets the fast lane.
 - Fast lane: transcript quiet >= 60 s with a turn in flight, single-instance root, liveness beat only; frozen bar 100 s (stale lane too); injectable `now` clock; the frozen proof is confirmed by a 3 s recheck on both lanes; a rejected recheck reverts the episode, an unreadable recheck leaves it unchanged.
 - Real freeze-to-ESC latency is about 3-4 min (the 88d2d9db subject '~2 beats' overstates it).
 - The old line 'diagnose_instance returns healthy whenever the transcript is advancing' no longer holds: a confirmed frozen-countdown proof is diagnosed while the transcript is not stale.
