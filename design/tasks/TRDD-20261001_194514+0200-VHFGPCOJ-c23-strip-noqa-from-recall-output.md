@@ -1,10 +1,10 @@
 ---
 trdd-id: VHFGPCOJ
 title: C23 — strip noqa from recall output
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:14+0200
-updated: 2026-10-08T20:01:31+0200
+updated: 2026-11-13T20:30:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:14+0200
-blocked-by: [JD2QR5SQ]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, VHFGPCOJ]
 blocker-holds-if: not-match:READY
 ---
@@ -37,3 +37,6 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:07+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-01 — scope correction from C00/U8: recall output is formatted in src/memory.rs (finalize_recall ~8471, recall_one_atom ~8717, recall_one_page ~8753), so this card writes src/memory.rs and runs AFTER C22 (TRDD-JD2QR5SQ) in the memory.rs serial chain.
 - 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
+- 2026-11-13 — unblocked from TRDD-JD2QR5SQ (C22): proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; if JD2QR5SQ's field run finds a defect, re-check this card
+- 2026-11-13T20:30:41+0100 — column → todo by main-agent@ai-maestro-janitor. proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; see TRDD-JD2QR5SQ Cleared blocked-by (--clear-blocker override).
+- 2026-11-13 — note: this card writes src/memory.rs; C22 (TRDD-JD2QR5SQ) still has undecided DECISION items (C21-(c), unused-noqa label) that may also touch memory.rs; serialize, do not run in parallel with them.

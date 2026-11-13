@@ -1,10 +1,10 @@
 ---
 trdd-id: RVWJQR8E
 title: C44 — migrate ledger and push codes to catalog
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:24+0200
-updated: 2026-10-08T20:02:01+0200
+updated: 2026-11-13T20:30:42+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:24+0200
-blocked-by: [JD2QR5SQ]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, RVWJQR8E]
 blocker-holds-if: not-match:READY
 ---
@@ -36,3 +36,5 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:34+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on JD2QR5SQ per DSN035UN wave order
 - 2026-10-08 (probe caveat, corpus sweep): this why-probe's holds-if is not-match:READY against trddgrep why output — two known ceilings: (1) a future blocker card whose TITLE contains the word READY false-unblocks this card (grep is not column-aware here); (2) the zero-open-prereq->READY transition was never observed on a flipping card (endpoints only) — trddgrep may never print READY after an archived blocker (known tooling gap). Treat a probe release as a PROMPT TO RE-VERIFY the chain, not proof of unblocked.
+- 2026-11-13 — unblocked from TRDD-JD2QR5SQ (C22): proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; if JD2QR5SQ's field run finds a defect, re-check this card
+- 2026-11-13T20:30:42+0100 — column → todo by main-agent@ai-maestro-janitor. proceeds on test evidence (610f569c real-binary lock+ledger, cargo 9+64 green), not field evidence; see TRDD-JD2QR5SQ Cleared blocked-by (--clear-blocker override).
