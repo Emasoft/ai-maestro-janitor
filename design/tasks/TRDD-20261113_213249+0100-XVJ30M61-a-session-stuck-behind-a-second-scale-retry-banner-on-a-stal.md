@@ -4,7 +4,7 @@ title: A session stuck behind a second-scale retry banner on a stale transcript 
 column: dev
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-13T22:24:12+0100
+updated: 2026-11-13T22:36:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -62,3 +62,4 @@ NEXT ACTION: propose the code change (PROPOSAL FOR ACTION marker, adversarial re
 2026-11-13 SCOPE CORRECTION (review of 5c4083b6), supersedes "works for every banner shape" and "one test per banner shape (0s, 2m 50s, 5h)": option 0 applies ONLY to a second-scale or 0s countdown (no ESC while the countdown is longer than the stale gate). An hour-scale wall (`Retrying in 5h … attempt 1/5`, fixture real-wedged-fable-limit.txt) is a legitimate limit, not a stall: ESC + resume would loop every cooldown for hours; it stays with rotation and escalation. Tests: 0s and 2m 50s fixtures ESC; the 5h fixture must NOT ESC.
 GUARD required (TRDD-P7WU40G9: typed input into a wedged pane only buffers): the ESC must be confirmed landed (pane re-read shows the wedge gone) before `resume` is typed, with a read-back, as in RJJGXPIK; never swap `rearm` for a bare typed resume.
 Scope rule: parse the WHOLE countdown into seconds (e.g. `4h 59m 30s` = 17970 s) and compare it to `stale_threshold_for(armed, STALE_S)` (scripts/lib/fleet_scan.py), the same threshold the stale lane uses. Do NOT reuse `_SECOND_SCALE_RE` as the scope filter: it matches any `\d+s` token (so an hour wall with a seconds part) and it rejects 0s, which IS in scope.
+2026-11-13 Draft implementation proposal: design/specs/XVJ30M61-retry-stuck-route-proposal.md (new diagnosis retry_stuck, own stuck_since field, ~125 prod lines + ~280 test lines). Corrections listed at its top supersede the STATE clause about "a second-scale banner whose 3 s recheck keeps failing" (dropped: it never matures). Blocked first on a check that non-liveness gather_fleet callers do not wipe the fast-lane episode (RJJGXPIK).
