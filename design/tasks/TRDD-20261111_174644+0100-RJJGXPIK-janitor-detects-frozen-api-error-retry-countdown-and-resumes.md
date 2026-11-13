@@ -4,7 +4,7 @@ title: janitor detects frozen API-error retry countdown and resumes
 column: testing
 status: tasked
 created: 2026-11-11T17:46:44+0100
-updated: 2026-11-13T23:56:48+0100
+updated: 2026-11-14T00:55:54+0100
 current-owner: user
 created-by: user
 task-type: bugfix
@@ -18,7 +18,7 @@ approved: true
 approval-judge: user
 approval-datetime: 2026-11-11T17:46:44+0100
 relevant-rules: [1]
-eht: XVJ30M61
+eht: [XVJ30M61, 7L70VR0W, I0GRCULA, WQJQ1DP7]
 implementation-commits: [ee837c54, 88d2d9db, 07f34be0, 6ad75042, eacea9b6]
 ---
 
