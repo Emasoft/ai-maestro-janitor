@@ -1,10 +1,10 @@
 ---
 trdd-id: XVJ30M61
 title: A retry banner stuck at Retrying in 0s is never escaped by the fast lane
-column: todo
+column: dev
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-13T22:15:06+0100
+updated: 2026-11-13T22:16:42+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ Child of TRDD-RJJGXPIK (EHT). Blocks RJJGXPIK reaching complete: the owner's rep
 ## Approval log
 
 - 2026-11-13T21:32:49+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-13T22:16:42+0100 — column → dev. decision taken: option 0
 
 ## Implementation notes
 
@@ -47,3 +48,14 @@ A live 0s retry loop advances the attempt (ARCHITECTURE.md:392); the uncovered s
 API_TIMEOUT_MS on this machine is 19000000 ms (5 h 17 min). A bar tied to it fires after about 5 h 21 min. A bar of about 540 s needs proof that Claude Code's 5-min stream idle watchdog aborts and bumps the attempt of a no-first-byte request (unverified, needs a captured frame).
 Countdown text is not logged today, so past 0s episodes cannot be counted. Cheap prerequisite: log `retry_wedge@<attempt>[<retry_in>]` on each pane read.
 OWNER DECISION NEEDED: (a) safe bar from API_TIMEOUT_MS (~5.3 h here), (b) verify the stream idle watchdog first and use ~540 s, or (c) accept the risk of ESCing a slow request with a short bar.
+2026-11-13 DECISION (main agent, owner standing instruction to decide without asking; adversarial review of the options): the three timeout-bar options are superseded. Option 0 is adopted: when the stale lane diagnoses cron_dead and the rearm is declined because the pane shows a retry wedge (daemon.py `_decline("retry_wedge_on_screen", "rearm")`, ~line 2340), send ESC plus one `resume` (the esc_nudge_resume route) instead of declining. Works for every banner shape (0s, minutes, hours); bar = existing 15-minute stale gate. Evidence: recovery-audit.ndjson has 84 cron_dead/retry_wedge_on_screen declines (~60 episodes, 15 roots, 09-05..11-05), none ESCed, some escalated to the human. Cost of a false ESC: one cancelled request, retried by resume.
+- Also adopted: log the countdown on each wedge read as `retry_wedge@<attempt>[<retry_in>]` so 0s episodes become countable.
+- Rejected: a bar from API_TIMEOUT_MS (~5 h 21 min here): it leaves a session idle for hours, the very symptom reported. Optional follow-up only: capture a frame proving the 5-min stream idle watchdog aborts a no-first-byte request.
+- Unverified premises: "a live 0s loop advances the attempt" comes from ARCHITECTURE.md:392 prose, not captured frames; the esc_nudge_resume route has no observed run on a retry-wedged pane; MAX_RETRIES=100 in settings vs /300 on the 2.1.258 frame is unresolved.
+2026-11-13 CORRECTION to the investigation note above: "neither lane sends ESC" is too strong. The stale lane DOES ESC via the `frozen` diagnosis (esc_nudge_resume) when a rate-limited.flag is present; that flag is written only by turn-ending hooks or the daemon's own ESC, so a hung request normally has none. "A live 0s retry loop advances the attempt" is janitor prose (ARCHITECTURE.md:392), not captured frames: unverified. The reports_dev/ path is a local gitignored file; its decisive facts are quoted inline in the decision line.
+2026-11-13 The "OWNER DECISION NEEDED" line above is SUPERSEDED by the option-0 decision below.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
+
+Investigation done (2f6d9294). Decision: option 0 (ESC + resume on stale cron_dead declined for retry_wedge_on_screen) plus countdown logging. Not implemented yet.
+NEXT ACTION: propose the code change (PROPOSAL FOR ACTION marker, adversarial review), then implement with tests: the stale-lane decline path becomes ESC+resume; one test per banner shape (0s, 2m 50s, 5h) using tests/fixtures/pane_frames/real-wedged-*.txt; the fast lane unchanged.
