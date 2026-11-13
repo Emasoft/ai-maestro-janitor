@@ -430,7 +430,76 @@ const jsonPair = (escapes: string, value: string): RegExp =>
 // first. The order does not decide what is hidden. Escaped pairs run first only to refine the count when the outer
 // key is itself secret-named: the inner secret is counted, then the outer value (swap measured 2026-11-04).
 const JSON_ESCAPED = jsonPair(String.raw`\\+`, String.raw`[^"\\\r\n]{3,}`)
-const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*)*`)
+// WHY JSON_ESCAPE_BOUND (TRDD-AGOEWF2E): the escape loop of JSON_PLAIN, `(?:\\.[^"\\\r\n]*)*`, repeats once per escape pair, so it has the iteration-count ceilings
+// described above URL_PASSWORD in the engine of claude plugin test: about 35 times slower per character past about 63.8K iterations, and no match at all, silently, from
+// 589,823 iterations (measured), so a secret-named value with that many escapes was not hidden. The loop is bounded to `{0,JSON_ESCAPE_BOUND}` iterations. The bound sits below
+// the slow step: measured under claude plugin test (2026-11-13), the exact bounded regex took the same time per character at 16,384, 32,768 and 49,152 escape pairs
+// (ratio 1.00, 1.00, 0.99), and 41 times longer per character at 65,536. A value with more escapes than the bound is not read by this regex at all (redactOverBoundJson).
+export const JSON_ESCAPE_BOUND = 49152
+const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*){0,${JSON_ESCAPE_BOUND}}`)
+// The over-bound detector: the opening of a pair, followed by more than the bound of escape pairs before the first bare quote or line end. The lookahead repeats
+// JSON_ESCAPE_BOUND + 1 times, which is still below the slow step: measured alone under claude plugin test (2026-11-13, best of 7), it took the same time per character
+// at 16,385, 32,769 and 49,153 escape pairs (0.438, 0.442 and 0.441 ns per character), and it stops at the first bare quote or line end, so each value is read at most once.
+const JSON_OVER_BOUND = new RegExp(String.raw`"([A-Za-z0-9_.-]+)"(\s*:\s*)"(?=(?:[^"\\\r\n]*\\.){${JSON_ESCAPE_BOUND + 1}})`, 'gm')
+const JSON_RUN = /[^"\\\r\n]*/y
+
+/**
+ * Hides each secret-named plain JSON value that holds more than JSON_ESCAPE_BOUND escape pairs, which JSON_PLAIN cannot read.
+ * WHY a linear scan with the grammar of JSON_PLAIN and no regex loop: a value this long is past the ceilings of a group loop. The scan takes a run of
+ * ordinary characters, steps over a backslash and the character after it (anything but a line end, the same `.` as the regex), and stops at a bare quote,
+ * at a line end, or at a backslash followed by a line end or the end of the text; `end` is what JSON_PLAIN's end group would have kept (the quote, or that last backslash).
+ * WHY it FAILS CLOSED: looksSecret and the STRONG_NAME gate are NOT applied, nor is any placeholder exemption: a value of a secret-named key that long is hidden whole.
+ * Over-hide, disclosed: a secret-named value with more than the bound of escapes is hidden without those checks, including values of 49,153 to 589,822 escapes that
+ * were judged by them before. The output is one marker with no escapes, so a second redact() leaves it alone (idempotent).
+ * Not covered, and unchanged: escaped (nested) JSON over the bound, `\"name\":\"...\"` with that many escapes, which JSON_ESCAPED never read (a known miss).
+ * The fast path counts backslashes: a text with no more than the bound of them cannot hold a value over it, since every escape pair holds at least one.
+ */
+function redactOverBoundJson(text: string, hits: Hits, found: Map<string, string>): string {
+  let backslashes = 0
+  for (let at = text.indexOf('\\'); at !== -1 && backslashes <= JSON_ESCAPE_BOUND; at = text.indexOf('\\', at + 1)) backslashes++
+  if (backslashes <= JSON_ESCAPE_BOUND) return text
+  const parts: string[] = []
+  let done = 0
+  JSON_OVER_BOUND.lastIndex = 0
+  for (let match = JSON_OVER_BOUND.exec(text); match !== null; match = JSON_OVER_BOUND.exec(text)) {
+    if (!isSecretName(match[1])) continue
+    const start = match.index + match[0].length
+    let at = start
+    let end = ''
+    let resume = 0
+    for (;;) {
+      JSON_RUN.lastIndex = at
+      at += JSON_RUN.exec(text)?.[0].length ?? 0
+      const char = text[at]
+      if (char === '"') {
+        end = '"'
+        resume = at + 1
+        break
+      }
+      if (char === undefined || char === '\r' || char === '\n') {
+        resume = at
+        break
+      }
+      // A backslash: the regex pairs it with any character `.` matches, which is not a line end (\r, \n, U+2028 and U+2029 count as one too); otherwise the value stops and the backslash is the end.
+      const after = text.charCodeAt(at + 1)
+      if (Number.isNaN(after) || after === 13 || after === 10 || after === 0x2028 || after === 0x2029) {
+        end = '\\'
+        resume = at + 1
+        break
+      }
+      at += 2
+    }
+    const value = text.slice(start, resume - end.length)
+    hits.assignment = (hits.assignment ?? 0) + 1
+    if (propagates(value)) found.set(value, 'assignment')
+    parts.push(text.slice(done, start), mark('assignment'), end)
+    done = resume
+    JSON_OVER_BOUND.lastIndex = resume
+  }
+  if (parts.length === 0) return text
+  parts.push(text.slice(done))
+  return parts.join('')
+}
 
 /** `.env`, shell, YAML and TOML lines: `API_KEY=...`, `export TOKEN="..."`, `password: ...`. */
 function redactAssignments(text: string, hits: Hits, found: Map<string, string>): string {
@@ -446,19 +515,24 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
     if (propagates(value)) found.set(value, 'assignment')
     return `${lead}${name}${sep}${quote}${mark('assignment')}${quote}${tail}`
   })
-  for (const pair of [JSON_ESCAPED, JSON_PLAIN]) {
-    out = out.replace(pair, (match, esc: string, name: string, sep: string, value: string, end: string) => {
-      // A value that never closed (it ran to the end of the line) is judged as unquoted: without its closing quote
-      // nothing says where it ends, so a short word such as `"password": "notasecret` is not hidden.
-      if (!isSecretName(name) || !looksSecret(value, end.endsWith('"'))) return match
-      // WHY: the same STRONG_NAME gate as the line pass above (TRDD-Q6LPJTPO).
-      if (isStrongName(name) && !strongValue(value)) return match
-      hits.assignment = (hits.assignment ?? 0) + 1
-      if (propagates(value)) found.set(value, 'assignment')
-      // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
-      return `${esc}"${name}${esc}"${sep}${esc}"${mark('assignment')}${end}`
-    })
+  const hideJsonPair = (match: string, esc: string, name: string, sep: string, value: string, end: string): string => {
+    // A value that never closed (it ran to the end of the line) is judged as unquoted: without its closing quote
+    // nothing says where it ends, so a short word such as `"password": "notasecret` is not hidden.
+    if (!isSecretName(name) || !looksSecret(value, end.endsWith('"'))) return match
+    // WHY: the same STRONG_NAME gate as the line pass above (TRDD-Q6LPJTPO).
+    if (isStrongName(name) && !strongValue(value)) return match
+    hits.assignment = (hits.assignment ?? 0) + 1
+    if (propagates(value)) found.set(value, 'assignment')
+    // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
+    return `${esc}"${name}${esc}"${sep}${esc}"${mark('assignment')}${end}`
   }
+  // WHY three statements and not a loop over the two patterns: the over-bound pass must run between them, and BEFORE JSON_PLAIN. With its
+  // `{0,JSON_ESCAPE_BOUND}` and the `\\*$` end alternative, JSON_PLAIN claims a PREFIX of an over-bound value when the rest of its line is only
+  // backslashes (more than the bound of `\\` pairs, cut off at the end of the line): it hides the prefix and leaves the backslashes visible. The pass
+  // hides the whole value first, so JSON_PLAIN never sees it (TRDD-AGOEWF2E).
+  out = out.replace(JSON_ESCAPED, hideJsonPair)
+  out = redactOverBoundJson(out, hits, found)
+  out = out.replace(JSON_PLAIN, hideJsonPair)
   return out
 }
 

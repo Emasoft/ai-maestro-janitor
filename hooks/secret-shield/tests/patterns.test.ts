@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { applyRule, countOf, isSecretFile, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
+import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { pypiToken } from '../rules/dev-services'
 import { privateKey } from '../rules/key-material'
 
@@ -510,6 +510,85 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
     expect(linear(small.ms, big.ms)).toBe(true)
     expect(big.done.text === dense(131072)).toBe(true)
     expect(big.done.hits['url-password']).toBeUndefined()
+  })
+})
+// WHY these tests exist (TRDD-AGOEWF2E): under claude plugin test the escape loop of a plain JSON value returned no match from 589,823 iterations, so a secret-named
+// value with 600,000 escapes was not hidden. The loop is bounded to JSON_ESCAPE_BOUND pairs and a linear pass hides every longer value of a secret-named key, whole,
+// without looksSecret or the STRONG_NAME gate (fail closed). Values are built from mixed escape pairs and a random lead, so looksSecret accepts them below the bound
+// and the exact outputs below pin the pass, not a coincidence. The opening brace keeps the line-assignment rule out. No test asserts a timing.
+describe('a plain JSON value with more than JSON_ESCAPE_BOUND escape pairs is hidden whole', () => {
+  const BOUND = JSON_ESCAPE_BOUND
+  const UNIT = ['aB3\\n', 'cD4\\t', 'eF5\\\\', 'gH6\\"', 'iJ7\\/']
+  // `n` escape pairs of five mixed kinds, each after three ordinary characters.
+  const escapes = (n: number) => UNIT.join('').repeat(Math.floor(n / UNIT.length)) + UNIT.slice(0, n % UNIT.length).join('')
+  const M = mark('assignment')
+  test('a value with 600,000 escape pairs is hidden with exactly one assignment hit', { timeoutMs: 60000 }, () => {
+    const r = redact(j('{"api_key": "', fake(24), escapes(600000), '"}'))
+    expect(r.hits).toEqual({ assignment: 1 })
+    expect(r.text === j('{"api_key": "', M, '"}')).toBe(true)
+  })
+  test('with exactly the bound of escape pairs and with one more, the value is hidden with one hit each', { timeoutMs: 60000 }, () => {
+    for (const n of [BOUND, BOUND + 1]) {
+      const r = redact(j('{"api_key": "', fake(24), escapes(n), '"}'))
+      expect(r.hits).toEqual({ assignment: 1 })
+      expect(r.text === j('{"api_key": "', M, '"}')).toBe(true)
+    }
+  })
+  test('a value over the bound under a name that is not a secret name is left unchanged', { timeoutMs: 60000 }, () => {
+    const input = j('{"note": "', fake(24), escapes(600000), '"}')
+    const r = redact(input)
+    expect(countOf(r.hits)).toBe(0)
+    expect(r.text === input).toBe(true)
+  })
+  test('redact() on the output of a hidden over-bound value, closed or cut off, changes nothing and counts no hit', { timeoutMs: 60000 }, () => {
+    for (const tail of ['"}', '\\\\\\']) {
+      const once = redact(j('{"api_key": "', fake(24), escapes(600000), tail))
+      expect(once.hits).toEqual({ assignment: 1 })
+      const twice = redact(once.text)
+      expect(countOf(twice.hits)).toBe(0)
+      expect(twice.text === once.text).toBe(true)
+    }
+  })
+  test('a value over the bound cut off at the end of its line, ending in an odd run of 3 or 5 backslashes, is hidden to the line end and keeps exactly one backslash', { timeoutMs: 60000 }, () => {
+    // An odd run is some escaped pairs and a lone backslash followed by the line end, which cannot pair and is kept as the `end` (what the `\\*$` of JSON_PLAIN keeps).
+    for (const n of [BOUND + 1, 600000]) {
+      for (const run of ['\\\\\\', '\\\\\\\\\\']) {
+        const r = redact(j('{"api_key": "', fake(24), escapes(n), run, '\n{"x": 1}'))
+        expect(r.hits).toEqual({ assignment: 1 })
+        expect(r.text === j('{"api_key": "', M, '\\', '\n{"x": 1}')).toBe(true)
+      }
+    }
+  })
+  test('on one line, a non-secret pair over the bound is left as it is and the secret-named pair after it is hidden', { timeoutMs: 60000 }, () => {
+    const first = j(fake(24), escapes(BOUND + 1))
+    const r = redact(j('{"note": "', first, '", "api_key": "', fake(24), escapes(BOUND + 1), '"}'))
+    expect(r.hits).toEqual({ assignment: 1 })
+    expect(r.text === j('{"note": "', first, '", "api_key": "', M, '"}')).toBe(true)
+  })
+  test('more than the bound of escaped backslashes cut off at the end of the line are hidden whole, not as a prefix with the rest of the backslashes left visible', { timeoutMs: 60000 }, () => {
+    // The bounded regex alone would claim the first BOUND pairs as the value and the remaining backslashes as its end; the pass runs first and takes all of it.
+    const r = redact(j('{"api_key": "', fake(24), '\\\\'.repeat(BOUND + 5000), '\n{"x": 1}'))
+    expect(r.hits).toEqual({ assignment: 1 })
+    expect(r.text === j('{"api_key": "', M, '\n{"x": 1}')).toBe(true)
+  })
+  test('a value with no closing quote: exactly the bound of escapes is hidden by the regex and one more by the pass, with the same exact output', { timeoutMs: 60000 }, () => {
+    for (const n of [BOUND, BOUND + 1]) {
+      const r = redact(j('{"api_key": "', fake(24), escapes(n), '\n{"x": 1}'))
+      expect(r.hits).toEqual({ assignment: 1 })
+      expect(r.text === j('{"api_key": "', M, '\n{"x": 1}')).toBe(true)
+    }
+  })
+  test('the same over-bound value written unquoted elsewhere in the text is hidden there too, and counted once', { timeoutMs: 60000 }, () => {
+    const value = j(fake(24), escapes(600000))
+    const r = redact(j('{"api_key": "', value, '"}\ncopy=', value))
+    expect(r.hits).toEqual({ assignment: 1 })
+    expect(r.text === j('{"api_key": "', M, '"}\ncopy=', M)).toBe(true)
+  })
+  test('an escaped pair inside an over-bound value is hidden first and counted, then the whole value is hidden: two hits, one marker left', { timeoutMs: 60000 }, () => {
+    const inner = j('\\"token\\":\\"', fake(32), '\\"')
+    const r = redact(j('{"api_key": "', fake(24), escapes(BOUND + 10), inner, escapes(10), '"}'))
+    expect(r.hits).toEqual({ assignment: 2 })
+    expect(r.text === j('{"api_key": "', M, '"}')).toBe(true)
   })
 })
 describe('redacting twice changes nothing', () => {
