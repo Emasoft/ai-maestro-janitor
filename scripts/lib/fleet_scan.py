@@ -1349,6 +1349,74 @@ def mark_retry_wedge_resume_sent(root: str, now: int) -> None:
     _write_retry_wedge_state(root, {**prev, "resume_sent": True, "resume_sent_at": now})
 
 
+# A non-polling scan spares a stored episode only while ITS transcript mtime (`now - transcript_age`)
+# is within this many seconds of the mtime the episode was recorded against; `transcript_age` is a
+# whole-second difference of two clocks, so +-1 s of rounding is normal and 2 s is the margin.
+_TRANSCRIPT_ANCHOR_KEY = "transcript_mtime"
+_EPISODE_ANCHOR_TOLERANCE_S = 2
+
+
+def _quiet_in_flight_shape(
+    root: str,
+    *,
+    terminal: Mapping[str, str] | None,
+    deliberately_unarmed: bool,
+    server_owned: bool,
+    transcript_age: int | None,
+) -> bool:
+    """The fast-lane shape (TRDD-RJJGXPIK): an armed, client-owned instance with a terminal whose
+    transcript has been quiet for >= FROZEN_PROBE_S while its turn is still IN FLIGHT. ONE
+    definition, used by the fast-lane pane poll and by the spare in
+    `_non_polling_scan_spares_episode`, so the two cannot diverge. The transcript read
+    (`transcript_turn_in_flight`) runs last, only when every cheaper term already holds."""
+    return (
+        bool(terminal)
+        and not deliberately_unarmed
+        and not server_owned
+        and transcript_age is not None
+        and transcript_age >= FROZEN_PROBE_S
+        and transcript_turn_in_flight(root)
+    )
+
+
+def _non_polling_scan_spares_episode(
+    root: str,
+    *,
+    now: int,
+    transcript_age: int | None,
+    fast_lane: bool,
+    terminal: Mapping[str, str] | None,
+    deliberately_unarmed: bool,
+    server_owned: bool,
+) -> bool:
+    """True iff a scan that may NOT poll the pane (`fast_lane` False: the rotation-ESC tick,
+    fleet-stop, cold-cache-clear, peer-freeze-recovery, fleet_status and the fleet_scan CLI —
+    every `gather_fleet` caller except the daemon liveness beat, and that beat too for a root
+    shared by several claude instances) must leave the stored
+    retry-wedge episode untouched instead of clearing it (TRDD-RJJGXPIK).
+
+    Why: such a scan landing BETWEEN two liveness beats on a quiet in-flight turn learned nothing
+    about the countdown, and clearing the episode erased the baseline the beat had just written,
+    so the next beat was a fresh baseline and the fast lane never fired. It is spared only when
+    ALL hold: (1) the episode carries a transcript anchor, (2) this scan's own transcript mtime is
+    within `_EPISODE_ANCHOR_TOLERANCE_S` of it (the same quiet turn, not a later one), and
+    (3) the shape is still the fast-lane shape. Anything else clears, as before: an advanced
+    transcript, an idle prompt, unarmed, server-owned, no terminal, an unknown age, no anchor."""
+    if fast_lane or transcript_age is None:
+        return False
+    prev = _read_retry_wedge_state(root)
+    anchor = prev.get(_TRANSCRIPT_ANCHOR_KEY) if prev else None
+    if not isinstance(anchor, int) or abs((now - transcript_age) - anchor) > _EPISODE_ANCHOR_TOLERANCE_S:
+        return False
+    return _quiet_in_flight_shape(
+        root,
+        terminal=terminal,
+        deliberately_unarmed=deliberately_unarmed,
+        server_owned=server_owned,
+        transcript_age=transcript_age,
+    )
+
+
 # TRDD-RJJGXPIK continuity backstop. The ESC of `esc_nudge_resume` ABORTS the turn, so the
 # very next scan finds a session that is no longer wedged: `diagnose_root` then wipes
 # `retry-wedge-episode.json` (it reads "the episode is over"). If the resume that was meant to
@@ -1494,8 +1562,9 @@ def diagnose_root(
     # Cost: the stale lane reads only stale sessions (≈0 captures/beat on a healthy host, advisor
     # correction #4); the fast lane adds one capture per liveness beat for every session whose
     # current turn has waited on the model for more than FROZEN_PROBE_S. An idle host still reads
-    # nothing. Any prior episode is cleared the moment neither lane applies — the wedge already
-    # broke (or never existed here).
+    # nothing. A prior episode is cleared the moment neither lane applies — the wedge already
+    # broke (or never existed here) — except that a scan which may not poll spares it while the
+    # same quiet in-flight turn persists (`_non_polling_scan_spares_episode`).
     # Guardrail (never touch an unarmed/server_owned instance): skip the pane poll
     # entirely for those — reading its content is a real Apple Event / tmux call and
     # the result would be discarded anyway (diagnose_instance returns unarmed/
@@ -1510,9 +1579,13 @@ def diagnose_root(
             transcript_stale
             or (
                 fast_lane
-                and transcript_age is not None
-                and transcript_age >= FROZEN_PROBE_S
-                and transcript_turn_in_flight(root)
+                and _quiet_in_flight_shape(
+                    root,
+                    terminal=terminal,
+                    deliberately_unarmed=deliberately_unarmed,
+                    server_owned=server_owned,
+                    transcript_age=transcript_age,
+                )
             )
         )
     ):
@@ -1578,7 +1651,27 @@ def diagnose_root(
                     new_state["retry_in"] = recheck_in
                     if retry_wedged:
                         new_state["proof"] = session_liveness.PROOF_ATTEMPT_ADVANCE
+            # TRANSCRIPT ANCHOR (why): record the transcript mtime this episode was observed
+            # against, so a later scan that may not poll can tell "the same quiet turn" from "a
+            # different turn" (see `_non_polling_scan_spares_episode`). A stale baseline must
+            # never shortcut the 100 s frozen proof: without the anchor an episode could outlive
+            # its wedge (daemon dark for hours) and a NEW wedge showing the same attempt and
+            # countdown would match the old `first_seen` and be ESCed after only the 3 s recheck.
+            if new_state is not None and transcript_age is not None:
+                new_state = {**new_state, _TRANSCRIPT_ANCHOR_KEY: int(now - transcript_age)}
             _write_retry_wedge_state(root, new_state)
+    elif _non_polling_scan_spares_episode(
+        root,
+        now=now,
+        transcript_age=transcript_age,
+        fast_lane=fast_lane,
+        terminal=terminal,
+        deliberately_unarmed=deliberately_unarmed,
+        server_owned=server_owned,
+    ):
+        # Nothing to do, on purpose: the stored episode is left UNTOUCHED (no write). Why, and the
+        # bounds on it, are in `_non_polling_scan_spares_episode`.
+        pass
     else:
         _write_retry_wedge_state(root, None)
     diagnosis = session_liveness.diagnose_instance(
