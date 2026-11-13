@@ -27,12 +27,12 @@ implementation-commits: [28eed2a3, df430e1a, 7d54b062, b3363706, bcc3b377, f1a26
 - Done-when 2: met for URL_PASSWORD (7d54b062, b3363706, 0495dbcb).
 - Done-when 3: measured on 2026-11-13 (Note of that date; raw table in reports_dev, not tracked). Results per rule:
   - privateKey header: missed at 1,474,557 iterations. Fixed in bcc3b377.
-  - jsonPair JSON_PLAIN escape loop: missed at 589,823 iterations. Fixed in f1a26c0b: fails closed above 49,152 escapes.
+  - jsonPair JSON_PLAIN escape loop: missed at 589,823 iterations. Fixed in f1a26c0b: fails closed above 49,152 escapes (secret-named keys).
   - URL_PASSWORD: hidden at every size (bound 4096).
   - Hidden at every size up to 4 MB: anthropicKey, openaiProjectKey, huggingfaceToken, awsSessionToken, googleOAuthClientSecret, the three digitalocean rules, pypiToken, slackToken, slackWebhook, slackAppToken, stripeSecretKey, stripeWebhookSecret, bearerToken, jwt, the 13 gitlab token rules, gitlabSessionCookie, gitlabSessionCookieValueFirst, CONN, JSON_ESCAPED, the line-assignment rule, and the privateKey body.
   - Cannot match more than 64 KB (fixed or bounded length): openaiLegacyKey, openaiKey48, awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, googleApiKey, googleOAuthAccessToken, googleOAuthRefreshToken, githubTokenClassic, githubTokenFineGrained, npmToken, sendgridKey, slackConfigAccessToken, slackConfigRefreshToken, the gitlab session windows (512).
   - Group-loop helpers in looksSecret and propagates: no miss up to 4 MB. A miss there would over-hide, not leak.
-- Open: change 2. Bound the JSON_PLAIN escape loop with a count taken before the regex, and a fail-closed path for secret-named keys only that keeps the placeholder and marker-only exemption. Choose the bound from the measurements (slow step near 63,800 iterations, miss at 589,823), not a copy of 4096, and state the over-hide.
+- Done in f1a26c0b (was open): change 2. Bound the JSON_PLAIN escape loop with a count taken before the regex, and a fail-closed path for secret-named keys only that keeps the placeholder and marker-only exemption. Choose the bound from the measurements (slow step near 63,800 iterations, miss at 589,823), not a copy of 4096, and state the over-hide.
 - Open: Done-when 1 (see the 2026-11-13 hypothesis note).
 - Side finding, open: a malformed JSON value whose last escape swallows the closing quote is left visible.
 - NEXT ACTION: propose change 2.
