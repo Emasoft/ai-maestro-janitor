@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-13T23:42:23+0100
+updated: 2026-11-14T00:57:52+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -42,7 +42,8 @@ Split out of TRDD-M1218EMH.
 - 2026-11-03T22:46:01+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-03T22:46:10+0100 — column → blocked. waits for the write-back guard and the pre-wiring checks
 - 2026-11-13 — removed HF7GNHNF from blocked-by: it is complete (URL_PASSWORD step gone, OLD red 3/3 vs NEW linear 3/3). The other blockers and the owner-decision unblock-when still hold.
-- 2026-11-13 — blocked-by gained U5O72MGA: the secret shield's JSON_ESCAPED pass may exceed the hook's time limit (not yet confirmed) on a long backslash run, and whether a timed-out hook passes text through unredacted is not known. Wiring waits until U5O72MGA's Done-when (1) answers that.
+- 2026-11-13 — blocked-by gained U5O72MGA: the secret shield's JSON_ESCAPED pass may take over the hook's time limit on a long backslash run, and whether a timed-out hook passes text through unredacted is not known. Wiring waits until U5O72MGA's Done-when (1) answers that.
+- 2026-11-14 — correction to the 2026-11-13 U5O72MGA entry: read 'may take over the hook's time limit' as 'may exceed the hook's time limit (not yet confirmed)'; the limit itself is an assumed 10 s, not confirmed (see U5O72MGA).
 
 ## Notes
 

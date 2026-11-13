@@ -25,7 +25,7 @@ derived: true
 
 ## Why
 
-RJJGXPIK follow-up. The fast-lane beat's own re-baseline can still reuse a stale baseline for one beat. A single beat that re-baselines the episode can therefore reset the 100 s frozen bar, so the fast lane may wait longer than intended before a frozen countdown is acted on. This is the hazard named in the RJJGXPIK STATE; its exact trigger is to be confirmed by a test.
+RJJGXPIK follow-up. The fast-lane beat's own re-baseline may reuse a stale baseline for one beat (not shown). If so, a single beat that re-baselines the episode may reset the 100 s frozen bar, so the fast lane may wait longer than intended before a frozen countdown is acted on. This is the hazard named in the RJJGXPIK STATE; its exact trigger is to be confirmed by a test.
 
 ## Approval log
 
