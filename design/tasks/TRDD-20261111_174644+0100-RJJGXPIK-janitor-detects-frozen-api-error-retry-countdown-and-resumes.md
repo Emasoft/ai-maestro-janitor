@@ -4,7 +4,7 @@ title: janitor detects frozen API-error retry countdown and resumes
 column: testing
 status: tasked
 created: 2026-11-11T17:46:44+0100
-updated: 2026-11-13T23:32:04+0100
+updated: 2026-11-13T23:56:48+0100
 current-owner: user
 created-by: user
 task-type: bugfix
@@ -19,7 +19,7 @@ approval-judge: user
 approval-datetime: 2026-11-11T17:46:44+0100
 relevant-rules: [1]
 eht: XVJ30M61
-implementation-commits: [ee837c54, 88d2d9db, 07f34be0, 6ad75042]
+implementation-commits: [ee837c54, 88d2d9db, 07f34be0, 6ad75042, eacea9b6]
 ---
 
 # janitor detects frozen API-error retry countdown and resumes
@@ -32,7 +32,7 @@ implementation-commits: [ee837c54, 88d2d9db, 07f34be0, 6ad75042]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
 
-CURRENT (2026-11-13) — four commits, gated, fast lane live-tested with a SEEDED freeze; not released. Blocked from complete by EHT XVJ30M61 (0s banner gap). Until 6ad75042 the fast lane could not fire in production: any fast_lane=False scan (rotation-ESC tick, fleet-stop, cold-cache-clear, peer-freeze-recovery, fleet_status) landing between two liveness beats on a quiet in-flight turn cleared the episode, so the 100 s baseline never survived. The seeded live test did not show this because no other caller interleaved.
+CURRENT (2026-11-13) — five commits, gated, fast lane live-tested with a SEEDED freeze; not released. Blocked from complete by EHT XVJ30M61 (0s banner gap). Until 6ad75042 the fast lane could be defeated in production, depending on the cadence of non-polling callers (unmeasured): any fast_lane=False scan (rotation-ESC tick, fleet-stop, cold-cache-clear, peer-freeze-recovery, fleet_status) landing between two liveness beats on a quiet in-flight turn cleared the episode, so the 100 s baseline never survived. The seeded live test did not show this because no other caller interleaved.
 
 - Commits on branch fix/gitlab-cookie-review-20261105_152903: ee837c54 (ESC + resume), 88d2d9db (fast lane), 07f34be0 (3 s recheck), 6ad75042 (a non-polling scan spares the episode only for the same quiet in-flight turn, bounded by a transcript anchor within 2 s). The liveness module is committed unwired in 3a73c1b9; its wiring is blocked on TRDD-2V7OAUPE (one modules entry per plugin).
 - Gates on the 6ad75042 tree (worker run): ruff, mypy (540 files), pyright clean; pytest 19056 passed 2 skipped. Follow-ups not done: the fast-lane beat's own re-baseline can still reuse a stale baseline for one beat; peer-freeze-recovery gathers with fast_lane=False, so the fast lane never runs while the daemon is dark; a multi-instance root never gets the fast lane.
@@ -43,3 +43,4 @@ CURRENT (2026-11-13) — four commits, gated, fast lane live-tested with a SEEDE
 - Unverified: a live countdown changes within 3 s (unmeasured on a real 2.1.32x pane); a natural unseeded freeze; the resume-pending retry pass (tests only).
 - Open: the 0s gap, see EHT XVJ30M61. NOT released; the release-branch question (feature branch 391 commits ahead of main) is the owner's.
 - NEXT ACTION: work the 0s EHT XVJ30M61; observe one natural freeze recovered live after a release.
+eacea9b6 (2026-11-13): anchor key renamed to transcript_instant (substantive-row instant, never st_mtime). An old state carrying only transcript_mtime has no int anchor and clears on its first non-polling scan (fleet_scan.py:1412-1414, fail-safe). Tests added: an interrupt row after a sent resume clears the episode (two cases, mutation-checked), and a queue-row storm that pushes the prompt out of the 64 KiB tail clears it. Open follow-ups, not carded yet: one-beat re-baseline hazard; peer-freeze-recovery and multi-instance roots get no fast lane.
