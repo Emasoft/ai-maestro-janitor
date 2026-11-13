@@ -4,7 +4,7 @@ title: A session stuck behind a second-scale retry banner on a stale transcript 
 column: dev
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-13T22:18:27+0100
+updated: 2026-11-13T22:20:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -57,7 +57,8 @@ OWNER DECISION NEEDED: (a) safe bar from API_TIMEOUT_MS (~5.3 h here), (b) verif
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-13
 
-Investigation done (2f6d9294). Decision: option 0 (ESC + resume on stale cron_dead declined for retry_wedge_on_screen) plus countdown logging. Not implemented yet.
-NEXT ACTION: propose the code change (PROPOSAL FOR ACTION marker, adversarial review), then implement with tests: the stale-lane decline path becomes ESC+resume; one test per banner shape (0s, 2m 50s, 5h) using tests/fixtures/pane_frames/real-wedged-*.txt; the fast lane unchanged.
+Investigation done (2f6d9294). Decision: option 0 for a frozen 0s or any countdown no longer than the stale threshold (ESC + resume where the stale lane today declines cron_dead for retry_wedge_on_screen), plus countdown logging. Not implemented yet. This STATE block sits at the END of the card (trddgrep append cannot place it after the title); it supersedes every body line above it.
+NEXT ACTION: propose the code change (PROPOSAL FOR ACTION marker, adversarial review), then implement with tests: on a stale transcript, when the rearm would be declined for retry_wedge_on_screen and the countdown is at most the stale threshold, ESC, confirm by re-read that the wedge is gone, then type resume with a read-back. Tests: real-wedged-rate-limit-429.txt (0s) and real-wedged-session-limit.txt (2m 50s) ESC; real-wedged-fable-limit.txt (5h) must NOT ESC; the fast lane unchanged.
 2026-11-13 SCOPE CORRECTION (review of 5c4083b6), supersedes "works for every banner shape" and "one test per banner shape (0s, 2m 50s, 5h)": option 0 applies ONLY to a second-scale or 0s countdown (no ESC while the countdown is longer than the stale gate). An hour-scale wall (`Retrying in 5h … attempt 1/5`, fixture real-wedged-fable-limit.txt) is a legitimate limit, not a stall: ESC + resume would loop every cooldown for hours; it stays with rotation and escalation. Tests: 0s and 2m 50s fixtures ESC; the 5h fixture must NOT ESC.
 GUARD required (TRDD-P7WU40G9: typed input into a wedged pane only buffers): the ESC must be confirmed landed (pane re-read shows the wedge gone) before `resume` is typed, with a read-back, as in RJJGXPIK; never swap `rearm` for a bare typed resume.
+Scope rule: parse the WHOLE countdown into seconds (e.g. `4h 59m 30s` = 17970 s) and compare it to `stale_threshold_for(armed, STALE_S)` (scripts/lib/fleet_scan.py), the same threshold the stale lane uses. Do NOT reuse `_SECOND_SCALE_RE` as the scope filter: it matches any `\d+s` token (so an hour wall with a seconds part) and it rejects 0s, which IS in scope.
