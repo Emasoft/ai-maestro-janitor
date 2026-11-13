@@ -1349,10 +1349,15 @@ def mark_retry_wedge_resume_sent(root: str, now: int) -> None:
     _write_retry_wedge_state(root, {**prev, "resume_sent": True, "resume_sent_at": now})
 
 
-# A non-polling scan spares a stored episode only while ITS transcript mtime (`now - transcript_age`)
-# is within this many seconds of the mtime the episode was recorded against; `transcript_age` is a
+# A non-polling scan spares a stored episode only while ITS transcript instant (`now - transcript_age`)
+# is within this many seconds of the instant the episode was recorded against; `transcript_age` is a
 # whole-second difference of two clocks, so +-1 s of rounding is normal and 2 s is the margin.
-_TRANSCRIPT_ANCHOR_KEY = "transcript_mtime"
+# WHY the anchor is the substantive-row instant and deliberately NOT the file mtime (`st_mtime`):
+# the mtime moves on every `queue-operation` row, which the fleet guardian's own typed commands
+# append, so an mtime anchor would shift under an unchanged quiet turn and clear the episode
+# spuriously. `transcript_age` (from `transcript_activity`) already skips queue bookkeeping.
+# Do not switch this to `os.path.getmtime`.
+_TRANSCRIPT_ANCHOR_KEY = "transcript_instant"
 _EPISODE_ANCHOR_TOLERANCE_S = 2
 
 
@@ -1389,16 +1394,15 @@ def _non_polling_scan_spares_episode(
     deliberately_unarmed: bool,
     server_owned: bool,
 ) -> bool:
-    """True iff a scan that may NOT poll the pane (`fast_lane` False: the rotation-ESC tick,
-    fleet-stop, cold-cache-clear, peer-freeze-recovery, fleet_status and the fleet_scan CLI —
-    every `gather_fleet` caller except the daemon liveness beat, and that beat too for a root
-    shared by several claude instances) must leave the stored
-    retry-wedge episode untouched instead of clearing it (TRDD-RJJGXPIK).
+    """True iff a scan that may NOT poll the pane (`fast_lane` False: every `gather_fleet` caller
+    except the daemon liveness beat, and that beat too for a root shared by several claude
+    instances) must leave the stored retry-wedge episode untouched instead of clearing it
+    (TRDD-RJJGXPIK).
 
     Why: such a scan landing BETWEEN two liveness beats on a quiet in-flight turn learned nothing
     about the countdown, and clearing the episode erased the baseline the beat had just written,
     so the next beat was a fresh baseline and the fast lane never fired. It is spared only when
-    ALL hold: (1) the episode carries a transcript anchor, (2) this scan's own transcript mtime is
+    ALL hold: (1) the episode carries a transcript anchor, (2) this scan's own transcript instant is
     within `_EPISODE_ANCHOR_TOLERANCE_S` of it (the same quiet turn, not a later one), and
     (3) the shape is still the fast-lane shape. Anything else clears, as before: an advanced
     transcript, an idle prompt, unarmed, server-owned, no terminal, an unknown age, no anchor."""
@@ -1651,8 +1655,9 @@ def diagnose_root(
                     new_state["retry_in"] = recheck_in
                     if retry_wedged:
                         new_state["proof"] = session_liveness.PROOF_ATTEMPT_ADVANCE
-            # TRANSCRIPT ANCHOR (why): record the transcript mtime this episode was observed
-            # against, so a later scan that may not poll can tell "the same quiet turn" from "a
+            # TRANSCRIPT ANCHOR (why): record the substantive-row instant (`now - transcript_age`;
+            # `transcript_age` comes from `substantive_age_from_tail`) of the transcript this episode
+            # was observed against, so a later scan that may not poll can tell "the same quiet turn" from "a
             # different turn" (see `_non_polling_scan_spares_episode`). A stale baseline must
             # never shortcut the 100 s frozen proof: without the anchor an episode could outlive
             # its wedge (daemon dark for hours) and a NEW wedge showing the same attempt and

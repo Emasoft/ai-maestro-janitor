@@ -1958,7 +1958,7 @@ def test_a_non_liveness_scan_still_clears_the_episode_unless_it_is_the_fast_lane
     tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", case: str
 ) -> None:
     """TRDD-RJJGXPIK negative companion: the spare covers ONLY the same quiet in-flight turn (an
-    episode with a transcript anchor within 2 s of this scan's own transcript mtime, a terminal,
+    episode with a transcript anchor within 2 s of this scan's own transcript instant, a terminal,
     armed, client-owned, age >= FROZEN_PROBE_S). A `fast_lane=False` scan of any other shape
     still clears the episode, and the next liveness beat is a fresh baseline (healthy), not a
     frozen-countdown ESC. Cases: age below FROZEN_PROBE_S (anchor matching); the turn is not
@@ -1970,19 +1970,19 @@ def test_a_non_liveness_scan_still_clears_the_episode_unless_it_is_the_fast_lane
     spy = _PaneSpy(_retry_frame("12s", 3))
     monkeypatch.setattr(fs, "capture_pane_text", spy)
     gap = fs.session_liveness._FROZEN_COUNTDOWN_MIN_S + 19
-    mtime = _FL_BASE - 90  # the transcript mtime the first beat saw (age 90 at _FL_BASE)
+    mtime = _FL_BASE - 90  # the transcript instant the first beat saw (age 90 at _FL_BASE)
     if case == "transcript-advanced":
         mtime = _FL_BASE + 30 - (fs.FROZEN_PROBE_S - 1)  # this scan's own mtime, at age FROZEN_PROBE_S - 1
     if idle or case == "transcript-advanced":
         # Seed an episode (an old banner) anchored to THIS scan's own mtime, so ONLY the shape decides:
         # an idle session is never polled (the beat writes no episode), and an age below FROZEN_PROBE_S
         # with a matching anchor cannot come from a real beat (age only grows), so it is seeded too.
-        fs._write_retry_wedge_state(str(root), {"attempt": 3, "confirmed": False, "retry_in": "12s", "first_seen": _FL_BASE, "transcript_mtime": mtime})
+        fs._write_retry_wedge_state(str(root), {"attempt": 3, "confirmed": False, "retry_in": "12s", "first_seen": _FL_BASE, "transcript_instant": mtime})
     else:
         fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=90, terminal=_FL_TERM, fast_lane=True)
     assert _fl_state_file(root).exists(), "the episode exists before the non-liveness scan"
     middle_now = _FL_BASE + 30
-    middle_age: int | None = 120  # same transcript mtime as the beat: now - age == mtime
+    middle_age: int | None = 120  # same transcript instant as the beat: now - age == mtime
     middle_terminal: dict[str, str] | None = _FL_TERM
     server_owned = False
     if case == "transcript-advanced":
@@ -2001,7 +2001,7 @@ def test_a_non_liveness_scan_still_clears_the_episode_unless_it_is_the_fast_lane
     elif case == "no-anchor":
         episode = fs._read_retry_wedge_state(str(root))
         assert episode is not None
-        episode.pop("transcript_mtime")
+        episode.pop("transcript_instant")
         fs._write_retry_wedge_state(str(root), episode)
     fs.diagnose_root(str(root), now=middle_now, transcript_age=middle_age, terminal=middle_terminal, fast_lane=False, server_owned=server_owned)
     assert not _fl_state_file(root).exists(), "a scan that is not the fast-lane shape still clears"
@@ -2012,6 +2012,92 @@ def test_a_non_liveness_scan_still_clears_the_episode_unless_it_is_the_fast_lane
     third_now = _FL_BASE + gap
     third = fs.diagnose_root(str(root), now=third_now, transcript_age=third_now - mtime, terminal=_FL_TERM, fast_lane=True)
     assert third[:2] == ("healthy", None)
+
+
+
+def _append_rows(root: Path, rows: list[str]) -> None:
+    """Append rows to the root's one transcript, exactly as Claude Code appends them."""
+    with open(Path(fs._transcript_dir(str(root))) / "s1.jsonl", "a", encoding="utf-8") as fh:
+        fh.write("\n".join(rows) + "\n")
+
+
+def _age_now(root: Path, now: int) -> int:
+    """The transcript age `gather_fleet` hands `diagnose_root`: the REAL `transcript_activity`
+    (substantive row instant), not a number the test picks."""
+    age = fs.transcript_activity(str(root), now)[0]
+    assert age is not None
+    return age
+
+
+@pytest.mark.parametrize("interrupt_at", [_FL_BASE + 40, _FL_BASE - 399], ids=["interrupt-later", "interrupt-within-anchor-tolerance"])
+def test_an_interrupt_row_after_a_sent_resume_clears_the_episode_instead_of_sparing_it(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", interrupt_at: int
+) -> None:
+    """Lost-resume case (TRDD-RJJGXPIK follow-up): the ESC aborts the turn and Claude Code writes
+    `[Request interrupted by user]` as an ordinary `user` row. That row IS substantive for the
+    liveness age (only queue bookkeeping is skipped), is in `_NOT_A_MODEL_REQUEST_PREFIXES`, and
+    so the turn is no longer in flight: a non-polling scan must CLEAR the episode, resume_sent
+    included, exactly as before the spare existed — it must neither delay nor suppress anything.
+    `interrupt-within-anchor-tolerance` stamps the row inside the 2 s anchor tolerance so ONLY the
+    in-flight guard can clear it; a control scan of the unchanged transcript proves the same
+    episode IS spared without the interrupt row, so the clear is not a vacuous pass."""
+    import fleet_recovery as fr  # type: ignore[import-not-found]
+
+    root = _fl_root(tmp_path, monkeypatch, "lost-resume", _IN_FLIGHT_ROWS)
+    spy = _PaneSpy(_retry_frame("12s", 3))
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    beat = _FL_BASE
+    fs.diagnose_root(str(root), now=beat, transcript_age=_age_now(root, beat), terminal=_FL_TERM, fast_lane=True)
+    fs.mark_retry_wedge_resume_sent(str(root), beat)
+    assert fs.retry_wedge_resume_sent(str(root), beat) is True
+    control = beat + 30
+    fs.diagnose_root(str(root), now=control, transcript_age=_age_now(root, control), terminal=_FL_TERM, fast_lane=False)
+    assert fs.retry_wedge_resume_sent(str(root), control) is True, "control: unchanged quiet turn is spared"
+
+    _append_rows(root, [_row(interrupt_at, "user", "[Request interrupted by user]")])
+    scan = beat + 120
+    assert _age_now(root, scan) == scan - interrupt_at, "(a) the interrupt row counts as substantive"
+    assert "[Request interrupted by user]".startswith(fs._NOT_A_MODEL_REQUEST_PREFIXES), "(b) it is a non-request prefix"
+    assert fs.transcript_turn_in_flight(str(root)) is False, "(c) the turn is no longer in flight"
+    reads = spy.reads
+    fs.diagnose_root(str(root), now=scan, transcript_age=_age_now(root, scan), terminal=_FL_TERM, fast_lane=False)
+    assert not _fl_state_file(root).exists(), "(d) the episode is cleared, not spared"
+    assert fs.retry_wedge_resume_sent(str(root), scan) is False
+    # Next liveness-path decision: the session is not wedged and a fresh wedge may resume again.
+    nxt = fs.diagnose_root(str(root), now=scan + 120, transcript_age=_age_now(root, scan + 120), terminal=_FL_TERM, fast_lane=True)
+    assert nxt[:2] == ("healthy", None) and spy.reads == reads, "an idle prompt is not polled"
+    assert fr.action_for("retry_wedged", 0, resume_sent=fs.retry_wedge_resume_sent(str(root), scan + 120)) == "esc_nudge_resume"
+    if interrupt_at > beat:
+        # The daemon's resume-pending retry reads its OWN marker and ignores the interrupt row.
+        assert fs.transcript_activity_since(str(root), beat + 20) is False
+
+
+@pytest.mark.parametrize("queued", [5, 574], ids=["few-queue-rows", "substantive-row-out-of-the-window"])
+def test_queue_rows_push_the_substantive_row_out_of_the_tail_and_the_anchor_then_fails_safe(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", queued: int
+) -> None:
+    """`substantive_age_from_tail` skips trailing `queue-operation` rows while the substantive row
+    is still inside the 64 KiB tail window, so the anchor (`now - transcript_age`) is unchanged and
+    the episode is spared. Once enough queue rows (574 of the 113-byte shape here: 65536 / 114)
+    push that row out of the window, the tail is ALL queue rows: the age is measured from the
+    OLDEST queue row, the instant jumps forward, the anchor no longer matches and the episode is
+    cleared (fail-safe). The mtime fallback is NOT what happens here; it needs a window with no
+    parseable timestamp at all."""
+    root = _fl_root(tmp_path, monkeypatch, "storm", _IN_FLIGHT_ROWS)
+    monkeypatch.setattr(fs, "capture_pane_text", _PaneSpy(_retry_frame("12s", 3)))
+    beat = _FL_BASE
+    fs.diagnose_root(str(root), now=beat, transcript_age=_age_now(root, beat), terminal=_FL_TERM, fast_lane=True)
+    anchor = fs._read_retry_wedge_state(str(root))["transcript_instant"]  # type: ignore[index]
+    assert anchor == _FL_BASE - 400
+    _append_rows(root, [_enqueue_line(beat + 10 + i, "resume") for i in range(queued)])
+    in_window = any("say hi" in ln for ln in fs._tail_lines(os.path.join(fs._transcript_dir(str(root)), "s1.jsonl")))
+    assert in_window is (queued < 574)
+    scan = beat + 30 + queued
+    age = _age_now(root, scan)
+    matches = abs((scan - age) - anchor) <= fs._EPISODE_ANCHOR_TOLERANCE_S
+    assert matches is in_window
+    fs.diagnose_root(str(root), now=scan, transcript_age=age, terminal=_FL_TERM, fast_lane=False)
+    assert _fl_state_file(root).exists() is in_window
 
 
 def test_gather_fleet_gives_the_fast_lane_only_to_an_opted_in_scan_of_a_single_instance_root(
@@ -2156,7 +2242,7 @@ def test_rejected_recheck_keeps_a_genuine_attempt_advance_confirmation(
     assert (diag[:2] == ("retry_wedged", "esc_retry")) is (lane == "stale")
     persisted = fs._read_retry_wedge_state(str(root))
     # The beat stamps the transcript anchor on the episode it keeps (the seed has none); nothing else changes.
-    anchored = {**seed, "transcript_mtime": _FL_BASE - age}
+    anchored = {**seed, "transcript_instant": _FL_BASE - age}
     if outcome != "moved":
         assert persisted == anchored
         return
