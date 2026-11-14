@@ -4,7 +4,7 @@ title: Secret shield misses token shapes that jr-redact hides
 column: dev
 status: tasked
 created: 2026-11-14T01:14:32+0100
-updated: 2026-11-14T02:09:29+0100
+updated: 2026-11-14T02:12:09+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T01:14:32+0100
-implementation-commits: [6e073334, ad553852, 4fcec14c, 86c6d118]
+implementation-commits: [6e073334, ad553852, 4fcec14c, 86c6d118, 3dcd712b]
 ---
 
 # Secret shield misses token shapes that jr-redact hides
@@ -38,7 +38,7 @@ Each gap (1) to (6) is either closed by a shield rule change with a test that hi
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-14
 
 CURRENT (2026-11-14) — GitHub family (gap 2) landed in 6e073334, pinned and documented in ad553852 and b29d74bc; Stripe family landed in 4fcec14c (floor 16, no trailing \b); OpenAI family landed next (plain form: sk- plus 20 or more of [A-Za-z0-9_-], no trailing \b, no digit lookahead); jwt remains, gated as in NEXT ACTION; implementation-commits lists rule and test commits, not docs-only commits. Earlier: evidence gathered (report path above, gitignored, worker-run). Recommended (evidence: synthetic samples, file corpora), gated on the differential test in NEXT ACTION: WIDEN 1-4; KNOWN-MISSES entry for 5 (kind c, header language kept exact on purpose, rules/key-material.ts:5-14) and for 6c (port-then-path shape, kind a, existing test patterns.test.ts:249) and 6d (backtick, double quote, [ in userinfo, kind c); single quote goes to backlog TRDD-Q6LPJTPO; 6b needs no action (jr bug, jr over-hide, placeholder exemption).
-Candidate rules (from the report section 7): openai (landed, see CURRENT) rules/ai.ts:8 -> \b(sk-[A-Za-z0-9_-]{20,}) (plain form, superset of today; one kebab-slug false hit in 100 MB of third-party text, to be pinned as a documented over-hide test); github (landed 6e073334) rules/code-hosts.ts:5-6 -> \b(gh[pousr]_[A-Za-z0-9]{30,255}) and \b(github_pat_[A-Za-z0-9_]{20,255}) without trailing \b; jwt rules/key-material.ts:15 -> \b(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}); stripe (landed, see CURRENT) rules/messaging-payments.ts:7 -> \b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}) without trailing \b. Runtime on 512 KB unchanged within noise; suite 655/656, the one failure is the TOKEN_ORDER source pin. Alternative for openai: the same with lookahead (?=[A-Za-z0-9_-]*\d), 31/31 hidden, 5 new third-party hits instead of 6; choose by the differential and false-hit test.
+Candidate rules (from the report section 7): openai (landed, see CURRENT) rules/ai.ts:8 -> \b(sk-[A-Za-z0-9_-]{20,}) (plain form chosen; one kebab-slug match in 100 MB of third-party text, over-hide pinned); github (landed 6e073334) rules/code-hosts.ts:5-6 -> \b(gh[pousr]_[A-Za-z0-9]{30,255}) and \b(github_pat_[A-Za-z0-9_]{20,255}) without trailing \b; jwt rules/key-material.ts:15 -> \b(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}); stripe (landed, see CURRENT) rules/messaging-payments.ts:7 -> \b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}) without trailing \b. Runtime on 512 KB unchanged within noise; suite 655/656, the one failure is the TOKEN_ORDER source pin. The lookahead alternative (?=[A-Za-z0-9_-]*\d) was rejected: it fails the differential, because a no-digit 48 body the old rule hid would become visible.
 Bounds: samples are synthetic shapes from the catalog regexes; false hits measured on files (repo text 40 MB, third-party text 100 MB), not live tool output; function level only.
 KNOWN-LIMITS (accepted 2026-11-14; behaviour from 6e073334, pinned by ad553852): a gh*_/github_pat_ body over 255 characters is hidden only up to 255 and the tail stays visible — no GitHub token format is that long (classic 36, fine-grained about 82); a classic token stops at an underscore, correct because classic tokens are letters and digits only. Both pinned by tests in patterns.test.ts.
 FOLLOW-UP (2026-11-14): the stripeWebhookSecret underscore gap found in the 4fcec14c review is out of this card's scope and tracked on TRDD-RSI2OZ0B.

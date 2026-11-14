@@ -283,6 +283,13 @@ describe('OpenAI sk- keys with a body of 20 or more characters are hidden, nothi
     expect(redact(`value: ${SK}task-planner-helper-notes end`).text).toBe(`value: ${mark('openai-key')} end`)
   })
 
+  // WHY: a long kebab identifier led by sk- (a CSS class, an id slug, a flag) is also hidden whole; accepted over-hide, safe direction. The old rule left it visible, so this fails on the old rule.
+  test('deliberate over-hide pin: a long kebab identifier led by sk- is hidden whole', () => {
+    const slug = 'onboarding-step-two-modal-header-title-text-'.repeat(2)
+    expect(slug.length).toBeGreaterThanOrEqual(60)
+    expect(redact(`value: ${SK}${slug} end`).text).toBe(`value: ${mark('openai-key')} end`)
+  })
+
   test('every span the old rule matched is still hidden by the new rule, over generated 48 character bodies including no-digit ones', () => {
     const rotate = (k: number) => A36.slice(k) + A36.slice(0, k)
     const bodies = [...Array(10).keys()].map(k => cycle(48, rotate(k)))
