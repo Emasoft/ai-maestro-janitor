@@ -1,10 +1,10 @@
 ---
 trdd-id: RSI2OZ0B
 title: Stripe webhook secret rule keeps its trailing word boundary so an underscore tail leaves the secret visible
-column: todo
+column: dev
 status: tasked
 created: 2026-11-14T02:02:11+0100
-updated: 2026-11-14T02:03:41+0100
+updated: 2026-11-14T02:22:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -26,3 +26,7 @@ stripeWebhookSecret in hooks/secret-shield/rules/messaging-payments.ts is /\b(wh
 ## Approval log
 
 - 2026-11-14T02:02:11+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes
+
+2026-11-14: trailing \b dropped, underscore-tail test fails on the old rule, suite 682/682 (worker-reported); commit pending.

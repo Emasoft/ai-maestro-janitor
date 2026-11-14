@@ -7,9 +7,9 @@ export const slackWebhook: Rule = { kind: 'slack-webhook', pattern: /(https:\/\/
 // WHY the floor is 16 and there is no trailing \b on stripeSecretKey (TRDD-6A3XW3VO, widened 2026-11-14): the old floor (20) has no recorded reason; only the TOKEN_ORDER source pin held it, and no behavioural test did. jr-redact hid shorter keys the shield left visible;
 // the TRDD-6A3XW3VO evidence report measured 7 such samples (bodies of 16 to 18 characters, all four prefixes sk_live, sk_test, rk_live, rk_test; synthesized from other tools' catalog regexes), all hidden by the 16 floor, and 0 new matches in the file corpora it scanned (repo text, 40 MB in two corpora; third-party plugin-cache text, 100 MB, every 8th file).
 // Those are matches in files, not a judgement of false hits and not live tool output. The trailing \b is dropped because a key whose tail continues with an underscore (a word character) never reaches a boundary, so the old rule left the whole key visible.
-// stripeWebhookSecret below is not widened yet: it has the same underscore gap, tracked on TRDD-RSI2OZ0B.
+// WHY stripeWebhookSecret has no trailing \b (TRDD-RSI2OZ0B, 2026-11-14): a whsec_ secret followed by an underscore never reached a word boundary, so the old rule left the whole secret visible; the 24 floor is unchanged (no evidence for another).
 export const stripeSecretKey: Rule = { kind: 'stripe-key', pattern: /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g, group: 1 }
-export const stripeWebhookSecret: Rule = { kind: 'stripe-key', pattern: /\b(whsec_[A-Za-z0-9]{24,})\b/g, group: 1 }
+export const stripeWebhookSecret: Rule = { kind: 'stripe-key', pattern: /\b(whsec_[A-Za-z0-9]{24,})/g, group: 1 }
 
 // Slack app-level and configuration tokens, standalone (no secret name before them needed).
 // Provenance (a): word for word from gitleaks v8.30.1 (MIT, credited in NOTICE), read from the unmodified vendored copy

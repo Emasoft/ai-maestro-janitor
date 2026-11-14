@@ -5,7 +5,7 @@ import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
 import { privateKey } from '../rules/key-material'
-import { stripeSecretKey } from '../rules/messaging-payments'
+import { stripeSecretKey, stripeWebhookSecret } from '../rules/messaging-payments'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -236,6 +236,55 @@ describe('Stripe keys shorter than the old floor are hidden, nothing the old rul
     }
     // A comparison over zero old matches would pass for any new rule.
     expect(oldSpans).toBeGreaterThan(40)
+  })
+})
+// Stripe webhook signing secret (TRDD-RSI2OZ0B, 2026-11-14): the trailing \b was dropped; the 24 floor is unchanged.
+// WHY the differential test: the widening must be a superset. Every span the old rule hid must still be hidden, so the old pattern is kept here as a constant.
+describe('Stripe webhook secrets followed by an underscore are hidden, nothing the old rule hid becomes visible', () => {
+  const OLD_WEBHOOK = /\b(whsec_[A-Za-z0-9]{24,})\b/g
+  // The new pattern is the shipped rule's own, copied so a run keeps no lastIndex (rules/rule.ts); the old one is the constant above.
+  const NEW_WEBHOOK = new RegExp(stripeWebhookSecret.pattern.source, 'g')
+  const WHSEC = j('whsec', '_')
+  // Mixed fake bodies built from repeated characters at run time: no secret-looking literal is committed.
+  const cycle = (n: number, alphabet: string) => alphabet.repeat(Math.ceil(n / alphabet.length)).slice(0, n)
+  const webhook = (n: number) => WHSEC + cycle(n, 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+
+  // WHY: the old trailing \b never matched when the secret was followed by an underscore (a word character), so the whole secret stayed visible.
+  test('a secret whose tail continues with an underscore is hidden up to the underscore', () => {
+    expect(redact(`value: ${webhook(32)}_suffixtext end`).text).toBe(`value: ${mark('stripe-key')}_suffixtext end`)
+  })
+
+  test('a body of 24 and of 40 characters followed by a space is hidden', () => {
+    for (const n of [24, 40]) {
+      const { text, hits } = redact(`value: ${webhook(n)} end`)
+      expect(text).toBe(`value: ${mark('stripe-key')} end`)
+      expect(hits).toEqual({ 'stripe-key': 1 })
+    }
+  })
+
+  test('FLOOR pin (minimum length): a body of 23 characters stays visible', () => {
+    expect(redact(`value: ${webhook(23)} end`).text).toContain(webhook(23))
+  })
+
+  test('every span the old rule matched is still hidden by the new rule, over generated lengths', () => {
+    const contexts = [(t: string) => t, (t: string) => `value: ${t} end`, (t: string) => `{"token":"${t}"}`, (t: string) => `a ${t}\n`]
+    let oldSpans = 0
+    for (const n of [24, 32, 64]) {
+      for (const frame of contexts) {
+        const text = frame(webhook(n))
+        const done = redact(text).text
+        const newSpans = [...text.matchAll(NEW_WEBHOOK)].map(m => [m.index, m.index + m[0].length])
+        for (const m of text.matchAll(OLD_WEBHOOK)) {
+          oldSpans++
+          const start = m.index
+          const end = m.index + m[0].length
+          expect(newSpans.some(([s, e]) => s <= start && e >= end)).toBe(true)
+          expect(done).not.toContain(m[1])
+        }
+      }
+    }
+    // A comparison over zero old matches would pass for any new rule.
+    expect(oldSpans).toBeGreaterThan(10)
   })
 })
 // OpenAI sk- keys (TRDD-6A3XW3VO, 2026-11-14): the third openai rule hid only sk- plus exactly 48 letters and digits, so a key with any other body length, or with a hyphen or underscore in the body, stayed visible.
@@ -1679,7 +1728,7 @@ describe('token rule order', () => {
       id('slack-token', /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g),
       id('slack-webhook', /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g),
       id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g),
-      id('stripe-key', /\b(whsec_[A-Za-z0-9]{24,})\b/g),
+      id('stripe-key', /\b(whsec_[A-Za-z0-9]{24,})/g),
       id('google-api-key', /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g),
       id('jwt', /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),
       id('npm-token', /\b(npm_[A-Za-z0-9]{36})\b/g),
