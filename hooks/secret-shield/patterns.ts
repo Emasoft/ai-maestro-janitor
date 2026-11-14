@@ -459,10 +459,12 @@ export const JSON_ESCAPED = new RegExp(String.raw`(?="[A-Za-z0-9_.-]+(\\+)")(?<=
 // (ratio 1.00, 1.00, 0.99), and 41 times longer per character at 65,536. A value with more escapes than the bound is not read by this regex at all (redactOverBoundJson).
 export const JSON_ESCAPE_BOUND = 49152
 const JSON_PLAIN = jsonPair('', String.raw`[^"\\\r\n]*(?:\\.[^"\\\r\n]*){0,${JSON_ESCAPE_BOUND}}`)
-// The over-bound detector: the opening of a pair, followed by more than the bound of escape pairs before the first bare quote or line end. The lookahead repeats
-// JSON_ESCAPE_BOUND + 1 times, which is still below the slow step: measured alone under claude plugin test (2026-11-13, best of 7), it took the same time per character
-// at 16,385, 32,769 and 49,153 escape pairs (0.438, 0.442 and 0.441 ns per character), and it stops at the first bare quote or line end, so each value is read at most once.
-const JSON_OVER_BOUND = new RegExp(String.raw`"([A-Za-z0-9_.-]+)"(\s*:\s*)"(?=(?:[^"\\\r\n]*\\.){${JSON_ESCAPE_BOUND + 1}})`, 'gm')
+// The opening of a pair `"name": "`, found for every pair of the text: redactOverBoundJson then walks the value and counts its escape pairs itself.
+// WHY no lookahead for the escape count (TRDD-MC895I0A): this was `"(name)"(sep)"(?=(?:[^"\\\r\n]*\\.){JSON_ESCAPE_BOUND + 1})`. That lookahead is linear (measured under claude plugin test,
+// 2026-11-13: the same time per character at 16,385, 32,769 and 49,153 escape pairs) but it is a quantified group with an inner quantifier, a shape the CPV skillaudit REGEX_DOS
+// scanner refuses by design, so the gate blocked on it. Counting in the walk the function already does gives the same result with no such group, and the engine's own
+// retry after a failed lookahead is written out in the function as `lastIndex = match.index + 1`.
+const JSON_OVER_BOUND = /"([A-Za-z0-9_.-]+)"(\s*:\s*)"/gm
 const JSON_RUN = /[^"\\\r\n]*/y
 
 /**
@@ -484,11 +486,21 @@ function redactOverBoundJson(text: string, hits: Hits, found: Map<string, string
   let done = 0
   JSON_OVER_BOUND.lastIndex = 0
   for (let match = JSON_OVER_BOUND.exec(text); match !== null; match = JSON_OVER_BOUND.exec(text)) {
-    if (!isSecretName(match[1])) continue
+    // WHY `match.index + 1` and not the end of the match, on every path that does not hide a value (TRDD-MC895I0A): the old regex carried a lookahead for more than the bound of escape pairs, and when it
+    // failed the engine retried at the next position. This is that retry, and it must stay one position: the closing quote of a value is the opening quote of the next pair (`"a":"x"token":"...`),
+    // and a match that ended at the value start would skip it. A name that is not secret takes no walk at all.
+    // WHY +1 is also right where the old code, after a match whose lookahead had held, resumed at the value start (a non-secret name over the bound): the walk of an over-bound value stops first at a
+    // backslash, never at a quote (a quote before its first backslash would end it with no escape pair), so no `"name"` opening can begin at the value's opening quote (`start - 1`, the quote this match
+    // shares with its value), and none can begin inside the name or the separator either; the positions between `match.index + 1` and the value start find nothing, and the scan goes on from the value start as before.
+    if (!isSecretName(match[1])) {
+      JSON_OVER_BOUND.lastIndex = match.index + 1
+      continue
+    }
     const start = match.index + match[0].length
     let at = start
     let end = ''
     let resume = 0
+    let pairs = 0
     for (;;) {
       JSON_RUN.lastIndex = at
       at += JSON_RUN.exec(text)?.[0].length ?? 0
@@ -510,6 +522,13 @@ function redactOverBoundJson(text: string, hits: Hits, found: Map<string, string
         break
       }
       at += 2
+      // A counted pair is one the old lookahead counted: a run, a backslash, and a character that is not a line end. The last backslash of a value cut at a line end is not one.
+      pairs++
+    }
+    // At most the bound of pairs: JSON_PLAIN reads this value (it reads up to the bound), so it is not this pass's to hide.
+    if (pairs <= JSON_ESCAPE_BOUND) {
+      JSON_OVER_BOUND.lastIndex = match.index + 1
+      continue
     }
     const value = text.slice(start, resume - end.length)
     hits.assignment = (hits.assignment ?? 0) + 1
