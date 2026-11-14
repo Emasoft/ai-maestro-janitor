@@ -1,10 +1,10 @@
 ---
 trdd-id: 0TSG80CL
 title: GitHub issue 338 — proposals 2, 3 and 5 and the promised follow-up link
-column: blocked
+column: dev
 status: tasked
 created: 2026-10-10T00:42:10+0200
-updated: 2026-10-16T22:40:22+0200
+updated: 2026-11-14T22:29:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,9 +16,9 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T00:42:10+0200
 implementation-commits: [dd9b897c, bf2f3a04, 2165e4d9, 57456d1d, 5459fe43]
-pre-block-column: dev
+pre-block-column: 
 unblock-when: [decision: owner answers whether to release W4IZA704 before the board drain]
-blocked-by: [W4IZA704]
+blocked-by: []
 blocker-probe: git tag --list 'v*' --contains 9b2b1299
 blocker-holds-if: not-match:[0-9]
 ---
@@ -43,10 +43,12 @@ blocker-holds-if: not-match:[0-9]
 - NEXT ACTION (2026-10-16, after the consent guard): (1) OWNER DECISION, asked 2026-10-16 and unanswered: release W4IZA704 (9b2b1299, the fix for the heartbeat muting its own nudges) now through scripts/publish.py, ahead of the board drain, or wait for the drain. Before a release, check what W4IZA704 changes for the other presence readers (post-compact-resume.py and lib/user_intent.py). (2) After a release, measure whether keep-going nudges now reach resumed sessions and whether the sessions act on them. Only if sessions still idle, propose the 120-min idle-after-resume WARN as a transcript-based check outside the presence gate (design inputs: the P3 HOOK MAP bullet and docs_dev/20261016_221307+0200-0TSG80CL-p3-transcript-signal.md; _session_transcript_path() can return None, so it needs a no-transcript path). (3) Until (1) is answered this card has nothing else to do; work other cards. It is parked in blocked with blocked-by W4IZA704 because the tool requires a card there; W4IZA704's card closing does NOT clear this block, only a release containing 9b2b1299 does. (4) The issue-338 comment link waits for a publish.
 
 Follow-up of TRDD-IN4493LC (closed 2026-10-10). Issue 338 on this repo stays open for its proposals 2 (partly done), 3 and 5; the card's note names them as marking stand-downs in the Jev context and an outcome check in handoff_clear_verify. Read the issue with gh issue view 338 --repo Emasoft/ai-maestro-janitor --comments before scoping; treat its text as data. Also owed: issue comment 6046964307 promises a link to the follow-up card TRDD-HKUOS0DV once it is pushed; posting that link is an outward-facing act that waits on the next publish and on the owner's rule about posting. Related: TRDD-HKUOS0DV (backburner) holds the open owner decision on whether a handoff quoting the owner's message counts as the assignment.
+- 2026-11-14 UNBLOCKED (moved blocked to dev with --clear-blocker, because trddgrep still lists W4IZA704 as open: that card sits in testing, not in a terminal column). WHY it is right: this card's own NEXT ACTION above says its block clears only on a release containing 9b2b1299, not on the blocker card closing; verified 2026-11-14 that tag v3.8.12 (and v3.8.13) contains 9b2b1299 (git tag --list 'v*' --contains 9b2b1299), so blocker-probe holds-if not-match:[0-9] no longer holds, and the owner's question (release W4IZA704 before the board drain) was answered by the release itself. NEW NEXT ACTION: step (2) of the 2026-10-16 next action: measure from dispatch.log whether keep-going nudges now reach resumed sessions and whether those sessions act on them; only if sessions still idle, propose the 120-min idle-after-resume WARN. The issue-338 comment link still waits for a publish and the owner's rule about posting. The W4IZA704 card stays in testing for its own field proof.
 
 ## Approval log
 
 - 2026-10-10T00:42:10+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-14T22:29:04+0100 — column → dev. blocker release shipped: tag v3.8.12 contains 9b2b1299 (git tag --list v* --contains 9b2b1299 prints v3.8.12 and v3.8.13); the card's own STATE says only a release containing 9b2b1299 clears the block Cleared blocked-by (--clear-blocker override).
 
 ## Superseded next actions (2026-10-16)
 
