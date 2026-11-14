@@ -21,8 +21,8 @@ Pipeline stages (all fail-fast — any non-zero exit aborts):
    2. Lint files (ruff scripts/ tests/ + mypy scripts/ + pyright — ruff and
       pyright are parity with ci.yml Lint job; mypy is gate-only, catching a
       class of scripts/lib sibling-call errors pyright misses, TRDD-BMDZK4RA)
-  2b. Run the secret-shield mod tests (scripts/run_secret_shield_tests.py: `claude plugin test`
-      on a temp assembly of hooks/secret-shield; FAILS CLOSED when `claude` is missing, the
+  2b. Run the secret-shield and liveness mod tests (scripts/run_secret_shield_tests.py --mod <mod>: `claude plugin test`
+      on a temp assembly of hooks/<mod>; FAILS CLOSED when `claude` is missing, the
       run fails or times out, or the passing count drops below the script's floor). Runs BEFORE
       pytest: the suite is load-sensitive, so it gets the quiet host (TRDD-3GP0D06D)
    3. Validate plugin (uvx cpv-remote-validate plugin . --strict — fetches
@@ -74,12 +74,12 @@ Gate stages (--gate mode, called by pre-push hook):
         — the same fail-open shape rejected for pyright in G2; deferred on
         cost, not on principle (TRDD-MYQGMAQZ).
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
-   G3b. Secret-shield mod tests — the same step as 2b; fail-closed, no WARN-skip, before the pytest
+   G3b. Secret-shield and liveness mod tests — the same step as 2b; fail-closed, no WARN-skip, before the pytest
         run so the load-sensitive timing assert is not exposed to its load (TRDD-3GP0D06D)
    G4. Tests (pytest)
 
 Host requirement: a publish AND the pre-push gate (G3b / 2b) now require `claude` (Claude Code)
-on the host PATH, since `claude plugin test` is the only runner of the secret-shield tests. A missing
+on the host PATH, since `claude plugin test` is the only runner of the secret-shield and liveness tests. A missing
 `claude` blocks, it never skips. The installed, unpinned Claude Code version is what gates the release:
 a change in its test output or engine can block a publish (TRDD-3GP0D06D).
 
@@ -270,12 +270,16 @@ _PYTEST_CMD = ["uv", "run", "--extra", "dev", "pytest", "tests/", "-x", "-q", "-
 # a human would sit through.
 _CPV_TIMEOUT_SEC = 3600
 
-# Wall-clock bound for the secret-shield mod tests (scripts/run_secret_shield_tests.py, TRDD-3GP0D06D).
-# The suite itself takes ~5 s (841 tests, measured 2026-11-14); the script kills its own `claude`
-# process group at its default 300 s, and this outer bound is that plus a minute so the script's
-# own one-line failure message wins the race against this one. A hung run asserts nothing, so a
-# timeout is a block, never a pass.
-_SHIELD_TESTS_TIMEOUT_SEC = 360
+# The hooks/ mods whose tests the release gate runs, one `run_secret_shield_tests.py --mod <mod>` each
+# (TRDD-3GP0D06D secret-shield, TRDD-KADV0ZO6 liveness). A mod added here also needs a floor in that script.
+_MOD_TESTS = ("secret-shield", "liveness")
+
+# Wall-clock bound PER MOD for the hooks/ mod tests (scripts/run_secret_shield_tests.py).
+# The secret-shield suite takes ~5 s (841 tests, measured 2026-11-14), liveness ~0.3 s (15 tests); the
+# script kills its own `claude` process group at its default 300 s, and this outer bound is that plus
+# a minute so the script's own one-line failure message wins the race against this one. A hung run
+# asserts nothing, so a timeout is a block, never a pass.
+_MOD_TESTS_TIMEOUT_SEC = 360
 
 # The release push's wall clock CONTAINS the branch-aware pre-push gate (`publish.py
 # --gate`: lint, jscpd, actionlint, mypy, the compiled-component build + tests, remote
@@ -289,8 +293,8 @@ _SHIELD_TESTS_TIMEOUT_SEC = 360
 # 4 attempts in 46 min, 2 orphaned gates running concurrently, zero pushes, remote
 # untouched. 3 attempts still absorb a real transfer hiccup after a green gate; 60 was
 # sized for a 4 s bare push, and 60 × a 15-min gate is a 10-hour futile loop.
-# + _SHIELD_TESTS_TIMEOUT_SEC: the gate also runs the secret-shield tests (G3b), so its bound grows by theirs.
-_PUSH_TIMEOUT_SEC = _CPV_TIMEOUT_SEC + _TEST_SUITE_TIMEOUT_SEC + _SHIELD_TESTS_TIMEOUT_SEC + 1800
+# + len(_MOD_TESTS) * _MOD_TESTS_TIMEOUT_SEC: the gate also runs every hooks/ mod's tests (G3b), so its bound grows by theirs.
+_PUSH_TIMEOUT_SEC = _CPV_TIMEOUT_SEC + _TEST_SUITE_TIMEOUT_SEC + len(_MOD_TESTS) * _MOD_TESTS_TIMEOUT_SEC + 1800
 _PUSH_MAX_ATTEMPTS = 3
 
 # The CPV validator pin — ONE literal, in `.cpv-version` at the repo root.
@@ -413,27 +417,32 @@ def run_pytest_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> int:
         signal.signal(signal.SIGHUP, old_hup)
 
 
-def run_shield_tests(root: Path) -> int:
-    """Run the secret-shield mod tests (TRDD-3GP0D06D); return 0 on a pass, else a non-zero code.
+def run_mod_tests(root: Path) -> int:
+    """Run the hooks/ mod tests (secret-shield, TRDD-3GP0D06D; liveness, TRDD-KADV0ZO6); return 0 on a pass, else a non-zero code.
 
     WHY a separate script, not inline: scripts/run_secret_shield_tests.py is runnable on its own
-    (`python scripts/run_secret_shield_tests.py`), so the step can be exercised, and a deliberately
-    failing shield test shown to fail it, without a publish. It fails closed on its own (no
+    (`python scripts/run_secret_shield_tests.py --mod <mod>`), so the step can be exercised, and a
+    deliberately failing test shown to fail it, without a publish. It fails closed on its own (no
     `claude`, failed run, timeout, count below its floor) and exits 1 with one explanatory line;
-    this wrapper adds only the outer wall-clock kill and the BLOCKED line.
+    this wrapper adds only the outer wall-clock kill and the BLOCKED line. Every mod runs even after
+    an earlier one failed, so one gate run reports every red mod; the first non-zero code is returned.
     """
     script = root / "scripts" / "run_secret_shield_tests.py"
-    try:
-        # Reuses the pytest runner for a non-pytest command (it is a generic own-session runner); it raises TimeoutExpired after killing the group.
-        code = run_pytest_in_own_session([sys.executable, str(script)], root, _SHIELD_TESTS_TIMEOUT_SEC)
-    except subprocess.TimeoutExpired:
-        cprint(f"  {RED}BLOCKED: secret-shield tests timed out after {_SHIELD_TESTS_TIMEOUT_SEC}s.{NC}")
-        return 1
-    if code != 0:
-        cprint(f"  {RED}BLOCKED: secret-shield tests failed (exit {code}).{NC}")
-        return code
-    cprint(f"  {GREEN}Secret-shield tests passed.{NC}")
-    return 0
+    first_failure = 0
+    for mod in _MOD_TESTS:
+        try:
+            # Reuses the pytest runner for a non-pytest command (it is a generic own-session runner); it raises TimeoutExpired after killing the group.
+            code = run_pytest_in_own_session([sys.executable, str(script), "--mod", mod], root, _MOD_TESTS_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            cprint(f"  {RED}BLOCKED: {mod} tests timed out after {_MOD_TESTS_TIMEOUT_SEC}s.{NC}")
+            code = 1
+        else:
+            if code != 0:
+                cprint(f"  {RED}BLOCKED: {mod} tests failed (exit {code}).{NC}")
+            else:
+                cprint(f"  {GREEN}{mod} tests passed.{NC}")
+        first_failure = first_failure or code
+    return first_failure
 
 
 def run_cpv_strict(cmd: list[str], cwd: Path, *, timeout: int) -> tuple[int, list[str]]:
@@ -1626,11 +1635,11 @@ def run_gate(root: Path) -> int:
     if _gate_validate(root):
         return 1
 
-    # Gate 3b: secret-shield mod tests (TRDD-3GP0D06D). MANDATORY, fail-closed, no WARN-skip.
+    # Gate 3b: secret-shield + liveness mod tests (TRDD-3GP0D06D, TRDD-KADV0ZO6). MANDATORY, fail-closed, no WARN-skip.
     # WHY before G4 pytest: ~5 s, and patterns.test.ts:661/:664 (timing ratio) is load-sensitive,
     # so it runs on the quietest host the gate offers, not after the full pytest suite.
-    cprint(f"\n{BLUE}[G3b] Running secret-shield tests...{NC}")
-    if run_shield_tests(root) != 0:
+    cprint(f"\n{BLUE}[G3b] Running the secret-shield and liveness mod tests...{NC}")
+    if run_mod_tests(root) != 0:
         return 1
 
     # Gate 4: Tests. MANDATORY — missing tests/ dir or zero tests is a BLOCK.
@@ -1890,14 +1899,14 @@ def stage_tests(root: Path) -> None:
     unconditionally — the cleanup is a safety net, not a skip
     mechanism.
     """
-    # Step 2b: secret-shield mod tests (TRDD-3GP0D06D). MANDATORY, fail-closed, BEFORE pytest.
+    # Step 2b: secret-shield + liveness mod tests (TRDD-3GP0D06D, TRDD-KADV0ZO6). MANDATORY, fail-closed, BEFORE pytest.
     # WHY before: the shield suite takes ~5 s, and patterns.test.ts:661/:664 asserts a timing ratio
     # that is sensitive to host load (seen once failing at loadavg ~45 inside pytest). Run first,
     # on a quiet host, it is less exposed than after the heavy pytest run has loaded the machine.
-    cprint(f"\n{BOLD}[2b/11] Running secret-shield tests...{NC}")
-    shield_code = run_shield_tests(root)
-    if shield_code != 0:
-        sys.exit(shield_code)
+    cprint(f"\n{BOLD}[2b/11] Running the secret-shield and liveness mod tests...{NC}")
+    mod_code = run_mod_tests(root)
+    if mod_code != 0:
+        sys.exit(mod_code)
 
     cprint(f"\n{BOLD}[3/11] Running tests...{NC}")
     test_dir = root / "tests"

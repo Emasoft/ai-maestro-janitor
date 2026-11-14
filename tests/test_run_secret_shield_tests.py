@@ -66,6 +66,27 @@ def test_a_deliberately_failing_shield_test_fails_the_script(tmp_path: Path) -> 
 
 
 @needs_claude
+def test_the_liveness_mod_passes_through_the_script() -> None:
+    """`--mod liveness` assembles hooks/liveness, runs its suite and exits 0 reporting its pass count (TRDD-KADV0ZO6)."""
+    result = _run("--mod", "liveness")
+    assert result.returncode == 0, result.stderr
+    assert "OK: liveness: " in result.stdout
+
+
+@needs_claude
+def test_a_deliberately_failing_liveness_test_fails_the_script(tmp_path: Path) -> None:
+    """A failing test(...) injected into a copy of hooks/liveness makes `--mod liveness` exit 1 (TRDD-KADV0ZO6)."""
+    mod = tmp_path / "liveness"
+    shutil.copytree(_REPO / "hooks" / "liveness", mod, ignore=shutil.ignore_patterns(".DS_Store"))
+    with (mod / "tests" / "liveness.test.ts").open("a", encoding="utf-8") as handle:
+        handle.write("\ntest('deliberate failure injected by test_run_secret_shield_tests', () => {\n  expect(1).toBe(2)\n})\n")
+    result = _run("--mod", "liveness", "--mod-dir", str(mod))
+    assert result.returncode == 1
+    assert "`claude plugin test` exited 1" in result.stderr
+    assert "deliberate failure injected by test_run_secret_shield_tests" in result.stderr
+
+
+@needs_claude
 def test_a_mod_dir_with_no_test_files_fails_the_script(tmp_path: Path) -> None:
     """A mod copy whose tests/ directory is gone exits 1 instead of passing on nothing."""
     mod = _copy_mod(tmp_path / "secret-shield")

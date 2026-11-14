@@ -2,22 +2,23 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""run_secret_shield_tests — run the secret-shield mod's tests through `claude plugin test`
-(TRDD-3GP0D06D).
+"""run_secret_shield_tests — run a hooks/ mod's tests (secret-shield by default, or liveness with
+`--mod liveness`) through `claude plugin test` (TRDD-3GP0D06D, TRDD-KADV0ZO6).
 
-WHY THIS EXISTS. hooks/secret-shield/tests are run by the mods test kit (`claude-code/testing`),
+WHY THIS EXISTS. hooks/<mod>/tests are run by the mods test kit (`claude-code/testing`),
 which only the `claude` binary provides. Nothing in publish.py or CI ran them, so a release could
-ship a shield that fails its own tests.
+ship a mod that fails its own tests. The script keeps its secret-shield name: it was written for that
+mod, and publish.py and the tests name it.
 
 HOW. `claude plugin test <dir>` refuses a bare mod directory ("no hooks module to load; there is no
 hooks/hooks.json naming one in "modules""), and a minimal plugin.json fails two userConfig tests. So
 the mod is assembled in a fresh temp dir: the repo's full .claude-plugin/plugin.json, a
-hooks/hooks.json holding ONLY {"modules": ["./secret-shield/register.ts"]}, and a copy of the mod.
+hooks/hooks.json holding ONLY {"modules": ["./<mod>/register.ts"]}, and a copy of the mod.
 The repo's own hooks/hooks.json is never read or written: it must not carry a "modules" key until
 the wiring gate (tests/test_secret_shield_wiring_gate.py) allows it. The run is pointed at the temp
 dir, never at the repo root: _corpus_dev/ holds untrusted *.test.ts that a root discovery would run.
 
-Exit 0: the run passed, reported at least _MIN_PASSED passing tests, and every test file of the copy appeared in its output. Exit 1: anything else, with
+Exit 0: the run passed, reported at least the mod's floor of passing tests, and every test file of the copy appeared in its output. Exit 1: anything else, with
 one `run_secret_shield_tests: FAIL:` line on stderr (the run's own output follows when it ran).
 """
 
@@ -35,19 +36,21 @@ import tempfile
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
-_DEFAULT_MOD_DIR = _REPO / "hooks" / "secret-shield"
 _PLUGIN_JSON = _REPO / ".claude-plugin" / "plugin.json"
-_MODULE = "./secret-shield/register.ts"
+_DEFAULT_MOD = "secret-shield"
 _DEFAULT_TIMEOUT_SEC = 300
 
-# Measured 841 passing across 4 files on 2026-11-14 (suite wall time ~5 s). WHY a floor at all:
+# Floor of passing tests per mod, measured 2026-11-14: secret-shield 841 passing across 4 files (suite
+# wall time ~5 s), liveness 15 passing in 1 file (~0.3 s). WHY a floor at all:
 # `claude plugin test` exits 1 when it finds NO test file (measured), so an empty assembly is already
 # caught, and the per-file check catches a file of the assembly that the run did not execute. What
 # neither sees is a test file REMOVED from the repo (the assembly is built from what is left) or tests
-# silently not collected inside a file: both still exit 0 with fewer passes. 800 catches a large loss
-# (~40+ tests); a single small file removed from the repo can still pass. Lower it in the same
-# commit that removes tests, never to make a red run green.
-_MIN_PASSED = 800
+# silently not collected inside a file: both still exit 0 with fewer passes. secret-shield 800 catches a
+# large loss (~40+ tests); a single small file removed from the repo can still pass. liveness 15 is its
+# exact count (one file, so any removed or uncollected test is caught); a removed liveness test must
+# lower it in the same commit. Lower a floor in the same commit that removes tests, never to make a red
+# run green.
+_MIN_PASSED = {"secret-shield": 800, "liveness": 15}
 
 _PASS_RE = re.compile(r"^\s*(\d+) pass\s*$", re.MULTILINE)
 _FAIL_RE = re.compile(r"^\s*(\d+) fail\s*$", re.MULTILINE)
@@ -85,36 +88,40 @@ def _run_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, s
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Run the secret-shield mod tests via `claude plugin test` in a temp assembly.")
-    parser.add_argument("--mod-dir", type=Path, default=_DEFAULT_MOD_DIR, help="directory assembled as hooks/secret-shield (default: the repo's hooks/secret-shield)")
+    parser = argparse.ArgumentParser(description="Run a hooks/ mod's tests via `claude plugin test` in a temp assembly.")
+    parser.add_argument("--mod", choices=sorted(_MIN_PASSED), default=_DEFAULT_MOD, help=f"which hooks/<mod> to test (default {_DEFAULT_MOD})")
+    parser.add_argument("--mod-dir", type=Path, default=None, help="directory assembled as hooks/<mod> (default: the repo's hooks/<mod>)")
     parser.add_argument("--timeout", type=int, default=_DEFAULT_TIMEOUT_SEC, help="seconds before the run's process group is killed (default 300)")
     args = parser.parse_args(argv)
+    mod: str = args.mod
+    mod_dir: Path = args.mod_dir if args.mod_dir is not None else _REPO / "hooks" / mod
+    min_passed = _MIN_PASSED[mod]
 
     # WHY fail closed on a missing binary: the tests cannot run without it, and "skipped" would let a
-    # release ship an untested shield — exactly the gap this script closes.
+    # release ship an untested mod — exactly the gap this script closes.
     claude = shutil.which("claude")
     if claude is None:
-        return _fail("`claude` is not on PATH; the secret-shield tests need its mods test kit")
-    if not args.mod_dir.is_dir():
-        return _fail(f"mod dir not found: {args.mod_dir}")
+        return _fail(f"`claude` is not on PATH; the {mod} tests need its mods test kit")
+    if not mod_dir.is_dir():
+        return _fail(f"mod dir not found: {mod_dir}")
     if not _PLUGIN_JSON.is_file():
         return _fail(f"manifest not found: {_PLUGIN_JSON}")
 
-    with tempfile.TemporaryDirectory(prefix="secret-shield-tests-") as tmp_name:
+    with tempfile.TemporaryDirectory(prefix=f"{mod}-tests-") as tmp_name:
         tmp = Path(tmp_name)
         (tmp / ".claude-plugin").mkdir()
         shutil.copy2(_PLUGIN_JSON, tmp / ".claude-plugin" / "plugin.json")
         (tmp / "hooks").mkdir()
-        (tmp / "hooks" / "hooks.json").write_text(f'{{"modules": ["{_MODULE}"]}}\n', encoding="utf-8")
-        shutil.copytree(args.mod_dir, tmp / "hooks" / "secret-shield", ignore=shutil.ignore_patterns(".DS_Store"))
+        (tmp / "hooks" / "hooks.json").write_text(f'{{"modules": ["./{mod}/register.ts"]}}\n', encoding="utf-8")
+        shutil.copytree(mod_dir, tmp / "hooks" / mod, ignore=shutil.ignore_patterns(".DS_Store"))
         # WHY computed from the copy, never a hardcoded list: a renamed or added test file is checked
         # automatically, and a stale list would fail on the first rename.
-        tests_dir = tmp / "hooks" / "secret-shield" / "tests"
+        tests_dir = tmp / "hooks" / mod / "tests"
         expected = sorted(f.relative_to(tmp).as_posix() for pattern in ("*.test.ts", "*.test.tsx") for f in tests_dir.rglob(pattern))
         try:
             code, output = _run_in_own_session([claude, "plugin", "test", str(tmp)], tmp, args.timeout)
         except subprocess.TimeoutExpired:
-            # WHY: a hung run asserts nothing; reporting it as a pass or a skip would hide a wedged shield.
+            # WHY: a hung run asserts nothing; reporting it as a pass or a skip would hide a wedged mod.
             return _fail(f"`claude plugin test` timed out after {args.timeout}s; its process group was killed")
 
     if code != 0:
@@ -136,9 +143,9 @@ def main(argv: list[str]) -> int:
     unreported = _unreported_test_files(expected, output)
     if unreported:
         return _fail(f"test file(s) in the assembly are missing from the run's output: {', '.join(unreported)}", output)
-    if n_pass < _MIN_PASSED:
-        return _fail(f"only {n_pass} tests passed, below the floor of {_MIN_PASSED}: part of the suite was not collected", output)
-    print(f"run_secret_shield_tests: OK: {n_pass} pass, {n_fail} fail (floor {_MIN_PASSED})")
+    if n_pass < min_passed:
+        return _fail(f"only {n_pass} tests passed, below the floor of {min_passed}: part of the suite was not collected", output)
+    print(f"run_secret_shield_tests: OK: {mod}: {n_pass} pass, {n_fail} fail (floor {min_passed})")
     return 0
 
 
