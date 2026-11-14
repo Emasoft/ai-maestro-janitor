@@ -863,24 +863,27 @@ def test_phase_clear_resume_emits_directive_and_clears(env_isolation: dict) -> N
     dispatch = _import_dispatch()
     import state
 
-    _arm_clear_flag(
+    # Flag written 42 s ago at submit, the real clear observed 30 s ago: the cue age is
+    # measured from the observation (issue #355), not from the submit-time flag.
+    _write_clear_flag(
         state,
         "read .janitor/state/agent-handoff.md FIRST, then continue TRDD-Z582IKIR.",
         age_s=42,
     )
+    _observe_clear(state, age_s=30)
     out = _capture_stdout(dispatch._phase_clear_resume)
     lines = out.splitlines()
     assert lines[0] == "[janitor-resume]", f"marker line must be bare, got {lines[0]!r}"
     assert "TRDD-Z582IKIR" in out
     assert "agent-handoff.md" in out, "the link-only handoff pointer must survive"
-    assert _reported_age(out) in (42, 43), (
-        # The helper stamps the sidecar as now-42, then the PHASE reads the clock again.
-        # A second ticking over between those two independent reads makes the age 43 —
+    assert _reported_age(out) in (30, 31), (
+        # The helper stamps clear-observed.ts as now-30, then the PHASE reads the clock again.
+        # A second ticking over between those two independent reads makes the age 31 —
         # a real 1-in-N flake that only shows under a loaded full suite (it blocked a
         # release on 2026-08-01, having passed in isolation every time). Asserting an
-        # exact second across two clock reads is the bug; the sidecar is still proven to
-        # be the source, because a missing/ignored one yields 0.
-        f"age must come from the .ts sidecar (~42s), got {out!r}"
+        # exact second across two clock reads is the bug; the stamp is still proven to
+        # be the source, because a missing/ignored one yields 0 or 42.
+        f"age must come from clear-observed.ts (~30s), got {out!r}"
     )
     sd = state.state_dir()
     assert not (sd / "resume-after-clear.flag").exists(), "flag must be cleared after emission"
@@ -921,14 +924,70 @@ def test_phase_clear_resume_defangs_marker_mimicry(env_isolation: dict) -> None:
 
 
 def test_phase_clear_resume_generic_cue_when_flag_empty(env_isolation: dict) -> None:
-    """Flag present but empty → still cue a generic resume pointing at the handoff."""
+    """Flag present but empty and no handoff attributable → generic cue says to rebuild from git/TRDD."""
     dispatch = _import_dispatch()
     import state
 
     _arm_clear_flag(state, "")
     out = _capture_stdout(dispatch._phase_clear_resume)
     assert out.startswith("[janitor-resume]")
-    assert "injected SessionStart handoff summary" in out
+    # Issue #355: with no handoff on disk the cue must not point at one.
+    assert "injected SessionStart handoff summary" not in out
+    assert "rebuild your state from git log and the in-flight TRDD STATE blocks" in out
+
+
+
+def test_clear_cue_age_is_measured_from_the_real_clear_not_the_submit(
+    env_isolation: dict,
+) -> None:
+    """Issue #355: submit at T, clear landed at T+1140 s, now T+1203 s → cue says ~63 s, not 1203 s."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "continue TRDD-Z582IKIR", age_s=1203)
+    _observe_clear(state, age_s=63)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]"), out
+    assert _reported_age(out) in (63, 64), out
+    assert "1203s ago" not in out, out
+
+
+def test_clear_cue_without_attributable_handoff_says_to_rebuild_from_git_and_trdd(
+    env_isolation: dict,
+) -> None:
+    """Issue #355: the stored directive names a SessionStart handoff but none exists → cue rewrites that claim."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(
+        state,
+        "read the injected SessionStart handoff summary FIRST (follow its wikimem/TRDD "
+        "links via memgrep recall on demand), then resume your prior in-flight task.",
+    )
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert "read the injected SessionStart handoff summary" not in out, out
+    assert "no handoff was attributable to this clear" in out, out
+    assert "rebuild your state from git log and the in-flight TRDD STATE blocks" in out, out
+    assert "resume your prior in-flight task" in out, out
+
+
+def test_clear_cue_with_fresh_handoff_keeps_the_directive_wording(env_isolation: dict) -> None:
+    """Issue #355: when a keyed handoff is attributable the stored directive is emitted unchanged, plus its path."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    directive = (
+        "read the injected SessionStart handoff summary FIRST (follow its wikimem/TRDD "
+        "links via memgrep recall on demand), then resume your prior in-flight task."
+    )
+    _arm_clear_flag(state, directive)
+    handoff_path = handoff_files.write(state.state_dir(), "deadbeef", "the fresh summary body")
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert directive in out, out
+    assert str(handoff_path.resolve()) in out, out
+    assert "attributable" not in out, out
 
 
 def test_compact_resume_must_not_consume_the_pending_clear_flag(env_isolation: dict) -> None:

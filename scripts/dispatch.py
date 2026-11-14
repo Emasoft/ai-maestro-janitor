@@ -2318,6 +2318,19 @@ def _latest_handoff(paths: list[Path]) -> Path:
     return max(paths, key=rank)
 
 
+# Issue #355: the stored clear directives (token-meter, external handoff clear, clear_trigger
+# default) all tell the resumed session to "read the injected SessionStart handoff summary"
+# (+ an optional "FIRST" and parenthetical). When no handoff is attributable the cue builder
+# swaps that clause for this sentence.
+_HANDOFF_CLAIM_RE = re.compile(
+    r"read the injected SessionStart handoff summary(?: FIRST)?(?: \([^)]*\))?", re.IGNORECASE
+)
+_NO_HANDOFF_REBUILD = (
+    "no handoff was attributable to this clear — rebuild your state from git log and the "
+    "in-flight TRDD STATE blocks"
+)
+
+
 def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     """A one-line pointer at the freshest post-clear compacted context, when one exists on disk.
 
@@ -2329,7 +2342,7 @@ def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     resumed turn to notice a file SessionStart already read past.
 
     Returns "" when no keyed handoff can be attributed to this clear — the caller then falls
-    back to the generic "read the injected SessionStart handoff summary" directive alone.
+    back to the directive with its "read the injected SessionStart handoff summary" clause rewritten (issue #355).
     `clear_ts` is forwarded so the cleared session is identified, not guessed (TRDD-PHS3DIBD).
     """
     # TRDD-D7RLXAN1: one clear must name ONE read-first file. SessionStart's READ FIRST line names
@@ -2794,32 +2807,55 @@ def _phase_clear_resume() -> bool:
     # `[janitor-…]` marker), collapse to a single bounded line.
     directive = state.sanitize_for_drift_line(directive)
     directive = " ".join(directive.split())
-    if len(directive) > 280:
-        directive = directive[:277] + "..."
-
-    age = max(0, now - (written_at or now))
-
-    # F7 (wikimem audit): bare marker line + prose payload — see
-    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract). D5
-    # (TRDD-82JRK0CY) funnels it through _emit_decision (auto-flush + payload defang).
-    if directive:
-        note = f"Session was cleared {age}s ago — auto-resume. {directive}"
-    else:
-        # Flag present but empty/unreadable: still cue a generic resume so the fresh
-        # session doesn't stall idle after a /clear.
-        note = (
-            f"Session was cleared {age}s ago — auto-resume. Read the injected "
-            "SessionStart handoff summary and resume your prior task."
-        )
-    # TRDD-QZVAEWQH: appended AFTER the 280-char truncation above, which governs only the
-    # ORIGINAL directive text — an absolute path truncated at 277 chars is useless, so this
-    # line is built and appended separately and is never subject to that cap.
     # TRDD-PHS3DIBD: `written_at` is the clear's own timestamp; it lets the helpers read WHICH
     # session was cleared from the clear trigger's sidecar instead of guessing the newest.
     # A missing or unparseable `.ts` reads as 0: pass None then, so no sidecar lookup runs and
     # nothing is logged (today's behaviour).
     clear_ts = written_at or None
     fresh = _fresh_summary_note(sd, clear_ts)
+    # Issue #355: the stored directive is a static string written BEFORE the clear and claims a
+    # SessionStart handoff was injected. When none is attributable to this clear (a late-landing
+    # clear whose hooks ran past the sidecar freshness bound injects nothing) that claim is false
+    # and sent the resumed session to read a handoff that did not exist. Rewrite it here, in the
+    # cue builder, on the FULL directive before the 280-char cap below can cut the clause in half;
+    # the stored directive file is left untouched. A directive without the claim gets the
+    # sentence appended instead.
+    if directive and not fresh:
+        directive, claim_hits = _HANDOFF_CLAIM_RE.subn(_NO_HANDOFF_REBUILD, directive)
+        if not claim_hits:
+            directive = f"{directive} ({_NO_HANDOFF_REBUILD})"
+    if len(directive) > 280:
+        directive = directive[:277] + "..."
+
+    # Issue #355: age from the REAL clear (clear-observed.ts, stamped by SessionStart), never from
+    # `resume-after-clear.ts`, which is written when /clear is SUBMITTED. A /clear typed into a busy
+    # pane is queued and lands minutes later (measured 19 min), so the submit-time age reported
+    # 1203 s for a clear that was 63 s old. `clear_flag_armed` above guarantees the stamp is
+    # >= the flag, so it exists and is valid here; the submit time is only the fallback.
+    observed_at = state.read_int_state(sd / "clear-observed.ts", 0)
+    age = max(0, now - (observed_at or written_at or now))
+
+    # F7 (wikimem audit): bare marker line + prose payload — see
+    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract). D5
+    # (TRDD-82JRK0CY) funnels it through _emit_decision (auto-flush + payload defang).
+    if directive:
+        note = f"Session was cleared {age}s ago — auto-resume. {directive}"
+    elif fresh:
+        # Flag present but empty/unreadable: still cue a generic resume so the fresh
+        # session doesn't stall idle after a /clear.
+        note = (
+            f"Session was cleared {age}s ago — auto-resume. Read the injected "
+            "SessionStart handoff summary and resume your prior task."
+        )
+    else:
+        # Issue #355: nothing was injected for this clear, so do not tell the session to read it.
+        note = (
+            f"Session was cleared {age}s ago — auto-resume. "
+            f"{_NO_HANDOFF_REBUILD[0].upper()}{_NO_HANDOFF_REBUILD[1:]}, then resume your prior task."
+        )
+    # TRDD-QZVAEWQH: appended AFTER the 280-char truncation above, which governs only the
+    # ORIGINAL directive text — an absolute path truncated at 277 chars is useless, so this
+    # line is built and appended separately and is never subject to that cap.
     if fresh:
         note = f"{note} {fresh}"
     # Arms `_phase_late_summary_drift`: records the real summary this resume already named.
