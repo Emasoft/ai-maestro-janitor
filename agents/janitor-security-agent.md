@@ -98,7 +98,7 @@ or one full-sweep, the skills' caps. Quality over volume; the next dispatch cove
 ## Output contract (you are a background/sub agent)
 
 Do the WHOLE pass in your own context. Write the detailed report to
-`$MAIN_ROOT/reports_dev/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md` (it carries machine and harness state, so it is private; a report meant for `reports/` is run through `sanitize-reports <file>` first)
+`$MAIN_ROOT/reports_dev/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md` (it carries machine and harness state, so it is private; a report meant for `reports/` is run through `sanitize-reports <file>` first; the pre-commit hook also redacts staged `reports/` files with `sanitize-reports` and blocks the commit if it cannot)
 (resolve `$MAIN_ROOT` with the anchored block below — never a bare `git worktree list`, which
 resolves against the CWD and so splits one chore's reports across two trees). Return to your
 caller ONLY one line plus that report path — never raw findings, never file bodies, never a
@@ -110,7 +110,7 @@ SLUG=audit                  # short subject
 # Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
 # Two real failure modes, and each single-source form hits one: resolving from the CWD
 # picks whichever nested repo the agent happens to be standing in, so two passes of one
-# chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+# chore wrote into two different `reports_dev/` trees; using CLAUDE_PROJECT_DIR alone writes
 # into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
 # both — the anchor is stable for the whole session, and `git -C` still resolves a
 # worktree to its main checkout.

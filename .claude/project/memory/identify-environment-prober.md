@@ -1,8 +1,8 @@
 ---
 name: identify-environment-prober
-description: "how does /janitor-identify-environment detect the environment / why did terminal or TTY detection report wrong headless or '??' inside an interactive session / where is the env_detect code / how do I add a new detector to identify-environment / why is the tool secret-safe no-network fail-open / a background agent was falsely reported inside a fully interactive iTerm session / ITERM_SESSION_ID is absent on a resumed or --continue session / why does subprocess ps report tty ?? for the bash tool / how to read process identity from an ancestor not self / NAT detection misclassified a Tailscale CGNAT address as public / is 100.64.0.0/10 private in python ipaddress / where does identify-environment write its report json / what does --fast skip in identify-environment / what does --online enable in identify-environment / does identify-environment ever emit secret values"
+description: "how does /janitor-identify-environment detect the environment / why did terminal or TTY detection report wrong headless or '??' inside an interactive session / where is the env_detect code / how do I add a new detector to identify-environment / why is the tool secret-safe no-network fail-open / a background agent was falsely reported inside a fully interactive iTerm session / ITERM_SESSION_ID is absent on a resumed or --continue session / why does subprocess ps report tty ?? for the bash tool / how to read process identity from an ancestor not self / NAT detection misclassified a Tailscale CGNAT address as public / is 100.64.0.0/10 private in python ipaddress / where does identify-environment write its report json (reports_dev/identify-environment, gitignored; reports/ is tracked, not private) / what does --fast skip in identify-environment / what does --online enable in identify-environment / does identify-environment ever emit secret values"
 ocd: 2026-07-13
-lmd: 2026-09-09
+lmd: 2026-11-14
 metadata:
   node_type: memory
   type: project
@@ -38,11 +38,11 @@ GitHub probes; (3) **fail-open** — every probe helper (`_out`/`_out_any`) degr
 blocked/unavailable probe to ""/"unknown" and never raises, which is also why it runs
 green under the deny-by-default test process-sandbox.
 
-^VKG97PLH [desc:"Delivery/token economy: default run writes the full object to reports/identify-environment/<ts>-env.json, prints only a compact digest; --json prints raw; --fast skips tool-versions+ports.", keywords:"where_does_identify_environment_write_its_report_json what_does_fast_skip_in_identify_environment default_run_writes_full_object_to_reports json_flag_prints_raw_object_to_stdout tool_versions_and_listening_ports_skipped_by_fast"]
+^VKG97PLH [desc: "Default run writes the full object to reports_dev/identify-environment/<ts>-env.json (gitignored), prints a compact digest; --json prints raw; --fast skips tool-versions+ports.", keywords: where_does_identify_environment_write_its_report_json what_does_fast_skip_in_identify_environment default_run_writes_full_object_to_reports json_flag_prints_raw_object_to_stdout tool_versions_and_listening_ports_skipped_by_fast, lmd: 2026-11-14]
 **Delivery (token economy):** the default run WRITES the full object to
-`reports/identify-environment/<ts>-env.json` and prints only a compact digest + the
+`reports_dev/identify-environment/<ts>-env.json` (gitignored; `reports/` is tracked) and prints only a compact digest + the
 path; `--json` prints the raw object to stdout; `--fast` skips tool-versions +
-listening-ports.
+listening-ports. [^3]
 
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG07-0013, status:valid, keywords:"subprocess_no_controlling_terminal iterm_session_id_absent_on_resume read_identity_from_ancestor_not_self", ocd:2026-07-13, lmd:2026-07-13] **The anchor a subprocess loses.** Terminal/TTY
@@ -64,3 +64,4 @@ listening-ports.
   shared space (`100.64.0.0/10`) is not in Python's `ipaddress.is_private`. Fix: skip
   tunnel/VPN interfaces and treat CGNAT as non-routable. Lesson: `is_private` is not
   "is on my LAN" — enumerate the special ranges you care about explicitly.
+[^3]: [id: ATOM-HX7D-9842, status: valid, supersedes: VKG97PLH, keywords: "identify-environment_report_json_location reports_dev_identify-environment_env_json reports_tracked_not_private where_is_the_env_json_written identify_environment_output_path reports_dev_gitignored_output stale_reports_path identify-environment_default_run_output env.json_path reports_vs_reports_dev", ocd: 2026-11-14, lmd: 2026-11-14] DO NOT say identify-environment writes its report json under reports/, BECAUSE reports/ is git-tracked (TRDD-KSUIEPTQ, owner 2026-11-14) and the tool writes to the gitignored reports_dev/identify-environment/ (scripts/identify_environment.py). DO read reports_dev/identify-environment/<ts>-env.json. SUPERSEDED BODY: **Delivery (token economy):** the default run WRITES the full object to `reports/identify-environment/<ts>-env.json` and prints only a compact digest + the path; `--json` prints the raw object to stdout; `--fast` skips tool-versions + listening-ports.

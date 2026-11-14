@@ -48,7 +48,8 @@ class PrivateClass:
 # the intended way to add coverage; adding a branch elsewhere is not.
 #
 # `/*_dev/` and `/.trashcan/` are ROOT-anchored on purpose: the rules that define
-# them put them at the project root, and nothing else. Unanchored, `reports/` named
+# them put them at the project root, and nothing else. The lesson came from a since-removed
+# `reports/` class (reports/ is tracked now, TRDD-KSUIEPTQ): unanchored, it named
 # `skills/<x>/templates/reports/*.md` — a skill's report TEMPLATES, tracked on purpose — in a
 # fleet repo on the 2026-09-02 sweep, and would have prescribed `git rm --cached` for them every
 # hour. `.venv/` and `node_modules/` stay unanchored: a nested one is still machine bulk.
@@ -123,7 +124,7 @@ def matches_private_class(
     twelve patterns WE own, which have four fixed, simple shapes, each with git's meaning: a
     bare name or glob matches the basename at any depth, a `dir/` pattern matches any directory
     component, a `/dir/` pattern matches ONLY the root directory (the 2026-09-02 fleet sweep:
-    unanchored `reports/` named a skill's tracked `templates/reports/` as contamination), and a
+    an unanchored `reports/` class, since removed, named a skill's tracked `templates/reports/` as contamination), and a
     pattern with an inner slash is anchored at the root.
     """
     norm = path.removeprefix("./")

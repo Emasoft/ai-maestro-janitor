@@ -56,6 +56,6 @@ Every dispatch ends in exactly one of: `resolved` (fixed AND verified — you ra
 becomes `needs_human` and is surfaced on every heartbeat until a person deals with it. That is the
 design: a ticket the janitor could not fix must never simply go quiet.
 
-Write your report to `reports_dev/janitor-repair-agent/` (it carries machine and harness state; a report meant for `reports/` is run through `sanitize-reports <file>` first) and return ONE line plus the report path. Never
+Write your report to `reports_dev/janitor-repair-agent/` (it carries machine and harness state; a report meant for `reports/` is run through `sanitize-reports <file>` first; the pre-commit hook also redacts staged `reports/` files with `sanitize-reports` and blocks the commit if it cannot) and return ONE line plus the report path. Never
 return the report's contents — the whole reason you run in your own context is to keep them out of the
 orchestrator's.

@@ -2,7 +2,7 @@
 name: janitor-is-not-a-role-agent
 description: "why are ai-maestro role plugins erroring in this repo / can I install chief-of-staff or maintainer-agent here / claude says 'enabled in project settings but isn't installed here' and offers --scope project / why is the janitor user-scope / what memory survives if another agent takes over this repo / can the janitor play a role like autonomous-agent or chief-of-staff / why does /janitor-arm refuse a project or local scope install / should I run claude plugin install role@ai-maestro-plugins --scope project here / why is there a stale enabledPlugins key for a role plugin / what happens to LOCAL and USER scope memory if a maintainer clones this repo into a container / why must project-scope memory carry no private data / does deleting an enabledPlugins key uninstall anything / is reports/ project-scoped / why are role plugins mutually exclusive / what is a purely functional plugin with no main agent"
 ocd: 2026-07-09
-lmd: 2026-09-09
+lmd: 2026-11-14
 metadata:
   node_type: memory
   tier: component
@@ -35,30 +35,32 @@ fix is to **delete the stale key** from user-scope `enabledPlugins` (done 2026-0
 
 ## What survives a maintainer takeover — why PROJECT scope is load-bearing
 
-^61M30BH1 [desc:"What survives a maintainer clone into a container: only PROJECT-scope memory (git-tracked); LOCAL/USER memory + reports/ do NOT survive — plugin-dev knowledge MUST be PROJECT-scope, no private data.", keywords:"what_memory_survives_if_another_agent_takes_over_this_repo what_happens_to_local_and_user_scope_memory_if_a_maintainer_clones_this_repo why_must_project_scope_memory_carry_no_private_data is_reports_project_scoped only_project_scope_memory_survives_the_clone would_a_fresh_agent_with_nothing_but_this_repo_need_it"]
+^61M30BH1 [desc: "What survives a maintainer clone: PROJECT-scope memory and reports/ (both git-tracked); LOCAL/USER memory and reports_dev/ do NOT — plugin-dev knowledge MUST be PROJECT-scope, no private data.", keywords: what_memory_survives_if_another_agent_takes_over_this_repo what_happens_to_local_and_user_scope_memory_if_a_maintainer_clones_this_repo why_must_project_scope_memory_carry_no_private_data is_reports_project_scoped only_project_scope_memory_survives_the_clone would_a_fresh_agent_with_nothing_but_this_repo_need_it, lmd: 2026-11-14]
 If a maintainer agent ever takes over development of this plugin, it will **clone the repo
 from GitHub into a container**. It will NOT use a developer's local checkout. Therefore
 everything not committed to the repo is **lost to it**:
 
 | Artifact | Survives the clone? |
 |---|---|
-| PROJECT-scope memory (`.claude/project/memory/`, git-tracked via the gitignore exception) | **YES** — this is the only memory that survives |
+| PROJECT-scope memory (`.claude/project/memory/`, git-tracked via the gitignore exception) | **YES** — the only memory that survives |
 | LOCAL-scope memory (per-project, outside the repo) | no |
 | USER-scope memory (janitor plugin-data dir) | no |
-| `reports/`, `reports_dev/` (gitignored) | no |
+| `reports/` (git-tracked, redacted by `sanitize-reports` before commit) | **YES** |
+| `reports_dev/` (gitignored) | no |
 
 **So any knowledge required to develop or maintain this plugin MUST be written at PROJECT
 scope.** That is not a stylistic preference — it is the difference between the next
 maintainer having the knowledge and re-deriving it (badly) from scratch. When in doubt
 about *where* a fact belongs, ask: "would a fresh agent, with nothing but this repo,
 need it?" If yes → PROJECT scope, with no private data (paths, hostnames, tokens); the
-`memory-scope-leak` detector polices exactly that.
+`memory-scope-leak` detector polices exactly that. [^2]
 
-^6L0151TS [desc:"Open, undecided idea: making reports/ project-scoped so findings survive a maintainer takeover, blocked on privacy — reports carry local paths/creds needing sanitizing first; nothing built.", keywords:"open_idea_not_a_decision_reports_project_scoped blocked_on_privacy_reports_carry_absolute_local_paths reports_would_have_to_be_sanitized_before_pushed nothing_has_been_decided_or_built"]
-**Open idea, not a decision:** making `reports/` project-scoped so audit findings would
-also survive a takeover. Blocked on privacy — reports routinely carry absolute local
-paths, credentials seen in logs, and internal notes. They would have to be **sanitized**
-before anything is pushed. Nothing has been decided or built.
+^6L0151TS [desc: "Decided and built: reports/ is project-scoped (git-tracked, redacted with sanitize-reports at commit) so findings survive a takeover; private raw output goes to the gitignored reports_dev/.", keywords: reports_project_scoped_decided_and_built reports_tracked_redacted_at_commit is_reports_project_scoped reports_dev_is_the_private_gitignored_dir sanitize-reports_before_commit would_reports_survive_a_maintainer_takeover reports_privacy_question_resolved precommit_redacts_staged_reports owner_ruled_reports_are_git_tracked reports_no_longer_an_open_idea, lmd: 2026-11-14]
+**Decided and built (TRDD-KSUIEPTQ):** `reports/` is project-scoped, so audit findings
+survive a takeover. Reports routinely carry absolute local paths, credentials seen in
+logs, and internal notes, so they are **sanitized** (`sanitize-reports`; the pre-commit
+hook redacts staged `reports/` files and blocks the commit if it cannot) before anything
+is pushed. Raw or private material goes to the gitignored `reports_dev/`. [^3]
 
 See also [[memory-system]].
 
@@ -74,3 +76,5 @@ See also [[memory-system]].
   record for a harness agent lives in a different file (`installed_plugins.json`) and was
   deliberately left untouched — deleting an `enabledPlugins` key does not uninstall
   anything.
+[^2]: [id: ATOM-3NVV-8OF1, status: valid, supersedes: 61M30BH1, keywords: "reports_survives_clone reports_tracked_in_git reports_dev_not_survive maintainer_clone_reports does_reports_survive_a_takeover reports_git_tracked_redacted reports_dev_gitignored_lost what_survives_a_maintainer_clone sanitize-reports_at_commit reports_dir_tracked", ocd: 2026-11-14, lmd: 2026-11-14] DO NOT say reports/ does not survive a maintainer clone, BECAUSE reports/ is git-tracked since TRDD-KSUIEPTQ (owner 2026-11-14) and is redacted by sanitize-reports at commit; only the gitignored reports_dev/ is lost. DO list reports/ as surviving and reports_dev/ as not. SUPERSEDED BODY: If a maintainer agent ever takes over development of this plugin, it will **clone the repo from GitHub into a container**. It will NOT use a developer's local checkout. Therefore everything not committed to the repo is **lost to it**: | Artifact | Survives the clone? | |---|---| | PROJECT-scope memory (`.claude/project/memory/`, git-tracked via the gitignore exception) | **YES** — this is the only memory that survives | | LOCAL-scope memory (per-project, outside the repo) | no | | USER-scope memory (janitor plugin-data dir) | no | | `reports/`, `reports_dev/` (gitignored) | no | **So any knowledge required to develop or maintain this plugin MUST be written at PROJECT scope.** That is not a stylistic preference — it is the difference between the next maintainer having the knowledge and re-deriving it (badly) from scratch. When in doubt about *where* a fact belongs, ask: "would a fresh agent, with nothing but this repo, need it?" If yes → PROJECT scope, with no private data (paths, hostnames, tokens); the `memory-scope-leak` detector polices exactly that.
+[^3]: [id: ATOM-W09U-KWN9, status: valid, supersedes: 6L0151TS, keywords: "reports_project-scoped_decided reports_tracked_redacted_at_commit is_reports_project_scoped reports_idea_no_longer_open reports_git_tracked_decision sanitize-reports_pre-commit_stage_0 reports_dev_private owner_ruled_reports_tracked reports_survive_takeover_built reports_privacy_resolved", ocd: 2026-11-14, lmd: 2026-11-14] DO NOT call reports/ project-scoping an open, undecided idea, BECAUSE the owner decided it (2026-11-01, re-ordered 2026-11-14) and it is built: reports/ is git-tracked and redacted with sanitize-reports at commit (pre-commit Stage 0), while reports_dev/ stays gitignored (TRDD-KSUIEPTQ). DO treat reports/ as shared, sanitized content. SUPERSEDED BODY: **Open idea, not a decision:** making `reports/` project-scoped so audit findings would also survive a takeover. Blocked on privacy — reports routinely carry absolute local paths, credentials seen in logs, and internal notes. They would have to be **sanitized** before anything is pushed. Nothing has been decided or built. See also [[memory-system]].

@@ -531,7 +531,7 @@ def complete_claim(
     split report is named `<ts>-split-<scope>-<page-slug>.md` (never matches the exact
     `-<chore>-<scope>` shape the old check assumed), the scope token's case could differ
     from the record's, a manual chore run writes the exact same filename shape as a
-    scheduled one, and `reports/` is per-PROJECT while a USER/LOCAL claim's state_dir is
+    scheduled one, and `reports_dev/` is per-PROJECT while a USER/LOCAL claim's state_dir is
     not. The pass that finished is the one thing that actually knows it finished — so it
     says so, by id, instead of the claim script inferring it from a filename that was
     never designed to be machine-readable evidence.
@@ -1002,10 +1002,10 @@ def main() -> int:
     # removes that step entirely: the curator only has to APPEND. Fail OPEN — an
     # unwritable reports dir must never block a successful claim.
     #
-    # The skeleton path is `expected_state_dir.parent.parent / reports/...`, which is
+    # The skeleton path is `expected_state_dir.parent.parent / reports_dev/...`, which is
     # only meaningful when expected_state_dir IS `<project>/.janitor/state` (the shape
     # every real caller passes). A bare `--state-dir /tmp/x` would otherwise resolve to
-    # `/reports/...` at the filesystem root, and a shallower-but-real dir would write the
+    # `/reports_dev/...` at the filesystem root, and a shallower-but-real dir would write the
     # skeleton beside some unrelated ancestor where nothing ever purges it. Skip the
     # skeleton entirely in that case and fall back to the pre-TRDD-I8AAJ3PG "REPORT
     # HEADER" printout below, which still works with no state-dir shape assumptions.

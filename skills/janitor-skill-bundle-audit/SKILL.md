@@ -55,7 +55,7 @@ Parse `$ARGUMENTS` for any of (all optional):
    # Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
    # Two real failure modes, and each single-source form hits one: resolving from the CWD
    # picks whichever nested repo the agent happens to be standing in, so two passes of one
-   # chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+   # chore wrote into two different `reports_dev/` trees; using CLAUDE_PROJECT_DIR alone writes
    # into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
    # both — the anchor is stable for the whole session, and `git -C` still resolves a
    # worktree to its main checkout.

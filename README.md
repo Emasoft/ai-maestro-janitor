@@ -421,7 +421,7 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   working tree so the diff lands as a single discrete commit.
 - `/janitor-doctor` — pre-flight health check. Runs ~12 named pass/fail
   checks (state-dir writable, detectors executable, uv/git/gh available,
-  `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints
+  `/reports_dev/` gitignored and `/reports/` NOT gitignored, plugin.json valid) and prints
   a unicode-bordered table with fix hints for any failures. Read-only —
   safe to run during any session, including paused or disarmed.
 - `/janitor-compact-context` — agent-invocable Jev compaction, on demand: the
@@ -487,7 +487,7 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   `$MAIN_ROOT/.janitor/state/sca-cursor.json` so subsequent runs only
   fetch advisories newer than the cursor — steady-state cost stays under
   12 API calls/hour. Findings land in
-  `$MAIN_ROOT/reports/janitor-supply-chain-watcher/<TS>-findings.md`
+  `$MAIN_ROOT/reports_dev/janitor-supply-chain-watcher/<TS>-findings.md`
   with the exact upgrade command per package.
 - `/janitor-github-workflow-doctor` — audits `.github/workflows/*.yml` for
   security issues and emits surgical fix recipes. Runs zizmor (when present)
