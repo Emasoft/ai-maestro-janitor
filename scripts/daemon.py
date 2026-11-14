@@ -1827,6 +1827,29 @@ def _file_github_config_issues(audit) -> None:
         state.log_line("daemon", f"  ghcfg-issues: skipped ({exc})")
 
 
+def _log_retry_wedge_countdowns(fleet: list, now: int) -> None:
+    """One `session-liveness:` line per DISTINCT project root that holds a persisted retry-wedge
+    episode (TRDD-XVJ30M61, logging only): `<project> retry_wedge@<attempt>[<countdown>]
+    read_age=<N>s instances=<n>`. A static `Retrying in 0s · attempt N` wedge becomes a countable
+    episode in daemon.log. Deduped per root (two instances on one project share one episode file,
+    so one line), `instances` = how many fleet rows sit on that root. FAIL-OPEN: a logging fault
+    must never break the recovery beat."""
+    try:
+        counts: dict[str, int] = {}
+        for inst in fleet:
+            if inst.project_root:
+                counts[inst.project_root] = counts.get(inst.project_root, 0) + 1
+        for root, n in counts.items():
+            token = fleet_scan.retry_wedge_log_token(root, now)
+            if token is not None:
+                state.log_line(
+                    "daemon",
+                    f"session-liveness: {os.path.basename(root)} {token} instances={n}",
+                )
+    except Exception:  # noqa: BLE001 -- a log line must NEVER break the recovery beat
+        pass
+
+
 def task_session_liveness(fleet: list | None = None) -> None:
     """Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
     version-mismatched claude instances across the WHOLE host and recover them from
@@ -1882,6 +1905,9 @@ def task_session_liveness(fleet: list | None = None) -> None:
         except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
             state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
             return
+    # Logged BEFORE `_rotation_esc_pass` and the typing gate below, on purpose (TRDD-XVJ30M61): the
+    # countdown line must appear on every beat, including the ones the typing gate defers.
+    _log_retry_wedge_countdowns(fleet, now)
     # BEFORE the typing gate, on purpose (TRDD-NACCL0CB): a pane wedged in the retry
     # watchdog has a BLOCKED input line, so an ESC there cannot land under anyone's fingers —
     # and the 2026-09-02 wall showed the gate deferring it for 12 minutes straight while the

@@ -1356,3 +1356,84 @@ def test_only_the_liveness_beat_opts_into_the_fast_lane(tmp_path, monkeypatch) -
     monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", _spy_scan)
     daemon.task_session_liveness()
     assert [kw.get("fast_lane") for kw in seen] == [True]
+
+
+# --- TRDD-XVJ30M61 (logging only): one retry-wedge countdown line per project per beat ---
+
+
+def _seed_episode(root: Path, *, attempt: int, last_retry_in: str | None, age: int) -> None:
+    """A persisted retry-wedge episode file whose pane read happened `age` seconds ago."""
+    import time
+
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    (sdir / fleet_scan._RETRY_WEDGE_STATE_FILE).write_text(
+        json.dumps({"attempt": attempt, "confirmed": True, "read_at": int(time.time()) - age,
+                    "last_retry_in": last_retry_in}),
+        encoding="utf-8",
+    )
+
+
+def _countdown_lines(tmp_path: Path) -> list[str]:
+    return [ln for ln in _log(tmp_path).splitlines() if " retry_wedge@" in ln]
+
+
+def _countdown_fleet(tmp_path: Path) -> list:
+    """Two instances on proj-a, one on proj-b (both with a seeded episode), one on proj-c (none)."""
+    roots = {name: tmp_path / name for name in ("proj-a", "proj-b", "proj-c")}
+    for r in roots.values():
+        r.mkdir()
+    _seed_episode(roots["proj-a"], attempt=5, last_retry_in="0s", age=1000)
+    _seed_episode(roots["proj-b"], attempt=9, last_retry_in=None, age=1000)
+    term = {"tmux_pane": "%5"}
+    return [
+        _inst("healthy", str(roots["proj-a"]), term),
+        _inst("healthy", str(roots["proj-a"]), {"tmux_pane": "%6"}),
+        _inst("healthy", str(roots["proj-b"]), term),
+        _inst("healthy", str(roots["proj-c"]), term),
+    ]
+
+
+def test_the_beat_logs_exactly_one_countdown_line_per_project_root(tmp_path, monkeypatch) -> None:
+    """Two instances on one root share one episode file: ONE line for it, `instances=2`; another
+    root with an episode gets its own line; a root with no episode gets none."""
+    fleet = _countdown_fleet(tmp_path)
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 600.0)
+    daemon.task_session_liveness()
+    lines = _countdown_lines(tmp_path)
+    assert len(lines) == 2, lines
+    (line_a,) = [ln for ln in lines if "session-liveness: proj-a retry_wedge@5[0s] read_age=" in ln]
+    assert line_a.endswith(" instances=2")
+    (line_b,) = [ln for ln in lines if "session-liveness: proj-b retry_wedge@9 read_age=" in ln]
+    assert line_b.endswith(" instances=1")
+    assert "[" not in line_b.split("retry_wedge@9", 1)[1]
+    assert "proj-c" not in "".join(lines)
+    age = int(line_a.split("read_age=", 1)[1].split("s", 1)[0])
+    assert 1000 <= age < 1060
+
+
+def test_a_typing_deferred_beat_still_logs_the_countdown_lines(tmp_path, monkeypatch) -> None:
+    """The line is logged BEFORE the typing gate: a beat deferred because the human typed
+    (HID idle 3 s, under the 20 s gate) still emits it, next to the deferral line."""
+    fleet = _countdown_fleet(tmp_path)
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 3.0)
+    daemon.task_session_liveness()
+    assert "user typing" in _log(tmp_path), "premise: the beat really was deferred"
+    assert len(_countdown_lines(tmp_path)) == 2
+
+
+def test_a_countdown_logging_fault_never_breaks_the_beat(tmp_path, monkeypatch) -> None:
+    """Fail-open: a raising token reader is swallowed and the rest of the beat still runs."""
+    fleet = _countdown_fleet(tmp_path)
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 3.0)
+
+    def _boom(root: str, now: int) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(daemon.fleet_scan, "retry_wedge_log_token", _boom)
+    daemon.task_session_liveness()
+    assert "user typing" in _log(tmp_path)
+    assert _countdown_lines(tmp_path) == []

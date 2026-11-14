@@ -242,6 +242,19 @@ def retry_wedge_retry_in(text: str) -> str | None:
     return m.group("retry_in").strip() if m else None
 
 
+def retry_wedge_token(attempt: int | None, retry_in: str | None) -> str:
+    """`retry_wedge[@<attempt>][[<retry_in>]]` — the ONE spelling of a retry-wedge reading in
+    logs (TRDD-XVJ30M61), shared by the pane-policy failed-step line and the fleet beat's
+    per-project countdown line so the two can never drift. Each part is omitted when None.
+    PURE. The `retry_wedge` prefix is `pane_state.StatusKind.RETRY_WEDGE.value`; a test pins that."""
+    token = "retry_wedge"
+    if attempt is not None:
+        token += f"@{attempt}"
+    if retry_in is not None:
+        token += f"[{retry_in}]"
+    return token
+
+
 def retry_wedge_state_update(
     *,
     prev: Mapping[str, object] | None,

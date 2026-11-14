@@ -520,3 +520,16 @@ def test_iterm_channel_evidence_counts_a_busy_read_not_only_a_fired_rearm() -> N
     assert sl.latest_iterm_rearm_epoch(
         "[2026-08-13T07:00:00+0200] session-liveness: X [cron_dead] no channel resolved"
     ) is None
+
+
+def test_retry_wedge_token_omits_each_missing_part_and_keeps_the_kind_prefix() -> None:
+    """TRDD-XVJ30M61: `retry_wedge[@attempt][[retry_in]]`, each part dropped when None, and the
+    prefix is the very string `pane_state.StatusKind.RETRY_WEDGE` carries (one spelling)."""
+    import pane_state  # type: ignore[import-not-found]
+
+    assert sl.retry_wedge_token(None, None) == "retry_wedge"
+    assert sl.retry_wedge_token(5, None) == "retry_wedge@5"
+    assert sl.retry_wedge_token(None, "0s") == "retry_wedge[0s]"
+    assert sl.retry_wedge_token(5, "0s") == "retry_wedge@5[0s]"
+    assert sl.retry_wedge_token(0, "2m 50s") == "retry_wedge@0[2m 50s]"
+    assert sl.retry_wedge_token(None, None) == pane_state.StatusKind.RETRY_WEDGE.value

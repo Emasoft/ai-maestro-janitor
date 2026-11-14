@@ -1349,6 +1349,31 @@ def mark_retry_wedge_resume_sent(root: str, now: int) -> None:
     _write_retry_wedge_state(root, {**prev, "resume_sent": True, "resume_sent_at": now})
 
 
+def retry_wedge_log_token(root: str, now: int) -> str | None:
+    """`retry_wedge@<attempt>[<countdown>] read_age=<N>s` for `root`'s persisted retry-wedge
+    episode, or None when there is none to describe (TRDD-XVJ30M61, logging only). The daemon
+    beat logs it once per project per beat, which turns a static `Retrying in 0s · attempt N`
+    wedge into a countable episode. `read_age` is `now - read_at`, the age of the pane read that
+    produced the countdown — NOT the file mtime (a resume marker rewrites the file with no read).
+    None for a state with no int attempt or no int `read_at` (written by an older build, or torn):
+    a line that cannot say how old its reading is would only mislead."""
+    st = _read_retry_wedge_state(root)
+    if st is None:
+        return None
+    attempt = st.get("attempt")
+    read_at = st.get("read_at")
+    # bool is an int subclass and JSON can hold `true`: never log it as an attempt or a timestamp.
+    if not isinstance(attempt, int) or isinstance(attempt, bool):
+        return None
+    if not isinstance(read_at, int) or isinstance(read_at, bool):
+        return None
+    last_retry_in = st.get("last_retry_in")
+    token = session_liveness.retry_wedge_token(
+        attempt, last_retry_in if isinstance(last_retry_in, str) else None
+    )
+    return f"{token} read_age={max(0, now - read_at)}s"
+
+
 # A non-polling scan spares a stored episode only while ITS transcript instant (`now - transcript_age`)
 # is within this many seconds of the instant the episode was recorded against; `transcript_age` is a
 # whole-second difference of two clocks, so +-1 s of rounding is normal and 2 s is the margin.
@@ -1664,6 +1689,21 @@ def diagnose_root(
             # countdown would match the old `first_seen` and be ESCed after only the 3 s recheck.
             if new_state is not None and transcript_age is not None:
                 new_state = {**new_state, _TRANSCRIPT_ANCHOR_KEY: int(now - transcript_age)}
+            # READ STAMP (TRDD-XVJ30M61 logging): `read_at` + this poll's RAW countdown, persisted so the
+            # daemon beat can log "<attempt>[<retry_in>] read_age=Ns". The file mtime is NOT a read
+            # time: `mark_retry_wedge_resume_sent` rewrites this file with no pane read at all. And
+            # `new_state["retry_in"]` is not the raw countdown either: `retry_wedge_state_update`
+            # carries the previous poll's value over when this frame had none, which would log a
+            # fake "[0s]" for a frame that showed no countdown. `last_retry_in` is None in that case.
+            # `last_retry_in` is the FIRST capture of the beat: on the moving-countdown recheck path
+            # `retry_in` takes the recheck's value but the log shows the first read (harmless: a moving
+            # countdown is not static).
+            if new_state is not None:
+                new_state = {
+                    **new_state,
+                    "read_at": now,
+                    "last_retry_in": session_liveness.retry_wedge_retry_in(pane_text),
+                }
             _write_retry_wedge_state(root, new_state)
     elif _non_polling_scan_spares_episode(
         root,

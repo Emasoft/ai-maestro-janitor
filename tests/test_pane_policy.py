@@ -481,3 +481,32 @@ def test_execute_unreadable_pane_never_satisfies_and_fails() -> None:
     )
     assert outcome.status is pp.OutcomeStatus.FAILED
     assert outcome.observed == ("unreadable",)
+
+
+def test_read_detail_spells_a_retry_wedge_reading_as_kind_attempt_and_countdown() -> None:
+    """TRDD-XVJ30M61: `_read_detail` output is unchanged by the shared `retry_wedge_token`: the
+    real 429 frame reads `retry_wedge@5[0s]`; a wedge with no countdown / no attempt drops that
+    part; a non-wedge kind is its bare value; an unreadable pane is `unreadable`."""
+    wedge = _state("real-wedged-rate-limit-429.txt")
+    assert pp._read_detail(wedge) == "retry_wedge@5[0s]"
+    attempt_only = ps.PaneState(
+        input_field=wedge.input_field,
+        status=ps.Status(kind=ps.StatusKind.RETRY_WEDGE, attempt=7),
+        agents_running=wedge.agents_running,
+        model=wedge.model,
+        context_pct=wedge.context_pct,
+        bypass_on=wedge.bypass_on,
+    )
+    assert pp._read_detail(attempt_only) == "retry_wedge@7"
+    bare = ps.PaneState(
+        input_field=wedge.input_field,
+        status=ps.Status(kind=ps.StatusKind.RETRY_WEDGE),
+        agents_running=wedge.agents_running,
+        model=wedge.model,
+        context_pct=wedge.context_pct,
+        bypass_on=wedge.bypass_on,
+    )
+    assert pp._read_detail(bare) == "retry_wedge"
+    idle = _state("synthetic-idle-empty-field.txt")
+    assert pp._read_detail(idle) == idle.status.kind.value
+    assert pp._read_detail(None) == "unreadable"

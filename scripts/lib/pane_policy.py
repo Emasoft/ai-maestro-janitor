@@ -85,6 +85,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable
 
 from pane_state import InputFieldKind, PaneState, StatusKind
+from session_liveness import retry_wedge_token
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -566,10 +567,6 @@ def _read_detail(state: PaneState | None) -> str:
     if state is None:
         return "unreadable"
     status = state.status
-    token = status.kind.value
     if status.kind is StatusKind.RETRY_WEDGE:
-        if status.attempt is not None:
-            token += f"@{status.attempt}"
-        if status.retry_in is not None:
-            token += f"[{status.retry_in}]"
-    return token
+        return retry_wedge_token(status.attempt, status.retry_in)
+    return status.kind.value

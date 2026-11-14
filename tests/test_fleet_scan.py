@@ -13,6 +13,7 @@ with its two subprocess-touching calls monkeypatched — no real CLI, no network
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -2210,7 +2211,12 @@ def test_frozen_proof_acts_only_if_the_recheck_countdown_is_byte_identical(
         assert persisted["first_seen"] == _FL_BASE + 119, "a live countdown must earn a fresh 100 s"
         assert persisted["retry_in"] == "9s", "the latest observation"
     else:
-        assert persisted == before, "an unreadable recheck leaves the episode exactly as it stood"
+        # The decision state stands as it was; only the read stamp (TRDD-XVJ30M61) moves, because the
+        # first capture of this beat DID read the pane: `read_at` is this beat, `last_retry_in` its raw countdown.
+        assert before is not None
+        assert persisted == {**before, "read_at": _FL_BASE + 119, "last_retry_in": "12s"}, (
+            "an unreadable recheck leaves the episode exactly as it stood, bar the read stamp"
+        )
     if outcome != "acts" and lane == "fast":
         assert second[:2] == ("healthy", None)
 
@@ -2241,8 +2247,8 @@ def test_rejected_recheck_keeps_a_genuine_attempt_advance_confirmation(
     assert spy.reads == 2
     assert (diag[:2] == ("retry_wedged", "esc_retry")) is (lane == "stale")
     persisted = fs._read_retry_wedge_state(str(root))
-    # The beat stamps the transcript anchor on the episode it keeps (the seed has none); nothing else changes.
-    anchored = {**seed, "transcript_instant": _FL_BASE - age}
+    # The beat stamps the transcript anchor and the read stamp (TRDD-XVJ30M61) on the episode it keeps (the seed has neither); nothing else changes.
+    anchored = {**seed, "transcript_instant": _FL_BASE - age, "read_at": _FL_BASE, "last_retry_in": "12s"}
     if outcome != "moved":
         assert persisted == anchored
         return
@@ -2303,3 +2309,109 @@ def test_only_the_liveness_beat_opts_into_the_fast_lane() -> None:
                             opted_in.append(f"{src.name}:{fn.name}")
     assert calls >= 4, "the walker must actually see the production callers"
     assert sorted(set(opted_in)) == ["daemon.py:task_session_liveness"]
+
+
+# --- TRDD-XVJ30M61 (logging only): the retry-wedge countdown the daemon beat logs ---
+
+_REAL_429 = (_PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "real-wedged-rate-limit-429.txt").read_text()
+
+
+def _stale_poll(root: Path, now: int) -> None:
+    """One STALE-lane diagnose_root pane read (transcript older than STALE_S)."""
+    fs.diagnose_root(str(root), now=now, transcript_age=fs.STALE_S + 5, terminal=_FL_TERM)
+
+
+def test_the_real_429_frame_logs_attempt_countdown_and_a_zero_read_age(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-XVJ30M61: the real `Retrying in 0s · attempt 5/300` frame, read through
+    `diagnose_root` with no prior episode, yields the token `retry_wedge@5[0s] read_age=0s`;
+    with no episode on disk there is nothing to log."""
+    root = _fl_root(tmp_path, monkeypatch, "log-429", _IN_FLIGHT_ROWS)
+    assert fs.retry_wedge_log_token(str(root), _FL_BASE) is None
+    spy = _PaneSpy(_REAL_429)
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    _stale_poll(root, _FL_BASE)
+    assert spy.reads == 1
+    token = fs.retry_wedge_log_token(str(root), _FL_BASE)
+    assert token is not None
+    assert "retry_wedge@5[0s]" in token
+    assert "read_age=0s" in token
+
+
+def test_a_frame_without_a_parsable_countdown_never_logs_the_carried_zero_s(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """`retry_wedge_state_update` carries the previous poll's `retry_in` over a frame that has
+    none; the log must show the countdown THIS read showed (none), not a fake `[0s]`."""
+    root = _fl_root(tmp_path, monkeypatch, "log-no-countdown", _IN_FLIGHT_ROWS)
+    spy = _PaneSpy(_REAL_429)
+    monkeypatch.setattr(fs, "capture_pane_text", spy)
+    _stale_poll(root, _FL_BASE)
+    assert "[0s]" in (fs.retry_wedge_log_token(str(root), _FL_BASE) or "")
+    border = "─" * 40
+    # `Retrying in` + `attempt N/M` but no ` · ` before the attempt: the attempt parses, the countdown does not.
+    spy.text = f"✻ Rate limited · Retrying in 0s attempt 6/300\n{border}\n❯ \n{border}\n"
+    assert fs._read_retry_wedge_state(str(root)) is not None
+    _stale_poll(root, _FL_BASE + 120)
+    carried = fs._read_retry_wedge_state(str(root))
+    assert carried is not None and carried["retry_in"] == "0s", "the state still carries it (premise)"
+    token = fs.retry_wedge_log_token(str(root), _FL_BASE + 120)
+    assert token is not None
+    assert token.startswith("retry_wedge@6 "), token
+    assert "[" not in token, token
+
+
+def test_a_resume_marker_rewrite_does_not_refresh_the_read_age(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """`mark_retry_wedge_resume_sent` rewrites the episode file with no pane read: `read_age`
+    must keep growing from the real read (240 s), not reset to the rewrite instant."""
+    root = _fl_root(tmp_path, monkeypatch, "log-resume-marker", _IN_FLIGHT_ROWS)
+    monkeypatch.setattr(fs, "capture_pane_text", _PaneSpy(_REAL_429))
+    _stale_poll(root, _FL_BASE)
+    fs.mark_retry_wedge_resume_sent(str(root), _FL_BASE + 240)
+    token = fs.retry_wedge_log_token(str(root), _FL_BASE + 240)
+    assert token is not None
+    assert token == "retry_wedge@5[0s] read_age=240s"
+
+
+def test_retry_wedge_log_token_is_none_for_a_state_it_cannot_age(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """No int attempt, or no int `read_at` (an older build's file), is not logged; a clock that
+    went backwards clamps to 0 rather than printing a negative age."""
+    root = _fl_root(tmp_path, monkeypatch, "log-unageable", _IN_FLIGHT_ROWS)
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    path = sdir / fs._RETRY_WEDGE_STATE_FILE
+    for body in (
+        {"attempt": 5, "retry_in": "0s"},
+        {"attempt": "5", "read_at": _FL_BASE},
+        {"attempt": 5, "read_at": "x"},
+        {"read_at": _FL_BASE},
+        {"attempt": True, "read_at": _FL_BASE},
+        {"attempt": 5, "read_at": True},
+    ):
+        path.write_text(json.dumps(body), encoding="utf-8")
+        assert fs.retry_wedge_log_token(str(root), _FL_BASE) is None, body
+    path.write_text(json.dumps({"attempt": 5, "read_at": _FL_BASE + 50}), encoding="utf-8")
+    assert fs.retry_wedge_log_token(str(root), _FL_BASE) == "retry_wedge@5 read_age=0s"
+
+
+def test_a_spared_non_polling_beat_lets_the_read_age_keep_growing(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A non-polling scan on the same quiet in-flight turn spares the episode (no pane read, no
+    write), so `read_at` stays the real read at the first beat and `read_age` grows to 120 s.
+    The first read is the FAST lane: a stale-lane read cannot be followed by a non-stale
+    transcript, and a stale one polls instead of sparing."""
+    root = _fl_root(tmp_path, monkeypatch, "log-spared", _IN_FLIGHT_ROWS)
+    monkeypatch.setattr(fs, "capture_pane_text", _PaneSpy(_REAL_429))
+    fs.diagnose_root(str(root), now=_FL_BASE, transcript_age=90, terminal=_FL_TERM, fast_lane=True)
+    assert fs.retry_wedge_log_token(str(root), _FL_BASE) == "retry_wedge@5[0s] read_age=0s"
+    blind = _PaneSpy(None)
+    monkeypatch.setattr(fs, "capture_pane_text", blind)
+    fs.diagnose_root(str(root), now=_FL_BASE + 120, transcript_age=210, terminal=_FL_TERM, fast_lane=False)
+    assert blind.reads == 0, "the non-polling beat reads no pane"
+    assert fs.retry_wedge_log_token(str(root), _FL_BASE + 120) == "retry_wedge@5[0s] read_age=120s"
