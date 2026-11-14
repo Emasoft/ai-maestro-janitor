@@ -4,7 +4,7 @@ title: The secret-shield timing-ratio assert at patterns.test.ts 661 fails under
 column: todo
 status: tasked
 created: 2026-11-14T04:14:05+0100
-updated: 2026-11-14T06:48:49+0100
+updated: 2026-11-14T08:22:06+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,3 +40,4 @@ Make the assert load-robust (for example a median of N runs, or an absolute ceil
 ## Notes
 
 2026-11-14 main-agent ruling under TRDD-S6GX1DHN: TRDD-OD5Z90YL runs no further loaded timing campaign until the load target here is restated per core (the host has 14 cores) and an ambient-load bound is set. The Done-when's load of 45 or more is not to be used for a new campaign until then.
+2026-11-14: the D8 harness (tests/harness/redos_load_harness.py, a2d0d5d8) matches the two tests by exact describe and test name (Z41_TESTS). If increment 1b replaces or renames them, the harness reports Z41A13XV incomplete, never pass, until Z41_TESTS is edited to the new names.
