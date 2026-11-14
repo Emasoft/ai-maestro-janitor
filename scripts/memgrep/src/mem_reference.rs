@@ -11,11 +11,12 @@
 
 use crate::md;
 use crate::memory::{
-    atom_id_matches, atomic_write_page, bump_page_lmd, fence_step, footer_section_line,
+    atom_id_matches, atomic_write_page, bump_page_lmd, fence_step,
     locate_atom_body_matching, read_page_for_write, reindex_owning_scope, rel, today_date,
     Fence,
 };
 use crate::write_gate;
+use crate::page_layout::link_section_insertion_line;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -84,7 +85,7 @@ fn next_heading_after(text: &str, start: usize) -> Option<usize> {
 }
 
 /// Add `- [[name]]` under the page's `## See also` section, creating that section (spliced before
-/// the earliest footer heading — `footer_section_line`, same boundary `add-atom` uses) when the
+/// the first link-section heading, else `layout_boundary` — see `link_section_insertion_line`) when the
 /// page has none. Callers only invoke this once `already_links_to` says a write is needed.
 fn add_see_also_entry(text: &str, name: &str) -> String {
     let entry = format!("- [[{name}]]");
@@ -104,7 +105,10 @@ fn add_see_also_entry(text: &str, name: &str) -> String {
             entry,
             String::new(),
         ];
-        match footer_section_line(text) {
+        // WHY (TRDD-8MVESX28, GH #289): the new link section joins the existing link sections, else
+        // goes above Superseded and Notes (`link_section_insertion_line`), never below a Superseded
+        // section that precedes the links.
+        match link_section_insertion_line(text) {
             Some(idx) => {
                 let tail = lines.split_off(idx);
                 lines.extend(block);
@@ -426,6 +430,17 @@ mod tests {
         assert!(b_text.contains("## See also"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    // TRDD-8MVESX28 / GH #289 — the See-also creator on a page whose `## Superseded` precedes the links.
+    #[test]
+    fn add_see_also_entry_joins_the_first_link_heading_not_the_superseded_section() {
+        let page = "---\nname: n\ndescription: \"d\"\n---\n\n# n\n\n## Superseded\n\n^ATOM-ZZZZ-OLD0 [keywords: z, status: superseded]\n\nz\n\n## Governed by\n\n- [[hub]]\n\n## Notes and lessons learned\n";
+        let out = add_see_also_entry(page, "other");
+        let see_at = out.find("## See also").expect("section created");
+        assert!(out.find("## Superseded").unwrap() < see_at, "after Superseded:\n{out}");
+        assert!(see_at < out.find("## Governed by").unwrap(), "before the first link heading:\n{out}");
     }
 
     /// TRDD-7KAL6PNB (ai-maestro-janitor#330): a USER page may not link DOWN to a LOCAL page —

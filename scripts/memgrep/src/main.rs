@@ -19,6 +19,7 @@ mod mem_reference;
 mod mem_replace;
 mod mem_split;
 mod memory;
+mod page_layout;
 mod predicate;
 mod pre_write;
 mod query_dsl;

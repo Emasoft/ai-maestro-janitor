@@ -11,12 +11,13 @@
 use crate::md;
 use crate::memory::{
     append_footnote_defs, atom_id_matches, atomic_write_page, bump_page_lmd,
-    footer_section_line, footnote_integrity_violations, guard_downward_cross_scope,
+    footnote_integrity_violations, guard_downward_cross_scope,
     insert_atom_block_before, locate_atom_body_matching, next_footnote_label, normalize_keywords,
-    page_description_phrases, read_page_for_write, reindex_owning_scope, rel,
+    page_description_phrases, read_page_for_write, reindex_owning_scope, rel, resolve_atoms_from_text,
     rewrite_footnote_labels, today_date, unique_phrases,
 };
 use crate::write_gate;
+use crate::page_layout::{footer_section_line, layout_boundary, superseded_insertion_line};
 use anyhow::{Context, Result};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
@@ -226,7 +227,10 @@ fn merge_topic_compute(
 
     // Resolve each moving atom's exact (marker, body) via the fence-aware authority, and collect
     // every footnote label any of them REFERENCES (by 1-based line membership in its own range).
-    let mut blocks: Vec<(String, String)> = Vec::new();
+// (marker, body, retired). `retired` comes from memgrep's own atom parser, so the status
+    // spellings it accepts (`superseded` and the `superseeded` typo) can never drift from this verb.
+    let from_atoms = resolve_atoms_from_text(from_text);
+    let mut blocks: Vec<(String, String, bool)> = Vec::new();
     let mut all_labels: Vec<String> = Vec::new();
     let mut seen_labels: HashSet<String> = HashSet::new();
     for id in &ids {
@@ -237,7 +241,8 @@ fn merge_topic_compute(
         };
         let block = from_lines[marker_idx..=last_idx].join("\n");
         let (marker, body) = block.split_once('\n').unwrap_or((block.as_str(), ""));
-        blocks.push((marker.to_string(), body.to_string()));
+let retired = from_atoms.iter().any(|a| a.status == "superseded" && atom_id_matches(&a.id, id));
+        blocks.push((marker.to_string(), body.to_string(), retired));
         for r in &ctx.footnote_refs {
             if r.line > marker_idx && r.line <= last_idx + 1 && seen_labels.insert(r.label.clone()) {
                 all_labels.push(r.label.clone());
@@ -257,12 +262,19 @@ fn merge_topic_compute(
         label_map.insert(lbl.clone(), (first + offset as u32).to_string());
     }
 
-    // Splice every atom into --into, before its footer boundary, in source order.
+    // Splice every atom into --into in source order. WHY (TRDD-8MVESX28, GH #289): a live atom goes
+    // above the link sections, `## Superseded` and Notes (`layout_boundary`), never below a Superseded
+    // section that precedes the links; a RETIRED atom goes right after an existing `## Superseded`
+    // heading so it stays with the retired content, else to the historical point (earliest footer).
     let mut dest_text = into_text.to_string();
-    for (marker, body) in &blocks {
+    for (marker, body, retired) in &blocks {
         let rewritten_marker = rewrite_footnote_labels(marker, &label_map);
         let rewritten_body = rewrite_footnote_labels(body, &label_map);
-        let boundary = footer_section_line(&dest_text);
+        let boundary = if *retired {
+            superseded_insertion_line(&dest_text).or_else(|| footer_section_line(&dest_text))
+        } else {
+            layout_boundary(&dest_text)
+        };
         dest_text = insert_atom_block_before(&dest_text, &rewritten_marker, &rewritten_body, boundary);
     }
 
@@ -707,6 +719,58 @@ mod tests {
         assert_eq!(tomb_fm.get("name").map(String::as_str), Some("a"));
         assert_eq!(tomb_fm.get("ocd").map(String::as_str), Some("2026-01-05"));
         assert!(r.tombstone_text.contains("Merged into [[b]]"));
+    }
+
+
+    // TRDD-8MVESX28 / GH #289 — a merged LIVE atom lands above the link sections and `## Superseded`;
+    // a merged RETIRED atom lands right under an existing `## Superseded`, else at the historical
+    // earliest-footer point. Three destination layouts.
+    const MERGE_FROM: &str = "---\nname: a\ndescription: \"a\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+        ^ATOM-AAAA-LIVE [keywords: live]\n\nlive body\n\n\
+        ^ATOM-AAAA-OLD0 [keywords: old, status: superseded, superseded-by: ATOM-AAAA-LIVE]\n\nretired body\n\n\
+        ## Notes and lessons learned\n";
+    const MERGE_INTO_HEAD: &str = "---\nname: b\ndescription: \"b\"\nocd: 2026-01-02\nlmd: 2026-01-02\n---\n\n\
+        ^ATOM-BBBB-BBBB [keywords: bar]\n\nbody b\n\n";
+    const MERGE_INTO_SUPERSEDED: &str =
+        "## Superseded\n\n^ATOM-BBBB-OLD0 [keywords: gone, status: superseded]\n\nold b\n\n";
+
+    fn pos(text: &str, needle: &str) -> usize {
+        text.find(needle).unwrap_or_else(|| panic!("`{needle}` missing from:\n{text}"))
+    }
+
+    #[test]
+    fn merge_topic_superseded_above_links_live_above_and_retired_under_the_heading() {
+        let into = format!("{MERGE_INTO_HEAD}{MERGE_INTO_SUPERSEDED}## Governed by\n\n- [[hub]]\n\n## Notes and lessons learned\n");
+        let t = merge_topic_compute(MERGE_FROM, &into, "a", "b", "2026-02-01").expect("merge succeeds").dest_text;
+        assert!(pos(&t, "^ATOM-AAAA-LIVE") < pos(&t, "## Superseded"), "live atom above Superseded:\n{t}");
+        assert!(pos(&t, "## Superseded") < pos(&t, "^ATOM-AAAA-OLD0"), "retired atom under the heading:\n{t}");
+        assert!(pos(&t, "^ATOM-AAAA-OLD0") < pos(&t, "^ATOM-BBBB-OLD0"), "newest retired first:\n{t}");
+    }
+
+    #[test]
+    fn merge_topic_superseded_below_links_live_above_the_links_retired_under_the_heading() {
+        let into = format!("{MERGE_INTO_HEAD}## Applies to\n\n- [[hub]]\n\n{MERGE_INTO_SUPERSEDED}## Notes and lessons learned\n");
+        let t = merge_topic_compute(MERGE_FROM, &into, "a", "b", "2026-02-01").expect("merge succeeds").dest_text;
+        assert!(pos(&t, "^ATOM-AAAA-LIVE") < pos(&t, "## Applies to"), "live atom above the links:\n{t}");
+        assert!(pos(&t, "## Superseded") < pos(&t, "^ATOM-AAAA-OLD0"), "retired atom under the heading:\n{t}");
+        assert!(pos(&t, "^ATOM-AAAA-OLD0") < pos(&t, "^ATOM-BBBB-OLD0"), "newest retired first:\n{t}");
+    }
+
+    #[test]
+    fn merge_topic_no_superseded_heading_retired_atom_keeps_the_historical_point() {
+        let into = format!("{MERGE_INTO_HEAD}## Governed by\n\n- [[hub]]\n\n## Notes and lessons learned\n");
+        let t = merge_topic_compute(MERGE_FROM, &into, "a", "b", "2026-02-01").expect("merge succeeds").dest_text;
+        assert!(pos(&t, "^ATOM-AAAA-LIVE") < pos(&t, "## Governed by"), "live atom above the links:\n{t}");
+        assert!(pos(&t, "^ATOM-AAAA-OLD0") < pos(&t, "## Governed by"), "retired atom above the earliest footer:\n{t}");
+        assert!(!t.contains("## Superseded"), "the merge never creates the heading:\n{t}");
+    }
+
+    #[test]
+    fn merge_topic_see_also_joins_the_links_below_a_superseded_section_above_them() {
+        let into = format!("{MERGE_INTO_HEAD}{MERGE_INTO_SUPERSEDED}## Governed by\n\n- [[hub]]\n\n## Notes and lessons learned\n");
+        let t = merge_topic_compute(MERGE_FROM, &into, "a", "b", "2026-02-01").expect("merge succeeds").dest_text;
+        assert!(pos(&t, "## Superseded") < pos(&t, "## See also"), "See also with the links, under Superseded:\n{t}");
+        assert!(pos(&t, "## See also") < pos(&t, "## Governed by"), "See also at the first link heading:\n{t}");
     }
 
     #[test]

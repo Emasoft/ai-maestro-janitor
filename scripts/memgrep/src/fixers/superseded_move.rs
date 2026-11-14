@@ -4,7 +4,8 @@
 //! multiset of non-blank lines changes only by the added heading.
 #![allow(dead_code)]
 use super::quote_desc::{accept_if_better, marker_props};
-use crate::memory::{Fence, fence_step, footer_section_line, parse_block_props};
+use crate::memory::{Fence, fence_step, parse_block_props};
+use crate::page_layout::footer_section_line;
 use std::path::Path;
 
 const ABOVE: &str = "superseded-atom-above-delimiter";

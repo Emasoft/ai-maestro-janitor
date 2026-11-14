@@ -254,15 +254,15 @@ frontmatter, the `# <name>` title, the atoms, the link sections (`## Applies to`
 `## Notes and lessons learned`. A new atom — from `new-mem-atom` with or without `--supersedes`,
 and from every verb that splices one into a page — lands ABOVE the earliest of the first
 link-section heading, `## Superseded` and the Notes heading; that point is the LAYOUT BOUNDARY.
-Today the splice point is the earliest FOOTER heading alone (WM-NOTE-08), and the `## Superseded`
-limit is applied only under `--supersedes` (memory.rs:3160-3166), so a plain `new-mem-atom` on a
-page whose `## Superseded` precedes every footer heading puts the atom BELOW it: issue 289 is
-closed only for the `--supersedes` path (reproduced with the installed memgrep 0.2.0, e5cf088), and
-lint reports nothing for that placement. Not yet implemented: TRDD-F8EIVTSG increment 2; until then
-memgrep does not conform.
+Implemented for atoms (TRDD-8MVESX28, memgrep 0.3.0): every verb that splices an atom uses the LAYOUT
+BOUNDARY (`layout_boundary`, page_layout.rs, computed on the frontmatter-free body), so issue 289 is closed
+for a plain `new-mem-atom` too; `merge-mem-topic` puts a RETIRED atom right under an existing
+`## Superseded` heading, and a new `## See also` section joins the first link-section heading. Not yet
+implemented (TRDD-F8EIVTSG increment 3): the superseded-move fixer still inserts `## Superseded` at the earliest
+footer heading, and the trailing lint boundary (WM-NOTE-08) is unchanged; until then those two do not conform.
 
 `WM-NOTE-08` **the-footer-is-two-boundaries-in-three-copies** — `MUST`: this clause records what
-memgrep implements today (WM-META-05; memgrep 0.2.0, e5cf088), because the spec never named the
+memgrep implements today (WM-META-05; behaviour of memgrep 0.2.0, e5cf088; file:lines as of 0.3.0), because the spec never named the
 footer although `new-mem-atom`, the lint and the repair gate all key on it.
 
 - FOOTER HEADING: a line whose first non-whitespace character is `#` (any level; a bare `#tag`
@@ -270,17 +270,17 @@ footer although `new-mem-atom`, the lint and the repair gate all key on it.
   is exactly `applies to`, `governed by` or `see also`, or which contains `notes and lessons
   learned` or `lessons learned`. `## Superseded` is NOT a footer heading. No copy skips the YAML
   frontmatter, so a `# ...` comment line inside it is a heading to all three; a caller that must
-  not see it slices the body first (fixers/superseded_move.rs:83-96).
+  not see it slices the body first (fixers/superseded_move.rs:84-97).
 - EARLIEST boundary, the insertion point: the first footer heading. Copy 1, Rust
-  `footer_section_line`, memory.rs:2493-2517. Callers: `new-mem-atom` (memory.rs:3160, 3278),
-  `merge-mem-topic` (mem_merge.rs:265), `split-mem-topic` (mem_split.rs:115, 271), the See-also
-  insertion of `reference-mem-topic` (mem_reference.rs:107) and the superseded-move fixer
-  (fixers/superseded_move.rs:88).
+  `footer_section_line`, page_layout.rs:52-76. Callers: `layout_boundary` (page_layout.rs:220-225),
+  `merge-mem-topic`'s retired-atom fallback (mem_merge.rs:274) and the superseded-move fixer
+  (fixers/superseded_move.rs:88). Atoms splice at `layout_boundary`: `new-mem-atom` (memory.rs:3006),
+  `insert_atom_block` (memory.rs:3118), `merge-mem-topic` (mem_merge.rs:276), `split-mem-topic` (mem_split.rs:276); a new See-also section goes to `link_section_insertion_line` (mem_split.rs:118, mem_reference.rs:111).
 - TRAILING boundary, the lint boundary: the start of the maximal run of footer headings at the END
   of the heading list of the page; there is none when the last heading is not a footer heading, so
   a footer-shaped heading mid-page, followed by ordinary content, is an ordinary section
-  (janitor#260). Copy 2, Rust `footer_section_trailing_line`, memory.rs:2545-2579, called by lint
-  at memory.rs:8088. Copy 3, Python `_footer_heading_line`,
+  (janitor#260). Copy 2, Rust `footer_section_trailing_line`, page_layout.rs:104-138, called by lint
+  at memory.rs:7927. Copy 3, Python `_footer_heading_line`,
   scripts/lib/memory_content_precheck.py:697-755 with `_is_footer_heading` 677-695, called by
   `repair_defect` at memory_content_precheck.py:881.
 - The copies differ: (a) copy 1 is earliest, copies 2 and 3 are trailing, by design; (b) the
@@ -323,7 +323,7 @@ more `[[target]]` and optionally an annotation, and may wrap onto indented conti
 the single placeholder bullet `- (none yet)`; an empty section is legal. ONE Rust parser owns the
 footer boundaries (WM-NOTE-08) and the link sections; the Python boundary copy and the second
 See-also implementation (WM-NOTE-09) are removed. Anything else inside a link section is foreign
-content (WM-LINT-12). Not yet implemented: TRDD-F8EIVTSG increment 2; until then memgrep does not
+content (WM-LINT-12). Increment 2 (TRDD-8MVESX28, memgrep 0.3.0) moved the footer boundary scanners into page_layout.rs. Not yet implemented: removal of the Python boundary copy (TRDD-F8EIVTSG increment 3), the second See-also implementation (increment 4, link-mem-topics replaces both), the bullet grammar and WM-LINT-12; until then memgrep does not
 conform.
 
 ## WM-ATOM — the atom model

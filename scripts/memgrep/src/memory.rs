@@ -8,6 +8,9 @@
 
 use crate::jev::{self, ProseScorer};
 use crate::md;
+use crate::page_layout::{
+    footer_section_trailing_line, layout_boundary, notes_section_line, superseded_heading_line,
+};
 use crate::predicate::{LinkDir, LinkSets};
 use crate::query_dsl;
 use crate::search::Cmp;
@@ -2448,160 +2451,6 @@ pub(crate) fn build_atom_marker(
     format!("^{id} [{}]", render_block_props(&props))
 }
 
-/// The 0-based line index of the page's `## Notes and lessons learned` heading, fence-aware, or None.
-/// Mirrors the linter's detection (a heading whose lowercased text contains "notes and lessons
-/// learned" or "lessons learned"), skipping any such line inside a fenced code block. This is the
-/// insertion boundary: `add-atom` places a new atom BEFORE it (so the atom's body — which the parser
-/// ends at the next heading — never bleeds into the lessons section), and `add-lesson` appends its
-/// footnote def AFTER it (inside the section).
-pub(crate) fn notes_section_line(text: &str) -> Option<usize> {
-    let mut fence: Option<Fence> = None;
-    for (i, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        if fence_step(line, &mut fence) {
-            continue;
-        }
-        if fence.is_some() {
-            continue;
-        }
-        if t.starts_with('#') {
-            let low = t.to_ascii_lowercase();
-            if low.contains("notes and lessons learned") || low.contains("lessons learned") {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-
-/// The 0-based line index of the EARLIEST footer-section heading — `## Applies to`, `## Governed
-/// by`, `## See also`, or `## Notes and lessons learned` (any spelling `notes_section_line`
-/// accepts) — fence-aware, or `None` when the page carries none of them. This is `add-atom`'s
-/// insertion boundary (janitor#250): the link law (`markdown-memory-recall.md`) puts the link
-/// sections BEFORE `## Notes and lessons learned`, so anchoring only on Notes let a new atom
-/// land INSIDE the last link section — where `--in "Governed by"` then misread it as belonging to
-/// that section. Treating them as one FOOTER family keeps the documented "before Notes"
-/// behaviour true on the common case (a page with only Notes) while never splicing past a link
-/// section that comes first.
-///
-/// `## See also` is in the family because the reporter's THIRD reproduction measured it there —
-/// a USER-scope page whose only footer was `## See also`, atom spliced below it, and
-/// `--in "See also"` returned the atom and its body. The first fix shipped with three headings
-/// because it was written from the issue BODY, whose two examples were both `## Governed by`;
-/// the fourth was named in a comment. The rule is not "the link law's two sections" but "ANY
-/// trailing footer that precedes Notes", and `See also` is the lateral-link member of that set.
-pub(crate) fn footer_section_line(text: &str) -> Option<usize> {
-    let mut fence: Option<Fence> = None;
-    for (i, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        if fence_step(line, &mut fence) {
-            continue;
-        }
-        if fence.is_some() {
-            continue;
-        }
-        if t.starts_with('#') {
-            let low = t.to_ascii_lowercase();
-            let heading_text = low.trim_start_matches('#').trim();
-            if heading_text == "applies to"
-                || heading_text == "governed by"
-                || heading_text == "see also"
-                || low.contains("notes and lessons learned")
-                || low.contains("lessons learned")
-            {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-
-/// The 0-based line index where the page's TRAILING footer REGION begins, or `None` — the
-/// `atom-after-footer` lint boundary, DELIBERATELY DIFFERENT from `footer_section_line` above
-/// (janitor#260 endgame).
-///
-/// `footer_section_line` returns the EARLIEST footer-family heading, which is exactly right for
-/// `insert_atom_block`'s splice point (splice before any of them) but WRONG for deciding "is this
-/// atom misplaced after the footer": a footer-shaped heading that appears mid-page — e.g.
-/// `## See also` at line 279 of a 524-line page, followed by ordinary content and five more real
-/// atoms — is not a trailing footer at all, and the earliest-hit boundary would misclassify every
-/// atom after it as "inside the footer" forever. That is exactly the bug the Python twin
-/// (`memory_content_precheck._footer_heading_line`) carried and fixed for janitor#260: the correct
-/// boundary is the maximal SUFFIX of the page made only of footer-family headings — if the page
-/// does not END on one, it has no trailing footer region at all, so nothing after an earlier,
-/// mid-page footer-shaped heading is flagged.
-///
-/// Mirrors `_footer_heading_line` exactly (same heading family as `footer_section_line`, same
-/// fence-awareness, same trailing-run walk) so the Python precheck (the repair-chore GATE) and
-/// this linter (the repair-agent's ARBITER) can never disagree about where the footer starts —
-/// janitor#227's shape (gate and arbiter disagreeing loops the repair chore forever), here fixed
-/// by giving `atom-after-footer` exactly one owner: this function, called from `lint_paths` below.
-///
-/// One deliberate, non-divergent difference: the case fold here is ASCII-only (matching both
-/// sibling functions above) while Python's `.lower()` is Unicode-aware. The footer family is four
-/// fixed English phrases, so no heading exists that the two folds classify differently — but it is
-/// recorded rather than left implicit, because an unstated known difference is precisely what turns
-/// a "these two can never disagree" comment into a false one.
-fn footer_section_trailing_line(text: &str) -> Option<usize> {
-    let mut fence: Option<Fence> = None;
-    // (0-based line index, is_footer) for every heading OUTSIDE a fence, in page order.
-    let mut headings: Vec<(usize, bool)> = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        if fence_step(line, &mut fence) {
-            continue;
-        }
-        if fence.is_some() {
-            continue;
-        }
-        if t.starts_with('#') {
-            let low = t.to_ascii_lowercase();
-            let heading_text = low.trim_start_matches('#').trim();
-            let is_footer = heading_text == "applies to"
-                || heading_text == "governed by"
-                || heading_text == "see also"
-                || low.contains("notes and lessons learned")
-                || low.contains("lessons learned");
-            headings.push((i, is_footer));
-        }
-    }
-    // The page must END in a footer heading for a trailing footer region to exist at all — a
-    // footer-shaped heading earlier in the page, with ordinary content following it, is an
-    // ordinary mid-page section and must not swallow everything written after it.
-    if !headings.last().map(|&(_, is_footer)| is_footer).unwrap_or(false) {
-        return None;
-    }
-    let mut start = headings.len() - 1;
-    while start > 0 && headings[start - 1].1 {
-        start -= 1;
-    }
-    Some(headings[start].0)
-}
-
-/// The 1-based line of the page's canonical `## Superseded` delimiter heading (TRDD-57WJL5L2),
-/// fence-aware, or `None` when the page carries no such heading. Exact spelling only, matched
-/// case-insensitively on the heading TEXT (the `##` level is fixed) — this is the ONE canonical
-/// delimiter spelling the corpus keys on; a page using different wording is simply not detected,
-/// by design (a fuzzy match here would risk mistaking an unrelated heading for the delimiter).
-/// 1-based (unlike `notes_section_line`'s 0-based `enumerate`) so it lines up directly with
-/// `AtomLintFacts.line`, which the lint check compares it against.
-fn superseded_heading_line(text: &str) -> Option<usize> {
-    let mut fence: Option<Fence> = None;
-    for (i, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        if fence_step(line, &mut fence) {
-            continue;
-        }
-        if fence.is_some() {
-            continue;
-        }
-        if t.trim_end().eq_ignore_ascii_case("## Superseded") {
-            return Some(i + 1);
-        }
-    }
-    None
-}
-
 /// Read a page for a READ-MODIFY-WRITE verb: strict UTF-8, real errors named.
 ///
 /// The write verbs must NOT go through `md::read_text` (TRDD-7YHT3FNK). That reader is built
@@ -3148,22 +2997,13 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
         None => text,
     };
 
-    // The ordinary splice boundary is the earliest footer heading (`insert_atom_block`'s own
-    // `footer_section_line`). Under `--supersedes` that alone is not enough: the page now also
-    // carries a `## Superseded` heading, and the card's own mechanism (TRDD-3PWQK8NM §2 step 3)
-    // requires the NEW atom to land "in the live section above" it — never inside/after the
-    // retired content, or a plain `recall` still finds the current truth but any reader scanning
-    // the page top-to-bottom sees the SUPERSEDED body before the atom that replaced it. Narrowing
-    // the boundary to whichever comes first (an existing footer, or `## Superseded`) keeps ordinary
-    // `add-atom` calls (no `--supersedes`) byte-for-byte unaffected — `superseded_heading_line` only
-    // ever returns `Some` here because `supersede_atom_lesson_free` just created/reused it.
-    let mut boundary = footer_section_line(&text);
-    if a.supersedes.is_some()
-        && let Some(sup_line1) = superseded_heading_line(&text)
-    {
-        let sup_idx0 = sup_line1 - 1;
-        boundary = Some(boundary.map_or(sup_idx0, |f| f.min(sup_idx0)));
-    }
+    // WHY (TRDD-8MVESX28, GH #289): the splice point is `layout_boundary`, the earliest of the first
+    // link-section heading, `## Superseded` and Notes. It was `footer_section_line` plus a
+    // `--supersedes`-only min() with `## Superseded`, so a PLAIN add-atom on a page whose Superseded
+    // section precedes the links landed BELOW the retired content. `layout_boundary` already counts
+    // Superseded, so the `--supersedes` result (TRDD-3PWQK8NM §2 step 3: the new atom lands in the
+    // live section above the retired one) is unchanged without the special case.
+    let boundary = layout_boundary(&text);
 
     let out = bump_page_lmd(&insert_atom_block_before(&text, &marker, &body, boundary), &today);
     // A2 step 5 wave 1 (TRDD-XI10BA5D): add-atom's page write is gated — the proposed bytes
@@ -3270,19 +3110,18 @@ fn supersede_atom_lesson_free(page: &Path, text: &str, target: &str, new_id: &st
 /// exercises the real insertion, not a copy). Emits a blank separator, the marker, a blank line, then
 /// the body (task shape: "marker then a blank line then the body"); the leading blank keeps the marker
 /// off the previous paragraph and `resolve_atoms_from_text` trims it back off when rebuilding the
-/// body. Placed BEFORE the earliest footer heading (`## Applies to` / `## Governed by` / `## Notes
-/// and lessons learned` — see `footer_section_line`) when present (so the atom's body — which the
+/// body. Placed BEFORE `layout_boundary` (the earliest of the first link-section heading,
+/// `## Superseded` and Notes — TRDD-8MVESX28, GH #289) when present (so the atom's body — which the
 /// parser ends at the next heading — is bounded and never bleeds into a footer section), else at
 /// EOF. The result always ends in exactly one newline.
 fn insert_atom_block(text: &str, marker: &str, body: &str) -> String {
-    insert_atom_block_before(text, marker, body, footer_section_line(text))
+    insert_atom_block_before(text, marker, body, layout_boundary(text))
 }
 
 /// The `boundary`-parameterized core `insert_atom_block` delegates to (with `boundary =
-/// footer_section_line(text)`, its historical behaviour, byte-for-byte). `add-atom --supersedes`
-/// (TRDD-3PWQK8NM) is the one other caller: it narrows `boundary` to whichever comes first, an
-/// ordinary footer heading OR the page's `## Superseded` delimiter — so the NEW atom lands in the
-/// live section above the retired content it replaces, never inside/after it. `boundary` is a
+/// layout_boundary(text)`). `add-atom` and the merge/split verbs call it directly with the boundary
+/// they computed, so the NEW atom lands in the live section above the link sections, the retired
+/// content and Notes, never inside or after them. `boundary` is a
 /// 0-based line index into `text`; `None` means "no boundary — append at EOF".
 pub(crate) fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Option<usize>) -> String {
     let mut atom_lines: Vec<String> = vec![String::new(), marker.to_string(), String::new()];
@@ -13853,122 +13692,6 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     }
 
     #[test]
-    fn notes_section_line_is_fence_aware() {
-        let text = "# p\n```\n## Notes and lessons learned\n```\n## Notes and lessons learned\ndone\n";
-        // The first (fenced) heading is code, not the section; the real heading is line index 4.
-        assert_eq!(notes_section_line(text), Some(4));
-        assert_eq!(notes_section_line("# p\nno section here\n"), None);
-    }
-
-    // janitor#250 — `add-atom` must never splice INSIDE a `## Applies to` / `## Governed by`
-    // section that precedes `## Notes and lessons learned`. Four shapes, matching the link law's
-    // real page layout plus the two degenerate cases.
-
-    #[test]
-    fn footer_section_line_finds_earliest_of_all_three_footers() {
-        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n## Notes and lessons learned\n";
-        // `## Applies to` at line 2 is the earliest footer heading, not Notes at line 6.
-        assert_eq!(footer_section_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_line_finds_notes_only() {
-        let text = "# p\nbody\n## Notes and lessons learned\n";
-        assert_eq!(footer_section_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_line_finds_link_sections_only_no_notes() {
-        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n";
-        assert_eq!(footer_section_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_line_none_when_no_footer_at_all() {
-        assert_eq!(footer_section_line("# p\nno footer here\n"), None);
-    }
-
-    // janitor#250 third reproduction — `## See also` is a footer member too (a USER-scope page
-    // whose only footer was `## See also`, atom spliced BELOW it, `--in "See also"` returned it).
-
-    #[test]
-    fn footer_section_line_finds_see_also_only() {
-        let text = "# p\nbody\n## See also\n- [[x]]\n";
-        assert_eq!(footer_section_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_line_finds_see_also_before_notes() {
-        let text = "# p\nbody\n## See also\n- [[x]]\n## Notes and lessons learned\n";
-        // `## See also` at line 2 is the earliest footer heading, not Notes at line 4.
-        assert_eq!(footer_section_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_line_ignores_see_also_inside_fence() {
-        let text = "# p\nbody\n```\n## See also\n```\nmore body\n";
-        assert_eq!(footer_section_line(text), None);
-    }
-
-    // janitor#260 endgame — `footer_section_trailing_line` is the SEPARATE, trailing-RUN boundary
-    // the `atom-after-footer` lint check uses, deliberately different from `footer_section_line`
-    // (which stays the earliest-heading splice anchor for `add-atom`/`insert_atom_block`). See the
-    // function's own docstring for the janitor#260 postmortem this guards against.
-
-    #[test]
-    fn footer_section_trailing_line_matches_earliest_when_footer_is_a_single_run() {
-        // The common case — Applies to, Governed by, Notes, all contiguous at the end — has only
-        // ONE run, so trailing and earliest agree: both point at the run's first heading.
-        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n## Notes and lessons learned\n";
-        assert_eq!(footer_section_trailing_line(text), Some(2));
-        assert_eq!(footer_section_trailing_line(text), footer_section_line(text));
-    }
-
-    #[test]
-    fn footer_section_trailing_line_skips_a_mid_page_footer_shaped_heading() {
-        // The exact janitor#260 reproduction shape: `## See also` appears mid-page, followed by an
-        // ordinary content section and a real atom, before the page's actual trailing footer run.
-        // `footer_section_line` (earliest-hit) would wrongly return the `## See also` line; the
-        // trailing-run boundary must skip straight past it to the real footer at the end.
-        let text = "# p\nbody\n## See also\n- [[x]]\n## More content\n^ATOM-LIVE-0001 [keywords: k]\nlive fact.\n## Notes and lessons learned\n";
-        assert_eq!(footer_section_line(text), Some(2), "earliest-hit anchor is unaffected");
-        assert_eq!(
-            footer_section_trailing_line(text),
-            Some(7),
-            "trailing-run boundary must be the LAST heading (Notes), not the mid-page See also"
-        );
-    }
-
-    #[test]
-    fn footer_section_trailing_line_none_when_the_page_does_not_end_in_a_footer() {
-        // A footer-shaped heading earlier in the page, with ordinary content (no further footer
-        // heading) after it, has no TRAILING footer region at all — the page simply does not end
-        // on a footer, so nothing on it can be "after the footer".
-        let text = "# p\nbody\n## Governed by\n- a\n## More content\nprose that never becomes a footer\n";
-        assert_eq!(footer_section_trailing_line(text), None);
-    }
-
-    #[test]
-    fn footer_section_trailing_line_walks_back_over_the_whole_trailing_run() {
-        // Two consecutive footer headings at the end: the boundary is the FIRST of that trailing
-        // run (`## See also`), not the last (`## Notes and lessons learned`) — so an atom sitting
-        // between them is still caught as "after the footer".
-        let text = "# p\nbody\n## See also\n- [[x]]\n## Notes and lessons learned\n";
-        assert_eq!(footer_section_trailing_line(text), Some(2));
-    }
-
-    #[test]
-    fn footer_section_trailing_line_none_when_no_footer_at_all() {
-        assert_eq!(footer_section_trailing_line("# p\nno footer here\n"), None);
-    }
-
-    #[test]
-    fn footer_section_trailing_line_ignores_see_also_inside_fence() {
-        let text = "# p\nbody\n```\n## See also\n```\nmore body\n";
-        assert_eq!(footer_section_trailing_line(text), None);
-    }
-
-    #[test]
     fn lint_flags_atom_after_the_trailing_footer_run() {
         let dir = lint_tmpdir("atom_after_footer");
         // An atom spliced AFTER the trailing `## Notes and lessons learned` heading — the
@@ -14038,6 +13761,30 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "atom must be spliced BEFORE `## Applies to`, not between it and `## Governed by`: {out:?}"
         );
         assert!(atom_at < governed_at);
+    }
+
+
+    // TRDD-8MVESX28 / GH #289 — a plain new-mem-atom (and the migrate-mem-atom destination, which
+    // shares `insert_atom_block`) on a page whose `## Superseded` precedes the links.
+    #[test]
+    fn insert_atom_block_lands_above_a_superseded_section_that_precedes_the_links() {
+        let page = "---\nname: p\ndescription: \"d\"\n---\n\n# p\nprose\n## Superseded\n\n^ATOM-OLDD-0001 [keywords: k, status: superseded]\n\nold fact\n\n## Governed by\n- [[y]]\n## Notes and lessons learned\n";
+        let marker = "^ATOM-9999-0002 [keywords: kw, ocd: 2026-08-11, lmd: 2026-08-11]";
+        let out = insert_atom_block(page, marker, "the fact");
+        let atom_at = out.find("^ATOM-9999-0002").expect("atom present");
+        assert!(atom_at < out.find("## Superseded").expect("heading present"), "atom above Superseded: {out:?}");
+        assert!(atom_at < out.find("^ATOM-OLDD-0001").expect("retired present"));
+        assert_eq!(out, insert_atom_block_before(page, marker, "the fact", layout_boundary(page)));
+    }
+
+    #[test]
+    fn supersede_then_add_atom_boundary_stays_above_the_new_superseded_heading() {
+        let page = "---\nname: p\ndescription: \"d\"\n---\n\n# p\n\n^ATOM-OLDD-0001 [keywords: k]\n\nold fact\n\n## Notes and lessons learned\n";
+        let moved = supersede_atom_lesson_free(Path::new("p.md"), page, "ATOM-OLDD-0001", "ATOM-NEWW-0001").expect("supersede");
+        let out = insert_atom_block_before(&moved, "^ATOM-NEWW-0001 [keywords: k]", "new fact", layout_boundary(&moved));
+        let new_at = out.find("^ATOM-NEWW-0001").expect("new atom");
+        assert!(new_at < out.find("## Superseded").expect("heading created"), "new atom above the retired block: {out:?}");
+        assert!(out.find("## Superseded").unwrap() < out.find("^ATOM-OLDD-0001").expect("old atom"));
     }
 
     #[test]

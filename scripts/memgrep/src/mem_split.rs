@@ -20,13 +20,14 @@
 use crate::md;
 use crate::memory::{
     append_footnote_defs, atom_id_matches, atomic_write_page, build_atom_marker, bump_page_lmd,
-    check_desc, check_keyword_floor, duplicate_phrases, footer_section_line,
+    check_desc, check_keyword_floor, duplicate_phrases,
     footnote_integrity_violations, generate_unique_atom_id, guard_downward_cross_scope,
     insert_atom_block_before, locate_atom_body_matching, next_footnote_label, normalize_keywords,
     page_description_phrases, read_page_for_write, reindex_owning_scope, rel,
     rewrite_footnote_labels, today_date, unique_phrases,
 };
 use crate::write_gate;
+use crate::page_layout::{layout_boundary, link_section_insertion_line};
 use anyhow::Result;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -112,7 +113,9 @@ pub(crate) fn ensure_see_also_link(text: &str, target_name: &str) -> String {
             out_lines.insert(insert_at, link_line);
         }
         None => {
-            let boundary = footer_section_line(text);
+            // WHY (TRDD-8MVESX28, GH #289): join the existing link sections, else go above Superseded and
+            // Notes, never below a Superseded section that precedes the links.
+            let boundary = link_section_insertion_line(text);
             let block = vec![
                 String::new(),
                 "## See also".to_string(),
@@ -268,7 +271,9 @@ fn split_topic_compute(src_text: &str, new_page_base: &str, atom_ids: &[String])
         let block = src_lines[*m..=*b].join("\n");
         let renamed = rewrite_footnote_labels(&block, &label_map);
         let (marker, body) = renamed.split_once('\n').unwrap_or((renamed.as_str(), ""));
-        let boundary = footer_section_line(&dest_text);
+        // WHY (TRDD-8MVESX28, GH #289): `layout_boundary`, not the footer-only line, so an atom never
+        // lands below a Superseded section.
+        let boundary = layout_boundary(&dest_text);
         dest_text = insert_atom_block_before(&dest_text, marker, body, boundary);
     }
     let mut moved_defs: Vec<String> = Vec::new();
@@ -892,6 +897,32 @@ mod tests {
         for help in [SplitTopicArgs::command().render_long_help().to_string(), SplitAtomArgs::command().render_long_help().to_string()] {
             assert!(help.contains("EXAMPLES:"), "verb help must carry an EXAMPLES section:\n{help}");
         }
+    }
+
+
+    // TRDD-8MVESX28 / GH #289 — split into a destination whose `## Superseded` precedes the links,
+    // and a new `## See also` on such a page.
+    const SUPERSEDED_ABOVE_LINKS: &str = "---\nname: n\ndescription: \"d\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n# n\n\n\
+        ## Superseded\n\n^ATOM-ZZZZ-OLD0 [keywords: z, status: superseded]\n\nz\n\n\
+        ## Applies to\n\n- [[hub]]\n\n## Notes and lessons learned\n";
+
+    #[test]
+    fn split_topic_atom_lands_above_a_superseded_section_that_precedes_the_links() {
+        let src = "---\nname: s\ndescription: \"s\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n# s\n\n^ATOM-SSSS-0001 [keywords: s]\n\nmoved body\n\n## Notes and lessons learned\n";
+        let r = split_topic_compute(src, SUPERSEDED_ABOVE_LINKS, &["ATOM-SSSS-0001".to_string()]).expect("split succeeds");
+        let atom_at = r.dest_text.find("^ATOM-SSSS-0001").expect("atom moved");
+        assert!(atom_at < r.dest_text.find("## Superseded").unwrap(), "atom above Superseded:\n{}", r.dest_text);
+    }
+
+    #[test]
+    fn see_also_link_joins_the_first_link_heading_not_the_superseded_section_above_it() {
+        let out = ensure_see_also_link(SUPERSEDED_ABOVE_LINKS, "other");
+        let see_at = out.find("## See also").expect("section created");
+        assert!(out.find("## Superseded").unwrap() < see_at, "after Superseded:\n{out}");
+        assert!(see_at < out.find("## Applies to").unwrap(), "before the first link heading:\n{out}");
+        let no_links = "---\nname: n\ndescription: \"d\"\n---\n\n# n\n\n## Superseded\n\n^ATOM-ZZZZ-OLD0 [keywords: z, status: superseded]\n\nz\n\n## Notes and lessons learned\n";
+        let out2 = ensure_see_also_link(no_links, "other");
+        assert!(out2.find("## See also").unwrap() < out2.find("## Superseded").unwrap(), "no links: above Superseded:\n{out2}");
     }
 
     #[test]
