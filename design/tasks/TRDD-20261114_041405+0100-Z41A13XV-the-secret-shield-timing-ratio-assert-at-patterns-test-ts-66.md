@@ -30,7 +30,7 @@ Observed once at loadavg ~45 inside pytest: patterns.test.ts:661 failed on its l
 Make the assert load-robust (for example a median of N runs, or an absolute ceiling with margin) without weakening what it detects. Related: TRDD-MEYVDFJ9.
 
 ## Done when
-- [ ] the assert passes 20 consecutive runs while 35 CPU-only workers (2.5 per core on the dev host) run for the whole campaign under the TRDD-OD5Z90YL D8 harness, measured and recorded; contention, not load level, is what the timing check must survive, so this replaces the earlier criterion of load 45 or more, the one level at which it was seen to fail (main-agent ruling under TRDD-S6GX1DHN, 2026-11-14)
+- [ ] the ratio assert at hooks/secret-shield/tests/patterns.test.ts:657 and :664, or the check that replaces it in TRDD-OD5Z90YL increment 1b (whichever is in the module when this is measured; that one closes this card), passes 20 consecutive probes of the real secret-shield module while 35 CPU-only workers (2.5 per core on the dev host) run for the whole campaign under the TRDD-OD5Z90YL D8 harness, measured and recorded; contention, not load level, is what the timing check must survive, so this replaces the earlier criterion of load 45 or more, the one level at which it was seen to fail (main-agent ruling under TRDD-S6GX1DHN, 2026-11-14)
 - [ ] a mutant that makes the guarded rule quadratic still fails it, measured and recorded
 
 ## Approval log

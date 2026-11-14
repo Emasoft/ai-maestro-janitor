@@ -4,7 +4,7 @@ title: secret-shield tests run in the release gate and CI
 column: human_review
 status: tasked
 created: 2026-11-04T01:26:43+0100
-updated: 2026-11-14T04:26:13+0100
+updated: 2026-11-14T07:39:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -50,3 +50,4 @@ Found during TRDD-Q6LPJTPO (review of commit baeecd80).
 
 - decision:ci-claude-install — run the shield tests in CI (needs claude on the runner and a push to prove) or accept the local gate only.
 - decision:release-requires-claude — publish and the pre-push gate now hard-require claude and gate on the installed, unpinned Claude Code version; accept, or pin a version.
+- 2026-11-14: the acceptance criterion of this card's EHT TRDD-Z41A13XV changed while this card sits in human_review. Old: the ratio assert passes 20 runs at load 45 or more. New: it, or its increment-1b replacement, passes 20 probes of the real module while 35 CPU-only workers run under the TRDD-OD5Z90YL D8 harness. Reason: load average lags and is moved by other sessions; contention is what the check must survive. Main-agent ruling under TRDD-S6GX1DHN; veto it here if the old criterion must stand.
