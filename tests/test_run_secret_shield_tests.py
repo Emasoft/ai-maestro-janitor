@@ -174,7 +174,7 @@ def test_the_file_capture_keeps_all_of_a_big_write_followed_by_process_exit(tmp_
 
 @pytest.mark.real_subprocess("node", "bun")
 def test_a_plain_pipe_loses_the_tail_of_the_same_big_write(tmp_path: Path) -> None:
-    """Documents the bug the helper avoids: the same script read through a plain pipe returns fewer than 200000 bytes; if this host ever returns them all, the test skips (reports) instead of failing."""
+    """Documents the upstream claude/bun pipe defect; NOT a regression test of this code: it can only pass or skip, because its assertion cannot fail once the skip condition is false (a plain pipe read of the same script returns fewer than 200000 bytes; if this host returns them all in every run, it skips)."""
     script = tmp_path / "big_write.js"
     script.write_text(_BIG_WRITE_JS, encoding="utf-8")
     runtime = _js_runtime()

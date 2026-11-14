@@ -87,7 +87,7 @@ _GROUP_POLL_SEC = 0.05
 
 @dataclass(frozen=True)
 class CapturedRun:
-    """Outcome of run_captured_in_own_session. `returncode` is the direct child's, also after a kill (then negative)."""
+    """Outcome of run_captured_in_own_session. `returncode` is the direct child's exit code: negative if the child itself was killed, but when the timeout or abort fires after the child already exited (the group-wait phase) it is the child's real exit code, often 0. Callers must check `timed_out`/`aborted` first."""
 
     returncode: int
     output: str
@@ -117,7 +117,11 @@ def run_captured_in_own_session(cmd: list[str], cwd: Path, timeout: float, shoul
     # WHY the output is read only once no process is left in the child's group: a child of claude (a per-test-file runner)
     # may still write to the inherited fd after claude itself has exited, so the child's exit is not the end of the output.
     # The group id equals the child pid (start_new_session). A descendant that moves to another process group would escape this
-    # wait (unlikely for `claude plugin test`). The only bound is `timeout`; reaching it is the timeout failure path.
+    # wait (unlikely for `claude plugin test`). The only bound is `timeout`; reaching it is the timeout failure path. A descendant
+    # that stays in the group after letting go of the output fd (e.g. a leaked background process) now makes the run end as a
+    # timeout, where the old pipe reader would have returned. After proc.wait reaps the child its pid is free: if the group empties
+    # and an unrelated session leader reuses that pid within one poll, the wait and the timeout kill would target that unrelated
+    # group; accepted as a narrow race (pid reuse inside 50 ms), not guarded.
     # WHY a session of its own: killing only the direct child on timeout would orphan its descendants (same pattern as publish.run_pytest_in_own_session).
     deadline = time.monotonic() + timeout
     timed_out = aborted = False
@@ -129,8 +133,10 @@ def run_captured_in_own_session(cmd: list[str], cwd: Path, timeout: float, shoul
         return aborted or timed_out
 
     def kill_group(pgid: int) -> None:
-        # WHY suppress: the group may already be gone (child exited just before the signal).
-        with contextlib.suppress(ProcessLookupError):
+        # WHY suppress both: the group may already be gone (child exited just before the signal), or (macOS) hold only zombies, where
+        # killpg raises EPERM, as _group_alive already treats it; an unsuppressed EPERM in the except-BaseException path would
+        # replace the original exception and skip proc.wait.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
 
     with tempfile.TemporaryFile() as capture:
