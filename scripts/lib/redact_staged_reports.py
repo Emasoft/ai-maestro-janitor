@@ -23,6 +23,7 @@ the repo. Wired into git-hooks/pre-commit as Stage 0.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -39,7 +40,13 @@ def _fail(message: str) -> int:
 
 
 def _git(*args: str) -> str:
-    r = subprocess.run(["git", *args], capture_output=True, text=True, check=True)
+    # GIT_OPTIONAL_LOCKS=0: a read-only `git diff`/`rev-parse` otherwise takes
+    # .git/index.lock for an optional stat-cache write-back and can kill a
+    # concurrent git WRITE (janitor#245). Optional locks only: `git add` still
+    # takes the index lock it needs, so the same env is safe for every call.
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    r = subprocess.run(["git", *args], capture_output=True, text=True, check=True, env=env)
     return r.stdout
 
 
