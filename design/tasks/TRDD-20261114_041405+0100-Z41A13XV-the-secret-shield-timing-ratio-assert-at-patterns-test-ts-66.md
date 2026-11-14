@@ -4,7 +4,7 @@ title: The secret-shield timing-ratio assert at patterns.test.ts 661 fails under
 column: todo
 status: tasked
 created: 2026-11-14T04:14:05+0100
-updated: 2026-11-14T04:14:24+0100
+updated: 2026-11-14T04:19:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,7 +30,7 @@ Observed once at loadavg ~45 inside pytest: patterns.test.ts:661 failed on its l
 Make the assert load-robust (for example a median of N runs, or an absolute ceiling with margin) without weakening what it detects. Related: TRDD-MEYVDFJ9.
 
 ## Done when
-- [ ] the assert passes 20 consecutive runs while the host is loaded to at least loadavg 45 (e.g. a parallel full pytest run), measured and recorded
+- [ ] the assert passes 20 consecutive runs while the host is loaded to at least loadavg 45 (the one level observed on this host, not a design target) (e.g. a parallel full pytest run), measured and recorded
 - [ ] a mutant that makes the guarded rule quadratic still fails it, measured and recorded
 
 ## Approval log

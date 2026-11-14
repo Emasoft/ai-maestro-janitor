@@ -1,10 +1,10 @@
 ---
 trdd-id: 3GP0D06D
 title: secret-shield tests run in the release gate and CI
-column: todo
+column: human_review
 status: tasked
 created: 2026-11-04T01:26:43+0100
-updated: 2026-11-14T04:16:29+0100
+updated: 2026-11-14T04:18:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T01:26:43+0100
 eht: [Z41A13XV]
+implementation-commits: [c0da4a21]
 ---
 
 # secret-shield tests run in the release gate and CI
@@ -35,12 +36,14 @@ Found during TRDD-Q6LPJTPO (review of commit baeecd80).
 ## Approval log
 
 - 2026-11-04T01:26:43+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-14T04:18:49+0100 — column → human_review by main-agent@ai-maestro-janitor. local half landed in c0da4a21; CI half and claude dependency await two owner decisions
 
 ## Notes
 
 - 2026-11-14 — Local half built: scripts/run_secret_shield_tests.py assembles a temp dir (repo plugin.json + hooks.json holding only the modules entry + a copy of hooks/secret-shield), runs claude plugin test in its own session, and fails closed (no claude, non-zero exit, timeout, unparseable count, count below the 800 floor, any *.test.ts / *.test.tsx of the copy with no `<path>:` header line in the output). The step runs BEFORE pytest: 2b in stage_tests ([2b/11]) and G3b in run_gate (after G3 validate, before G4); _PUSH_TIMEOUT_SEC now includes its bound. The Done-when local half (a deliberate failing shield test fails the step on its own, without publishing) is proven by tests/test_run_secret_shield_tests.py::test_a_deliberately_failing_shield_test_fails_the_script. The CI half is NOT done: ci.yml runs only on main, pull requests and merge_group, has no claude install step, and proving it needs a pushed feature branch — owner decision below.
 - 2026-11-14 — Observed once under host load (loadavg ~45): patterns.test.ts:661 (linear(small.ms, big.ms) ratio assert, line 664) failed inside the pytest run; three reruns passed. A timing-ratio assertion can therefore block the new gate step on a loaded host.
 - 2026-11-14 — Review fixes: the shield step now runs BEFORE pytest (so the load-sensitive timing assert is less exposed). The script now also checks that every *.test.ts / *.test.tsx of the copied tests/ has a header line in the output of claude plugin test (a file the run did not execute fails it). Releases and the pre-push gate now depend on the installed, unpinned Claude Code (claude): a change in its output format or test engine can block a publish. ANSI colour codes in claude's output (FORCE_COLOR or a changed default) would make every header miss; that fails closed, not open. This card cannot close until the EHT TRDD-Z41A13XV (make the patterns.test.ts:661 timing-ratio assert load-robust) is terminal.
+- 2026-11-14 — Landed in c0da4a21. The Done-when local half is proven at the script level (scripts/run_secret_shield_tests.py is the gate step; publish.py's run_shield_tests only adds the outer timeout and the BLOCKED line). The real claude plugin test output format is pinned only by tests that skip without claude, so CI does not check it. Moved to human_review: the CI half and the claude dependency wait on decision:ci-claude-install and decision:release-requires-claude; the card cannot reach complete until TRDD-Z41A13XV is terminal.
 
 ## Owner decisions open
 
