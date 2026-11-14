@@ -1,10 +1,10 @@
 ---
 trdd-id: MC895I0A
 title: Secret shield JSON over-bound detector is flagged as a regex denial of service shape and needs a lookahead-free rewrite
-column: todo
+column: testing
 status: tasked
 created: 2026-11-14T22:28:32+0100
-updated: 2026-11-14T22:28:32+0100
+updated: 2026-11-14T23:21:09+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T22:28:32+0100
+implementation-commits: [f0b1edd9]
 ---
 
 # Secret shield JSON over-bound detector is flagged as a regex denial of service shape and needs a lookahead-free rewrite
@@ -25,6 +26,7 @@ approval-datetime: 2026-11-14T22:28:32+0100
 
 - NEXT ACTION: build the rewrite below as one bounded change with differential tests (new matcher against the old regex on the same inputs), then re-run the scoped CPV skillaudit on hooks/secret-shield and confirm the REGEX_DOS finding for the JSON_OVER_BOUND line is gone. Tests only run before the push. Ask the Fable advisor first if the differential tests find a case the walk cannot reproduce.
 - Status: not started. Blocks the CPV publish gate (v5.16.2 skillaudit) together with the URL_PASSWORD card TRDD-AGV84UGC. Related: TRDD-AGOEWF2E (dev; origin of the escape bound), TRDD-OD5Z90YL (plan; ReDoS harness).
+- 2026-11-14T23:21:01+0100 BUILT in f0b1edd9 (supersedes 'Status: not started'): lookahead dropped, pairs counted in the walk, retry at match.index + 1. Worker evidence: 13 pinning tests (hooks/secret-shield/tests/over-bound-json.test.ts) pass on old and new code; 0 differences old against new over 6,300 seeded cases; 3 mutants red; scoped CPV skillaudit leaves only patterns.ts:66 (TRDD-AGV84UGC). UBS pre-commit: 29 advisory criticals, all in the new test file and all false positives (=== on redacted text; api_key fixture names). NEXT ACTION: closes when the pre-push run of scripts/run_secret_shield_tests.py passes and the release gate's CPV run no longer lists the JSON_OVER_BOUND line.
 
 ## Finding
 
@@ -45,3 +47,4 @@ Needs differential tests, including overlapping openings: `"x":"token":"<N+1 esc
 ## Approval log
 
 - 2026-11-14T22:28:32+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-14T23:21:09+0100 — column → testing by main-agent@ai-maestro-janitor. built in f0b1edd9; tests run before the push
