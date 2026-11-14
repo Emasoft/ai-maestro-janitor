@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-14T01:15:43+0100
+updated: 2026-11-14T01:16:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -46,6 +46,7 @@ Split out of TRDD-M1218EMH.
 - 2026-11-14 — correction to the 2026-11-13 U5O72MGA entry: read 'may take over the hook's time limit' as 'may exceed the hook's time limit (not yet confirmed)'; the limit itself is an assumed 10 s, not confirmed (see U5O72MGA).
 - 2026-11-14 — blocked-by lost J0TBHZ15 (complete: jr-redact measured against the shield). Its jr-only gaps are on TRDD-6A3XW3VO, which must be closed or recorded as KNOWN-MISSES before jr-redact is disabled.
 - 2026-11-14 — blocked-by gained 6A3XW3VO, so the guard 'close or record the jr-only gaps before jr-redact is disabled' is a graph edge, not prose. Measured cost: the shield is about 7x slower than jr-redact on a 512 KB input (21.3 vs 3.0 ms median, function level).
+- 2026-11-14 — owns gap (7) from 6A3XW3VO: while both mods run, jr-redact rewrites [JANITOR-REDACTED:url-password] into [REDACTED:password] (3 of 35 marked inputs, function level). Disabling jr-redact here closes it.
 
 ## Notes
 

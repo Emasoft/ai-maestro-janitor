@@ -32,4 +32,4 @@ Bound of this evidence: catalog samples were synthesized from the catalog regexe
 
 ## Done when
 
-Each gap (1) to (6) is either closed by a shield rule change with a test that hides the sample shape, or recorded as a deliberate KNOWN-MISSES entry with its reason (for example the placeholder exemption, or a length floor kept to avoid false hits). (7) matters only while both run; it closes when jr-redact is disabled.
+Each gap (1) to (6) is either closed by a shield rule change with a test that hides the sample shape, or recorded as a deliberate KNOWN-MISSES entry with its reason (for example the placeholder exemption, or a length floor kept to avoid false hits). This card is terminal on gaps (1) to (6) alone. Gap (7), jr rewriting shield markers while both run, belongs to TRDD-2V7OAUPE, which disables jr-redact; tying it here would make the two cards block each other.
