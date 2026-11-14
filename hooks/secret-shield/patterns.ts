@@ -5,7 +5,7 @@ import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken
 import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
 import { bearerToken, jwt, jwtWide, privateKey } from './rules/key-material'
-import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
+import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeApiKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
 
 export type Hits = Record<string, number>
@@ -121,7 +121,7 @@ const TOKENS: readonly Rule[] = [
   slackConfigRefreshToken,
   slackToken,
   slackWebhook,
-  stripeSecretKey,
+  stripeApiKey,
   stripeWebhookSecret,
   googleApiKey,
   jwt,
@@ -187,6 +187,19 @@ function looksSecret(value: string, isQuoted: boolean): boolean {
   return (value.length >= 6 && /\d/.test(value)) || value.length >= 16
 }
 
+// WHY two flat checks and not one regex with a repeated group: the slug and dotted-name shapes were each written as a run, then a group of a joiner
+// and a run, repeated. That form was linear (each repeat starts on a joiner the run before it cannot take), but skillaudit's REGEX_DOS rule flags
+// every repeated group that holds a quantifier, and the CPV release gate blocks on it. These checks accept exactly the same strings (the exhaustive
+// differential in tests/patterns.test.ts compares them with the old regexes) and use only flat class loops. Exported for that test.
+/** A lowercase-word slug (`my-app-db-credentials`, `secret/data/myapp`): runs of a-z joined by single `-`, `_`, `.` or `/`, at least one joiner. */
+export function isLowercaseSlug(value: string): boolean {
+  return /^[a-z][a-z./_-]*[a-z]$/.test(value) && /[./_-]/.test(value) && !/[./_-]{2}/.test(value)
+}
+/** A dotted name (`api.example.com`, `build-01.example.net`): runs of letters, digits and `-` joined by single dots, at least one dot. */
+export function isDottedName(value: string): boolean {
+  return /^[A-Za-z0-9-][A-Za-z0-9.-]*[A-Za-z0-9-]$/.test(value) && value.includes('.') && !value.includes('..')
+}
+
 // A value is worth hunting for elsewhere only when it is long and secret-shaped. WHY: the review of 2026-11-04
 // found that propagation spreads every false positive of the looksSecret heuristic (paths, env-var names,
 // identifiers, slugs, emails, host:port) over a whole row, and those values are usually 10 or more characters, so a
@@ -203,14 +216,14 @@ function propagates(value: string): boolean {
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !hasDigit) return false
   if (/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(value)) return false
   // A lowercase-word slug (`my-app-db-credentials`, `secret/data/myapp`) names a thing.
-  if (/^[a-z]+([-_./][a-z]+)+$/.test(value)) return false
+  if (isLowercaseSlug(value)) return false
   if (value.startsWith('/') || value.startsWith('~/') || value.startsWith('./') || value.startsWith('../')) return false
   // A path or vault key (`prod/db/password`) holds a slash; a base64 secret does too, but only with all three kinds of character.
   if (value.includes('/') && !(/[A-Z]/.test(value) && /[a-z]/.test(value) && hasDigit)) return false
   if (value.includes('://')) return false
   if (/^[^@\s]+@[A-Za-z0-9.-]+\.[A-Za-z]+$/.test(value)) return false
   if (/^[A-Za-z0-9.-]+:\d{1,5}$/.test(value)) return false
-  if (/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(value) && /^[A-Za-z]+$/.test(value.slice(value.lastIndexOf('.') + 1))) return false
+  if (isDottedName(value) && /^[A-Za-z]+$/.test(value.slice(value.lastIndexOf('.') + 1))) return false
   return (/[A-Za-z]/.test(value) && hasDigit) || value.length >= 16
 }
 /** Replaces each match of `rule` with its mark, counting into `hits`; a hidden value that propagates() accepts is recorded in `found`. Exported so tests can drive a synthetic rule. */
@@ -439,7 +452,7 @@ const jsonPair = (escapes: string, value: string): RegExp =>
 // text in front of it is not part of it: hideEscapedPair drops the run from what hideJsonPair builds. Checked against the old pattern on 500,000 seeded strings of
 // backslashes, quotes, escape pairs, JSON fragments and secrets in escaped JSON with 0 differences, and at 1 MB redact() takes about 16 ms on each shape, 57 ms with a secret after the run (the tests of TRDD-U5O72MGA).
 export const JSON_ESCAPED = new RegExp(String.raw`(?="[A-Za-z0-9_.-]+(\\+)")(?<=\1)"([A-Za-z0-9_.-]+)\1"(\s*:\s*)\1"([^"\\\r\n]{3,})(\1"|\\*$)`, 'gm')
-// WHY JSON_ESCAPE_BOUND (TRDD-AGOEWF2E): the escape loop of JSON_PLAIN, `(?:\\.[^"\\\r\n]*)*`, repeats once per escape pair, so it has the iteration-count ceilings
+// WHY JSON_ESCAPE_BOUND (TRDD-AGOEWF2E): the escape loop of JSON_PLAIN, which takes one escape pair and the run of plain characters after it per iteration, repeats once per escape pair, so it has the iteration-count ceilings
 // described above URL_PASSWORD in the engine of claude plugin test: about 35 times slower per character past about 63.8K iterations, and no match at all, silently, from
 // 589,823 iterations (measured), so a secret-named value with that many escapes was not hidden. The loop is bounded to `{0,JSON_ESCAPE_BOUND}` iterations. The bound sits below
 // the slow step: measured under claude plugin test (2026-11-13), the exact bounded regex took the same time per character at 16,384, 32,768 and 49,152 escape pairs
@@ -605,7 +618,7 @@ function redactInto(text: string, hits: Hits, found: Map<string, string>): strin
   out = redactConnectionStrings(out, hits, found)
   // WHY jwtWide is the LAST pass and not a TOKENS entry (TRDD-6A3XW3VO): measured over 39072 contextual inputs (22 contexts x 8 tails x 222 tokens), jwtWide in
   // TOKENS regressed 10962 of them. It pre-empts the bearer-token rule and the assignment and connection-string passes (cookies and URL userinfo were unaffected): they then see a marker, not the
-  // whole value, and leave the value's tail visible (`Authorization: Bearer <jr-shape token>+/=xyz` became `Bearer [mark]+/=xyz`). As the last pass it only hides what
+  // whole value, and leave the value's tail visible (an Authorization header holding `Bearer <jr-shape token>+/=xyz` became `Bearer [mark]+/=xyz`). As the last pass it only hides what
   // every other rule left, so those values keep their kind and their whole hide (0 regressions over the same inputs). The jwt rule keeps its TOKENS position; its own
   // pre-emption of current-shape tokens in those contexts is older and tracked separately.
   // It must stay the final applyRule before return: a pass added below it would be pre-empted the same way and re-create the regression,
@@ -757,7 +770,7 @@ const SECRET_FILES: RegExp[] = [
   /\.(pem|key|p12|pfx|jks|keystore|asc|gpg)$/i,
   /^id_(rsa|dsa|ecdsa|ed25519)$/,
   /^\.?netrc$|^_netrc$/,
-  /^\.npmrc$/, /^\.pypirc$/, /^\.git-credentials$/,
+  /^\.(?:npmrc|pypirc|git-credentials)$/,
   /^credentials(\.json)?$/i,
   /^service[-_]?account.*\.json$/i,
   /^secrets?\.(ya?ml|json|toml|env)$/i,

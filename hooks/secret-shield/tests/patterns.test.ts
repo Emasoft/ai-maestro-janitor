@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, JSON_ESCAPED, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
+import { applyRule, countOf, isDottedName, isLowercaseSlug, isSecretFile, JSON_ESCAPE_BOUND, JSON_ESCAPED, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
 import { jwt, jwtWide, privateKey } from '../rules/key-material'
-import { stripeSecretKey, stripeWebhookSecret } from '../rules/messaging-payments'
+import { stripeApiKey, stripeWebhookSecret } from '../rules/messaging-payments'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -174,7 +174,7 @@ describe('GitHub tokens shorter than the old floors are hidden, nothing the old 
 describe('Stripe keys shorter than the old floor are hidden, nothing the old rule hid becomes visible', () => {
   const OLD_STRIPE = /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g
   // The new pattern is the shipped rule's own, copied so a run keeps no lastIndex (rules/rule.ts); the old one is the constant above.
-  const NEW_STRIPE = new RegExp(stripeSecretKey.pattern.source, 'g')
+  const NEW_STRIPE = new RegExp(stripeApiKey.pattern.source, 'g')
   const PREFIXES = [j('sk', '_live_'), j('sk', '_test_'), j('rk', '_live_'), j('rk', '_test_')]
   // Mixed fake bodies built from repeated characters at run time: no secret-looking literal is committed.
   const cycle = (n: number, alphabet: string) => alphabet.repeat(Math.ceil(n / alphabet.length)).slice(0, n)
@@ -437,10 +437,40 @@ test('withhold keeps the blocks, not their text', () => {
 })
 
 describe('isSecretFile', () => {
-  const secret = ['.env', '.env.local', 'app/.env.production', 'server.pem', 'tls.key', '/home/User/.ssh/id_rsa', '/home/User/.ssh/id_ed25519', '/Users/User/.aws/credentials', '.npmrc', '.netrc', '.git-credentials', 'service-account-prod.json', 'config/secrets.yml', '/Users/User/.kube/config', '.envrc']
+  const secret = ['.env', '.env.local', 'app/.env.production', 'server.pem', 'tls.key', '/home/User/.ssh/id_rsa', '/home/User/.ssh/id_ed25519', '/Users/User/.aws/credentials', '.npmrc', '.pypirc', '.netrc', '.git-credentials', 'service-account-prod.json', 'config/secrets.yml', '/Users/User/.kube/config', '.envrc']
   const fine = ['.env.example', '.env.sample', 'src/env.ts', 'id_rsa.pub', '/home/User/.ssh/known_hosts', 'README.md', 'keyboard.ts', 'environment.yml', 'docs/secrets.md']
   for (const path of secret) test(`secret: ${path}`, () => expect(isSecretFile(path)).toBe(true))
   for (const path of fine) test(`fine: ${path}`, () => expect(isSecretFile(path)).toBe(false))
+})
+
+// WHY (CPV release gate, 2026-11-14): propagates() tested the slug and dotted-name shapes with a run followed by a repeated group of a joiner and a run;
+// skillaudit's REGEX_DOS rule flags that form, so patterns.ts now uses flat checks. The old regexes are kept here and both forms are compared on every string
+// over a small alphabet up to length 6. Each alphabet holds every joiner, the edge letters of the run class, a character the shape refuses and a line feed.
+describe('isLowercaseSlug and isDottedName accept exactly the strings the old regexes accepted', () => {
+  const OLD_SLUG = /^[a-z]+([-_./][a-z]+)+$/
+  const OLD_DOTTED = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/
+  const every = (alphabet: readonly string[], maxLength: number): string[] => {
+    const all = ['']
+    let layer = ['']
+    for (let n = 1; n <= maxLength; n++) {
+      layer = layer.flatMap(s => alphabet.map(c => s + c))
+      // A loop, not push(...layer): a spread of 262,144 arguments can pass the engine's argument limit.
+      for (const s of layer) all.push(s)
+    }
+    return all
+  }
+  test('slug: every string over a z - _ . / A and a line feed, up to 6 characters', () => {
+    const differ = every(['a', 'z', '-', '_', '.', '/', 'A', '\n'], 6).filter(s => isLowercaseSlug(s) !== OLD_SLUG.test(s))
+    expect(differ).toEqual([])
+  })
+  test('dotted name: every string over a Z 0 - . _ and a line feed, up to 6 characters', () => {
+    const differ = every(['a', 'Z', '0', '-', '.', '_', '\n'], 6).filter(s => isDottedName(s) !== OLD_DOTTED.test(s))
+    expect(differ).toEqual([])
+  })
+  test('both accept their documented examples and refuse a single run', () => {
+    expect([isLowercaseSlug('my-app-db-credentials'), isLowercaseSlug('secret/data/myapp'), isLowercaseSlug('myapp')]).toEqual([true, true, false])
+    expect([isDottedName('api.example.com'), isDottedName('build-01.example.net'), isDottedName('localhost')]).toEqual([true, true, false])
+  })
 })
 
 test('labels read naturally', () => {

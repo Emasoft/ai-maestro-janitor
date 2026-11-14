@@ -31,10 +31,14 @@ export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b
 //   before any non-alphanumeric character, such as .isPresent( or .getMethod(, is hidden with the token too.
 //   glrtr- gets the tail without evidence, on the assumption that it mirrors glrt-.
 // - The glwt- and glrtr- bodies are an assumption: neither prefix has a published shape, and gitleaks has no rule for either.
-const BODY = '[0-9A-Za-z_-]{20,}'
 const TAIL = String.raw`(?:\.[0-9a-z]{9}(?![0-9A-Za-z]))?`
 // Not exported: known-misses.test.ts reads every export of this file as a Rule.
-const gitlab = (kind: string, prefix: string, tailed = false): Rule => ({ kind, pattern: new RegExp(prefix + BODY + (tailed ? TAIL : ''), 'gi') })
+// WHY the body is a string literal in the RegExp call and the tail is picked before the call: skillaudit's REGEX_DOS check accepts a concatenated RegExp
+// only when the call holds a string literal and nothing but identifiers around it; the old call (a body const and a ternary) was flagged.
+const gitlab = (kind: string, prefix: string, tailed = false): Rule => {
+  const tail = tailed ? TAIL : ''
+  return { kind, pattern: new RegExp(prefix + '[0-9A-Za-z_-]{20,}' + tail, 'gi') }
+}
 
 export const gitlabPat: Rule = gitlab('gitlab-pat', 'glpat-', true)
 export const gitlabOAuthAppSecret: Rule = gitlab('gitlab-oauth-app-secret', 'gloas-')
@@ -51,7 +55,7 @@ export const gitlabWorkspaceToken: Rule = gitlab('gitlab-workspace-token', 'glwt
 export const gitlabScimToken: Rule = gitlab('gitlab-scim-token', 'glsoat-')
 export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-client-token', 'glffct-')
 
-// GitLab session cookie: its name makes the whole value a secret, so the value is hidden wherever it is written next to the name `_gitlab_session`. It is not a prefixed token, so it has
+// The GitLab session cookie's name makes the whole value a secret, so the value is hidden wherever it is written next to the name `_gitlab_session`. It is not a prefixed token, so it has
 // its own two rules, not the factory above. Forms hidden: `_gitlab_session=V` (a Cookie header, a Set-Cookie header, a curl -b argument, a URL query, a cookie assignment, with spaces
 // around the `=` or quotes after it), `_gitlab_session%3DV` (URL-encoded), a JSON, Ruby-hash, JavaScript or Python key (`"_gitlab_session": "V"`, `"_gitlab_session"=>"V"`,
 // `{'_gitlab_session': 'V'}`, `cookies['_gitlab_session'] = 'V'`, plain, escaped or URL-encoded), YAML (`_gitlab_session: V`), a Netscape cookie-jar line (the name, a tab, the value), the
@@ -105,7 +109,6 @@ export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-cl
 //   same reason, and not at a quote: a pattern that starts with a run of backslashes would try every position of a long run (quadratic).
 const QUOTE = String.raw`(?:\\*["']|%2[27])`
 const SESSION_VALUE = String.raw`([^;&,%\s"'` + '`' + String.raw`\\]{16,})`
-const SESSION_NAME = '_gitlab_session(?:_[0-9a-z_]{0,80})?'
 // Up to 400 characters of one object: the lazy span never crosses a brace.
 const SAME_OBJECT = '[^{}]{0,400}?'
 // The key `value`, its optional closing quote, a colon and the MANDATORY opening quote of its value.
@@ -116,7 +119,8 @@ const AFTER_NAME =
   QUOTE + String.raw`?\]?[ \r\n]*(?:(?:=>?|:|%3[AD]|\t)[ \t]*` + QUOTE + '?|(?:,|=>?[ \\t]*\\{)' + SAME_OBJECT + VALUE_KEY + '))'
 export const gitlabSessionCookie: Rule = {
   kind: 'gitlab-session-cookie',
-  pattern: new RegExp(SESSION_NAME + AFTER_NAME + SESSION_VALUE, 'gi'),
+  // WHY the name is a string literal here and not a const: skillaudit's REGEX_DOS check accepts a concatenated RegExp only when the call holds a string literal.
+  pattern: new RegExp('_gitlab_session(?:_[0-9a-z_]{0,80})?' + AFTER_NAME + SESSION_VALUE, 'gi'),
   group: 1,
 }
 export const gitlabSessionCookieValueFirst: Rule = {

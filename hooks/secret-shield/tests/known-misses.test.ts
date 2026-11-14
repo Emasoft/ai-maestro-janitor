@@ -337,7 +337,7 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       jwtWide: { prefix: 'eyJ', secret: fake('Qm8Zr4Tx') + '.' + fake('Wn6Kd2Vp') + '.' + fake('Hs9Lc3Yb') },
       bearerToken: { lead: 'Authorization: Bearer ', prefix: '', secret: fake('lZmCMpd_tO_G_U8ZDnHUJJ5s-_URIH') },
       slackToken: { prefix: j('xo', 'xb-'), secret: fake('5065969875') + '-' + fake('0509749660') + '-' + fake('zDynHn4HnpmBwUjbocXfjj3r') },
-      stripeSecretKey: { prefix: j('s', 'k_live_'), secret: fake('npxqRcM4BeQSpqu6xYVOvZwx') },
+      stripeApiKey: { prefix: j('s', 'k_live_'), secret: fake('npxqRcM4BeQSpqu6xYVOvZwx') },
       stripeWebhookSecret: { prefix: j('wh', 'sec_'), secret: fake('7jWBCCK0WmWnOoJwtmqyWce1UStjLA') },
     }
     const contexts: Array<[string, (token: string) => string]> = [
