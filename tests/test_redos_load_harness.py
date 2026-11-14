@@ -381,6 +381,43 @@ def test_the_cap_guard_stops_before_a_probe_that_would_pass_the_cap(tmp_path: Pa
     assert (runner.calls, len(d.judgements)) == (2, 1)
 
 
+
+class CutOffRunner(FakeRunner):
+    """A probe runner whose run exited 0 but whose output stops mid-line with no count lines, as on 2026-11-14 (TRDD-LAUPB305)."""
+
+    def __call__(self, claude: str, mod_dir: Path, timeout_s: float, abort: threading.Event) -> h.ProbeRun:
+        self.calls += 1
+        return h.ProbeRun(0, make_output()[:700], 10.0, False, False, EXPECTED_FILES)
+
+
+def test_an_invalid_probe_keeps_its_raw_output_beside_the_record_and_names_it(tmp_path: Path) -> None:
+    """A cut-off probe is invalid; its raw output is saved as `<record stem>-probe<index>.txt` and the record carries that path."""
+    d = drive(tmp_path, CutOffRunner([10.0]))
+    assert d.status == "invalid"
+    raw_path = tmp_path / "record-probe0.txt"
+    assert d.records[0]["raw_output"] == str(raw_path)
+    assert raw_path.read_text(encoding="utf-8") == make_output()[:700]
+
+
+def test_a_valid_probe_record_has_no_raw_output_field_and_no_file_is_written(tmp_path: Path) -> None:
+    """Only an invalid probe carries `raw_output`; a clean campaign writes no `-probe<n>.txt` file."""
+    d = drive(tmp_path, FakeRunner([10.0]))
+    assert d.status == "complete"
+    assert all("raw_output" not in r for r in d.records)
+    assert list(tmp_path.glob("*-probe*.txt")) == []
+
+
+def test_probe_record_carries_raw_output_only_when_given() -> None:
+    """`_probe_record` adds `raw_output` exactly when a path is passed; the other fields do not change."""
+    run = h.ProbeRun(0, make_output(), 1.0, False, False, EXPECTED_FILES)
+    judged = judge(run.output)
+    plain = h._probe_record(1, False, run, judged, 1.0, 2.0, 0.5)
+    kept = h._probe_record(1, False, run, judged, 1.0, 2.0, 0.5, Path("/x/record-probe1.txt"))
+    assert "raw_output" not in plain
+    assert kept.pop("raw_output") == "/x/record-probe1.txt"
+    assert kept == plain
+
+
 @pytest.mark.skipif(shutil.which("claude") is None, reason="`claude` is not on PATH (run_campaign looks it up; the probe itself is the fake runner)")
 def test_run_campaign_passes_the_injected_runner_through(tmp_path: Path) -> None:
     """run_campaign with 0 workers and a fake runner runs the dry run plus one probe and records a `complete` campaign (1 probe is fewer than 20, so exit 2)."""

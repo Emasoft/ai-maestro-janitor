@@ -126,3 +126,22 @@ def test_a_test_file_with_no_header_in_the_output_is_reported_missing() -> None:
     output = "hooks/secret-shield/tests/a.test.ts:\n(pass) x [0.1ms]\n\nhooks/secret-shield/tests/c.test.ts:\n(pass) y [0.1ms]\n"
     expected = ["hooks/secret-shield/tests/a.test.ts", "hooks/secret-shield/tests/b.test.ts", "hooks/secret-shield/tests/c.test.ts"]
     assert shield_runner._unreported_test_files(expected, output) == ["hooks/secret-shield/tests/b.test.ts"]
+
+
+
+def test_the_output_summary_gives_bytes_newlines_and_the_last_twenty_lines_of_a_cut_off_run() -> None:
+    """For a 30-line output cut mid-line, the summary reports its byte length, newline count, no final newline, and exactly the last 20 lines (TRDD-LAUPB305)."""
+    lines = [f"(pass) test number {n} [0.1ms]" for n in range(29)] + ["(pass) the GitLab session cookie is hidden whole, the cookie name is kept > stays vis"]
+    output = "\n".join(lines)
+    summary = shield_runner._output_summary(output)
+    assert f"{len(output.encode())} bytes, 29 newlines, ends with a newline: False; last 20 lines:" in summary
+    assert "\n".join(lines[-20:]) in summary
+    assert "test number 9 " not in summary
+    assert "test number 10 " in summary
+
+
+def test_the_output_summary_of_a_short_output_reports_its_real_line_count() -> None:
+    """An output shorter than 20 lines reports its own line count (2 for "a", "b"), not 20, and still ends with the full-output marker."""
+    summary = shield_runner._output_summary("a\nb\n")
+    assert "last 2 lines:" in summary
+    assert summary.endswith("--- full output follows ---")

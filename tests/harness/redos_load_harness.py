@@ -594,7 +594,9 @@ def _drive(
         dead = group.dead()
         if dead and judged.valid:
             judged.valid, judged.invalid_reason, judged.status = False, f"dead worker: workers {dead} died during the probe", "invalid"
-        recorder.write(_probe_record(index, dry, run, judged, load_start, load_end, ambient_estimate))
+        # WHY (TRDD-LAUPB305): two cut-off runs on 2026-11-14 left no output to examine; an invalid probe keeps its raw output next to the record.
+        raw_output = None if judged.valid else save_invalid_output(recorder.path, index, run.output)
+        recorder.write(_probe_record(index, dry, run, judged, load_start, load_end, ambient_estimate, raw_output))
         if not judged.valid:
             # WHY one vocabulary: a dead worker is recorded as `invalid` (spec "Liveness"); its reason starts "dead worker".
             return "invalid", judged.invalid_reason
@@ -607,8 +609,10 @@ def _drive(
     return "complete", None
 
 
-def _probe_record(index: int, dry: bool, run: ProbeRun, judged: ProbeJudgement, load_start: float, load_end: float, ambient_estimate: float) -> dict[str, object]:
-    return {
+def _probe_record(
+    index: int, dry: bool, run: ProbeRun, judged: ProbeJudgement, load_start: float, load_end: float, ambient_estimate: float, raw_output: Path | None = None
+) -> dict[str, object]:
+    record: dict[str, object] = {
         "kind": "probe",
         "index": index,
         "dry_run": dry,
@@ -626,6 +630,17 @@ def _probe_record(index: int, dry: bool, run: ProbeRun, judged: ProbeJudgement, 
         "load_end": load_end,
         "ambient_estimate": ambient_estimate,
     }
+    # WHY present only for an invalid probe (TRDD-LAUPB305): a valid record keeps its shape, and the key itself says the raw output was kept.
+    if raw_output is not None:
+        record["raw_output"] = str(raw_output)
+    return record
+
+
+def save_invalid_output(record_path: Path, index: int, output: str) -> Path:
+    """Write an invalid probe's raw output to `<record stem>-probe<index>.txt` beside the JSONL record and return that path."""
+    raw_path = record_path.with_name(f"{record_path.stem}-probe{index}.txt")
+    raw_path.write_text(output, encoding="utf-8")
+    return raw_path
 
 
 def main(argv: list[str]) -> int:

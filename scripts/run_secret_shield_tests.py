@@ -68,6 +68,17 @@ def _unreported_test_files(expected: list[str], output: str) -> list[str]:
     return [rel for rel in expected if re.search(rf"^{re.escape(rel)}:\s*$", output, re.MULTILINE) is None]
 
 
+def _output_summary(output: str, tail_lines: int = 20) -> str:
+    """Byte length, line count and last `tail_lines` lines of `output`, for a run whose output cannot be parsed."""
+    # WHY (TRDD-LAUPB305): on 2026-11-14 a run exited 0 with output cut mid-line and no count lines. `_fail` prints
+    # the whole output, ~500 lines, so where it stopped is buried; the length, line count and tail printed first
+    # show at once whether the output was cut and where. Bytes are of the decoded text re-encoded as UTF-8, because
+    # the run is read with errors="replace".
+    lines = output.splitlines()
+    tail = "\n".join(lines[-tail_lines:])  # splitlines: no phantom empty last line when the output ends with a newline
+    return f"output: {len(output.encode('utf-8'))} bytes, {output.count(chr(10))} newlines, ends with a newline: {output.endswith(chr(10))}; last {min(tail_lines, len(lines))} lines:\n{tail}\n--- full output follows ---"
+
+
 def _run_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
     """Run `cmd`; on timeout or interrupt kill its whole process group. Returns (exit code, output)."""
     # WHY a session of its own: `claude plugin test` runs each test file in a child of itself, and
@@ -140,7 +151,8 @@ def main(argv: list[str]) -> int:
     if not passed or not failed:
         # WHY: an exit 0 with no count line means the output format changed or the run did not
         # report; the floor below could not be checked, so the run proves nothing.
-        return _fail("could not parse the pass/fail counts from the run's output", output)
+        # WHY the summary (TRDD-LAUPB305): the full output alone buried where a cut-off run stopped; never loosen this check to make a cut-off run pass.
+        return _fail(f"could not parse the pass/fail counts from the run's output\n{_output_summary(output)}", output)
     n_pass, n_fail = int(passed[-1]), int(failed[-1])
     if n_fail != 0:
         # WHY: the exit code and the counts must agree; a disagreement is not a pass.
