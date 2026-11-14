@@ -4,7 +4,7 @@ title: Audit secret-shield rules and passes for quadratic cost on long runs
 column: backburner
 status: tasked
 created: 2026-11-14T03:43:52+0100
-updated: 2026-11-14T03:43:52+0100
+updated: 2026-11-14T03:45:45+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: audit
@@ -26,3 +26,7 @@ The jwt rule (TRDD-A7RII4DN, 4970ff1f) and the JSON_ESCAPED pass (TRDD-U5O72MGA,
 ## Approval log
 
 - 2026-11-14T03:43:52+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Method refinement (2026-11-14 review)
+
+Flag a rule or pass whose time grows more than about 8x per 4x size (linear is about 4x, quadratic about 16x), measured at sizes where it takes over 50 ms, median of at least 3 runs; also require redact() on 1 MB under the 1000 ms bound the tests use, and assert a secret placed after the long run is still hidden (TRDD-AGOEWF2E showed the engine can silently miss a match after a long loop).

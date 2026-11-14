@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-14T03:43:41+0100
+updated: 2026-11-14T03:45:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -66,3 +66,8 @@ Split out of TRDD-M1218EMH.
 ## Done when
 
 - [ ] jr-redact is disabled, and a test or live check shows shield markers reach the transcript unrewritten (gap 7 from TRDD-6A3XW3VO).
+
+## Owner decisions open
+
+Hook timeout, model copy (from TRDD-U5O72MGA's Done-when (1) answer, read from the mods docs and register.ts, not observed live): session.append withholds a row whose scan did not finish (fails closed): accept the withheld notice in place of the content?
+Hook timeout, stored and displayed copy (same source): tool.call has no .catch, so a tool result whose scan outlasts the 10 s limit is expected to be stored and shown unhidden (fails open): accept, or make it fail closed? f38c30c8 removed one known cause (JSON_ESCAPED); TRDD-MEYVDFJ9 audits the others.
