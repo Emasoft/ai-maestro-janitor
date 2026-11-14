@@ -2,8 +2,11 @@
 
 import type { Rule } from './rule'
 
-export const githubTokenClassic: Rule = { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g, group: 1 }
-export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g, group: 1 }
+// WHY the floors are 30 and 20 and there is no trailing \b (TRDD-6A3XW3VO, widened 2026-11-14): the old floors (36 and 22) came from upstream secret-shield 1.0.0 with no recorded
+// reason. jr-redact hid shorter tokens the shield left visible; the TRDD-6A3XW3VO measurement showed that widening them hides all 15 such samples with 0 new false hits on 140 MB of text.
+// The trailing \b is dropped because a token whose tail continues with an underscore (a word character) never reaches a boundary, so the old rule left the whole token visible.
+export const githubTokenClassic: Rule = { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{30,255})/g, group: 1 }
+export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b(github_pat_[A-Za-z0-9_]{20,255})/g, group: 1 }
 
 // GitLab prefixed tokens, standalone (no secret name before them needed). Sources (NOTICE credits gitleaks v8.30.1): the prefixes come from
 // docs.gitlab.com/security/tokens, which gives no length or character set; the body shapes come from gitleaks cmd/generate/config/rules/gitlab.go

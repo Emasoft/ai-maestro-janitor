@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
+import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { pypiToken } from '../rules/dev-services'
 import { privateKey } from '../rules/key-material'
 
@@ -69,6 +70,85 @@ test('a password in a URL is hidden, the user and host are kept', () => {
   expect(redact('see https://example.com/a:b@c').hits['url-password']).toBeUndefined()
 })
 
+// GitHub token length floors (TRDD-6A3XW3VO, 2026-11-14): the classic floor went 36 -> 30, the fine-grained floor 22 -> 20, and the trailing \b was dropped.
+// WHY the differential test: the widening must be a superset. Every span the old rule hid must still be hidden, so the old patterns are kept here as constants.
+describe('GitHub tokens shorter than the old floors are hidden, nothing the old rules hid becomes visible', () => {
+  const OLD_CLASSIC = /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g
+  const OLD_FINE_GRAINED = /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g
+  // The new patterns are the shipped rules' own, copied so a run keeps no lastIndex (rules/rule.ts); the old ones are the constants above.
+  const NEW_CLASSIC = new RegExp(githubTokenClassic.pattern.source, 'g')
+  const NEW_FINE_GRAINED = new RegExp(githubTokenFineGrained.pattern.source, 'g')
+  // Mixed fake bodies built from repeated characters at run time: no secret-looking literal is committed.
+  const cycle = (n: number, alphabet: string) => alphabet.repeat(Math.ceil(n / alphabet.length)).slice(0, n)
+  const classic = (n: number, prefix = j('gh', 'p_')) => prefix + cycle(n, 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+  const fine = (n: number) => j('github', '_pat_') + cycle(n, 'aB3dE5fG7_hJ9kL1mN3pQ5_')
+
+  test('a classic token with a 30 to 35 character body is hidden', () => {
+    for (const n of [30, 31, 33, 35]) {
+      const token = classic(n)
+      const { text, hits } = redact(`value: ${token} end`)
+      expect(text).toBe(`value: ${mark('github-token')} end`)
+      expect(hits).toEqual({ 'github-token': 1 })
+    }
+  })
+
+  test('a fine-grained token with a 20 or 21 character body is hidden', () => {
+    for (const n of [20, 21]) {
+      const token = fine(n)
+      const { text, hits } = redact(`value: ${token} end`)
+      expect(text).toBe(`value: ${mark('github-token')} end`)
+      expect(hits).toEqual({ 'github-token': 1 })
+    }
+  })
+
+  test('a classic token whose tail continues with an underscore is hidden up to the underscore', () => {
+    const body = cycle(30, 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+    const { text } = redact(`value: ${j('gh', 'p_')}${body}_more end`)
+    expect(text).not.toContain(body)
+  })
+
+  test('the old rules hid a classic body of 36 characters and 37, the new one hides them too', () => {
+    for (const n of [36, 37]) expect(redact(`value: ${classic(n)} end`).text).toBe(`value: ${mark('github-token')} end`)
+  })
+
+  test('a token below the new floors stays visible', () => {
+    expect(redact(`value: ${classic(29)} end`).text).toContain(classic(29))
+    expect(redact(`value: ${fine(19)} end`).text).toContain(fine(19))
+  })
+
+  test('every span an old rule matched is still hidden by the new rule, over the suite samples and generated lengths', () => {
+    const suiteSamples = [
+      j('gh', 'p_', A36),
+      j('gh', 's_', A36),
+      j('gh', 'p_', 'A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8'),
+      j('gh', 'p_', 'B2c3D4e5F6g7H8i9J0k1', 'L2m3N4o5P6q7R8s9'),
+      j('github', '_pat_', '11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz'),
+    ]
+    const generated: string[] = []
+    for (const n of [30, 36, 40, 255]) for (const prefix of ['gh' + 'p_', 'gh' + 'o_', 'gh' + 'u_', 'gh' + 's_', 'gh' + 'r_']) generated.push(classic(n, prefix))
+    for (const n of [20, 22, 82]) generated.push(fine(n))
+    const contexts = [(t: string) => t, (t: string) => `value: ${t} end`, (t: string) => `{"token":"${t}"}`, (t: string) => `a ${t}\n`]
+    let oldSpans = 0
+    for (const sample of [...suiteSamples, ...generated]) {
+      for (const frame of contexts) {
+        const text = frame(sample)
+        const done = redact(text).text
+        for (const [oldRule, newRule] of [[OLD_CLASSIC, NEW_CLASSIC], [OLD_FINE_GRAINED, NEW_FINE_GRAINED]] as const) {
+          const newSpans = [...text.matchAll(newRule)].map(m => [m.index, m.index + m[0].length])
+          for (const m of text.matchAll(oldRule)) {
+            oldSpans++
+            const start = m.index
+            const end = m.index + m[0].length
+            expect(newSpans.some(([s, e]) => s <= start && e >= end)).toBe(true)
+            expect(done).not.toContain(m[1])
+          }
+        }
+      }
+    }
+    // A comparison over zero old matches would pass for any new rule.
+    expect(oldSpans).toBeGreaterThan(40)
+  })
+})
 describe('secret assignments are hidden, the name is kept', () => {
   const cases: Array<[string, string]> = [
     ['API_KEY=abcd1234efgh', 'API_KEY=[JANITOR-REDACTED:assignment]'],
@@ -1407,8 +1487,8 @@ describe('token rule order', () => {
       id('aws-secret-key', /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi),
       id('aws-secret-key', /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g),
       id('aws-session-token', /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g),
-      id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{36,255})\b/g),
-      id('github-token', /\b(github_pat_[A-Za-z0-9_]{22,255})\b/g),
+      id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{30,255})/g),
+      id('github-token', /\b(github_pat_[A-Za-z0-9_]{20,255})/g),
       id('gitlab-pat', /glpat-[0-9A-Za-z_-]{20,}(?:\.[0-9a-z]{9}(?![0-9A-Za-z]))?/gi),
       id('gitlab-oauth-app-secret', /gloas-[0-9A-Za-z_-]{20,}/gi),
       id('gitlab-deploy-token', /gldt-[0-9A-Za-z_-]{20,}/gi),
