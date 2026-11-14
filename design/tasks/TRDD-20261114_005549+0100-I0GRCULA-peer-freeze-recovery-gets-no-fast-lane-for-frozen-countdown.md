@@ -30,7 +30,7 @@ RJJGXPIK follow-up. peer-freeze-recovery gathers with fast_lane=False (diagnose_
 ## Done when
 
 A test drives a frozen countdown through peer-freeze-recovery and asserts it is diagnosed on the fast-lane bar (100 s), red on the current code.
-First: the owner decides whether peer-freeze-recovery should get the fast lane at all (open question to the owner, 2026-11-14). The test above applies only if the answer is yes; a no closes this card as refused.
+First: the owner decides whether peer-freeze-recovery should get the fast lane at all (open question to the owner, 2026-11-14). The test above applies only if the answer is yes; a no closes this card (cancelled).
 
 ## Approval log
 

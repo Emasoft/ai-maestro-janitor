@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-14T01:16:17+0100
+updated: 2026-11-14T01:35:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T22:46:01+0100
-blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, U5O72MGA, 6A3XW3VO]
+blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, U5O72MGA, 6A3XW3VO, A7RII4DN]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, decision:owner-answers-TEP6F3A3-wiring-gate]
 pre-block-column: design
 blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
@@ -47,6 +47,8 @@ Split out of TRDD-M1218EMH.
 - 2026-11-14 — blocked-by lost J0TBHZ15 (complete: jr-redact measured against the shield). Its jr-only gaps are on TRDD-6A3XW3VO, which must be closed or recorded as KNOWN-MISSES before jr-redact is disabled.
 - 2026-11-14 — blocked-by gained 6A3XW3VO, so the guard 'close or record the jr-only gaps before jr-redact is disabled' is a graph edge, not prose. Measured cost: the shield is about 7x slower than jr-redact on a 512 KB input (21.3 vs 3.0 ms median, function level).
 - 2026-11-14 — owns gap (7) from 6A3XW3VO: while both mods run, jr-redact rewrites [JANITOR-REDACTED:url-password] into [REDACTED:password] (3 of 35 marked inputs, function level). Disabling jr-redact here closes it.
+- 2026-11-14 — blocked-by gained A7RII4DN: the jwt rule is superlinear on a long eyJ run (about 600 ms at 64 KB, extrapolated near the hook limit at 256 KB).
+- 2026-11-14 — Done-when gained the gap-7 check (from 6A3XW3VO, review 2026-11-14).
 
 ## Notes
 
@@ -56,3 +58,7 @@ Split out of TRDD-M1218EMH.
 - 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. This card stays blocked until those land.
 - 2026-11-05 — blocked-by now also names AGOEWF2E, HF7GNHNF and J0TBHZ15, the three items the owner-decision note above waits for. The 'Read as' reading in that note was put to the owner, whose next message ('decide yourself on anything else, but decide on verified facts') did not contest it. Correction to commit f0453a7d: its message says 'until both land'; the blockers are three.
 - 2026-11-13 — TRDD-R9NLNV3W's liveness hooks module (hooks/liveness/, unwired) also needs the plugin's single modules slot; wiring must use one shared entry module registering both the shield and liveness.
+
+## Done when
+
+- [ ] jr-redact is disabled, and a test or live check shows shield markers reach the transcript unrewritten (gap 7 from TRDD-6A3XW3VO).
