@@ -35,9 +35,9 @@ Each step is its own commit, verified before the next.
 - Sampler: reads the 1-min load every 2 s in every phase, from an injectable source; above 60 it kills and reaps the group and records the campaign as aborted.
 - Liveness: every worker is polled before and after each probe; a dead worker ends the campaign at once: the group is reaped and it exits 2, recorded as invalid.
 - Assembly per probe: a fresh temp dir; `assemble_plugin_dir` for the real secret-shield module; `probe.load.ts` copied to `probe.test.ts` in the same directory inside the assembly; `hooks/secret-shield/tests/load/probe.test.ts` appended to the expected list.
-- Probe: one `claude plugin test` run in its own session, timeout 300 s (a timeout is a probe failure).
+- Probe: one `claude plugin test` run in its own session, timeout 300 s (a timeout makes the probe invalid, since its rows cannot be read, and ends the campaign at once).
 - Timing and cap: the workers start, the load settles about 70 s, then the first probe runs as a dry run, excluded from verdicts and included in the cap. The cap is 43 min for the whole run (ambient check, settle, dry run, probes); worker lifetime 48 min. After the dry run, K is the largest count up to 20 whose expected end, at the dry-run duration per probe, fits the cap; the dry-run duration and K are recorded. Hitting the cap records the campaign as aborted.
-- Exit codes: 0 pass, 1 fail, 2 aborted, incomplete or invalid (the record names which), 3 refused.
+- Exit codes: 0 pass, 1 fail (1a or TRDD-Z41A13XV failed; a failure outranks incomplete, since one failing probe already decides it), 2 aborted, incomplete or invalid (the record names which), 3 refused.
 
 ## Verdicts
 
@@ -56,12 +56,12 @@ The output prints a header line `<path>:` per file, then one line per test, `(pa
 
 ## Records
 
-One JSON line per probe in `reports_dev/redos-load-harness/`: exit code, pass and fail counts, each row with its verdict and its test outcome, the Z41A13XV tests, collateral failures, undecided count, invalid reason if any, load at start and end, ambient estimate, dry-run flag.
+One JSON line per probe in `reports_dev/redos-load-harness/`: exit code, pass and fail counts, each row with its verdict and its test outcome, the Z41A13XV tests, collateral failures, undecided count, invalid reason if any, load at start and end, ambient estimate, dry-run flag. A closing `kind: campaign` line records the status, reason, exit code, both verdicts, planned K, dry-run seconds, ambient estimate and peak load, so a refused, aborted or invalid campaign is recorded too.
 
 ## Tests
 
 - In the release gate (default pytest run): pure tests for the worker-count formula, the ambient refusal and the verdict rules; an import-existence test that every name `probe.load.ts`, `old-quadratic.ts` and `timing.ts` import from `../../patterns` and `../../rules/*` still exists as an export there (plain text check, the only guard between releases).
-- Only with `REDOS_HARNESS_REAL=1` (skipped otherwise, because `pyproject.toml` deselects no marker): an abort test that feeds the sampler a reading of 61 while real workers run and asserts each recorded PID is reaped (`waitpid`, then `kill(pid, 0)` raises); an orphan test that SIGKILLs the harness in a workers-only mode and asserts its workers exit within 10 s; a smoke run (K=1, N=2) that proves only that the harness runs end to end, skipped without `claude`. These tests use a worker lifetime of about 30 s and kill the recorded process group in a `finally`, then assert every PID is gone, whatever the outcome. C2's report includes one such run.
+- Only with `REDOS_HARNESS_REAL=1` (skipped otherwise, because `pyproject.toml` deselects no marker): an abort test that feeds the sampler a reading of 61 while real workers run and asserts each recorded PID is reaped (`waitpid`, then `kill(pid, 0)` raises); an orphan test that SIGKILLs the harness in a workers-only mode and asserts its workers exit within 10 s; a smoke run (K=1, N=2) that proves only that the harness runs end to end, skipped without `claude`. These tests use a worker lifetime of about 30 s (the smoke run 150 s, because its dry run plus one probe take about 40 s and a worker that exits ends the run) and kill the recorded process group in a `finally`, then assert every PID is gone, whatever the outcome. C2's report includes one such run.
 - No test runs the full 35-worker campaign.
 
 ## Elsewhere

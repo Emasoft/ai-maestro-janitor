@@ -98,6 +98,7 @@ def assemble_plugin_dir(tmp: Path, mod: str, mod_dir: Path) -> list[str]:
     shutil.copytree(mod_dir, tmp / "hooks" / mod, ignore=shutil.ignore_patterns(".DS_Store"))
     # WHY computed from the copy, never a hardcoded list: a renamed or added test file is checked
     # automatically, and a stale list would fail on the first rename.
+    # WHY hooks/<mod>/tests/load/*.load.ts are deliberately uncollected: `claude plugin test` runs only *.test.ts and *.test.tsx, so the ReDoS load probe stays out of the 841 count; the load harness (tests/harness/redos_load_harness.py, TRDD-OD5Z90YL) copies probe.load.ts to probe.test.ts in its own assembly.
     tests_dir = tmp / "hooks" / mod / "tests"
     return sorted(f.relative_to(tmp).as_posix() for pattern in ("*.test.ts", "*.test.tsx") for f in tests_dir.rglob(pattern))
 
