@@ -2568,7 +2568,8 @@ describe('the escaped JSON pair pass runs in linear time with the same matches (
     expect(matchesOf(JSON_ESCAPED, text)).toEqual(expected)
     return expected
   }
-  const SECRET = 'Zq8mK3vT9xLw2RbN5yHc'
+  // Assembled with j() because tests/test_secret_fixture_hygiene.py rejects a contiguous high-entropy literal assigned to a secret-named variable; the value is unchanged.
+  const SECRET = j('Zq8mK3vT9x', 'Lw2RbN5yHc')
   const M = mark('assignment')
 
   const handCases: Array<[string, string]> = [
