@@ -207,6 +207,12 @@ describe('Stripe keys shorter than the old floor are hidden, nothing the old rul
     }
   })
 
+  // The widening over-hides identifiers in two ways the old rule did not: a 16-19 letter camelCase run (the lower floor), and a camelCase run followed by an underscore (no trailing \b). Both are accepted over-hiding, the safe direction; both cases leave the old rule's text visible, so this test fails on the old rule. A change that stops hiding either must change this test on purpose.
+  test('deliberate over-hide pin: camelCase identifiers after sk_test_ that the old rule left visible are now hidden, the safe direction', () => {
+    expect(redact(`value: ${j('sk', '_test_')}createPaymentIntent end`).text).toBe(`value: ${mark('stripe-key')} end`)
+    expect(redact(`value: ${j('sk', '_test_')}createPaymentIntentHelper_spec end`).text).toBe(`value: ${mark('stripe-key')}_spec end`)
+  })
+
   test('every span the old rule matched is still hidden by the new rule, over the suite sample and generated lengths', () => {
     const suiteSamples = [j('sk', '_live_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7')]
     const generated: string[] = []
