@@ -320,6 +320,32 @@ def prompt_field_shows_only(pane_text: str, command: str) -> bool:
     return bool(re.fullmatch(r"/[^\s/]\S*(?: \S+)*", field))
 
 
+
+# Claude Code's collapsed-paste placeholder, with the optional line count it adds when the
+# pasted text had newlines (`[Pasted text #3 +2 lines]`).
+_PASTE_PLACEHOLDER_RE = re.compile(r"\[Pasted text #\d+(?: \+\d+ lines)?\]")
+
+def _is_paste_residue(field: str, command: str) -> bool:
+    """True iff `field` is a `[Pasted text #N]` placeholder, optionally followed by a SUFFIX of
+    `command` — the shape our own over-800-char typing leaves behind (issue #343): the first
+    over-threshold chunk collapses into the placeholder and the short remainder is typed
+    normally, e.g. `[Pasted text #283]eloper-plugin!`. Space runs are collapsed as in
+    `prompt_field_shows_only`. This is a RESIDUE test only: a placeholder is never accepted as
+    a valid read-back, because Claude Code submits a leading placeholder as prose, not as the
+    slash command."""
+    norm = _norm_wrap_spaces(field)
+    match = _PASTE_PLACEHOLDER_RE.match(norm)
+    if match is None:
+        return False
+    rest = norm[match.end():]
+    return rest == "" or _norm_wrap_spaces(command.strip()).endswith(rest)
+
+def field_is_paste_residue(pane_text: str, command: str) -> bool:
+    """`_is_paste_residue` over a pane capture; False when no field is found."""
+    field = extract_prompt_field(pane_text)
+    return field is not None and _is_paste_residue(field, command)
+
+
 def applescript_quote(command: str) -> str:
     """`command` escaped for interpolation inside an AppleScript double-quoted string —
     the SSOT sink-hardening for every iTerm `write text "…"` builder (audit finding 3).
@@ -449,6 +475,19 @@ def channel_is_readable(terminal: Mapping[str, str]) -> bool:
     return False
 
 
+
+# WHY a long command is typed in pieces (issue #343). Claude Code 2.1.325 collapses any SINGLE
+# input chunk longer than 800 chars into a `[Pasted text #N]` placeholder (`R8=800` in the
+# 2.1.325 binary, measured). A `/goal <long text>` typed in one write arrives as one chunk
+# (1036 chars on 2026-11-13), is collapsed, and a collapsed `/goal` can never run as a command:
+# it stranded in the input box and blocked every later /clear chain for 19 h. Every piece must
+# stay far below 800, and the pause lets the TUI consume one piece before the next arrives so
+# two pieces are not coalesced back into one over-threshold read. Three 250-char pieces
+# coalesced (750) would still be under 800; the 0.3 s gap is a chosen floor, not a measurement.
+_TYPE_CHUNK_CHARS = 250
+_TYPE_CHUNK_GAP_S = 0.3
+
+
 def build_type_only_steps(
     terminal: Mapping[str, str], command: str
 ) -> list[list[str]] | None:
@@ -460,22 +499,39 @@ def build_type_only_steps(
     `send-keys Enter`), which is correct for a blind send and unusable for a verified one —
     by the time we could look, the command has already run.
 
+    A command longer than `_TYPE_CHUNK_CHARS` is typed as several pieces with a
+    `_TYPE_CHUNK_GAP_S` pause between them (see those constants for why); one that fits is
+    ONE step, exactly as before. Enter is never part of the plan.
+
     A newline in `command` is refused, not escaped: it would submit on its own and defeat
     the split. `applescript_quote` enforces the same invariant on the iTerm side.
     """
     if "\n" in command or "\r" in command:
         raise ValueError("command must be a single line (a newline would submit it early)")
     kind = terminal.get("kind", "")
+    pieces = [
+        command[i : i + _TYPE_CHUNK_CHARS] for i in range(0, len(command), _TYPE_CHUNK_CHARS)
+    ] or [command]
     if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
         # `-l` is LITERAL: without it tmux interprets the text as key names, so a command
         # containing e.g. "Enter" would be sent as the Enter KEY rather than typed.
-        return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "-l", command]]
-    if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
-        return [["RUN", "osascript", "-e", _iterm_session_script(
-            terminal["session_id"],
-            [f'            write text "{applescript_quote(command)}" without newline'],
-        )]]
-    return None
+        typing = [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "-l", piece] for piece in pieces]
+    elif kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
+        typing = [
+            ["RUN", "osascript", "-e", _iterm_session_script(
+                terminal["session_id"],
+                [f'            write text "{applescript_quote(piece)}" without newline'],
+            )]
+            for piece in pieces
+        ]
+    else:
+        return None
+    plan: list[list[str]] = []
+    for step in typing:
+        if plan:
+            plan.append(["SLEEP", str(_TYPE_CHUNK_GAP_S)])
+        plan.append(step)
+    return plan
 
 
 # The model badge Claude Code draws in its status line, e.g. `🤖 Opus 5 v2.4.1`. Literal
@@ -1151,10 +1207,21 @@ def inject_until_sent(
         cmd_rows = -(-len(command.strip()) // (width - 2)) if width and width > 2 else 0
         rows_expected = cmd_rows + 1 if cmd_rows > 1 else cmd_rows
         rows = max(rows_seen or 1, rows_expected)
-        if rows <= 1:
+        # A stranded `[Pasted text #N]` placeholder (issue #343) is one row, so the row count
+        # alone would end the tidy after pass 1 without ever reading back whether the chip went
+        # away. It is OUR residue (a collapsed copy of our own command), so the passes repeat
+        # until the field reads empty, bounded by `_CLEAR_MAX_PASSES`: a chip may need more than
+        # one clear to delete, and the unfixed code left it in the box for 19 h, blocking
+        # every later /clear chain on rule 1.
+        residue = _is_paste_residue(extract_prompt_field(before_text) or "", command)
+        if rows <= 1 and not residue:
             return ""
         norm_cmd = _norm_wrap_spaces(command.strip())
-        limit = min(rows, _CLEAR_MAX_PASSES)
+
+        def _is_ours(f: str) -> bool:
+            return norm_cmd.endswith(_norm_wrap_spaces(f)) or _is_paste_residue(f, command)
+
+        limit = _CLEAR_MAX_PASSES if residue else min(rows, _CLEAR_MAX_PASSES)
         local_deadline = max(deadline, clock() + limit * 2 * _SETTLE_READ_INTERVAL_S)
         field: str | None = None  # None = unknown (unread, unreadable, or deadline hit)
         while clock() < local_deadline:
@@ -1165,7 +1232,7 @@ def inject_until_sent(
                 return ""
             if field is None or passes >= limit:
                 break
-            if not norm_cmd.endswith(_norm_wrap_spaces(field)) or typing_probe(terminal):
+            if not _is_ours(field) or typing_probe(terminal):
                 break
             clear_fn()
             passes += 1
@@ -1192,7 +1259,12 @@ def inject_until_sent(
         if not typed_once or clear_fn is None:
             return ""
         text = reader(terminal)
-        if text is not None and prompt_field_shows_only(text, command):
+        # Our own stranded paste placeholder counts as ours too: after a collapsed /goal the field
+        # holds `[Pasted text #N]` (+ maybe a tail), which is not our command but is OUR residue
+        # and, left in place, blocked every later /clear chain for 19 h (issue #343).
+        if text is not None and (
+            prompt_field_shows_only(text, command) or field_is_paste_residue(text, command)
+        ):
             return _clear_ours(text)
         return ""
 

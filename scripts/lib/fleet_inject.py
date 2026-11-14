@@ -232,6 +232,11 @@ def _readback_split_plan(terminal: dict, steps_for, *, command: str) -> dict | N
     if not steps:
         return None
     if rt["kind"] == "iterm":
+        # `fire()` runs ONE osascript for an iTerm plan. `build_type_only_steps` splits a command
+        # over `_TYPE_CHUNK_CHARS` into several osascript steps (issue #343); sending only the
+        # first would type a truncated command, so refuse the plan instead.
+        if len(steps) != 1:
+            return None
         return {"channel": "iterm", "command": command, "delay_s": 0.0, "osascript": steps[0][3]}
     return {"channel": "tmux", "command": command, "delay_s": 0.0, "steps": steps}
 
