@@ -429,7 +429,16 @@ const jsonPair = (escapes: string, value: string): RegExp =>
 // returned unchanged, so the escaped pass still sees the pairs inside `"args": "{\"token\":...}"` whichever runs
 // first. The order does not decide what is hidden. Escaped pairs run first only to refine the count when the outer
 // key is itself secret-named: the inner secret is counted, then the outer value (swap measured 2026-11-04).
-const JSON_ESCAPED = jsonPair(String.raw`\\+`, String.raw`[^"\\\r\n]{3,}`)
+// WHY JSON_ESCAPED is anchored on the opening quote and not on the backslash run (TRDD-U5O72MGA): the form `(\\+)"name"...` took the whole rest of a run of n backslashes
+// from every backslash of the run and backtracked it, O(n) per start and O(n^2) overall: measured under bun (JavaScriptCore, the engine of claude plugin test), this pass
+// alone took 278, 1,115 and 4,477 ms at 27K, 54K and 108K backslashes (ratio 4.0 per doubling) and was 99% of redact(), for a run of backslashes and for a quote followed by escaped pairs alike.
+// The escape run of a match is not free: the run after the key name must be exactly the run before its opening quote (`\1"`), and only the last `\1` backslashes of a longer run
+// before the quote are group 1 (a run of 2 before the quote and one after the name matches from the second backslash). So the match is found from the quote: the lookahead
+// reads `"name` and the run after it once, atomically, and takes that run as group 1; the lookbehind `(?<=\1)` then checks that the same number of backslashes stands before the quote.
+// Each quote costs the name and the run after it, and a name and a run contain no quote, so the whole pass is linear. The match starts at the quote, not at the run, so the
+// text in front of it is not part of it: hideEscapedPair drops the run from what hideJsonPair builds. Checked against the old pattern on 500,000 seeded strings of
+// backslashes, quotes, escape pairs, JSON fragments and secrets in escaped JSON with 0 differences, and at 1 MB redact() takes about 16 ms on each shape, 57 ms with a secret after the run (the tests of TRDD-U5O72MGA).
+export const JSON_ESCAPED = new RegExp(String.raw`(?="[A-Za-z0-9_.-]+(\\+)")(?<=\1)"([A-Za-z0-9_.-]+)\1"(\s*:\s*)\1"([^"\\\r\n]{3,})(\1"|\\*$)`, 'gm')
 // WHY JSON_ESCAPE_BOUND (TRDD-AGOEWF2E): the escape loop of JSON_PLAIN, `(?:\\.[^"\\\r\n]*)*`, repeats once per escape pair, so it has the iteration-count ceilings
 // described above URL_PASSWORD in the engine of claude plugin test: about 35 times slower per character past about 63.8K iterations, and no match at all, silently, from
 // 589,823 iterations (measured), so a secret-named value with that many escapes was not hidden. The loop is bounded to `{0,JSON_ESCAPE_BOUND}` iterations. The bound sits below
@@ -526,11 +535,16 @@ function redactAssignments(text: string, hits: Hits, found: Map<string, string>)
     // `end` is the closing quote, or what was left of it (nothing, or some of its backslashes) when the value ran to the end of the line.
     return `${esc}"${name}${esc}"${sep}${esc}"${mark('assignment')}${end}`
   }
+  // JSON_ESCAPED matches from the opening quote, so the backslash run in front of the pair is outside the match and is not written again (TRDD-U5O72MGA).
+  const hideEscapedPair = (match: string, esc: string, name: string, sep: string, value: string, end: string): string => {
+    const hidden = hideJsonPair(match, esc, name, sep, value, end)
+    return hidden === match ? match : hidden.slice(esc.length)
+  }
   // WHY three statements and not a loop over the two patterns: the over-bound pass must run between them, and BEFORE JSON_PLAIN. With its
   // `{0,JSON_ESCAPE_BOUND}` and the `\\*$` end alternative, JSON_PLAIN claims a PREFIX of an over-bound value when the rest of its line is only
   // backslashes (more than the bound of `\\` pairs, cut off at the end of the line): it hides the prefix and leaves the backslashes visible. The pass
   // hides the whole value first, so JSON_PLAIN never sees it (TRDD-AGOEWF2E).
-  out = out.replace(JSON_ESCAPED, hideJsonPair)
+  out = out.replace(JSON_ESCAPED, hideEscapedPair)
   out = redactOverBoundJson(out, hits, found)
   out = out.replace(JSON_PLAIN, hideJsonPair)
   return out

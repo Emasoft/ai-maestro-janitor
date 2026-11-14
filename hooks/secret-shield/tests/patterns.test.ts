@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
+import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, JSON_ESCAPED, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
@@ -2554,4 +2554,134 @@ describe('jwt tokens with shorter segments or a non-eyJ payload segment are hidd
       expect(out).toBe(jwtMark)
     })
   }
+})
+
+describe('the escaped JSON pair pass runs in linear time with the same matches (TRDD-U5O72MGA)', () => {
+  // The pattern exactly as it was before TRDD-U5O72MGA. It is the reference the current JSON_ESCAPED must match span for span, group for group.
+  const OLD_ESCAPED = /(\\+)"([A-Za-z0-9_.-]+)\1"(\s*:\s*)\1"([^"\\\r\n]{3,})(\1"|\\*$)/gm
+  // The old match starts at the backslash run (group 1) and the current one at the opening quote, so a match is identified by the position of its opening quote and
+  // its groups: the two patterns agree exactly when the same pairs match with the same groups.
+  const matchesOf = (pattern: RegExp, text: string): string[] =>
+    [...text.matchAll(new RegExp(pattern.source, pattern.flags))].map(m => `${m.index + m[0].indexOf('"')}|${m[1].length}|${m[2]}|${m[3]}|${m[4]}|${m[5]}`)
+  const sameAsOld = (text: string): string[] => {
+    const expected = matchesOf(OLD_ESCAPED, text)
+    expect(matchesOf(JSON_ESCAPED, text)).toEqual(expected)
+    return expected
+  }
+  const SECRET = 'Zq8mK3vT9xLw2RbN5yHc'
+  const M = mark('assignment')
+
+  const handCases: Array<[string, string]> = [
+    ['one level of escaping', `{\\"api_key\\":\\"${SECRET}\\"}`],
+    ['two levels of escaping', `\\\\\\"api_key\\\\\\":\\\\\\"${SECRET}\\\\\\"`],
+    ['a run of 2 before the key quote and one backslash after the key: the match starts inside the run', `\\\\"api_key\\":\\"${SECRET}\\"`],
+    ['a run of 3 before the key quote and 2 after the key: no match', `\\\\\\"api_key\\\\":\\\\"${SECRET}\\\\"`],
+    ['a run of 1 before the key quote and 2 after the key: no match', `\\"api_key\\\\":\\"${SECRET}\\"`],
+    ['a value cut at the end of the text, with no closing escape', `\\"api_key\\":\\"${SECRET}`],
+    ['a value cut between the closing backslashes and the quote', `\\\\\\"api_key\\\\\\":\\\\\\"${SECRET}\\\\`],
+    ['a value cut at the end of a line', `\\"api_key\\":\\"${SECRET}\n\\"api_key\\":\\"${SECRET}\\"`],
+    ['spaces around the colon', `\\"api_key\\" : \\"${SECRET}\\"`],
+    ['a value of 2 characters', '\\"api_key\\":\\"ab\\"'],
+    ['a value of exactly 3 characters', '\\"api_key\\":\\"abc\\"'],
+    ['a value with a backslash in it', `\\"api_key\\":\\"${SECRET}\\n${SECRET}\\"`],
+    ['two pairs in one line', `\\"a\\":\\"${SECRET}\\",\\"b\\":\\"${SECRET}\\"`],
+    ['two pairs of different levels in one line', `\\"a\\":\\"${SECRET}\\",\\\\\\"b\\\\\\":\\\\\\"${SECRET}\\\\\\"`],
+    ['a plain pair has no backslash run and is not read here', `"api_key": "${SECRET}"`],
+    ['a run before a quote with no key after it', '\\\\\\\\\\"'],
+    ['a key quote and a colon with no value', '\\"api_key\\":'],
+    ['a key name that is not a name', '\\"api key\\":\\"abcdef\\"'],
+    ['a long run, then a pair', `${'\\'.repeat(40)}\\"api_key\\":\\"${SECRET}\\"`],
+    ['a pair whose second quote is preceded by a longer run than the first', `\\"api_key\\\\\\":\\"${SECRET}\\"`],
+    ['an unescaped opening quote after the run', `\\"api_key\\":"${SECRET}"`],
+    ['a run of 1 before the key quote and runs of 3 after the name and the colon: no match', `\\"api_key\\\\\\":\\\\\\"${SECRET}\\\\\\"`],
+  ]
+  for (const [name, text] of handCases) {
+    test(`same matches as the old pattern: ${name}`, () => {
+      sameAsOld(text)
+    })
+  }
+
+  test('the hand cases cover both a hit and a miss', () => {
+    const hit = handCases.filter(([, text]) => matchesOf(OLD_ESCAPED, text).length > 0).length
+    expect(hit).toBeGreaterThanOrEqual(10)
+    expect(handCases.length - hit).toBeGreaterThanOrEqual(5)
+  })
+
+  test('the hidden text is the secret and nothing else for a pair inside escaped JSON', () => {
+    const { text, hits } = redact(`{\\"api_key\\":\\"${SECRET}\\"}`)
+    expect(hits).toEqual({ assignment: 1 })
+    expect(text).toBe(`{\\"api_key\\":\\"${M}\\"}`)
+  })
+
+  test('the match that starts inside a run keeps the run it did not use', () => {
+    const { text, hits } = redact(`\\\\"api_key\\":\\"${SECRET}\\"`)
+    expect(hits).toEqual({ assignment: 1 })
+    expect(text).toBe(`\\\\"api_key\\":\\"${M}\\"`)
+  })
+
+  test('600 seeded random strings give the old pattern\'s matches', () => {
+    let seed = 20261114
+    const next = (): number => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32)
+    const pieces = ['\\', '\\', '\\\\', '\\\\\\', '\\\\\\\\', '"', '"', '\\"', '\\\\\\"', '\\\\"', 'key', 'api_key', 'token', 'a', 'Z', '_', '-', '.', ':', ':', ' ', '  ', '\t', '\n', '\r\n',
+      'value', 'abc', 'abcd', 'ab', 'x y', '\\u0041', '\\n', '{', '}', ',', '"api_key"', '"password":', '"token": "', '{"password":"hunter2xyz"}', '{\\"token\\":\\"abcdef123\\"}',
+      '{\\\\\\"secret\\\\\\":\\\\\\"zzzzzz\\\\\\"}', '\\"a\\":\\"bbbb\\"', '\\"a\\"', '\\":\\"', '"a":"', '\\\\\\":\\\\\\"', 'secret', 'sk-live-abcdef', '$']
+    let withMatch = 0
+    let withTwo = 0
+    for (let i = 0; i < 600; i++) {
+      let text = ''
+      for (let k = 1 + Math.floor(next() * 30); k > 0; k--) text += pieces[Math.floor(next() * pieces.length)]
+      const found = sameAsOld(text)
+      if (found.length > 0) withMatch++
+      if (found.length > 1) withTwo++
+    }
+    // A generator that never produced a match, or never two in one text, would pass vacuously.
+    expect(withMatch).toBeGreaterThanOrEqual(150)
+    expect(withTwo).toBeGreaterThanOrEqual(50)
+  })
+
+  // The old pattern took the whole rest of the run from every backslash of a run and backtracked it, so n backslashes cost n * n / 2 steps: 4.5 s at 108K
+  // backslashes and 1.1 s at 54K (measured under bun, the engine of claude plugin test: ratio 4.0 per doubling), 25 s expected at 256 KB. 1 s is generous for the current pattern.
+  const KB256 = 256 * 1024
+  const MB = 1024 * 1024
+  const shapes: Array<[string, (n: number) => string]> = [
+    ['backslashes', n => '\\'.repeat(n)],
+    ['escaped pairs after an opening quote', n => `"${'\\\\'.repeat(n / 2)}`],
+    ['backslashes and then a quote', n => `${'\\'.repeat(n)}"`],
+  ]
+  for (const [name, shape] of shapes) {
+    test(`256 KB of ${name} is redacted in under a second`, { timeoutMs: 120000 }, () => {
+      const start = performance.now()
+      const { text, hits } = redact(shape(KB256))
+      expect(performance.now() - start).toBeLessThan(1000)
+      expect(hits).toEqual({})
+      expect(text).toBe(shape(KB256))
+    })
+  }
+
+  // A quadratic pattern takes about 16x its 256 KB time at 1 MB, so on any hardware this case separates the old pattern from the linear one.
+  for (const [name, shape] of shapes) {
+    test(`1 MB of ${name} is redacted in under a second`, { timeoutMs: 120000 }, () => {
+      const start = performance.now()
+      const { text, hits } = redact(shape(MB))
+      expect(performance.now() - start).toBeLessThan(1000)
+      expect(hits).toEqual({})
+      expect(text).toBe(shape(MB))
+    })
+  }
+
+  // JavaScriptCore has silently missed matches of a long loop in this repo (TRDD-AGOEWF2E), so assert the hide, not only the time.
+  test('a secret in escaped JSON after a 1 MB backslash run is still hidden', { timeoutMs: 120000 }, () => {
+    const run = '\\'.repeat(MB)
+    const { text, hits } = redact(`${run}\n{\\"api_key\\":\\"${SECRET}\\"}`)
+    expect(hits.assignment).toBe(1)
+    expect(text).not.toContain(SECRET)
+    expect(text).toBe(`${run}\n{\\"api_key\\":\\"${M}\\"}`)
+  })
+
+  test('a secret in escaped JSON that follows a 1 MB backslash run on the same line is hidden', { timeoutMs: 120000 }, () => {
+    const run = '\\'.repeat(MB)
+    const { text, hits } = redact(`${run}"api_key\\":\\"${SECRET}\\"`)
+    expect(hits.assignment).toBe(1)
+    expect(text).toBe(`${run}"api_key\\":\\"${M}\\"`)
+  })
 })
