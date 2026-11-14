@@ -18,7 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T22:46:01+0100
 blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E]
-unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, decision:owner-answers-TEP6F3A3-wiring-gate, decision:hook-timeout-model-copy, decision:hook-timeout-stored-copy]
+unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, trdd:AGOEWF2E terminal, decision:owner-answers-TEP6F3A3-wiring-gate, decision:hook-timeout-model-copy, decision:hook-timeout-stored-copy]
 pre-block-column: design
 blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
 blocker-holds-if: not-match:^3$
@@ -71,4 +71,4 @@ Split out of TRDD-M1218EMH.
 
 Hook timeout, model copy (from TRDD-U5O72MGA's Done-when (1) answer, read from the mods docs and register.ts, not observed live): session.append withholds a row whose scan did not finish (fails closed): accept the withheld notice in place of the content?
 Hook timeout, stored and displayed copy (same source): tool.call has no .catch, so a tool result whose scan outlasts the 10 s limit is expected to be stored and shown unhidden (fails open): accept, or make it fail closed? f38c30c8 removed one known cause (JSON_ESCAPED); TRDD-MEYVDFJ9 audits the others.
-Gated: unblock-when carries decision:hook-timeout-model-copy and decision:hook-timeout-stored-copy; a decision: predicate never clears on its own, so the card stays blocked until the owner answers both, even after its blocked-by cards close.
+Gated: unblock-when carries decision:hook-timeout-model-copy and decision:hook-timeout-stored-copy; a decision: predicate never clears on its own, so the card stays blocked until the owner answers both, even after its blocked-by cards close; the owner's answer clears a predicate: remove it with the answer quoted verbatim in the Approval log.
