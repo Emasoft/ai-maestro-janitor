@@ -4,7 +4,7 @@ title: publish.py runs the secret shield TypeScript tests
 column: blocked
 status: tasked
 created: 2026-11-04T20:41:24+0100
-updated: 2026-11-14T04:26:39+0100
+updated: 2026-11-14T07:49:05+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -56,3 +56,4 @@ The secret shield's TypeScript tests (hooks/secret-shield/tests) run in no autom
 - 2026-11-14 stage position: the stage landed in c0da4a21 (TRDD-3GP0D06D) as publish.py step 2b inside stage_tests and as gate G3b in run_gate; this change generalizes it to both mods (run_mod_tests loops over _MOD_TESTS = secret-shield, liveness; the script gained --mod with a per-mod floor, liveness 15). In main() the order is stage_bypass_guard, stage_check_clean, stage_lint, stage_tests (2b runs first inside it, before pytest), stage_validate, stage_ci_preflight, stage_marketplace_registration, stage_consistency, stage_bump, so 2b runs before stage_bump. Fail-closed branches kept: no claude, failed or timed-out run, unparseable counts, a test file missing from the output, count below the floor.
 - 2026-11-14 Done-when status. (1) invocation recorded: met, above. (2) stage before stage_bump that blocks on a failing test or a missing claude: met in code; shown by real runs of the script (tests/test_run_secret_shield_tests.py: missing claude on PATH, an injected failing shield test, an injected failing liveness test, timeout, floor, no test files, all passed), and run_mod_tests(root) was called directly and returned 0. OPEN: no full publish.py run was made (a bump is not allowed here), so there is no real run of publish.py itself, and none of publish.py itself inside a Claude Code session. The script and pytest runs above did execute inside this Claude Code session tool calls (claude plugin test was a child of a Bash tool call), but that is the script run from a session, not publish.py run from a session, and this note does not count it as the item. (3) ReDoS harness: OPEN, TRDD-OD5Z90YL is in column todo. (4) liveness checkbox: met, ticked. CI is not changed. The card was not moved.
 - 2026-11-14 — This card and TRDD-3GP0D06D overlapped; 3GP0D06D (c0da4a21) delivered the publish stage, this card added the liveness suite. The open publish.py-run item can only be met at the next owner-approved publish.
+2026-11-14: before the first real publish run, check whether CPV flags the known-quadratic regex fixture hooks/secret-shield/tests/load/old-quadratic.ts (committed in bbe8bbf4, shipped with the plugin, used only by the TRDD-OD5Z90YL load harness); a CPV finding there must be resolved without deleting the fixture's purpose.

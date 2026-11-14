@@ -35,9 +35,10 @@ Show that the secret-shield timing checks hold under steady CPU contention. Cont
 
 The output prints a header line `<path>:` per file, then one line per test, `(pass) <name> [time]` or `(fail) <name> [time]`. A test inside `describe` is named `<describe> > <test>`. No file:line is printed, so tests are attributed by file header plus full name.
 
-- Probe count: a verdict needs at least 20 non-dry-run probes. If K comes out below 20, the campaign is incomplete (neither pass nor fail), and the cap or the worker count is restated in this file before any re-run.
-- 1a: every row of `probe.test.ts` passes in each of at least 20 non-dry-run probes, the quadratic mutant rows (which assert non-linear) included, and the probe reported the number of rows its `expected-rows` header declares. A mutant row that stays linear, or a missing probe, makes 1a NOT MET.
-- TRDD-Z41A13XV: in `hooks/secret-shield/tests/patterns.test.ts`, the two tests of the describe block `a port-skip query scan is linear up to 256 KB and still tells a port from a password` (the 8x-growth test and the same-growth-then-short-password test) pass in each of at least 20 non-dry-run probes. If increment 1b has replaced them, the replacement counts only after it has been shown red on the regex the original assert guards (the 1b mutant proof).
+- Probe count: a verdict needs K = 20 non-dry-run probes, and all K count (no best-of selection). If K comes out below 20, the campaign is incomplete (neither pass nor fail), and the cap or the worker count is restated in this file before any re-run.
+- Undecided rows: a mutant row whose estimator ran out of rounds is undecided, not a detection. Any undecided mutant row makes its probe undecided, and an undecided probe makes the campaign incomplete (neither pass nor fail).
+- 1a: every row of `probe.test.ts` passes in each of the K = 20 non-dry-run probes, the quadratic mutant rows (detected only on a superlinear or escaped verdict) included, and the probe reported the number of rows its `expected-rows` header declares. A mutant row judged linear, or a missing probe, makes 1a NOT MET.
+- TRDD-Z41A13XV: in `hooks/secret-shield/tests/patterns.test.ts`, the two tests of the describe block `a port-skip query scan is linear up to 256 KB and still tells a port from a password` (the 8x-growth test and the same-growth-then-short-password test) pass in each of the K = 20 non-dry-run probes. If increment 1b has replaced them, the replacement counts only after it has been shown red on the regex the original assert guards (the 1b mutant proof).
 - Any other failing test is recorded by name as collateral and makes neither verdict pass or fail.
 - The 20/20 must hold wherever a probe lands (performance or efficiency core).
 
@@ -51,12 +52,11 @@ Pure tests for the worker-count formula and the ambient refusal; an abort test t
 
 ## Step C additions (reviews of c6e06bb4 and bbe8bbf4)
 
-- Probe count wording: the campaign runs all K probes with K = 20; no best-of selection from a larger run.
+- Files step C may touch: `tests/harness/redos_load_harness.py`, its pytest file, the import-existence pytest, one comment line in `scripts/run_secret_shield_tests.py`, and, only if the probe does not expose a mutant row's verdict reason, `hooks/secret-shield/tests/load/probe.load.ts` and `timing.ts`. Any change to those two repeats the step B checks: the gate still runs 841, and an idle assembly shows all rows under the probe.
 - The probe copy goes in the same directory inside the temp assembly: `hooks/secret-shield/tests/load/probe.test.ts`, relative to the temp dir, the same form `assemble_plugin_dir` returns.
 - A fresh temp dir per probe (`assemble_plugin_dir` raises on a non-empty one).
-- Two probe checks: the file header proves the probe was collected; the row check proves all rows ran. The row check asserts the counts per kind recorded here, 6 linear rows (L1, L1c, L2d, L3, L3b, L3c) and 7 mutant rows (Q1, Q2, Q2b, Q3, Q4, Q5, Q6), or their names, not only the `expected-rows` total.
-- A mutant row counts as detected only on a superlinear or escaped verdict; a row that ends because the estimator ran out of rounds is recorded as undecided, not as a detection. If the probe does not expose the reason, step C makes it do so.
-- An import-existence pytest: every name `probe.load.ts` and `old-quadratic.ts` import from `../../patterns` and `../../rules/*` still exists as an export in those files (plain text check). No TypeScript checker covers `hooks/`, and the release gate never loads these files, so this is the only guard between releases.
+- Two probe checks: the file header proves the probe was collected; the row check proves all rows ran. The row check asserts the counts per kind, 6 linear rows (L1, L1c, L2d, L3, L3b, L3c) and 7 mutant rows (Q1, Q2, Q2b, Q3, Q4, Q5, Q6), or their names, not only the `expected-rows` total.
+- An import-existence pytest: every name that `probe.load.ts`, `old-quadratic.ts` and `timing.ts` import from `../../patterns` and `../../rules/*` still exists as an export in those files (plain text check). No TypeScript checker covers `hooks/`, and the release gate never loads these files, so this is the only guard between releases.
 - One WHY line in `scripts/run_secret_shield_tests.py` naming `tests/load/*.load.ts` as deliberately uncollected.
-- Before 3.8.14 is published: check whether CPV flags the shipped quadratic fixture.
+- The CPV check of the shipped quadratic fixture is tracked on TRDD-KADV0ZO6 (the first real publish run).
 - The step B files were copied verbatim from the scratch versions used in the idle 1a runs (25 of 25); the main agent did not reread them line by line.
