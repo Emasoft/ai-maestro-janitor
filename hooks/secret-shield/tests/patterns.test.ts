@@ -4,6 +4,7 @@ import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redac
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { pypiToken } from '../rules/dev-services'
 import { privateKey } from '../rules/key-material'
+import { stripeSecretKey } from '../rules/messaging-payments'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
@@ -159,6 +160,70 @@ describe('GitHub tokens shorter than the old floors are hidden, nothing the old 
             expect(newSpans.some(([s, e]) => s <= start && e >= end)).toBe(true)
             expect(done).not.toContain(m[1])
           }
+        }
+      }
+    }
+    // A comparison over zero old matches would pass for any new rule.
+    expect(oldSpans).toBeGreaterThan(40)
+  })
+})
+
+// Stripe secret and restricted key length floor (TRDD-6A3XW3VO, 2026-11-14): the floor went 20 -> 16 and the trailing \b was dropped.
+// WHY the differential test: the widening must be a superset. Every span the old rule hid must still be hidden, so the old pattern is kept here as a constant.
+describe('Stripe keys shorter than the old floor are hidden, nothing the old rule hid becomes visible', () => {
+  const OLD_STRIPE = /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g
+  // The new pattern is the shipped rule's own, copied so a run keeps no lastIndex (rules/rule.ts); the old one is the constant above.
+  const NEW_STRIPE = new RegExp(stripeSecretKey.pattern.source, 'g')
+  const PREFIXES = [j('sk', '_live_'), j('sk', '_test_'), j('rk', '_live_'), j('rk', '_test_')]
+  // Mixed fake bodies built from repeated characters at run time: no secret-looking literal is committed.
+  const cycle = (n: number, alphabet: string) => alphabet.repeat(Math.ceil(n / alphabet.length)).slice(0, n)
+  const stripe = (n: number, prefix = PREFIXES[0]) => prefix + cycle(n, 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5')
+
+  test('a key with a 16 to 19 character body is hidden, for sk_live, sk_test, rk_live and rk_test', () => {
+    for (const prefix of PREFIXES) {
+      for (const n of [16, 17, 19]) {
+        const { text, hits } = redact(`value: ${stripe(n, prefix)} end`)
+        expect(text).toBe(`value: ${mark('stripe-key')} end`)
+        expect(hits).toEqual({ 'stripe-key': 1 })
+      }
+    }
+  })
+
+  test('the old rule hid a body of 20 and 21 characters, the new one hides them too', () => {
+    for (const prefix of PREFIXES) {
+      for (const n of [20, 21]) expect(redact(`value: ${stripe(n, prefix)} end`).text).toBe(`value: ${mark('stripe-key')} end`)
+    }
+  })
+
+  test('FLOOR pin (minimum length): a body of 15 characters stays visible', () => {
+    for (const prefix of PREFIXES) expect(redact(`value: ${stripe(15, prefix)} end`).text).toContain(stripe(15, prefix))
+  })
+
+  // WHY: the old trailing \b never matched when the key was followed by an underscore (a word character), so the whole key stayed visible.
+  test('a key whose tail continues with an underscore is hidden up to the underscore', () => {
+    for (const n of [16, 24]) {
+      const key = stripe(n)
+      expect(redact(`value: ${key}_suffixtext end`).text).toBe(`value: ${mark('stripe-key')}_suffixtext end`)
+    }
+  })
+
+  test('every span the old rule matched is still hidden by the new rule, over the suite sample and generated lengths', () => {
+    const suiteSamples = [j('sk', '_live_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7')]
+    const generated: string[] = []
+    for (const n of [20, 24, 99]) for (const prefix of PREFIXES) generated.push(stripe(n, prefix))
+    const contexts = [(t: string) => t, (t: string) => `value: ${t} end`, (t: string) => `{"token":"${t}"}`, (t: string) => `a ${t}\n`]
+    let oldSpans = 0
+    for (const sample of [...suiteSamples, ...generated]) {
+      for (const frame of contexts) {
+        const text = frame(sample)
+        const done = redact(text).text
+        const newSpans = [...text.matchAll(NEW_STRIPE)].map(m => [m.index, m.index + m[0].length])
+        for (const m of text.matchAll(OLD_STRIPE)) {
+          oldSpans++
+          const start = m.index
+          const end = m.index + m[0].length
+          expect(newSpans.some(([s, e]) => s <= start && e >= end)).toBe(true)
+          expect(done).not.toContain(m[1])
         }
       }
     }
@@ -1530,7 +1595,7 @@ describe('token rule order', () => {
       id('slack-config-token', /(?i:xoxe-\d-[A-Z0-9]{146})/g),
       id('slack-token', /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g),
       id('slack-webhook', /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g),
-      id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g),
+      id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g),
       id('stripe-key', /\b(whsec_[A-Za-z0-9]{24,})\b/g),
       id('google-api-key', /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g),
       id('jwt', /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),

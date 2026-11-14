@@ -4,7 +4,11 @@ import type { Rule } from './rule'
 
 export const slackToken: Rule = { kind: 'slack-token', pattern: /\b(xox[abposr]-[A-Za-z0-9-]{10,})/g, group: 1 }
 export const slackWebhook: Rule = { kind: 'slack-webhook', pattern: /(https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+)/g, group: 1 }
-export const stripeSecretKey: Rule = { kind: 'stripe-key', pattern: /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,})\b/g, group: 1 }
+// WHY the floor is 16 and there is no trailing \b on stripeSecretKey (TRDD-6A3XW3VO, widened 2026-11-14): the old floor (20) has no recorded reason and no test pinned it. jr-redact hid shorter keys the shield left visible;
+// the TRDD-6A3XW3VO evidence report measured 7 such samples (bodies of 16 to 18 characters, all four prefixes sk_live, sk_test, rk_live, rk_test; synthesized from other tools' catalog regexes), all hidden by the 16 floor, and 0 new matches in the three file corpora it scanned (repo text, 40 MB; third-party plugin-cache text, 100 MB, every 8th file).
+// Those are matches in files, not a judgement of false hits and not live tool output. The trailing \b is dropped because a key whose tail continues with an underscore (a word character) never reaches a boundary, so the old rule left the whole key visible.
+// stripeWebhookSecret below is deliberately unchanged.
+export const stripeSecretKey: Rule = { kind: 'stripe-key', pattern: /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g, group: 1 }
 export const stripeWebhookSecret: Rule = { kind: 'stripe-key', pattern: /\b(whsec_[A-Za-z0-9]{24,})\b/g, group: 1 }
 
 // Slack app-level and configuration tokens, standalone (no secret name before them needed).
