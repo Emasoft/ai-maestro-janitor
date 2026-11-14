@@ -4,7 +4,7 @@ title: The secret-shield timing-ratio assert at patterns.test.ts 661 fails under
 column: todo
 status: tasked
 created: 2026-11-14T04:14:05+0100
-updated: 2026-11-14T04:19:00+0100
+updated: 2026-11-14T06:48:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,3 +36,7 @@ Make the assert load-robust (for example a median of N runs, or an absolute ceil
 ## Approval log
 
 - 2026-11-14T04:14:05+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Notes
+
+2026-11-14 main-agent ruling under TRDD-S6GX1DHN: TRDD-OD5Z90YL runs no further loaded timing campaign until the load target here is restated per core (the host has 14 cores) and an ambient-load bound is set. The Done-when's load of 45 or more is not to be used for a new campaign until then.
