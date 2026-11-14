@@ -4,7 +4,7 @@ import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redac
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
-import { privateKey } from '../rules/key-material'
+import { jwt, privateKey } from '../rules/key-material'
 import { stripeSecretKey, stripeWebhookSecret } from '../rules/messaging-payments'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
@@ -1730,7 +1730,7 @@ describe('token rule order', () => {
       id('stripe-key', /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g),
       id('stripe-key', /\b(whsec_[A-Za-z0-9]{24,})/g),
       id('google-api-key', /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g),
-      id('jwt', /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),
+      id('jwt', /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),
       id('npm-token', /\b(npm_[A-Za-z0-9]{36})\b/g),
       id('pypi-token', /\b(pypi-AgE[A-Za-z0-9_-]{50,})/g),
       id('huggingface-token', /\b(hf_[A-Za-z0-9]{34,})\b/g),
@@ -2155,5 +2155,106 @@ describe('a STRONG_NAME needs a mixed-case base64 key; a spaced connection-strin
   test('Server=h; Password = V; with spaces around the = is hidden through looksSecret', () => {
     const [input, want] = [`Server=h; Password = ${fake()};`, `Server=h; Password = ${CONN_KEY};`]
     for (const out of threeWays(input)) expect(out).toBe(want)
+  })
+})
+
+describe('jwt rule runs in linear time with the same matches (TRDD-A7RII4DN)', () => {
+  // The rule exactly as it was before TRDD-A7RII4DN. It is the reference the current rule must match span for span.
+  const oldJwt = { kind: 'jwt', pattern: /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g, group: 1 }
+  // The token is group 1 and ends the match in both rules; the current rule's match may start earlier, at the run start.
+  const spans = (pattern: RegExp, text: string): string =>
+    [...text.matchAll(new RegExp(pattern.source, pattern.flags))].map(m => `${m.index + m[0].length - m[1].length}-${m.index + m[0].length}`).join(',')
+  const sameAsOld = (text: string): string => {
+    expect(spans(jwt.pattern, text)).toBe(spans(oldJwt.pattern, text))
+    const [hitsNow, hitsOld] = [{}, {}]
+    const out = applyRule(text, jwt, hitsNow)
+    expect(out).toBe(applyRule(text, oldJwt, hitsOld))
+    expect(hitsNow).toEqual(hitsOld)
+    return out
+  }
+  const tok = j('eyJ', 'hbGciOiJIUzI1NiJ9', '.', 'eyJ', 'zdWIiOiIxMjM0NTY3ODkwIn0', '.', 'dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U')
+  const tok2 = j('eyJ', 'abcdefghij', '.', 'eyJ', 'klmnopqrst', '.', 'uvwxyz0123')
+  const jwtMark = mark('jwt')
+
+  const handCases: Array<[string, string]> = [
+    ['a token alone, at the text start and end', tok],
+    ['a token after x-, which stands at a word boundary', `x-${tok}`],
+    ['a token after _, which does not', `_${tok}`],
+    ['a token glued to a letter', `x${tok}`],
+    ['a token after a dot', `a.${tok}`],
+    ['several eyJ in one run: the leftmost start wins', `eyJab-eyJcdefghijklmn-${tok}`],
+    ['several eyJ in one run, the first too short to qualify', `eyJabcdefgh-eyJcdefghijklmn-${tok}`],
+    ['a starved third segment (9 characters)', j(tok2.slice(0, -1))],
+    ['a third segment of exactly 10 characters', tok2],
+    ['a first segment of 9 characters after eyJ', j('eyJ', 'abcdefghi', '.', 'eyJ', 'klmnopqrst', '.', 'uvwxyz0123')],
+    ['a first segment of exactly 10 characters after eyJ', j('eyJ', 'abcdefghij', '.', 'eyJ', 'klmnopqrst', '.', 'uvwxyz0123')],
+    ['a second segment of 9 characters after eyJ', j('eyJ', 'abcdefghij', '.', 'eyJ', 'klmnopqrs', '.', 'uvwxyz0123')],
+    ['a second segment that does not start with eyJ', j('eyJ', 'abcdefghij', '.', 'xyJ', 'klmnopqrst', '.', 'uvwxyz0123')],
+    ['two tokens in one line', `${tok} ${tok2}`],
+    ['two tokens joined by a dot', `${tok}.${tok2}`],
+    ['a token followed by dots and more segments', `${tok}.${tok2}.${tok2}`],
+    ['a long run that does not end in a dot', `eyJ-eyJ-eyJ-eyJ-eyJ-eyJ-eyJ-eyJ- ${tok}`],
+    ['a long run ending in a dot and a short eyJ tail', `eyJ-eyJ-eyJ-eyJ-eyJ-eyJ-.eyJabc ${tok}`],
+  ]
+  for (const [name, text] of handCases) {
+    test(`same spans as the old rule: ${name}`, () => {
+      const out = sameAsOld(text)
+      expect(redact(text).text).toBe(out)
+    })
+  }
+
+  test('the hand cases cover both a hit and a miss', () => {
+    const hit = handCases.filter(([, text]) => spans(oldJwt.pattern, text) !== '').length
+    expect(hit).toBeGreaterThanOrEqual(10)
+    expect(handCases.length - hit).toBeGreaterThanOrEqual(5)
+  })
+
+  test('400 seeded random strings give the old rule\'s spans, output and hit count', () => {
+    let seed = 20261114
+    const next = (): number => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32)
+    const pieces = ['eyJ', 'eyJ-', 'eyJ_', 'a', 'Z', '0', '-', '_', '.', ' ', 'eyJabcdefghij', 'eyJabcdefghi', 'eyJabcdefghijk', '.eyJ', 'x', 'abcdefghij', 'abcdefghi', '.eyJabcdefghij.', 'eyJ-abcdefghij', 'x-eyJabcdefghijklm', '_eyJabcdefghijklm']
+    let withMatch = 0
+    for (let i = 0; i < 400; i++) {
+      let text = ''
+      for (let k = 1 + Math.floor(next() * 14); k > 0; k--) text += pieces[Math.floor(next() * pieces.length)]
+      if (spans(oldJwt.pattern, text) !== '') withMatch++
+      sameAsOld(text)
+    }
+    // A generator that never produced a match would pass vacuously.
+    expect(withMatch).toBeGreaterThanOrEqual(20)
+  })
+
+  // The old rule scanned to the end of the run from every eyJ start inside it, so a run of n characters cost n * n / 4 steps:
+  // 9.8 s at 256 KB (one run on an uncontrolled host), more than 60 s at 1 MB. 1 s is generous for the current rule.
+  const KB256 = 256 * 1024
+  const run = (n: number): string => 'eyJ-'.repeat(n / 4)
+  const slowCases: Array<[string, string]> = [
+    ['eyJ- repeated and ending in .x', run(KB256).slice(0, KB256 - 2) + '.x'],
+    ['eyJ- repeated, then .eyJ and a short tail', `${run(KB256)}.eyJabc`],
+    ['eyJ- repeated, then .eyJ- repeated', `${run(KB256 / 2)}.${run(KB256 / 2)}`],
+    ['eyJ- repeated, then a second segment and a starved third', `${run(KB256)}.eyJabcdefghij.abc`],
+  ]
+  for (const [name, text] of slowCases) {
+    test(`256 KB of ${name} is redacted in under a second`, () => {
+      const start = performance.now()
+      const { hits } = redact(text)
+      expect(performance.now() - start).toBeLessThan(1000)
+      expect(hits.jwt).toBeUndefined()
+    })
+  }
+
+  // JavaScriptCore has silently missed matches of a long loop in this repo (TRDD-AGOEWF2E), so assert the hide, not only the time.
+  const MB = 1024 * 1024
+  test('a valid JWT after a 1 MB eyJ- run is still hidden', () => {
+    const { text, hits } = redact(`${run(MB)}\n${tok}`)
+    expect(hits.jwt).toBe(1)
+    expect(text).not.toContain(tok)
+    expect(text.endsWith(`\n${jwtMark}`)).toBe(true)
+  })
+
+  test('a valid JWT that continues a 1 MB eyJ- run is hidden whole', () => {
+    const { text, hits } = redact(`${run(MB)}.${tok.slice(tok.indexOf('.') + 1)}`)
+    expect(hits.jwt).toBe(1)
+    expect(text).toBe(jwtMark)
   })
 })
