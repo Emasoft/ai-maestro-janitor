@@ -33,7 +33,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "scripts"))
-from run_secret_shield_tests import assemble_plugin_dir  # noqa: E402
+from run_secret_shield_tests import assemble_plugin_dir, run_captured_in_own_session  # noqa: E402
 
 MOD = "secret-shield"
 PROBE_REL = f"hooks/{MOD}/tests/load/probe.test.ts"
@@ -423,32 +423,9 @@ def run_probe(claude: str, mod_dir: Path, timeout_s: float, abort: threading.Eve
         load_dir = tmp / "hooks" / MOD / "tests" / "load"
         shutil.copy2(load_dir / "probe.load.ts", load_dir / "probe.test.ts")
         expected.append(PROBE_REL)
-        # WHY a session of its own: the runner starts a child per test file; killing only the direct child on a timeout or abort would orphan them.
-        proc = subprocess.Popen([claude, "plugin", "test", str(tmp)], cwd=str(tmp), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
-        deadline = started + timeout_s
-        timed_out = aborted = False
-        output = ""
-        try:
-            while True:
-                try:
-                    output, _ = proc.communicate(timeout=poll_s)
-                    break
-                except subprocess.TimeoutExpired:
-                    aborted = abort.is_set()
-                    timed_out = not aborted and time.monotonic() > deadline
-                    if aborted or timed_out:
-                        break
-            if aborted or timed_out:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                output, _ = proc.communicate(timeout=30)
-        except BaseException:
-            if proc.poll() is None:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-            proc.communicate(timeout=30)
-            raise
-    return ProbeRun(None if (aborted or timed_out) else proc.returncode, output, time.monotonic() - started, timed_out, aborted, expected)
+        # WHY the shared file-capture helper (TRDD-LAUPB305): claude exits with pipe writes pending and drops the output past ~64 KiB, so its output is captured in a regular file, in a session of its own (the runner starts a child per test file; killing only the direct child would orphan them). The helper's WHY comment holds the measurements.
+        result = run_captured_in_own_session([claude, "plugin", "test", str(tmp)], tmp, timeout_s, should_abort=abort.is_set, poll_s=poll_s)
+    return ProbeRun(None if (result.aborted or result.timed_out) else result.returncode, result.output, time.monotonic() - started, result.timed_out, result.aborted, expected)
 
 ProbeRunner = Callable[[str, Path, float, threading.Event], ProbeRun]
 

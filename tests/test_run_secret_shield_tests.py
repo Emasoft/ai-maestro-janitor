@@ -145,3 +145,58 @@ def test_the_output_summary_of_a_short_output_reports_its_real_line_count() -> N
     summary = shield_runner._output_summary("a\nb\n")
     assert "last 2 lines:" in summary
     assert summary.endswith("--- full output follows ---")
+
+
+
+_BIG_WRITE_BYTES = 200_000
+# One 200 KB write, then process.exit(0): the shape of claude's exit with pipe writes pending (TRDD-LAUPB305).
+_BIG_WRITE_JS = f'process.stdout.write("x".repeat({_BIG_WRITE_BYTES - 1}) + "\\n"); process.exit(0);'
+
+
+def _js_runtime() -> str:
+    runtime = shutil.which("node") or shutil.which("bun")
+    if runtime is None:
+        pytest.skip("neither node nor bun is on PATH: the exit-with-pending-write micro-test needs a JS runtime")
+    return runtime
+
+
+@pytest.mark.real_subprocess("node", "bun")
+def test_the_file_capture_keeps_all_of_a_big_write_followed_by_process_exit(tmp_path: Path) -> None:
+    """run_captured_in_own_session returns all 200000 bytes of a JS script that writes them in one call and then calls process.exit(0)."""
+    script = tmp_path / "big_write.js"
+    script.write_text(_BIG_WRITE_JS, encoding="utf-8")
+    result = shield_runner.run_captured_in_own_session([_js_runtime(), str(script)], tmp_path, 60)
+    assert result.returncode == 0
+    assert not result.timed_out
+    assert not result.aborted
+    assert len(result.output) == _BIG_WRITE_BYTES
+
+
+@pytest.mark.real_subprocess("node", "bun")
+def test_a_plain_pipe_loses_the_tail_of_the_same_big_write(tmp_path: Path) -> None:
+    """Documents the bug the helper avoids: the same script read through a plain pipe returns fewer than 200000 bytes; if this host ever returns them all, the test skips (reports) instead of failing."""
+    script = tmp_path / "big_write.js"
+    script.write_text(_BIG_WRITE_JS, encoding="utf-8")
+    runtime = _js_runtime()
+    # A few runs: the loss measured here is 50 of 50, but a pipe race must not turn into a red test.
+    lengths = [len(subprocess.run([runtime, str(script)], capture_output=True, check=True, timeout=60).stdout) for _ in range(5)]
+    if min(lengths) == _BIG_WRITE_BYTES and max(lengths) == _BIG_WRITE_BYTES:
+        pytest.skip("the pipe returned the full 200000 bytes on this host in every run: the pipe loss did not reproduce here")
+    assert min(lengths) < _BIG_WRITE_BYTES
+
+
+@pytest.mark.real_subprocess("sh", "sleep")
+def test_the_file_capture_waits_for_a_grandchild_that_writes_after_its_parent_exited(tmp_path: Path) -> None:
+    """A background child still writing 1 s after the direct child exited is captured: the output is read only once the process group is empty."""
+    result = shield_runner.run_captured_in_own_session(["sh", "-c", "echo first; (sleep 1; echo late) & exit 0"], tmp_path, 60)
+    assert result.returncode == 0
+    assert result.output == "first\nlate\n"
+
+
+@pytest.mark.real_subprocess("sleep")
+def test_the_file_capture_reports_a_timeout_and_kills_the_group(tmp_path: Path) -> None:
+    """A command that outlives the timeout is killed with its group and reported as timed_out."""
+    result = shield_runner.run_captured_in_own_session(["sleep", "30"], tmp_path, 0.3, poll_s=0.1)
+    assert result.timed_out
+    assert not result.aborted
+    assert result.returncode < 0

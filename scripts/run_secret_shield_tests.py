@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import os
 import re
 import shutil
@@ -33,6 +34,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -78,24 +82,96 @@ def _output_summary(output: str, tail_lines: int = 20) -> str:
     tail = "\n".join(lines[-tail_lines:])  # splitlines: no phantom empty last line when the output ends with a newline
     return f"output: {len(output.encode('utf-8'))} bytes, {output.count(chr(10))} newlines, ends with a newline: {output.endswith(chr(10))}; last {min(tail_lines, len(lines))} lines:\n{tail}\n--- full output follows ---"
 
+_GROUP_POLL_SEC = 0.05
+
+
+@dataclass(frozen=True)
+class CapturedRun:
+    """Outcome of run_captured_in_own_session. `returncode` is the direct child's, also after a kill (then negative)."""
+
+    returncode: int
+    output: str
+    timed_out: bool
+    aborted: bool
+
+
+def _group_alive(pgid: int) -> bool:
+    # PermissionError counts as gone, like ProcessLookupError: killpg(pgid, 0) on a group we started can only hit EPERM
+    # when no member we may signal is left (a zombie on macOS), and nothing there can still write to the capture file.
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def run_captured_in_own_session(cmd: list[str], cwd: Path, timeout: float, should_abort: Callable[[], bool] | None = None, poll_s: float = 0.5) -> CapturedRun:
+    """Run `cmd` in a session of its own with stdout+stderr captured in a REGULAR FILE; kill the whole group on timeout, abort or interrupt."""
+    # WHY a regular file and never a pipe (TRDD-LAUPB305, measured 2026-11-14): `claude plugin test` is bun-based and writes a
+    # regular file synchronously but a pipe asynchronously, and it exits with its pipe writes still pending, so everything past
+    # the pipe capacity (~64 KiB) is lost with exit code 0. That is an upstream defect of claude, not a reader bug: 5 of 320
+    # pipe-captured runs were cut, every one 65500 bytes into the 116 KB patterns.test.ts block (offset 77931 = 12431 + 65500),
+    # ending mid-line; 0 of 180 file-captured runs were cut. A node/bun script doing one 200 KB write then process.exit(0) loses
+    # its tail through a pipe in 50 of 50 runs and never through a regular file. A regular file is the capture such a producer
+    # writes completely, so there is no pipe fallback.
+    # WHY the output is read only once no process is left in the child's group: a child of claude (a per-test-file runner)
+    # may still write to the inherited fd after claude itself has exited, so the child's exit is not the end of the output.
+    # The group id equals the child pid (start_new_session). A descendant that moves to another process group would escape this
+    # wait (unlikely for `claude plugin test`). The only bound is `timeout`; reaching it is the timeout failure path.
+    # WHY a session of its own: killing only the direct child on timeout would orphan its descendants (same pattern as publish.run_pytest_in_own_session).
+    deadline = time.monotonic() + timeout
+    timed_out = aborted = False
+
+    def interrupted() -> bool:
+        nonlocal timed_out, aborted
+        aborted = should_abort is not None and should_abort()
+        timed_out = not aborted and time.monotonic() > deadline
+        return aborted or timed_out
+
+    def kill_group(pgid: int) -> None:
+        # WHY suppress: the group may already be gone (child exited just before the signal).
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pgid, signal.SIGKILL)
+
+    with tempfile.TemporaryFile() as capture:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=capture, stderr=subprocess.STDOUT, start_new_session=True)
+        pgid = proc.pid
+        try:
+            while True:
+                try:
+                    proc.wait(timeout=poll_s)
+                    break
+                except subprocess.TimeoutExpired:
+                    if interrupted():
+                        break
+            while not (aborted or timed_out) and _group_alive(pgid):
+                if interrupted():
+                    break
+                time.sleep(_GROUP_POLL_SEC)
+            if aborted or timed_out:
+                kill_group(pgid)
+        except BaseException:
+            # BaseException: a Ctrl-C no longer reaches a child in another session.
+            kill_group(pgid)
+            # WHY bounded: an unkillable (D-state) child must not hang the caller forever.
+            proc.wait(timeout=30)
+            raise
+        # WHY bounded: an unkillable (D-state) child must not hang the caller forever.
+        proc.wait(timeout=30)
+        capture.seek(0)
+        # Text mode with errors="replace" and universal newlines, what `text=True, errors="replace"` gave the pipe readers.
+        reader = io.TextIOWrapper(capture, encoding="utf-8", errors="replace", newline=None)
+        output = reader.read()
+        reader.detach()
+    return CapturedRun(proc.returncode, output, timed_out, aborted)
+
 
 def _run_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
     """Run `cmd`; on timeout or interrupt kill its whole process group. Returns (exit code, output)."""
-    # WHY a session of its own: `claude plugin test` runs each test file in a child of itself, and
-    # killing only the direct child on timeout would orphan them. The group id equals the child pid,
-    # so killpg reaches every descendant (same pattern as publish.run_pytest_in_own_session).
-    proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
-    try:
-        output, _ = proc.communicate(timeout=timeout)
-    except BaseException:
-        # BaseException: a Ctrl-C no longer reaches a child in another session.
-        # WHY suppress: the group may already be gone (child exited just before the signal).
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
-        # WHY bounded: an unkillable (D-state) child must not hang the caller forever.
-        proc.communicate(timeout=30)
-        raise
-    return proc.returncode, output
+    result = run_captured_in_own_session(cmd, cwd, timeout)
+    if result.timed_out:
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return result.returncode, result.output
 
 
 def assemble_plugin_dir(tmp: Path, mod: str, mod_dir: Path) -> list[str]:
