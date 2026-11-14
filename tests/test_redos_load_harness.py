@@ -554,4 +554,6 @@ def test_real_smoke_one_probe_two_workers_runs_end_to_end(tmp_path: Path) -> Non
     assert campaign["kind"] == "campaign" and campaign["status"] == "complete", campaign
     assert [p["dry_run"] for p in probes] == [True, False]
     assert all(p["invalid_reason"] is None and len(p["rows"]) == 13 for p in probes), probes
+    # K=1 makes the campaign's Z41A13XV verdict always incomplete, so only this check proves the exact names match real runner output; whether they pass is left to the step 5 idle check and the campaign, because the smoke may run under load.
+    assert all(p["z41a13xv"][t] in ("pass", "fail") for p in probes if not p["dry_run"] for t in h.Z41_TESTS), probes
     assert code in (h.EXIT_FAIL, h.EXIT_UNFINISHED) and code == campaign["exit_code"]
