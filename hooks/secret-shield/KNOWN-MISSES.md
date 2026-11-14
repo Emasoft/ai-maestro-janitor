@@ -255,3 +255,35 @@ Shape: create_cookie(name='_gitlab_session', value='...') with 32 upper-case hex
 Hidden instead: The same call with the value in lower case (hidden with the gitlab-session-cookie marker).
 Card: none
 Test: KNOWN MISS gitlab-session-cookie-uppercase-hex: an upper-case 32-hex session cookie value in a keyword-argument form is not hidden, the same value in lower case is
+
+## private-key-header-shapes
+
+Reason: (c) a bound kept for a stated reason: the PEM header is one character class between lookarounds and "Keep that language exact: a wider header would take text the old pattern left alone, and its END could land inside another block and leave that block's tail visible" (hooks/secret-shield/rules/key-material.ts:5-14). The header accepts words each followed by one space and then PRIVATE KEY: it refuses a space right after BEGIN, a double space, and a word glued to PRIVATE. The shield test 'a header glued to PRIVATE whose END lies inside an RSA block' pins the glued case against a wider class.
+Shape: a PEM block whose BEGIN header has a space right after BEGIN (two spaces), or a double space inside the header (RSA, two spaces, PRIVATE KEY), or a word glued to PRIVATE (XPRIVATE KEY), with a body and a matching END line. jr-redact hides all three (its header class is [A-Z ]*).
+Hidden instead: the same block with a standard header (RSA PRIVATE KEY), hidden whole with the private-key marker.
+Card: none
+Test: KNOWN MISS private-key-header-shapes: a PEM header with a leading space, a double space or a word glued to PRIVATE is not hidden, a standard header is
+
+## url-password-port-then-path
+
+Reason: (a) a standalone rule for the form would hide ordinary text. patterns.ts:258-262 reads a password of up to 5 digits followed by a slash, or by a question mark and a query holding an equals sign before the at-sign, as a port followed by a path or a query (`host:8080/pkg/@scope`, `localhost:3000?email=a@b`), and skips it. A scan of the shape scheme://user:<1 to 5 digits>/...@ matched 13 times in 75764 text files read (2656 tracked files at fde4d89d, excluding hooks/secret-shield/tests/ and reports, and 73108 files of the plugin cache; files over 5 MB skipped), counted 2026-11-14: none is a credential: 10 are `@name/...` paths and 3 are placeholder or test strings. Existing tests pin the skip: 'a port followed by a path with an at-sign is not a password' and 'a password starting with digits then a slash is not hidden (known miss, kept)'.
+Shape: scheme://user:<1 to 5 digits><slash or ?x=><password>@host, for example postgres://u:9/<password>@db/app. jr-redact hides it.
+Hidden instead: the same password after 6 digits and a slash, or after a letter and a slash, hidden with the url-password marker.
+Card: none
+Test: KNOWN MISS url-password-port-then-path: a URL password starting with up to 5 digits and a slash or a query is read as a port and is not hidden, after 6 digits or a letter it is
+
+## url-userinfo-quote-backtick-bracket
+
+Reason: (c) a bound kept for a stated reason in part: a user part stops at a space, a colon, a slash, an at-sign, a quote, a backtick or an opening bracket (patterns.ts:62, NOT_USER; the bracket so that "a bracketed IPv6 host is never read as a user", patterns.ts:262-263, pinned by the test 'a bracketed IPv6 host is not read as a user'), and a password stops at a quote or a backtick (patterns.ts:63 and :76). No comment states why for the quote and the backtick; inferred reason: a quote or a backtick closes the string that holds a URL in code, JSON and Markdown, so a span never reads across one. Given up: a password or a user name that holds one of these characters is not hidden, and the pass hides nothing of that URL. The single quote is on the TRDD-Q6LPJTPO backlog, not here.
+Shape: a URL whose password holds a double quote or a backtick, or whose user part holds a double quote, a backtick or an opening bracket (postgres://u:pa"ss<more>@host). jr-redact hides the password in each.
+Hidden instead: the same URL with a plain password, hidden with the url-password marker.
+Card: none
+Test: KNOWN MISS url-userinfo-quote-backtick-bracket: a URL password holding a double quote or a backtick, or a user part holding a quote, a backtick or an opening bracket, is not hidden, a plain one is
+
+## jwt-header-space-after-brace
+
+Reason: (b) no source was found for the form: a JWT whose header JSON has a space after the opening brace starts with eyAi, not eyJ, and no jwt rule reads it (hooks/secret-shield/rules/key-material.ts, the jwt and jwtWide patterns need eyJ). Searched: 0 three-segment tokens with a first segment eyAi, and 0 with any ey-not-eyJ first segment, in 2656 tracked files (excluding hooks/secret-shield/tests/ and reports) and 73108 plugin-cache files read at fde4d89d; the JOSE specifications were not searched. Widening the first segment beyond eyJ needs its own measured change. jr-redact does not hide it either (not a jr gap).
+Shape: header.payload.signature, the header the base64url of a JSON object with a space after the opening brace (first segment eyAi), the payload starting eyJ, 8 or more characters in each segment.
+Hidden instead: the same token with a standard header (first segment eyJ), hidden with the jwt marker; and the eyAi token as the value of a quoted JSON access_token, hidden by the assignment pass.
+Card: none
+Test: KNOWN MISS jwt-header-space-after-brace: a JWT whose header has a space after the opening brace (first segment eyAi) is not hidden, with a standard header it is

@@ -180,6 +180,39 @@ describe('known misses: formats and names the shield does not hide on their own'
   })
 })
 
+describe('known misses: PEM headers, URL userinfo and JWT headers the shield does not read', () => {
+  test('KNOWN MISS private-key-header-shapes: a PEM header with a leading space, a double space or a word glued to PRIVATE is not hidden, a standard header is', () => {
+    const body = fake('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7')
+    const block = (head: string) => `${j('-----BEGIN ', head, '-----')}\n${body}\n${j('-----END ', head, '-----')}`
+    for (const head of [' PRIVATE KEY', 'RSA  PRIVATE KEY', 'XPRIVATE KEY']) check(`visible with the header ${JSON.stringify(head)}`, shown(block(head), body))
+    check('hidden with a standard header', hiddenAs(block('RSA PRIVATE KEY'), body, 'private-key'))
+  })
+
+  test('KNOWN MISS url-password-port-then-path: a URL password starting with up to 5 digits and a slash or a query is read as a port and is not hidden, after 6 digits or a letter it is', () => {
+    const password = fake('Kxq7mZw4Rt')
+    for (const lead of ['9/', '12345/', '9?a=']) check(`visible after ${lead}`, shown(`postgres://u:${lead}${password}@db.acme.io/app`, password))
+    for (const lead of ['123456/', 'ab/']) check(`hidden after ${lead}`, hiddenAs(`postgres://u:${lead}${password}@db.acme.io/app`, password, 'url-password'))
+  })
+
+  test('KNOWN MISS url-userinfo-quote-backtick-bracket: a URL password holding a double quote or a backtick, or a user part holding a quote, a backtick or an opening bracket, is not hidden, a plain one is', () => {
+    const password = fake('Hs9Lc3Yb7Vn')
+    const tick = String.fromCharCode(96)
+    const userinfos = [`u:pa"${password}`, `u:pa${tick}${password}`, `us"er:${password}`, `us${tick}er:${password}`, `us[er:${password}`]
+    for (const userinfo of userinfos) check(`visible in ${userinfo.replace(password, 'P')}`, shown(`postgres://${userinfo}@db.acme.io/app`, password))
+    check('hidden with a plain user and password', hiddenAs(`postgres://u:${password}@db.acme.io/app`, password, 'url-password'))
+  })
+
+  test('KNOWN MISS jwt-header-space-after-brace: a JWT whose header has a space after the opening brace (first segment eyAi) is not hidden, with a standard header it is', () => {
+    const signature = fake('dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U')
+    const payload = j('eyJ', fake('zdWIiOiIxMjM0NTY3ODkwIn0'))
+    const spaced = j('eyAi', fake('YWxnIjoiSFMyNTYifQ'), '.', payload, '.', signature)
+    const standard = j('eyJ', fake('hbGciOiJIUzI1NiJ9'), '.', payload, '.', signature)
+    expect(shown(`see ${spaced} here`, signature)).toBe(true)
+    check('hidden with a standard header', hiddenAs(`see ${standard} here`, signature, 'jwt'))
+    check('hidden as a quoted JSON value', hiddenAs(`{"access_token":"${spaced}"}`, signature, 'assignment'))
+  })
+})
+
 describe('known misses: copies of a hidden secret the shield does not follow', () => {
   const definition = (value: string): string => `API_KEY=${value}`
 

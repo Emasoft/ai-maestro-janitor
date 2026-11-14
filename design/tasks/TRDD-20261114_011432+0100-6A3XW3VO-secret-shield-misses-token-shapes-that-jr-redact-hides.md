@@ -4,7 +4,7 @@ title: Secret shield misses token shapes that jr-redact hides
 column: dev
 status: tasked
 created: 2026-11-14T01:14:32+0100
-updated: 2026-11-14T03:15:33+0100
+updated: 2026-11-14T03:22:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -33,7 +33,7 @@ Bound of this evidence: catalog samples were synthesized from the catalog regexe
 
 ## Done when
 
-Each gap (1) to (6) and (8) is either closed by a shield rule change with a test that hides the sample shape, or recorded as a deliberate KNOWN-MISSES entry with its reason (for example the placeholder exemption, or a length floor kept to avoid false hits); a disposition already recorded in STATE (6b needs no action; the single quote went to TRDD-Q6LPJTPO) also counts. This card is terminal on gaps (1) to (6) and (8) alone. Gap (7), jr rewriting shield markers while both run, belongs to TRDD-2V7OAUPE, which disables jr-redact; tying it here would make the two cards block each other.
+Each gap (1) to (6) and (8) is either closed by a shield rule change with a test that hides the sample shape, or recorded as a deliberate KNOWN-MISSES entry with its reason (for example the placeholder exemption, or a length floor kept to avoid false hits); exactly these two dispositions recorded in STATE also count: 6b needs no action; the single quote went to TRDD-Q6LPJTPO. This card is terminal on gaps (1) to (6) and (8) alone. Gap (7), jr rewriting shield markers while both run, belongs to TRDD-2V7OAUPE, which disables jr-redact; tying it here would make the two cards block each other.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-14
 
