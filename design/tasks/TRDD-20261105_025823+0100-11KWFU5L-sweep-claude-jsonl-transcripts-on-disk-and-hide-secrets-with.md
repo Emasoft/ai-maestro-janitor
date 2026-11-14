@@ -4,7 +4,7 @@ title: Sweep Claude JSONL transcripts on disk and hide secrets with the shield e
 column: todo
 status: tasked
 created: 2026-11-05T02:58:23+0100
-updated: 2026-11-05T03:11:22+0100
+updated: 2026-11-14T20:16:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -50,3 +50,7 @@ Safety: --dry-run is the default. A false positive in a live run destroys non-se
 ## Notes
 
 - 2026-11-05 — Correction to the bc5a6c73 commit message: "the URL_PASSWORD slowdown decides the runtime" is inferred, not measured; see the string-size box.
+
+## Owner requirements
+
+2026-11-14T20:16:01+0100 OWNER REQUIREMENT, verbatim (2026-11-14): "the secret shield must work as both a callable skill and a internal mod filtering the context and the tools output in realtime." Earlier the same day the owner asked why there is "still no option to run a scan to clean and redact secrets from the jsonl transcripts or any other text or code file" and named the command /janitor-redact-secrets <filename/files-mask>. Both halves are required: the on-demand skill (card TRDD-11KWFU5L) and the realtime mod wired in hooks/hooks.json (card TRDD-2V7OAUPE).

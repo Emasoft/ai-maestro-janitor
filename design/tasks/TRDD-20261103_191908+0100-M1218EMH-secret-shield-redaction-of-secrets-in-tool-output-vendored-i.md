@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: dev
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-03T23:46:11+0100
+updated: 2026-11-14T20:16:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -72,3 +72,7 @@ NEXT ACTION: (1) rename the command to /janitor-secret-shield; (2) cards for the
 2026-11-03 options wording: the two companion options use the upstream text (tool list matched to register.ts), the unverified reload sentence is removed, and the off/on tests share one token builder (mutation: removing the early return fails the off test). Result: 125/125.
 2026-11-03 correction to the options note: the probe session loaded no settings env block at all, so "a mod does not see the env block" is not proven for a normal session. The design rests on the documented options contract (a mod gets its own userConfig values), and the option descriptions now say only to set them with /plugin config; whether a CLAUDE_PLUGIN_OPTION_* value in the env block reaches a mod is untested, so they make no claim either way. The block-files description says Bash can still read the files. The deny path was checked at register.ts:71-72: Read, Edit, Write and NotebookEdit.
 2026-11-03 command renamed to /janitor-secret-shield (register.ts, tests, NOTICE). Result: 125/125.
+
+## Owner requirements
+
+2026-11-14T20:16:01+0100 OWNER REQUIREMENT, verbatim (2026-11-14): "the secret shield must work as both a callable skill and a internal mod filtering the context and the tools output in realtime." Earlier the same day the owner asked why there is "still no option to run a scan to clean and redact secrets from the jsonl transcripts or any other text or code file" and named the command /janitor-redact-secrets <filename/files-mask>. Both halves are required: the on-demand skill (card TRDD-11KWFU5L) and the realtime mod wired in hooks/hooks.json (card TRDD-2V7OAUPE).
