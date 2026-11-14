@@ -1776,7 +1776,7 @@ WM-LINT-09). The fixer keeps the EDGE SET of the section unchanged, so typed rec
 The atom-after-footer message (WM-LINT-11) `MUST` also state the exact remedy: move the atom block,
 marker line and body, above line N, the earliest footer heading, keeping every `[[link]]` it sat
 among as a bare bullet. The Python repair gate `MUST` take its atom-after-footer verdict from
-`memgrep lint --json` instead of recomputing it, so that gate and arbiter have one owner (janitor#227
+`memgrep lint --no-fix --output-format json` (there is no `--json` flag, and plain `lint` autofixes and so writes the store) instead of recomputing it, so that gate and arbiter have one owner (janitor#227
 and janitor#260 were the two disagreeing), and the repair skill and the chore routing `MUST` name the
 rule and the remedy. The issue code of the new rule is registered in
 design/specs/issue-codes.toml by the increment that implements it, not before. Not yet implemented:
