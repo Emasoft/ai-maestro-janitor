@@ -66,3 +66,10 @@ Pure tests for the worker-count formula and the ambient refusal; an abort test t
 - Each test line shows only (pass) or (fail), so the probe must expose each mutant row's verdict reason (linear, superlinear, escaped, or out of rounds), in the test name or a stdout line; step C makes that edit to `probe.load.ts`, with the step B re-checks. A mutant (fail) whose reason cannot be read makes the probe invalid, not a 1a failure.
 - A linear row that runs out of rounds is a failure of 1a, not undecided: a false failure of a linear rule under contention is what the campaign measures.
 - The per-probe JSON line records the number of undecided rows. If a campaign ends incomplete because of undecided rows, the remedy is a larger round budget for mutant rows, restated in this file, never re-running until 20 probes come out clean.
+
+## Step C split and gate safety (review of the first step C brief)
+
+- Step C is two commits. C1, the reason mechanism: measure whether `claude plugin test` passes a test's console output through to its own output (scratch plugin); give `timing.ts` a distinct out-of-rounds outcome that it returns rather than leaves to be inferred (the one permitted estimator change); make `probe.load.ts` report each mutant row's reason by console output if it passes through, else by a file in the temp assembly that the harness reads; repeat the step B checks. C2: the harness and its tests.
+- Tests that start real workers or call `claude` run only when the environment variable `REDOS_HARNESS_REAL=1` is set and skip otherwise, so the default pytest run and `publish.py` never run them (`pyproject.toml` deselects no marker by default). Only the pure tests and the import-existence check run in the release gate.
+- Worker lifetime is a harness parameter (default 48 min); tests use about 30 s. Every test that starts workers kills the recorded process group in a `finally` and then asserts each PID is gone, whatever the outcome.
+- Exit code 2 covers aborted, incomplete and invalid; the JSON record names which.
