@@ -14,7 +14,10 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -195,6 +198,15 @@ def test_z41a13xv_tests_are_matched_by_full_name_and_missing_is_not_a_pass() -> 
     assert judge(no_z41).z41[h.Z41_TESTS[0]] == "missing"
 
 
+
+def test_a_z41a13xv_name_with_a_suffix_reads_as_missing_not_as_a_pass() -> None:
+    """A patterns.test.ts line whose name is the Z41A13XV name plus a suffix is not that test: it reads missing, and when it fails it is collateral."""
+    suffixed = make_output(z41={0: "fail"}).replace(f"{Z41_FULL[0]} [5.00ms]", f"{Z41_FULL[0]} (renamed) [5.00ms]")
+    j = judge(suffixed)
+    assert j.z41[h.Z41_TESTS[0]] == "missing" and j.z41[h.Z41_TESTS[1]] == "pass"
+    assert j.collateral == [f"{h.PATTERNS_TEST_REL}: {Z41_FULL[0]} (renamed)"]
+
+
 def test_other_failing_tests_are_collateral_and_do_not_change_the_probe_status() -> None:
     """A failing test elsewhere is recorded by file and name and decides nothing."""
     j = judge(make_output(collateral=["something else breaks"]))
@@ -236,6 +248,148 @@ def test_a_failing_z41a13xv_test_fails_the_campaign() -> None:
     """The exit code joins both verdicts: a TRDD-Z41A13XV failure exits 1 even when 1a is met."""
     v = h.judge_campaign([probe_judgement(z41="fail")] + [probe_judgement() for _ in range(19)])
     assert (v.one_a, v.z41a13xv, v.exit_code) == ("pass", "fail", h.EXIT_FAIL)
+
+
+
+# ---------------------------------------------------------------- pure: the campaign loop with an injected probe runner (no claude, no worker processes)
+
+
+class FakeRunner:
+    """A probe runner that returns a valid probe taking `seconds[n]` (the last value repeats) and counts its calls; `on_call(n, abort)` runs first."""
+
+    def __init__(self, seconds: list[float], on_call: Callable[[int, threading.Event], None] | None = None) -> None:
+        self.seconds = seconds
+        self.on_call = on_call
+        self.calls = 0
+
+    def __call__(self, claude: str, mod_dir: Path, timeout_s: float, abort: threading.Event) -> h.ProbeRun:
+        n = self.calls
+        self.calls += 1
+        if self.on_call is not None:
+            self.on_call(n, abort)
+        return h.ProbeRun(0, make_output(), self.seconds[min(n, len(self.seconds) - 1)], False, False, EXPECTED_FILES)
+
+
+class FakeGroup(h.WorkerGroup):
+    """A real worker group with no workers whose dead() answers from the test."""
+
+    dead_pids: Callable[[], list[int]]
+
+    def dead(self) -> list[int]:
+        return self.dead_pids()
+
+
+class SpyRecorder(h.Recorder):
+    """A recorder that keeps what it writes and tells the test about each record."""
+
+    def __init__(self, path: Path, hook: Callable[[dict[str, object]], None] | None) -> None:
+        super().__init__(path)
+        self.records: list[dict[str, object]] = []
+        self.hook = hook
+
+    def write(self, record: dict[str, object]) -> None:
+        super().write(record)
+        self.records.append(record)
+        if self.hook is not None:
+            self.hook(record)
+
+
+@dataclass
+class Driven:
+    status: str
+    reason: str | None
+    judgements: list[h.ProbeJudgement]
+    state: dict[str, object]
+    records: list[dict[str, object]]
+
+
+def drive(
+    tmp_path: Path,
+    runner: FakeRunner,
+    *,
+    dead: Callable[[h.Sampler, FakeRunner], list[int]] = lambda sampler, runner: [],
+    on_write: Callable[[dict[str, object], h.Sampler], None] | None = None,
+    cap_s: float = h.DEFAULT_CAP_S,
+    started_ago: float = 0.0,
+    max_probes: int = 3,
+) -> Driven:
+    """Run `_drive` with workers=0: the sampler is never started, so the test sets `sampler.aborted` itself."""
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    group = FakeGroup(write_fd)
+    cfg = h.Config(workers=0, settle_s=0.0, cap_s=cap_s, max_probes=max_probes, cores=14)
+    sampler = h.Sampler(lambda: 1.0, 0.1, h.ABORT_LOAD, group)
+    group.dead_pids = lambda: dead(sampler, runner)
+    recorder = SpyRecorder(tmp_path / "record.jsonl", None if on_write is None else lambda record: on_write(record, sampler))
+    judgements: list[h.ProbeJudgement] = []
+    state: dict[str, object] = {"planned": None, "dry_s": None}
+    try:
+        status, reason = h._drive(cfg, lambda: 1.0, "claude", group, sampler, recorder, time.monotonic() - started_ago, 0.0, 13, judgements, state, runner)
+    finally:
+        group.reap()
+    return Driven(status, reason, judgements, state, recorder.records)
+
+
+def test_drive_runs_one_dry_probe_and_k_judged_probes_and_completes(tmp_path: Path) -> None:
+    """K=3 means exactly 4 runner calls: the dry run (excluded from the judgements) and 3 judged probes."""
+    runner = FakeRunner([10.0])
+    d = drive(tmp_path, runner)
+    assert (d.status, d.reason, runner.calls, len(d.judgements), d.state["planned"]) == ("complete", None, 4, 3, 3)
+    assert [r["dry_run"] for r in d.records] == [True, False, False, False]
+
+
+@pytest.mark.parametrize("when", ["during a probe", "between probes"])
+def test_a_sampler_abort_is_aborted_not_invalid_even_though_the_reaped_group_reads_dead(tmp_path: Path, when: str) -> None:
+    """The sampler reaps the group when it aborts, so dead() then lists workers; the campaign must still say `aborted` (the load), not a dead worker."""
+
+    def reaped(sampler: h.Sampler, runner: FakeRunner) -> list[int]:
+        return [4242] if sampler.aborted.is_set() else []
+
+    def abort_in_probe(n: int, abort: threading.Event) -> None:
+        if n == 1:
+            abort.set()
+
+    def abort_after_record(record: dict[str, object], sampler: h.Sampler) -> None:
+        if record["index"] == 1:
+            sampler.aborted.set()
+
+    if when == "during a probe":
+        runner, on_write = FakeRunner([10.0], abort_in_probe), None
+    else:
+        runner, on_write = FakeRunner([10.0]), abort_after_record
+    d = drive(tmp_path, runner, dead=reaped, on_write=on_write)
+    assert d.status == "aborted" and (d.reason or "").startswith("load over")
+    assert runner.calls == 2
+
+
+def test_a_dead_worker_is_recorded_as_invalid_with_a_dead_worker_reason(tmp_path: Path) -> None:
+    """A worker found dead before a probe, or after one, ends the campaign as status `invalid` whose reason starts `dead worker` (one vocabulary, spec "Liveness")."""
+    runner = FakeRunner([10.0])
+    before = drive(tmp_path, runner, dead=lambda sampler, runner: [4242])
+    assert before.status == "invalid" and (before.reason or "").startswith("dead worker: ") and runner.calls == 0
+    runner = FakeRunner([10.0])
+    after = drive(tmp_path, runner, dead=lambda sampler, runner: [4242] if runner.calls >= 1 else [])
+    assert after.status == "invalid" and (after.reason or "").startswith("dead worker: ") and runner.calls == 1
+    assert after.records[0]["status"] == "invalid"
+
+
+def test_the_cap_guard_stops_before_a_probe_that_would_pass_the_cap(tmp_path: Path) -> None:
+    """With 50 s used of a 100 s cap, the dry run (10 s) fits and sets K=3, but after a probe that took 60 s no further probe starts."""
+    runner = FakeRunner([10.0, 60.0])
+    d = drive(tmp_path, runner, cap_s=100.0, started_ago=50.0)
+    assert d.status == "aborted" and (d.reason or "").startswith("cap would be passed")
+    assert (runner.calls, len(d.judgements)) == (2, 1)
+
+
+@pytest.mark.skipif(shutil.which("claude") is None, reason="`claude` is not on PATH (run_campaign looks it up; the probe itself is the fake runner)")
+def test_run_campaign_passes_the_injected_runner_through(tmp_path: Path) -> None:
+    """run_campaign with 0 workers and a fake runner runs the dry run plus one probe and records a `complete` campaign (1 probe is fewer than 20, so exit 2)."""
+    cfg = h.Config(workers=0, settle_s=0.0, cap_s=600.0, max_probes=1, ambient_interval_s=0.0, sample_interval_s=0.1, cores=14)
+    runner = FakeRunner([5.0])
+    record = tmp_path / "campaign.jsonl"
+    code = h.run_campaign(cfg, lambda: 1.0, h.Recorder(record), runner=runner)
+    campaign = json.loads(record.read_text(encoding="utf-8").splitlines()[-1])
+    assert (runner.calls, campaign["status"], campaign["probes_judged"], code) == (2, "complete", 1, h.EXIT_UNFINISHED)
 
 
 # ---------------------------------------------------------------- probe file facts
@@ -378,7 +532,10 @@ def test_real_orphaned_workers_exit_when_the_harness_is_sigkilled() -> None:
 @pytest.mark.real_subprocess("claude")
 @pytest.mark.skipif(shutil.which("claude") is None, reason="`claude` is not on PATH")
 def test_real_smoke_one_probe_two_workers_runs_end_to_end(tmp_path: Path) -> None:
-    """K=1, N=2 proves only that the harness runs end to end: a dry run and one probe are recorded, valid, and the workers are gone."""
+    """K=1, N=2 proves only that the harness runs end to end: a dry run and one probe are recorded, valid, and the workers are gone.
+
+    Its constant load source (`lambda: 1.0`) disables the ambient refusal and the >60 abort, and it never exercises `system_load()` (the real `os.getloadavg()` reading).
+    """
     real_gate()
     # WHY lifetime 150 s, not the spec's ~30 s: the liveness poll ends the campaign when a worker exits, and a dry run plus one probe take about 40 s idle (spec "Tests" says
     # ~30 s for the abort and orphan tests, which run no probe). WHY a constant load source: the real 1-min load on the dev host is over the 0.7 per core ambient refusal.

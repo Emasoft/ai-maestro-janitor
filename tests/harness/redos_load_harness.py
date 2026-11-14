@@ -233,7 +233,8 @@ def judge_probe(output: str, expected_files: list[str], declared_rows: int) -> P
     for test in Z41_TESTS:
         full = f"{Z41_DESCRIBE} > {test}"
         z41_names.add(full)
-        found = [outcome for outcome, name in parsed.tests.get(PATTERNS_TEST_REL, []) if name.startswith(full)]
+        # WHY an exact name, not startswith: a prefix match would silently count a renamed or suffixed replacement test as Z41A13XV's; an exact match makes any rename read as missing (incomplete) until Z41_TESTS is updated.
+        found = [outcome for outcome, name in parsed.tests.get(PATTERNS_TEST_REL, []) if name == full]
         # WHY missing unless exactly one match: a replaced or renamed test must never read as a silent pass.
         z41[test] = found[0] if len(found) == 1 else "missing"
     collateral = [
@@ -241,7 +242,7 @@ def judge_probe(output: str, expected_files: list[str], declared_rows: int) -> P
         for file, tests in parsed.tests.items()
         if file != PROBE_REL
         for outcome, name in tests
-        if outcome == "fail" and not any(name.startswith(z) for z in z41_names)
+        if outcome == "fail" and name not in z41_names
     ]
     undecided = statuses.count("undecided")
     if problems:
@@ -449,6 +450,8 @@ def run_probe(claude: str, mod_dir: Path, timeout_s: float, abort: threading.Eve
             raise
     return ProbeRun(None if (aborted or timed_out) else proc.returncode, output, time.monotonic() - started, timed_out, aborted, expected)
 
+ProbeRunner = Callable[[str, Path, float, threading.Event], ProbeRun]
+
 
 # ---------------------------------------------------------------- campaign
 
@@ -485,7 +488,9 @@ def default_record_path(out_dir: Path) -> Path:
     return out_dir / f"{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S%z')}-campaign.jsonl"
 
 
-def run_campaign(cfg: Config, load: LoadSource, recorder: Recorder, on_group: Callable[[WorkerGroup], None] | None = None) -> int:
+def run_campaign(
+    cfg: Config, load: LoadSource, recorder: Recorder, on_group: Callable[[WorkerGroup], None] | None = None, runner: ProbeRunner = run_probe
+) -> int:
     """Run one campaign: ambient check, workers, settle, dry run, K probes. Returns the exit code; the record names the outcome.
 
     `on_group` receives the worker group as soon as it exists, so a caller (the real tests) can record its PIDs and prove them reaped.
@@ -514,13 +519,14 @@ def run_campaign(cfg: Config, load: LoadSource, recorder: Recorder, on_group: Ca
     judgements: list[ProbeJudgement] = []
     state: dict[str, object] = {"planned": None, "dry_s": None}
     try:
-        status, reason = _drive(cfg, load, claude, group, sampler, recorder, started, ambient_estimate, declared, judgements, state)
+        status, reason = _drive(cfg, load, claude, group, sampler, recorder, started, ambient_estimate, declared, judgements, state, runner)
     finally:
         sampler.stop()
         group.reap()
     if not group.all_gone():
         raise RuntimeError(f"workers still exist after reap: {group.pids}")
-    if sampler.aborted.is_set() and status == "complete":
+    # WHY any status, not only "complete": a sampler abort reaps the group, so a drive that lost the race may have returned another status for what was a load abort.
+    if sampler.aborted.is_set() and status != "aborted":
         status, reason = "aborted", sampler.error or f"load over {cfg.abort_load}"
     verdict = judge_campaign(judgements) if status == "complete" else None
     exit_code = verdict.exit_code if verdict is not None else EXIT_UNFINISHED
@@ -554,34 +560,44 @@ def _drive(
     declared: int,
     judgements: list[ProbeJudgement],
     state: dict[str, object],
+    runner: ProbeRunner = run_probe,
 ) -> tuple[str, str | None]:
     """Settle, dry run, then the K probes; returns (status, reason) where status is `complete` or the reason the campaign ended."""
     if sampler.aborted.wait(cfg.settle_s):
         return "aborted", sampler.error or f"load over {cfg.abort_load} during the settle"
     planned: int | None = None
     index = 0  # 0 is the dry run: excluded from verdicts, included in the cap (spec "Timing and cap")
+    last_s = 0.0  # duration of the last probe: 0 before the dry run
     while planned is None or index <= planned:
         dry = index == 0
+        # WHY the sampler abort is checked BEFORE group.dead(), here and after the probe: a sampler abort reaps the group, so dead() would then report every worker as
+        # dead and misrecord the cause of a load abort as a dead worker.
+        if sampler.aborted.is_set():
+            return "aborted", sampler.error or f"load over {cfg.abort_load} before probe {index}"
         dead = group.dead()
         if dead:
-            return "dead-worker", f"workers {dead} had exited before probe {index}"
-        if time.monotonic() - started > cfg.cap_s:
-            return "aborted", f"the {cfg.cap_s} s cap was reached before probe {index}"
+            return "invalid", f"dead worker: workers {dead} had exited before probe {index}"
+        elapsed = time.monotonic() - started
+        # WHY elapsed + the last probe's duration: workers live 48 min against a 43 min cap and a probe may take up to 300 s, so a probe that would run past the cap must not start.
+        if elapsed + last_s > cfg.cap_s:
+            return "aborted", f"cap would be passed: {elapsed:.0f} s elapsed + {last_s:.0f} s for the last probe is over the {cfg.cap_s} s cap, before probe {index}"
         load_start = load()
-        run = run_probe(claude, cfg.mod_dir, cfg.probe_timeout_s, sampler.aborted)
+        run = runner(claude, cfg.mod_dir, cfg.probe_timeout_s, sampler.aborted)
         load_end = load()
-        if run.aborted:
+        if sampler.aborted.is_set() or run.aborted:
             return "aborted", sampler.error or f"load over {cfg.abort_load} during probe {index}"
+        last_s = run.seconds
         judged = judge_probe(run.output, run.expected, declared)
         if run.timed_out:
             # WHY invalid: a timed-out probe's rows cannot be read, and the spec's "probe failure" for a timeout is read here as an invalid probe (listed in the report).
             judged.valid, judged.invalid_reason, judged.status = False, f"timeout after {cfg.probe_timeout_s} s", "invalid"
         dead = group.dead()
         if dead and judged.valid:
-            judged.valid, judged.invalid_reason, judged.status = False, f"workers {dead} died during the probe", "invalid"
+            judged.valid, judged.invalid_reason, judged.status = False, f"dead worker: workers {dead} died during the probe", "invalid"
         recorder.write(_probe_record(index, dry, run, judged, load_start, load_end, ambient_estimate))
         if not judged.valid:
-            return ("dead-worker" if dead else "invalid"), judged.invalid_reason
+            # WHY one vocabulary: a dead worker is recorded as `invalid` (spec "Liveness"); its reason starts "dead worker".
+            return "invalid", judged.invalid_reason
         if dry:
             planned = plan_probes(cfg.cap_s, time.monotonic() - started, run.seconds, cfg.max_probes)
             state["planned"], state["dry_s"] = planned, run.seconds
