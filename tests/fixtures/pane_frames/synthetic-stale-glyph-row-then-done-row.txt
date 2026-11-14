@@ -1,0 +1,9 @@
+✻ Running scheduled task… (4m 2s)
+⏺ Ran the heartbeat check.
+  detail
+✻ Churned for 4s · done 8:50 PM
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Sonnet 5 v2.1.300 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

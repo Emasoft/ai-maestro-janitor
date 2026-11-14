@@ -242,3 +242,45 @@ def parse(frame: str) -> PaneState:
         context_pct=int(pct_m.group("pct")) if pct_m else None,
         bypass_on="bypass permissions on" in text.lower(),
     )
+
+
+
+# Status kinds that mean the MAIN turn (or a modal in front of it) is not at an idle prompt.
+_MAIN_TURN_BUSY_KINDS = frozenset({
+    StatusKind.COMPACTING,
+    StatusKind.RELOADING,
+    StatusKind.AWAITING_USER,
+    StatusKind.API_ERROR,
+    StatusKind.RETRY_WEDGE,
+    StatusKind.SESSION_LIMIT,
+})
+
+
+def main_turn_busy(frame: str | None) -> bool | None:
+    """Is the MAIN turn still running (or blocked behind a modal)? True / False, None when the
+    frame cannot be read. PURE — never raises.
+
+    WHY this exists and is NOT `parse(frame).status.kind != StatusKind.IDLE` (issues #355, #356):
+    the /clear chain typed `/clear` into a pane mid-turn. The input field is EMPTY mid-turn, so
+    the injector's "field is empty" rule passed, Claude Code QUEUED the command, and it ran at
+    the next turn boundary — 19 minutes later in #355, after the chain had given up, so phase B
+    never ran. `StatusKind.WORKING` cannot be the gate: `_classify_status` also returns it when
+    only BACKGROUND-AGENT rows (`◯ ...`) are on screen while the main turn is idle, and a gate on
+    it would hold every clear for up to an hour whenever a background agent is listed.
+
+    Busy means the LAST status block (`status_row_text_at_tail` keeps the block closest to the
+    input box, so an older stale glyph row above it is ignored) is a glyph-led row that does not
+    say `done`, or the status kind is one of `_MAIN_TURN_BUSY_KINDS`. `agents_running` alone is
+    never busy. None (a frame with no input box and no status) must be treated by the caller as
+    busy too: typing blind into an unreadable pane is the original bug.
+    """
+    text = frame or ""
+    status = parse(text).status
+    if status.kind in _MAIN_TURN_BUSY_KINDS:
+        return True
+    status_row = status_row_text_at_tail(text)
+    if status_row is not None and "done" not in status_row.lower():
+        return True
+    if status.kind == StatusKind.UNKNOWN:
+        return None
+    return False

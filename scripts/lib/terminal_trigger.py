@@ -947,6 +947,7 @@ def inject_until_sent(
     reader=read_pane_text,
     is_typing=None,
     still_wanted=None,
+    main_turn_busy=None,
     sleeper=time.sleep,
     clock=time.monotonic,
     transcript_path: str | None = None,
@@ -964,6 +965,13 @@ def inject_until_sent(
     to a safety ceiling. Checked BEFORE the typing probe on purpose — a command that is no
     longer wanted must cancel even while the user types, not wait for the pane to free up
     first.
+
+    `main_turn_busy` (optional): `text -> bool | None` over the pane capture (the clear chain
+    passes `pane_state.main_turn_busy`). Anything but `False` DEFERS the typing at the `quiet_s`
+    cadence, bounded by `giveup_s`, and a give-up types NOTHING (#355, #356: a command typed
+    into a running main turn is QUEUED by Claude Code and runs at the next turn boundary,
+    possibly after this caller has given up). The verdict is re-asked on the read-back frame
+    right before Enter, because the turn can start between the first read and the submit.
 
     THE THREE RULES (owner, 2026-08-02 — these REPLACE the old presence-cancel entirely):
 
@@ -1242,6 +1250,18 @@ def inject_until_sent(
             sleeper(retry_s)
             continue
         unreadable = 0
+        # IDLE GATE (#355, #356): never type into a pane whose MAIN turn is still running. The input
+        # field is EMPTY mid-turn, so rule 1 below would pass; Claude Code would QUEUE the command and
+        # run it at the next turn boundary — 19 minutes later in #355, long after the chain gave up, so
+        # phase B never ran. Deferring (bounded by `giveup_s`, then NOTHING typed) is what makes it
+        # impossible for a queued command to outlive its caller. `None` (screen not readable as a
+        # Claude Code frame) defers too: typing blind is the original bug.
+        if main_turn_busy is not None:
+            busy = main_turn_busy(text)
+            if busy is not False:
+                last = "main turn still running — deferring" if busy else "pane screen unreadable — deferring"
+                sleeper(quiet_s)
+                continue
         # RULE 1 — inject only into an EMPTY field; otherwise re-check after the 8 s window.
         # Uses `quiet_s`, not `retry_s`: a non-empty field means a human is composing, and the
         # owner's rule for "wait for the human" is 8 s. `retry_s` is for OUR failed attempt.
@@ -1319,6 +1339,17 @@ def inject_until_sent(
             # heartbeat consumed it: issue #105, re-introduced by the very deferral that makes
             # the injector safe. Raising here aborts BEFORE Enter — refusing to submit is the
             # safe direction, so the exception is deliberately not caught.
+            # IDLE RE-CHECK (#355, #356): the turn can start in the gap between the idle read
+            # above and this verified field (typing and settling take real time). Enter into a
+            # running turn QUEUES the command — the exact bug — so clear our text and defer
+            # instead of pressing it.
+            if main_turn_busy is not None and main_turn_busy(after) is not False:
+                if clear_fn is None:
+                    return False, "main turn started after typing — and no clear_fn to undo it; refusing to submit"
+                last = "main turn started after typing — clearing and deferring"
+                last += _clear_ours(after)
+                sleeper(retry_s)
+                continue
             if pre_submit is not None:
                 pre_submit()
             submit_fn()
@@ -1736,6 +1767,7 @@ def run_chained_inject(
     settle_between_s: float = 0.0,
     giveup_s: float | None = None,
     still_wanted=None,
+    main_turn_busy=None,
     sleeper=time.sleep,
 ) -> tuple[bool, str]:
     """Type `first`, wait for the session it creates to actually EXIST, then type each of
@@ -1751,6 +1783,9 @@ def run_chained_inject(
     rejected as an unknown command while this chain still reports OK. A settle shrinks
     that window; it cannot close it, which is why the reload chain ALSO re-checks the
     arm state afterwards instead of trusting this pause.
+
+    `main_turn_busy` is passed to the FIRST command only, like `still_wanted`: the `then` commands
+    run on the fresh session's idle prompt, after the landing gate.
 
     THIS IS THE WHOLE POINT OF THE REDESIGN. `clear_trigger` used to fire two INDEPENDENT
     delayed children — `/clear` at t=2s, the bootstrap at t=10s — each typing blind. Applying
@@ -1782,6 +1817,7 @@ def run_chained_inject(
         type_fn=_runner(first), submit_fn=_submit, clear_fn=_clear,
         state_dir=state_dir,
         pre_submit=pre_submit_first, giveup_s=giveup_s, still_wanted=still_wanted,
+        main_turn_busy=main_turn_busy,
         sleeper=sleeper,
     )
     if not ok:

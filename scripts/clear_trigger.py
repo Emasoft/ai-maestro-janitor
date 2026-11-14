@@ -107,6 +107,10 @@ __all__ = [
 # the FRESH session's idle prompt. Ctrl+C is forbidden (its 2nd press EXITS Claude Code)
 # and no ESC is sent (the one destructive keystroke is an Enter into an open rewind menu,
 # which only an EMPTY-prompt double-ESC could open — and we send neither).
+# CORRECTION (#355, #356): "the skill ends its turn right after this fires" does NOT hold when a
+# Stop hook (/goal) continues the turn, and a `/clear` queued into a running turn runs at whatever
+# turn boundary comes next — minutes later, after the chain gave up. The chain child therefore
+# types `/clear` ONLY once `pane_state.main_turn_busy` is False (see `_run_chain_payload`).
 
 # Concision contract for the link-only handoff (owner HARD REQUIREMENT, TRDD-Z582IKIR
 # P1: "as CONCISE AS POSSIBLE" / "exhaustive COVERAGE by REFERENCE, never by
@@ -937,6 +941,23 @@ def _run_chain_payload(payload_b64: str) -> int:
             return True, back_why
         return _clear_still_wanted()
 
+    # #355/#356: the injector's "input field is empty" rule also passes MID-TURN (the field is empty
+    # while the model runs), so a `/clear` typed then is QUEUED by Claude Code and runs at the next
+    # turn boundary — 19 minutes later in #355, after this chain had given up, so phase B never ran.
+    # Hence `/clear` is held back until `pane_state.main_turn_busy` says False, for BOTH the normal and
+    # the past-ceiling lane (the queueing hazard is identical); busy OR unreadable (None) both wait,
+    # because typing blind is the original bug. On give-up NOTHING is typed, so no queued `/clear`
+    # can outlive the chain. `turn_gate["deferred"]` only feeds the log line below.
+    turn_gate = {"deferred": False}
+
+    def _main_turn_busy(text: str) -> bool | None:
+        import pane_state  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+        busy = pane_state.main_turn_busy(text)
+        if busy is not False:
+            turn_gate["deferred"] = True
+        return busy
+
     try:
         ok, why = terminal_trigger.run_chained_inject(
             data["terminal"],
@@ -962,6 +983,8 @@ def _run_chain_payload(payload_b64: str) -> int:
             # the time: six long-idle fires in a row on 2026-08-16, the exact unreachability
             # `external_clear.next_fire_misses_cache`'s docstring warns about.
             still_wanted=_still_wanted,
+            # #355/#356: hold `/clear` back while the MAIN turn is running (or the screen cannot be read).
+            main_turn_busy=_main_turn_busy,
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
         # TRDD-B3PY3HV7: the flag had to exist until now (SessionStart stamps `clear-observed.ts`, the
@@ -976,6 +999,15 @@ def _run_chain_payload(payload_b64: str) -> int:
         # between the Stop hook's decision and the actual land is measurable on its own.
         if not ok and why.startswith("cancelled — "):
             state.log_line("clear-trigger", f"clear cancelled at land: {why[len('cancelled — '):]}")
+        # #355/#356: the chain gave up WITHOUT ever typing `/clear` because the main turn never went
+        # idle. A distinct line, so "no /clear was typed" is not mistaken for a failed landing.
+        if not ok and not persisted["done"] and turn_gate["deferred"] and why.startswith(f"{data['first']} not sent: gave up"):
+            state.log_line(
+                "clear-trigger",
+                f"clear NOT typed: the main turn never went idle within {_CLEAR_CHAIN_GIVEUP_S:.0f}s "
+                f"({why}) — a /clear typed into a running turn is queued and can land after this chain "
+                "has given up (#355, #356)",
+            )
         if not ok:
             # 2026-08-02 review finding: the old cleanup here unconditionally unlinked
             # resume-after-clear.{flag,ts} AND resume-directive.txt on ANY chain failure.

@@ -52,6 +52,8 @@ _CASES: list[tuple[str, ps.StatusKind, ps.InputFieldKind]] = [
     ("synthetic-agents-running-context-pct.txt", ps.StatusKind.WORKING, ps.InputFieldKind.EMPTY),
     ("synthetic-garbage-random-text.txt", ps.StatusKind.UNKNOWN, ps.InputFieldKind.EMPTY),
     ("synthetic-garbage-empty.txt", ps.StatusKind.UNKNOWN, ps.InputFieldKind.EMPTY),
+    ("synthetic-done-row-idle.txt", ps.StatusKind.IDLE, ps.InputFieldKind.EMPTY),
+    ("synthetic-stale-glyph-row-then-done-row.txt", ps.StatusKind.IDLE, ps.InputFieldKind.EMPTY),
 ]
 
 
