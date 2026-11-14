@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook — three stages:
+# Pre-commit hook — four stages (0 = reports/ redaction, then 1-3 below):
 #   1. Privacy-leak scan (TRDD-FWDZDB7W): the staged diff is scanned for
 #      personal e-mails, home paths, machine identity and PII shapes by
 #      scripts/lib/staged_privacy_scan.py (reuses the G1b lint and the
@@ -24,6 +24,20 @@
 # git-hooks/pre-push for the sibling hook this mirrors).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+
+# Stage 0 — redact the staged files under reports/ BEFORE anything scans them
+# (TRDD-KSUIEPTQ). OWNER ORDER 2026-11-14: "reports must be git tracked! ends of
+# the story! this is why we implemented the secret redactor in the first place,
+# so it is always run before committing, redacting all secrets in the new files
+# under reports/". The helper runs `sanitize-reports` on every staged
+# added/modified file under the root reports/ and re-stages the result, so
+# Stage 1 and the commit see redacted content. It fails closed (sanitize-reports
+# missing, unstaged hunks in a reports/ file, sanitize failure): no fallback, no
+# skip. Nothing staged under reports/ => silent exit 0.
+uv run python scripts/lib/redact_staged_reports.py || {
+  echo "pre-commit: reports/ redaction blocked the commit (see output above)."
+  exit 1
+}
 
 # Stage 1 — staged-diff privacy scan. Fail toward BLOCKING: exit 2 from the
 # scanner (git failure, no toplevel) blocks the commit too, never waves it
