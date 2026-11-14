@@ -93,7 +93,8 @@ describe('estimator probe', () => {
       // file header; the plugin test sandbox offers no file access, so console output is the only channel. Printed before the assert so a failing row still reports its verdict.
       console.log(`REDOS-ROW ${c.id.split(' ')[0]} ${c.expectLinear ? 'linear' : 'mutant'} ${fx.verdict}`)
       if (c.expectLinear) expect(fx.verdict).toBe('linear')
-      else expect(['superlinear', 'escaped']).toContain(fx.verdict)
+      // WHY superlinear only: timing.ts says escaped is too fast to time and proves nothing, so it must never pass a mutant row (TRDD-OD5Z90YL, design/specs/redos-load-harness-d8.md).
+      else expect(fx.verdict).toBe('superlinear')
     })
   }
 })
