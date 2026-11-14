@@ -594,6 +594,8 @@ function redactInto(text: string, hits: Hits, found: Map<string, string>): strin
   // whole value, and leave the value's tail visible (`Authorization: Bearer <jr-shape token>+/=xyz` became `Bearer [mark]+/=xyz`). As the last pass it only hides what
   // every other rule left, so those values keep their kind and their whole hide (0 regressions over the same inputs). The jwt rule keeps its TOKENS position; its own
   // pre-emption of current-shape tokens in those contexts is older and tracked separately.
+  // It must stay the final applyRule before return: a pass added below it would be pre-empted the same way and re-create the regression,
+  // pinned by tests/test_secret_shield_jwtwide_last_pass.py.
   out = applyRule(out, jwtWide, hits, found)
   return out
 }

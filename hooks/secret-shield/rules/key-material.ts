@@ -38,6 +38,6 @@ export const jwt: Rule = { kind: 'jwt', pattern: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-
 // boundary before eyJ. Differential against the plain candidate /\b(eyJ[c]{8,}\.[c]{8,}\.[c]{8,})/g: 0 mismatches over 500000 seeded strings;
 // the plain candidate is quadratic on a run of eyJ- (640-700 ms at 64 KB), this rule takes 17-40 ms per MB. NOT covered: a header with a space
 // after the opening brace (first segment eyAi); widening the first segment beyond eyJ needs its own measured change. tests/patterns.test.ts
-// ('jwt tokens with shorter segments ...') pins the spans, the superset against a copy of jwt, the floors and the timing.
+// ('jwt tokens with shorter segments ...') pins the spans, the superset against a copy of jwt, the floors, the timing and the context table (pass order).
 export const jwtWide: Rule = { kind: 'jwt', pattern: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g, group: 1 }
 export const bearerToken: Rule = { kind: 'bearer-token', pattern: /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g, group: 1 }
