@@ -1,10 +1,10 @@
 ---
 trdd-id: U5O72MGA
 title: Secret shield JSON_ESCAPED pass is quadratic on a long backslash run
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-11-13T23:41:03+0100
-updated: 2026-11-14T03:40:35+0100
+updated: 2026-11-14T03:43:47+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-13T23:41:03+0100
+implementation-commits: [f38c30c8]
 ---
 
 # Secret shield JSON_ESCAPED pass is quadratic on a long backslash run
@@ -26,6 +27,7 @@ Found during the change-2 measurements of TRDD-AGOEWF2E. Measured 2026-11-13 by 
 ## Approval log
 
 - 2026-11-13T23:41:03+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-14T03:43:47+0100 — COMPLETE by main-agent@ai-maestro-janitor. Done-when (1)-(3) met; see the Done-when (2) answer.
 
 ## Done-when (1) answer — 2026-11-14
 
@@ -35,3 +37,10 @@ From the Claude Code mods docs bundled on this machine (they describe v2.1.290; 
 
 Isolated pass: JSON_ESCAPED, 99% of redact(). Measured under bun (JavaScriptCore, the engine of claude plugin test), one run each, load not controlled: pass alone 278, 1,115 and 4,477 ms at 27K, 54K and 108K backslashes (ratio 4.0 per doubling, quadratic); redact() 284, 1,119, 4,534 ms; the escaped-pairs shape (a quote then n/2 pairs) the same; JSON_PLAIN 0 ms. Fix: JSON_ESCAPED in hooks/secret-shield/patterns.ts is now anchored on the opening quote: an atomic lookahead reads the name and the run after it once, and a lookbehind (?<=\1) checks the same run before the quote, so each quote costs its own name and run and the pass is linear; the match starts at the quote, so hideEscapedPair drops the run from hideJsonPair's output (same output text). Exact equivalence: the run after the key name must equal the run before the opening quote, so per run only one group-1 length can match, and the old match starting inside a longer run is the same candidate. Scratch differential, old regex against new on 500,000 seeded strings (backslashes, quotes, escape pairs, u-escapes, JSON fragments, secrets in escaped JSON; about 280,000 with a match, about 126,000 with two or more): 0 differences. 1 MB through the new regex alone 7 to 29 ms per shape; through redact() about 16 ms per shape, 57 ms with a secret after the run.
 Tests, describe 'the escaped JSON pair pass runs in linear time with the same matches (TRDD-U5O72MGA)' in hooks/secret-shield/tests/patterns.test.ts: 21 hand cases (including the match that starts inside a run, and a run before the quote shorter than the runs after it) against a constant copy of the old pattern, span and group for group; 600 seeded strings (floors: 150 with a match, 50 with two or more); 256 KB and 1 MB of backslashes, of a quote then escaped pairs, and of backslashes then a quote, each through redact() in under 1000 ms; a secret in escaped JSON after a 1 MB backslash run, on the next line and on the same line, still hidden. Red on the old rule, confirmed on a scratch copy: 256 KB of backslashes took 26,809 ms (limit 1000); the 1 MB tests were not run against the old rule (about 16x longer, not measured); the differential tests pass on the old rule by construction. Mutation: dropping the lookbehind makes the seeded test and the hand case with a shorter run before the quote fail. Plugin engine: 841 pass, 0 fail (baseline 807); known-misses, wiring-gate and jwtwide-last-pass pytest files 38 passed. JSON_ESCAPED is now exported for the differential. Done-when (2) first branch is met: the pass is linear. The card is not moved.
+Done-when (3): (1) showed the stored copy (tool.call) fails open, so (2) was required; (2) is met by f38c30c8 (the 256 KB test is red on the old rule at 26,809 ms; 1 MB was not run on the old rule, it can only be slower). The model copy fails closed; with the pass linear, a scan of a long backslash run no longer approaches the 10 s limit, so no owner acceptance is needed for closing on (2).
+
+## Done when
+
+- [x] (1) The shield hook's time limit and its behaviour on running out of time are written down (Done-when (1) answer).
+- [x] (2) JSON_ESCAPED isolated, growth measured at 27K/54K/108K backslashes, made linear with tests red on the old rule (f38c30c8).
+- [x] (3) TRDD-2V7OAUPE is no longer blocked by this card.
