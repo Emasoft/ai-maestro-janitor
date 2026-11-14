@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-14T07:39:01+0100
+updated: 2026-11-14T07:39:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -70,3 +70,4 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 2026-11-14 D8 amendment (review of 4bcfd933). Z41A13XV's restated criterion is 35 CPU-only workers (2.5 per core on the dev host). The 43 min cap covers the whole run (refusal sampling, settle, probes); worker lifetime is the cap plus 5 min; hitting the cap records the campaign as aborted (neither pass nor fail). One JSON line per probe goes to reports_dev/redos-load-harness/ (exit, pass/fail counts, load at start and end, ambient). Headroom with 35 workers is about 10 to 12 below 60, not 15. The 20/20 must hold wherever the probe lands (P or E core). A probe passes only when every row passes, the quadratic rows included, and that is the 1a criterion. D8 decided the three choices posted to the owner; the owner may veto them, and no campaign runs before the owner has seen that report.
 2026-11-14 D8 clarification: 'the owner has seen that report' means it was posted in a user-visible message (done 2026-11-14 at about 07:40) at least one turn before the campaign; owner acknowledgement is not required, but an owner veto stops the campaign. Z41A13XV's Done-when line now carries the 35-worker criterion.
 2026-11-14 D8 precondition: the one-line note to the local Claude sessions (duration, peak load, no request) must be sent before the campaign starts; no note, no campaign. Z41A13XV's line names its subject: the patterns.test.ts:657/:664 assert or its 1b replacement, on the real module.
+2026-11-14 D8 step B placement, decided from a measurement (reports_dev/sonnet-worker/20261114_073850+0100-plugin-test-collection.md, local): claude plugin test collects only files named *.test.ts or *.test.tsx, at any depth, and has no filter flag; *.spec.ts, plain .ts and *.load.ts are not collected. So the estimator goes in hooks/secret-shield/tests/load/: timing.ts, a quadratic-rule fixture old-quadratic.ts and the probe named probe.load.ts. The release gate never collects them (its count stays 841). The harness copies probe.load.ts to probe.test.ts inside its temp assembly only. The fixture's known-quadratic regexes ship with the plugin but are imported only by that uncollected probe.
