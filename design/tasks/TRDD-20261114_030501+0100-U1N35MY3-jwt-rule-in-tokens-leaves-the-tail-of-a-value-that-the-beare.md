@@ -4,7 +4,7 @@ title: jwt rule in TOKENS leaves the tail of a value that the bearer and assignm
 column: backburner
 status: tasked
 created: 2026-11-14T03:05:01+0100
-updated: 2026-11-14T03:13:13+0100
+updated: 2026-11-14T03:15:33+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -28,7 +28,7 @@ The jwt rule runs in TOKENS before bearerToken and before the assignment and con
 ## Candidate fix
 
 Move jwt to the last pass too, gated on the same whole-pipeline measure (HEAD vs new over contexts x tails, 0 violations) and on the kind-attribution change being accepted (a JWT inside a header or assignment would keep the bearer-token or assignment kind instead of jwt).
-Risks to measure: kinds change for current-shape JWTs inside URL passwords, assignments and connection strings (consumers counting by kind: reports, label(), wiring-gate predicates); redactGitlabSessionWindows and redactUrlPasswords would see a full JWT first and claim it under their kind, or partially past URL_PASSWORD_BOUND (4096); TOKEN_ORDER loses the jwt entry, and the A7RII4DN oracle and 6A3XW3VO's context table change. Gate: the whole-pipeline measure (HEAD vs new, contexts x tails, hidesAll), the mutant checks, a context table, and a pinned frozen must-hide span corpus (HEAD's hidden spans for a seeded context corpus, asserted as a superset) so later widenings cannot regress silently. jwt must still run immediately before jwtWide (the superset argument and the 5-segment test depend on jwt first; the pytest pin keeps jwtWide the last assignment). hideKnown would record and hide copies under the other passes' kinds, not jwt. Rows of 6A3XW3VO's context table that use current-shape JWTs would change kind. Capture the frozen must-hide corpus from HEAD before the change. The gitlab session pass claims a JWT only inside a _gitlab_session setting.
+Risks to measure: kinds change for current-shape JWTs inside URL passwords, assignments and connection strings (consumers counting by kind: reports, label(), wiring-gate predicates); redactGitlabSessionWindows and redactUrlPasswords would see a full JWT first and claim it under their kind, or partially past URL_PASSWORD_BOUND (4096); TOKEN_ORDER loses the jwt entry, and the A7RII4DN oracle changes. Gate: the whole-pipeline measure (HEAD vs new, contexts x tails, hidesAll), the mutant checks, a context table, and a pinned frozen must-hide span corpus (HEAD's hidden spans for a seeded context corpus, asserted as a superset) so later widenings cannot regress silently. jwt must still run before jwtWide (directly before it, if moved last; the superset argument and the 5-segment test depend on jwt first; the pytest pin keeps jwtWide the last assignment). hideKnown would record and hide copies under the other passes' kinds, not jwt. Rows of 6A3XW3VO's tests that use current-shape JWTs inside a header or assignment, if any, would change kind (the context table itself uses jr-shape tokens). Capture the frozen must-hide corpus from HEAD before the change. The gitlab session pass (patterns.ts:352) runs only when the text holds _gitlab_session and hides 32-hex runs (SESSION_VALUE, patterns.ts:350) within 512 characters of it, so it claims part of a JWT only if the JWT holds such a run there.
 
 ## Done when
 
