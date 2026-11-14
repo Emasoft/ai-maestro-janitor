@@ -60,3 +60,9 @@ Pure tests for the worker-count formula and the ambient refusal; an abort test t
 - One WHY line in `scripts/run_secret_shield_tests.py` naming `tests/load/*.load.ts` as deliberately uncollected.
 - The CPV check of the shipped quadratic fixture is tracked on TRDD-KADV0ZO6 (the first real publish run).
 - The step B files were copied verbatim from the scratch versions used in the idle 1a runs (25 of 25); the main agent did not reread them line by line.
+
+## Step C additions (review of b93025a7)
+
+- Each test line shows only (pass) or (fail), so the probe must expose each mutant row's verdict reason (linear, superlinear, escaped, or out of rounds), in the test name or a stdout line; step C makes that edit to `probe.load.ts`, with the step B re-checks. A mutant (fail) whose reason cannot be read makes the probe invalid, not a 1a failure.
+- A linear row that runs out of rounds is a failure of 1a, not undecided: a false failure of a linear rule under contention is what the campaign measures.
+- The per-probe JSON line records the number of undecided rows. If a campaign ends incomplete because of undecided rows, the remedy is a larger round budget for mutant rows, restated in this file, never re-running until 20 probes come out clean.
