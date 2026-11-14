@@ -116,7 +116,7 @@ describe('GitHub tokens shorter than the old floors are hidden, nothing the old 
     expect(redact(`value: ${fine(19)} end`).text).toContain(fine(19))
   })
 
-  // The two tests below pin the CURRENT, deliberately chosen behaviour of the {30,255} / {20,255} caps and of the classic character class. They are not claims about what is ideal.
+  // The two tests below pin the CURRENT, deliberately chosen behaviour of the {30,255} / {20,255} caps and of the classic character class. They are not claims about what is ideal. A new rule that hides the 45-character tail or the `_suffixtext` tail must update these pins on purpose.
   test('deliberate pin of current behaviour: a 300-character body is hidden up to the 255 cap only, the last 45 characters stay visible', () => {
     for (const [token, prefix] of [[classic(300), j('gh', 'p_')], [fine(300), j('github', '_pat_')]] as const) {
       const body = token.slice(prefix.length)

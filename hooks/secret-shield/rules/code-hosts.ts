@@ -3,7 +3,7 @@
 import type { Rule } from './rule'
 
 // WHY the floors are 30 and 20 and there is no trailing \b (TRDD-6A3XW3VO, widened 2026-11-14): the old floors (36 and 22) came from upstream secret-shield 1.0.0 with no recorded
-// reason. jr-redact hid shorter tokens the shield left visible; the TRDD-6A3XW3VO measurement showed that widening them hides all 15 such samples with 0 new matches on 140 MB of text.
+// reason. jr-redact hid shorter tokens the shield left visible; the TRDD-6A3XW3VO measurement showed that widening them hides all 15 such samples (shield-test strings and catalog samples), and that on 140 MB of separate repo and plugin-cache text every match was already hidden by the old rules.
 // The trailing \b is dropped because a token whose tail continues with an underscore (a word character) never reaches a boundary, so the old rule left the whole token visible.
 export const githubTokenClassic: Rule = { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{30,255})/g, group: 1 }
 export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b(github_pat_[A-Za-z0-9_]{20,255})/g, group: 1 }

@@ -1,10 +1,10 @@
 ---
 trdd-id: 6A3XW3VO
 title: Secret shield misses token shapes that jr-redact hides
-column: todo
+column: dev
 status: tasked
 created: 2026-11-14T01:14:32+0100
-updated: 2026-11-14T01:44:24+0100
+updated: 2026-11-14T01:47:53+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -40,4 +40,5 @@ Each gap (1) to (6) is either closed by a shield rule change with a test that hi
 CURRENT (2026-11-14) — evidence gathered (report path above, gitignored, worker-run). Recommended (evidence: synthetic samples, file corpora), gated on the differential test in NEXT ACTION: WIDEN 1-4; KNOWN-MISSES entry for 5 (kind c, header language kept exact on purpose, rules/key-material.ts:5-14) and for 6c (port-then-path shape, kind a, existing test patterns.test.ts:249) and 6d (backtick, double quote, [ in userinfo, kind c); single quote goes to backlog TRDD-Q6LPJTPO; 6b needs no action (jr bug, jr over-hide, placeholder exemption).
 Candidate rules (from the report section 7): openai rules/ai.ts:8 -> \b(sk-[A-Za-z0-9_-]{20,}) (plain form, superset of today; one kebab-slug false hit in 100 MB of third-party text, to be pinned as a documented over-hide test); github rules/code-hosts.ts:5-6 -> \b(gh[pousr]_[A-Za-z0-9]{30,255}) and \b(github_pat_[A-Za-z0-9_]{20,255}) without trailing \b; jwt rules/key-material.ts:15 -> \b(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}); stripe rules/messaging-payments.ts:7 -> \b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})\b. Runtime on 512 KB unchanged within noise; suite 655/656, the one failure is the TOKEN_ORDER source pin. Alternative for openai: the same with lookahead (?=[A-Za-z0-9_-]*\d), 31/31 hidden, 5 new third-party hits instead of 6; choose by the differential and false-hit test.
 Bounds: samples are synthetic shapes from the catalog regexes; false hits measured on files (repo text 40 MB, third-party text 100 MB), not live tool output; function level only.
+KNOWN-LIMITS (accepted, 2026-11-14, ad553852): a gh*_/github_pat_ body over 255 characters is hidden only up to 255 and the tail stays visible — no GitHub token format is that long (classic 36, fine-grained about 82); a classic token stops at an underscore, correct because classic tokens are letters and digits only. Both pinned by tests in patterns.test.ts.
 NEXT ACTION: one rule family per commit (rule, TOKEN_ORDER pin at patterns.test.ts:1410-1439, positive tests, plus the jwt payload case with a space after the opening brace); gate each on a differential test old vs new over the suite and catalog inputs (nothing hidden today becomes visible); re-measure old and new jwt at 256 KB before the jwt change (see the jwt timing card); then the KNOWN-MISSES entries in a separate commit, each with its matching test title for tests/test_secret_shield_known_misses.py, keeping the leading-\b count in known-misses.test.ts. Watch the ubs pre-commit run on rules/*.ts (whole process tree); if one runs away, stop and report, do not add ignore lines.
