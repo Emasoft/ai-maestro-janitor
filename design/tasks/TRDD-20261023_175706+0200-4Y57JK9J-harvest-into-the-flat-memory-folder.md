@@ -4,7 +4,7 @@ title: Harvest into the flat memory folder
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:06+0200
-updated: 2026-11-14T09:53:22+0100
+updated: 2026-11-14T09:54:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -39,3 +39,4 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-20. The h
 ## Notes
 
 2026-11-14: live symptom of the split this card resolves: a LOCAL harvest pass (reports/janitor-memory-subconscious-agent/20261114_095020+0100-harvest-local.md) created memory/trdd-card-editing.md through memgrep new-mem-topic (which writes to the scope root, no path flag), but the harvest gate reads <scope>/wikimem/ only, so it could not see the page, abstained and left the watermark unstamped; each later harvest pass re-enters UPDATE for the same buffer note and abstains again.
+2026-11-14: checks on the previous note (review of 14551c91). Verified by the main agent: memgrep new-mem-topic --help says 'THERE IS NO --path: the destination is <scope root>/<name>.md'; skills/janitor-memory-harvest/SKILL.md (description, lines 18 and 219) has the harvest CREATE and check a wikimem/<name>.md page. Not observed, the agent's prediction: that later passes re-enter UPDATE and abstain again. Cost while blocked: the pass spawned the Haiku memory agent for about 228k tokens and 2.7 min; harvest is daily, so about one such spawn per scope per day, and the blind spot covers every buffer note harvested from now on, not only this one. A cheap pre-check (treat a buffer note whose claude_mem_ref resolves at the scope root as mirrored) would stop the no-op spawns before KLT5F93P lands; root cause is KLT5F93P.
