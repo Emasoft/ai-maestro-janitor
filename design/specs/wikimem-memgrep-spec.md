@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 2.5.0
+spec-version: 3.0.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-09-29T21:16:08+0200
+updated: 2026-11-14T23:57:19+0100
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -201,6 +201,18 @@ relocated (this is WM-LES-06 applied to structure).
 `WM-WIKI-06` **entry-point** — each scope root has ONE overview/entry page (`memgrep overview
 <root>`) that links out to the deeper pages; a fresh session navigates from it.
 
+`WM-WIKI-07` **typed-reciprocity** — `MUST` (TRDD-F8EIVTSG D4): the link law (WM-WIKI-04) is checked
+TYPED and within one scope (WM-WIKI-04a). An `## Applies to` edge from A to B needs a
+`## Governed by` edge from B to A, and the converse; a `## See also` edge needs a `## See also`
+edge back. A reciprocal edge of the WRONG type does not satisfy the law and is reported. Tier
+shape belongs to the same check and lives in the Rust lint: a `hub` or `aspect` page `MUST NOT`
+carry `## Governed by` without `## Applies to`, and a `component` page `MUST NOT` carry
+`## Applies to`. Today the law is section-blind: every `[[wikilink]]` anywhere on a page is an
+edge (memory.rs:7468-7585, the one-sided-link rule, WMLINK-002), and the tier shape is enforced
+only in Python (scripts/lib/memory_content_precheck.py:864-869, regexes anchored at column 0 and
+not fence-aware, plus the librarian detector), never by memgrep. Not yet implemented:
+TRDD-F8EIVTSG increment 4; until then memgrep does not conform.
+
 ## WM-NOTE — the page / note format
 
 `WM-NOTE-01` **frontmatter** — a page carries YAML frontmatter: `name` (== filename stem),
@@ -220,16 +232,99 @@ WM-MIG-07 for why (ranking tie-breaks on `lmd`, so a format pass would silently 
 corpus) and for the free audit it buys ("no `lmd` changed" proves the repair really was
 mechanical).
 
-`WM-NOTE-06` **footnotes-are-POOLED-under-three-sections** — a page's `[^N]` definitions live
-under `# Notes`, `# Lessons Learned` and `# See also` (or `##` equivalents), and the render GROUPS
+`WM-NOTE-06` **footnotes-are-POOLED-under-two-sections** — a page's `[^N]` definitions live
+under `# Notes` and `# Lessons Learned` (or `##` equivalents) ONLY, and the render GROUPS
 an atom's cited footnotes by WHICH section defines each. So a footnote's meaning comes from its
-defining section, not from its number: the same `[^3]` is a lesson or a relation depending on where
+defining section, not from its number: the same `[^3]` is a note or a lesson depending on where
 it is defined. `WM-NOTE-03`'s mandatory `## Notes and lessons learned` is the always-present
-landing zone; the other two are optional.
+landing zone; `# Lessons Learned` is optional. The `# See also` pool is RETIRED (TRDD-F8EIVTSG D9):
+a heading of that name is a link section (WM-NOTE-10), a `[^N]:` definition under any link section
+is foreign content (WM-LINT-12) whose fixer moves it to the Notes pool, and the render no longer
+groups footnotes by a See-also kind (today `SectionKind::SeeAlso`, memory.rs:845-880). Until spec
+3.0.0 this clause pooled footnotes under three sections. Not yet implemented: TRDD-F8EIVTSG
+increment 3; until then memgrep does not conform.
 
 `WM-NOTE-05` **curated-vs-raw** — a CURATED wiki page (authored via the verbs) is distinct from
 a RAW harness buffer note; the corpus discriminator (`is_curated_wiki_page`) decides which
 editorial passes apply.
+
+`WM-NOTE-07` **page-layout** — `MUST` (TRDD-F8EIVTSG D3): a curated page reads, top to bottom: the
+frontmatter, the `# <name>` title, the atoms, the link sections (`## Applies to`, `## Governed by`,
+`## See also`, each at most once, in any order among themselves), `## Superseded`, and last
+`## Notes and lessons learned`. A new atom — from `new-mem-atom` with or without `--supersedes`,
+and from every verb that splices one into a page — lands ABOVE the earliest of the first
+link-section heading, `## Superseded` and the Notes heading; that point is the LAYOUT BOUNDARY.
+Today the splice point is the earliest FOOTER heading alone (WM-NOTE-08), and the `## Superseded`
+limit is applied only under `--supersedes` (memory.rs:3160-3166), so a plain `new-mem-atom` on a
+page whose `## Superseded` precedes every footer heading puts the atom BELOW it: issue 289 is
+closed only for the `--supersedes` path (reproduced with the installed memgrep 0.2.0, e5cf088), and
+lint reports nothing for that placement. Not yet implemented: TRDD-F8EIVTSG increment 2; until then
+memgrep does not conform.
+
+`WM-NOTE-08` **the-footer-is-two-boundaries-in-three-copies** — `MUST`: this clause records what
+memgrep implements today (WM-META-05; memgrep 0.2.0, e5cf088), because the spec never named the
+footer although `new-mem-atom`, the lint and the repair gate all key on it.
+
+- FOOTER HEADING: a line whose first non-whitespace character is `#` (any level; a bare `#tag`
+  qualifies), outside a fenced code block, whose text after the `#` run — trimmed and lowercased —
+  is exactly `applies to`, `governed by` or `see also`, or which contains `notes and lessons
+  learned` or `lessons learned`. `## Superseded` is NOT a footer heading. No copy skips the YAML
+  frontmatter, so a `# ...` comment line inside it is a heading to all three; a caller that must
+  not see it slices the body first (fixers/superseded_move.rs:83-96).
+- EARLIEST boundary, the insertion point: the first footer heading. Copy 1, Rust
+  `footer_section_line`, memory.rs:2493-2517. Callers: `new-mem-atom` (memory.rs:3160, 3278),
+  `merge-mem-topic` (mem_merge.rs:265), `split-mem-topic` (mem_split.rs:115, 271), the See-also
+  insertion of `reference-mem-topic` (mem_reference.rs:107) and the superseded-move fixer
+  (fixers/superseded_move.rs:88).
+- TRAILING boundary, the lint boundary: the start of the maximal run of footer headings at the END
+  of the heading list of the page; there is none when the last heading is not a footer heading, so
+  a footer-shaped heading mid-page, followed by ordinary content, is an ordinary section
+  (janitor#260). Copy 2, Rust `footer_section_trailing_line`, memory.rs:2545-2579, called by lint
+  at memory.rs:8088. Copy 3, Python `_footer_heading_line`,
+  scripts/lib/memory_content_precheck.py:697-755 with `_is_footer_heading` 677-695, called by
+  `repair_defect` at memory_content_precheck.py:881.
+- The copies differ: (a) copy 1 is earliest, copies 2 and 3 are trailing, by design; (b) the
+  docstring of copy 3 says it mirrors copy 1 but it implements the walk of copy 2 — the comment is
+  wrong, the code is right; (c) case folding is ASCII in Rust and Unicode `str.lower` in Python;
+  (d) lines are split by Rust `str::lines` and by Python `str.splitlines`, which also splits on
+  form feed, vertical tab, U+0085, U+2028 and U+2029; (e) fence tracking is two implementations,
+  Rust `fence_step` and `memory_edit_verify.fence_step`; (f) the atom compared against the boundary
+  is the parsed atom line in Rust and a raw-line match of `_ATOM_MARKER_PROPS_RE` in Python
+  (memory_content_precheck.py:877-886); (g) the heading family is hard-coded a fourth and fifth
+  time for `see also` alone, with different matching (mem_reference.rs:61, mem_split.rs:100;
+  WM-NOTE-09).
+
+`WM-NOTE-09` **link-sections-today** — `MUST`: this clause records what memgrep implements today
+(WM-META-05); TRDD-F8EIVTSG replaces it clause by clause (WM-NOTE-10, WM-CLI-28, WM-CLI-29).
+
+- `## Applies to`, `## Governed by` and `## See also` are a CONVENTION: no Rust code parses the
+  bullets inside them. The link graph is section-blind — the lint (memory.rs:7468-7585), the write
+  gate (pre_write.rs, `refuse_introduced_one_sided_links`), `links` and `delete-mem-topic` treat
+  every `[[wikilink]]` anywhere on a page, in an atom, in prose or in the Notes, as an edge.
+- `## See also` is overloaded: a list of `- [[x]]` edges, and a footnote pool (WM-NOTE-06).
+- Two Rust implementations add a See-also link, and they differ. `add_see_also_entry`
+  (mem_reference.rs:89-121, used by `reference-mem-topic`) matches the heading exactly, appends at
+  the END of the section, and is a no-op when `[[x]]` appears anywhere on the page.
+  `ensure_see_also_link` (mem_split.rs:87-131, used by `split-mem-topic`, `merge-mem-topic` and
+  `migrate-mem-atom --leave-link`) matches any heading CONTAINING `see also`, inserts right after
+  the heading, and is a no-op only on an exact `- [[x]]` line. Both create the section before the
+  earliest footer heading when it is absent.
+- No verb exists to remove a link or a link section, yet `replace-mem-topic` and `update-mem-topic`
+  can drop one and no rule polices it (WM-CLI-25). `merge-mem-topic` writes a tombstone template
+  with no link sections (mem_merge.rs:339-342) and re-points no page that linked the source.
+- Nothing in Rust writes `## Applies to` or `## Governed by`.
+
+`WM-NOTE-10` **link-section-grammar** — `MUST` (TRDD-F8EIVTSG D1): the link sections stay in the
+page BODY and memgrep owns their shape; the frontmatter is NOT an edge source (deferred, the owner
+may veto). A link section is a heading whose text is exactly `Applies to`, `Governed by` or
+`See also` (case-insensitive, any level, outside fenced code, as WM-NOTE-08), running to the next
+heading of any level or the end of the page. Its content is bullets only — each bullet holds one or
+more `[[target]]` and optionally an annotation, and may wrap onto indented continuation lines — or
+the single placeholder bullet `- (none yet)`; an empty section is legal. ONE Rust parser owns the
+footer boundaries (WM-NOTE-08) and the link sections; the Python boundary copy and the second
+See-also implementation (WM-NOTE-09) are removed. Anything else inside a link section is foreign
+content (WM-LINT-12). Not yet implemented: TRDD-F8EIVTSG increment 2; until then memgrep does not
+conform.
 
 ## WM-ATOM — the atom model
 
@@ -744,6 +839,18 @@ but it `MUST NOT` be presented as the thing that makes the system safe. Any agen
 verbs with a raw edit tool, so a background repair chore is the safety net, and **correctness may
 never DEPEND on the safety net.**
 
+`WM-IDX-15` **the-index-block-lists-root-topics-only** — `MUST` (TRDD-F8EIVTSG D10, GitHub #328 option
+(b); owner decision, verbatim: "(b) Root topics only (Recommended)"): the generated wikimem index block in
+the project CLAUDE.md (the JANITOR-WIKIMEM-INDEX-START and -END fence, written by
+scripts/lib/repomap/claudemd_slim.py) lists ROOT topics only, so it changes only when a root topic
+is added, renamed or re-described, never because a page beneath one changed. A ROOT topic is a
+top-level grouping of the block: the overview page, and each hub page (hub grouping) or each
+distinct `metadata.topic` value (topic grouping). Pages beneath a root topic, and the unclaimed
+pages the block files under "Other topics", are not listed; `memgrep overview` and `memgrep recall`
+reach them. Today the block lists every page — each hub with the pages it links, then every
+unclaimed page (claudemd_slim.py:184-283) — so it changes whenever PROJECT memory changes. Not yet
+implemented: TRDD-F8EIVTSG increment 5; until then memgrep does not conform.
+
 `WM-SCORE-10` **the-ordering-and-date-flags** — `recall`/`find` also carry `--sort score|ocd|lmd`
 (default `score`), `--order asc|desc` (default `desc`), and `--since`/`--until` over
 `--date-field ocd|lmd` (default `lmd`). Two null-handling rules, both deliberate:
@@ -1137,7 +1244,7 @@ is unconditionally true on this verb: a whole-page rewrite mutates every survivi
 contract (the same per-call blast radius as `update-mem-topic`'s accepted ceiling). The
 one-sided-link removal ceiling applies: dropping the page's half of a reciprocal link pair, or
 dissolving an id other pages still `[[link]]`, creates edges no rule polices — `--retire-atom`
-declares the intent, the caller owns the holders.
+declares the intent, the caller owns the holders. The link half of this ceiling is REPLACED by the WM-CLI-29 gate and its `--retire-link` once implemented (TRDD-F8EIVTSG increment 4); until then the ceiling stands.
 
 `WM-CLI-13` **new-mem-atom-supersedes** — `new-mem-atom --supersedes <ID>` (was `add-atom
 --supersedes`) `MUST`, in one transaction: mark the target atom `status: superseded,
@@ -1281,8 +1388,8 @@ default), and the cost model is WM-BENCH-04.
 `WM-CLI-08` **write-verb-placement-and-uniqueness** — the rules that make a synthesised write
 land correctly:
 
-- a `new-mem-atom` block is inserted immediately BEFORE the `## Notes and lessons learned` heading
-  when present, else at EOF. Not cosmetic: the atom parser terminates a body at the next heading,
+- a `new-mem-atom` block is inserted immediately BEFORE the earliest footer heading (WM-NOTE-08), else at
+  EOF (WM-NOTE-07 narrows it further). Not cosmetic: the atom parser terminates a body at the next heading,
   so appending at EOF past that heading would put the new atom's body inside the lessons section
   and truncate it to nothing;
 - atom-id uniqueness is checked across the WHOLE OWNING SCOPE, not just the target page, because
@@ -1307,6 +1414,45 @@ LATENCY half (WM-IDX-08), and it is a different mechanism from an external file 
 phrase"`, wildcards), `--only-notes` to search the LESSONS, `--use-index` for the SQLite sidecar,
 and `--top N`. The DSL grammar lives in the Rust crate and is the search surface both the wiki and
 the private user-mem search build on.
+
+`WM-CLI-28` **link-mem-topics-and-unlink-mem-topics** — `MUST` (TRDD-F8EIVTSG D6): `memgrep
+link-mem-topics --page <PAGE> --to <PAGE> --rel see-also|applies-to` wires BOTH ends, typed, in one
+gated edit; `--rel` is required. `see-also` writes `- [[to]]` under `## See also` on each page;
+`applies-to` writes `- [[to]]` under `## Applies to` on `--page`, the radiating side, and
+`- [[page]]` under `## Governed by` on `--to` (WM-WIKI-07). A missing section is created at the
+layout boundary (WM-NOTE-07) by the single parser (WM-NOTE-10), and the verb is idempotent on an
+existing typed edge — never on a `[[x]]` found elsewhere on the page, which is the silent no-op of
+`reference-mem-topic` today (WM-NOTE-09). `memgrep unlink-mem-topics --page <PAGE> --to <PAGE> --rel
+see-also|applies-to` retires BOTH ends of one typed edge in one gated edit and never removes a
+section heading (an empty section is legal, WM-NOTE-10). Both carry `--dry-run` and the WM-CLI-11
+`--base-sha256` guard. `reference-mem-topic` becomes an alias of `link-mem-topics --rel see-also`
+(WM-CLI-22), and the WM-CLI-01 verb block gains the two verbs in the SAME change that implements
+them, so the block and the dispatcher never disagree. Not yet implemented: TRDD-F8EIVTSG
+increment 4; until then memgrep does not conform.
+
+`WM-CLI-29` **link-section-edge-gate** — `MUST` (TRDD-F8EIVTSG D7): the write gate of every write
+verb (WM-CLI-11; pre_write.rs) refuses an edit that INTRODUCES any of: the removal of a link-section
+heading (WM-NOTE-10), a dropped section edge, or foreign content in a link section (WM-LINT-12).
+"Introduced" is a before-versus-after comparison of the proposed page bytes, so a pre-existing
+defect passes (WM-LINT-04). Per verb:
+
+- `update-mem-topic`, `new-mem-topic` (content mode) and `new-mem-atom`: refuse, with no exception.
+- `replace-mem-topic`: the same, unless the dropped edge is named by `--retire-link <TARGET>`
+  (repeatable, like `--retire-atom`); `--retire-link` also retires the far end of that edge, on the
+  other page, in the same batch.
+- `merge-mem-topic`: the typed edges of the source move to the destination, deduplicated, and each
+  far end is re-pointed from the source to the destination in the same batch; the gate accepts a
+  removed source edge only when the same typed edge appears on the destination in that batch. Test:
+  merge a page that carries all three link sections; every far end ends reciprocal with the
+  destination.
+- `split-mem-topic`: the link-section edges stay on the source page; only atoms move; the new
+  See-also pair is added both ways, as today.
+
+Today none of this exists: the gate refuses only an INTRODUCED one-sided edge
+(pre_write.rs:390, `refuse_introduced_one_sided_links`) and WM-CLI-25 records a dropped link as
+unpoliced; `merge-mem-topic` re-points nothing (mem_merge.rs:336-349). An out-of-band edit with a raw
+editor bypasses the gate; the post-edit lint hook (WM-WIKI-07, WM-LINT-12) is the defence there. Not
+yet implemented: TRDD-F8EIVTSG increment 4; until then memgrep does not conform.
 
 ## WM-BASE — the base markdown-AST grep mode
 
@@ -1599,6 +1745,56 @@ count only ever refilled.
 only lint violations an edit INTRODUCES (before(live) vs after(staged) counts), never a page's
 pre-existing violation — the corpus carries legacy defects, so an absolute "block on any lint
 hit" would reject every unrelated edit.
+
+`WM-LINT-11` **atom-after-footer** — `MUST`: this clause records what memgrep implements today
+(WM-META-05). `memgrep lint` raises `WMATOM-009` (`atom-after-footer`; WARN, no fixer, `gate_floor`
+false) for an atom whose marker line is at or after the start of the TRAILING footer region of the
+page (WM-NOTE-08, copy 2; memory.rs:8088, 8218-8247). The message reads, verbatim: "atom `^<id>`
+sits AT OR AFTER the page's trailing footer region (starts line N) — a link-section lookup like
+`--in "Governed by"` misreads it as part of that section; move it back above the footer". A page
+whose last heading is not a footer heading has no trailing region, so nothing on it is flagged; an
+atom between `## See also` and `## Superseded` is not flagged either, because `## Superseded` is
+not a footer heading and the trailing run is then the Notes heading alone. The Python repair gate
+`repair_defect` recomputes the same verdict with its own boundary copy
+(memory_content_precheck.py:877-886). The message names no remedy beyond "move it back above the
+footer", and the repair skill (skills/janitor-memory-repair) never mentions the rule.
+
+`WM-LINT-12` **foreign-content-in-a-link-section** — `MUST` (TRDD-F8EIVTSG D5): a link section
+(WM-NOTE-10) holds only grammar bullets, their indented continuation lines and blank lines. Anything
+else is FOREIGN CONTENT — an atom marker and its body, a prose block, a `[^N]:` footnote definition,
+a bullet that has no `[[target]]` and is not `- (none yet)` — and `memgrep lint` reports it under a
+new rule (WARN, with a SAFE fixer: `lint --apply-fixes` applies it with no `lmd` bump, WM-NOTE-04,
+WM-LINT-09). The fixer keeps the EDGE SET of the section unchanged, so typed reciprocity
+(WM-WIKI-07) reports nothing new after it runs:
+
+- an atom or prose block moves above the layout boundary (WM-NOTE-07), and every `[[target]]` it
+  held stays in the section as a bare `- [[target]]` bullet;
+- a `[^N]:` definition moves to the Notes pool (WM-NOTE-06);
+- a bullet that is a known bootstrap placeholder becomes `- (none yet)`; any other placeholder text
+  moves above the layout boundary.
+
+The atom-after-footer message (WM-LINT-11) `MUST` also state the exact remedy: move the atom block,
+marker line and body, above line N, the earliest footer heading, keeping every `[[link]]` it sat
+among as a bare bullet. The Python repair gate `MUST` take its atom-after-footer verdict from
+`memgrep lint --json` instead of recomputing it, so that gate and arbiter have one owner (janitor#227
+and janitor#260 were the two disagreeing), and the repair skill and the chore routing `MUST` name the
+rule and the remedy. The issue code of the new rule is registered in
+design/specs/issue-codes.toml by the increment that implements it, not before. Not yet implemented:
+TRDD-F8EIVTSG increment 3; until then memgrep does not conform.
+
+`WM-LINT-13` **no-cheap-silencer** — `MUST` (TRDD-F8EIVTSG D8): for every structural rule — one whose
+finding disappears when the structure it inspects is removed — the cheapest edit that silences it
+`MUST` either raise another finding or be refused by the write gate; deleting the evidence is never a
+free fix. Issue 358 is the counter-example: removing the three link-section headings of a page
+cleared every link-section lookup and every link finding that hung on them, and nothing flagged the
+loss. Acceptance test, which a conformance test `MUST` hold: on a fixture of a `hub` page that has
+`## Applies to`, `## Governed by` and `## See also` sections, each far end reciprocating, apply the
+issue 358 edit — delete the three headings and keep the bullets. (a) Through the memgrep write verbs
+(`update-mem-topic`, `replace-mem-topic`, `new-mem-atom`) the gate refuses the edit and names the
+dropped headings (WM-CLI-29). (b) Written out of band, `memgrep lint` reports strictly MORE findings
+than before the edit: at least one typed one-sided link per far end (WM-WIKI-07).
+Today neither half holds: the section-blind lint reports nothing new (WM-NOTE-09). Not yet
+implemented: TRDD-F8EIVTSG increment 4; until then memgrep does not conform.
 
 ## WM-MIG — the migrate contract
 

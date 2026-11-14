@@ -4,7 +4,7 @@ title: Wikimem link sections redesign for GitHub issues 358 and 328 option b
 column: dev
 status: tasked
 created: 2026-11-14T23:49:01+0100
-updated: 2026-11-14T23:49:01+0100
+updated: 2026-11-14T23:58:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -29,6 +29,7 @@ Open, the owner's alone: golden rules G7.1 and G10.1 require a project-map fence
 Review: the proposal was put to the owner 2026-11-14 with the PROPOSAL FOR ACTION marker; no review finding surfaced, unverified (the turn may have been heartbeat-exempt).
 Increment 4 note: cargo install puts a refusing gate under every project's sessions while the plugin cannot publish (TRDD-AGV84UGC): either hold that install or make every refusal message carry the full remedy.
 Host load was 91 to 168 on 2026-11-14/15: one worker at a time.
+2026-11-15 increment 1 spec text DONE: wikimem-memgrep-spec.md 2.5.0 to 3.0.0 via one specgrep batch; codifies today's footer as WM-NOTE-08, WM-NOTE-09, WM-LINT-11 (boundary copies memory.rs:2493 earliest, memory.rs:2545 trailing, memory_content_precheck.py:697 trailing); new WM-NOTE-07, WM-NOTE-10, WM-WIKI-07, WM-LINT-12, WM-LINT-13, WM-CLI-28, WM-CLI-29, WM-IDX-15, amended WM-NOTE-06, WM-CLI-08, WM-CLI-25, each marked with its increment. specgrep lint 20 findings, all on old letter-suffixed ids, none on new text. Worker-authored choices open to veto: WM-IDX-15 root topic = overview plus hub pages; WM-LINT-12 severity WARN. NEXT ACTION: dry-run counts script in scripts_dev/ over LOCAL, PROJECT, USER (estimates), then mint the increment-2 card.
 
 ## Owner directive (verbatim, 2026-11-14)
 
