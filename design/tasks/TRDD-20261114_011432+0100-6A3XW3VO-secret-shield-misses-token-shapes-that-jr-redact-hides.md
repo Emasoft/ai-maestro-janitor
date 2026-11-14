@@ -4,7 +4,7 @@ title: Secret shield misses token shapes that jr-redact hides
 column: todo
 status: tasked
 created: 2026-11-14T01:14:32+0100
-updated: 2026-11-14T01:34:46+0100
+updated: 2026-11-14T01:44:24+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T01:14:32+0100
+implementation-commits: [6e073334]
 ---
 
 # Secret shield misses token shapes that jr-redact hides

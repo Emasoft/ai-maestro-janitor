@@ -111,9 +111,26 @@ describe('GitHub tokens shorter than the old floors are hidden, nothing the old 
     for (const n of [36, 37]) expect(redact(`value: ${classic(n)} end`).text).toBe(`value: ${mark('github-token')} end`)
   })
 
-  test('a token below the new floors stays visible', () => {
+  test('FLOOR pin (minimum length): a classic body of 29 and a fine-grained body of 19 stay visible', () => {
     expect(redact(`value: ${classic(29)} end`).text).toContain(classic(29))
     expect(redact(`value: ${fine(19)} end`).text).toContain(fine(19))
+  })
+
+  // The two tests below pin the CURRENT, deliberately chosen behaviour of the {30,255} / {20,255} caps and of the classic character class. They are not claims about what is ideal.
+  test('deliberate pin of current behaviour: a 300-character body is hidden up to the 255 cap only, the last 45 characters stay visible', () => {
+    for (const [token, prefix] of [[classic(300), j('gh', 'p_')], [fine(300), j('github', '_pat_')]] as const) {
+      const body = token.slice(prefix.length)
+      const { text, hits } = redact(`value: ${token} end`)
+      expect(text).toBe(`value: ${mark('github-token')}${body.slice(255)} end`)
+      expect(hits).toEqual({ 'github-token': 1 })
+    }
+  })
+
+  test('deliberate pin of current behaviour: a classic token is cut at an underscore and the tail stays visible, a fine-grained token extends through it', () => {
+    const classicToken = classic(36)
+    expect(redact(`value: ${classicToken}_suffixtext end`).text).toBe(`value: ${mark('github-token')}_suffixtext end`)
+    const fineToken = fine(36)
+    expect(redact(`value: ${fineToken}_suffixtext end`).text).toBe(`value: ${mark('github-token')} end`)
   })
 
   test('every span an old rule matched is still hidden by the new rule, over the suite samples and generated lengths', () => {
