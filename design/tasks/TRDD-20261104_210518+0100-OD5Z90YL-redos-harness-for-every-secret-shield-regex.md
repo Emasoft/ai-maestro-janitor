@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-14T08:26:59+0100
+updated: 2026-11-14T08:28:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-04T21:05:18+0100
+npt: [LAUPB305]
 ---
 
 # ReDoS harness for every secret-shield regex
