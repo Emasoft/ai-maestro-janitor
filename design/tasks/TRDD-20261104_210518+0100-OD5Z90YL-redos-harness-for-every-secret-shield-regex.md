@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-14T08:28:44+0100
+updated: 2026-11-14T09:21:42+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -77,3 +77,4 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 2026-11-14 D8, its amendments 1 to 3 and the clarifications above are consolidated in design/specs/redos-load-harness-d8.md, the single current spec; step C builds from that file.
 2026-11-14: risk before the campaign — a truncated `claude plugin test` output, as seen once in TRDD-LAUPB305 (where the cut happens is not yet known, so it may or may not reach the harness's own runs), would make a probe invalid and end the campaign at once with exit 2 (invalid_reason lists the missing count lines, headers and REDOS-ROW lines). Accepted: failing closed is correct; the cost is one wasted load window. Run the LAUPB305 reproducer first if it is ready.
 2026-11-14: the LAUPB305 truncation reproduced inside the harness smoke test (see LAUPB305 Evidence). The campaign waits for LAUPB305: at two occurrences in an uncounted number of runs today (estimated about a dozen), a 21-probe campaign could well end invalid and waste the load window.
+2026-11-14: TRDD-LAUPB305 is closed (7f1cb08a): gate and harness capture claude's output through a regular file (5d69ec99..aefe5fe3), so it no longer blocks step 5. The loss rate under heavy load is unmeasured: in the campaign, treat any invalid probe whose saved raw output is short with exit 0 as a LAUPB305 recurrence and stop. Corrections to the archived LAUPB305 record (archived cards are immutable, so noted here): its Acceptance checklist was written at closing time; its claude-level reproducer (scripts_dev/laupb305/) is local and gitignored, the committed micro-test shows only the mechanism; its run5 and 50/50 counts are worker-reported; a fork review is confirmed for 5d69ec99, ea884607, e6c96af6 and aefe5fe3, not for 74799e97.
