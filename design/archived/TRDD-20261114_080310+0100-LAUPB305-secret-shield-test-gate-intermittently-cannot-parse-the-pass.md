@@ -1,10 +1,10 @@
 ---
 trdd-id: LAUPB305
 title: secret-shield test gate intermittently cannot parse the pass and fail counts after claude exits 0
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-11-14T08:03:10+0100
-updated: 2026-11-14T09:06:41+0100
+updated: 2026-11-14T09:20:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T08:03:10+0100
+implementation-commits: [74799e97, 5d69ec99, ea884607, e6c96af6, aefe5fe3]
 ---
 
 # secret-shield test gate intermittently cannot parse the pass and fail counts after claude exits 0
@@ -49,7 +50,17 @@ The cause is named with a reproducer, or N runs show no failure and step 2 is co
 - 2026-11-14T08:03:10+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-14T08:04:49+0100 — column → todo by main-agent@ai-maestro-janitor. the gate runs inside publish.py, so this can block a release
 - 2026-11-14 — straight from backburner to todo without design: a small bugfix card whose work steps are already written; a design pass would add nothing before the reproducer.
+- 2026-11-14 — Done when met: cause named with a reproducer (claude exits with pipe writes pending; 5/320 pipe vs 0/180 file), step 2 committed (74799e97), fix committed (5d69ec99..aefe5fe3); each commit reviewed by an adversarial fork.
+- 2026-11-14T09:20:31+0100 — COMPLETE by main-agent@ai-maestro-janitor. Done when met; fix and diagnostics committed and reviewed.
 
 ## Notes
 
 2026-11-14: the upstream defect (claude exits with stdout pipe writes pending) is NOT reported anywhere: Claude Code's repository is not owned by this project's GitHub account, so whether to report it is the owner's decision. Our fix captures through a regular file, the capture claude writes synchronously; it is not a reader-bug fix.
+2026-11-14: FIX landed. 5d69ec99: gate (_run_in_own_session) and D8 harness (run_probe) capture claude's output through run_captured_in_own_session: a TemporaryFile outside the assembly, own session, read only once the process group is empty (bounded by the timeout), text mode errors=replace newline=None, no pipe fallback. ea884607: kill ignores EPERM; CapturedRun docstring (group-wait timeout keeps the child's real exit code). e6c96af6 + aefe5fe3: test pins the group-wait timeout contract and proves the grandchild is killed (e6c96af6's message claimed that proof before it existed; aefe5fe3 corrects it). Worker smoke: gate 20/20, group empty 0.000 s after claude exit in 6 runs. Accepted, not fixed (reviews): pid reuse within one 50 ms poll; an other-uid descendant counts as gone and survives the kill unreported (claude starts none); a leftover in-group process turns a run into a timeout; the group-wait test may flake on returncode or os.kill EPERM on a slow or zombie-reporting host (5/5 at normal load). Still unmeasured: loss rate under heavy load; the D8 campaign records the raw output of any invalid probe, so a recurrence there is diagnosable.
+
+## Acceptance
+
+- [x] Cause named with a reproducer: claude exits with stdout pipe writes pending (scripts_dev/laupb305/repro.py; pipe 5/320 cut, file 0/180; node/bun micro-test 50/50).
+- [x] Parse-failure path prints byte length, newline count and last 20 lines before the full output (74799e97).
+- [x] D8 harness saves the raw output of an invalid probe next to its record (74799e97).
+- [x] Gate and harness capture claude's output through a regular file, never a pipe, with real tests for the full capture, the late grandchild, the timeout kill and the group-wait timeout (5d69ec99, ea884607, e6c96af6, aefe5fe3); the check was not loosened.
