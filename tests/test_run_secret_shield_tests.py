@@ -174,7 +174,7 @@ def test_the_file_capture_keeps_all_of_a_big_write_followed_by_process_exit(tmp_
 
 @pytest.mark.real_subprocess("node", "bun")
 def test_a_plain_pipe_loses_the_tail_of_the_same_big_write(tmp_path: Path) -> None:
-    """Documents the upstream claude/bun pipe defect; NOT a regression test of this code: it can only pass or skip, because its assertion cannot fail once the skip condition is false (a plain pipe read of the same script returns fewer than 200000 bytes; if this host returns them all in every run, it skips)."""
+    """Documents the upstream claude/bun pipe defect; NOT a regression test of this code: it can only pass, skip, or error on a broken JS runtime, because its assertion cannot fail once the skip condition is false (a plain pipe read of the same script returns fewer than 200000 bytes; if this host returns them all in every run, it skips)."""
     script = tmp_path / "big_write.js"
     script.write_text(_BIG_WRITE_JS, encoding="utf-8")
     runtime = _js_runtime()
@@ -200,3 +200,12 @@ def test_the_file_capture_reports_a_timeout_and_kills_the_group(tmp_path: Path) 
     assert result.timed_out
     assert not result.aborted
     assert result.returncode < 0
+
+
+@pytest.mark.real_subprocess("sh", "sleep")
+def test_a_timeout_in_the_group_wait_phase_reports_the_childs_real_exit_code(tmp_path: Path) -> None:
+    """When the direct child exits 0 but a grandchild keeps the group alive past the timeout, the run reports timed_out with returncode 0, so callers must check timed_out first."""
+    result = shield_runner.run_captured_in_own_session(["sh", "-c", "(sleep 30) & exit 0"], tmp_path, 1.0, poll_s=0.1)
+    assert result.timed_out
+    assert not result.aborted
+    assert result.returncode == 0
