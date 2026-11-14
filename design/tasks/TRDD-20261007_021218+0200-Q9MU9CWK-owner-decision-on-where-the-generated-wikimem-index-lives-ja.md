@@ -1,22 +1,27 @@
 ---
 trdd-id: Q9MU9CWK
 title: Owner decision on where the generated wikimem index lives (janitor#328)
-column: proposal
-status: proposed
+column: todo
+status: tasked
 created: 2026-10-07T02:12:18+0200
-updated: 2026-10-10T03:42:18+0200
+updated: 2026-11-14T23:12:48+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
 min-approval-requirement: user
 assignee: main-agent@ai-maestro-janitor
-approved: false
+approved: true
 relevant-rules: [7.1, 10.1]
+approval-judge: user
+approval-datetime: 2026-11-14T23:12:47+0100
 ---
 
 # Owner decision on where the generated wikimem index lives (janitor#328)
 
 ## Approval log
+- 2026-11-14T23:12:36+0100 — OWNER DECISION, verbatim answer the owner gave in this session (session 1603e47a, AskUserQuestion on issue 328): "(b) Root topics only (Recommended)". Meaning: keep golden rules G7.1 and G10.1; the generated wikimem index block in CLAUDE.md lists only ROOT topics, so it changes only when a root topic is added, renamed or re-described. Built as part of the wikimem redesign for GitHub issues 358 and 328.
+- 2026-11-14T23:12:47+0100 — APPROVED by user (min-approval-requirement: user). owner chose option (b) in session 1603e47a.
+- 2026-11-14T23:12:48+0100 — column → todo by user. approved by the owner; built with the wikimem redesign (issues 358, 328)
 
 ## STATE
 
