@@ -154,17 +154,26 @@ def test_checksum_key_assignment_in_other_file_suppressed(repo: Path) -> None:
     assert sps.scan_staged(repo) == []
 
 
-def test_bare_hex_run_outside_lockfile_still_blocks(repo: Path) -> None:
-    """A hand-pasted hex-looking token in an ordinary file is NOT suppressed
-    by the bare-hex shape (only named lockfiles get that) — it still reads
-    as an SSN shape and blocks."""
-    _stage(repo, "handwritten.md", "token cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf end\n")
+def test_bare_hex_run_is_not_an_ssn(repo: Path) -> None:
+    """FLIPPED by the hex-boundary fix: a hand-pasted 64-hex token in an ordinary
+    file no longer reads as an SSN (a digit run inside a hex token is not an SSN;
+    pasted-secret detection belongs to secret-shield/trufflehog), while a real
+    SSN on the next line still blocks."""
+    _stage(repo, "handwritten.md", (
+        "token cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf end\n"
+        "SSN: 123-45-6789\n"
+    ))
     hits = [h for h in sps.scan_staged(repo) if h.rule == "pii-us_ssn"]
-    assert len(hits) == 1
+    assert [h.line for h in hits] == [2]
 
 
-# A 64-hex digest whose digit run (245038516) reads as an SSN shape.
-_MANIFEST_LINE = '    "scripts/a.py": "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",\n'
+# An integrity-manifest-shaped entry line whose KEY carries a real SSN shape: it
+# is flagged when scanned and suppressed only on the exact manifest path, so it
+# discriminates the path gate (a bare 64-hex digest no longer reads as an SSN).
+_SSN = "123" + "-" + "45" + "-" + "6789"
+_MANIFEST_LINE = (
+    "    \"" + _SSN + "\": \"cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf\",\n"
+)
 
 
 def _ssn_hits(repo: Path) -> list:
@@ -180,17 +189,22 @@ def test_integrity_manifest_entry_line_suppressed(repo: Path) -> None:
 
 
 def test_manifest_entry_line_in_ordinary_file_still_blocks(repo: Path) -> None:
-    """The same entry line in an ordinary file still blocks (path gate control)."""
+    """REWRITTEN after the hex-boundary fix (a bare digest no longer hits the SSN
+    rule): an entry line carrying a real SSN shape in an ordinary file is still scanned."""
     (repo / "data").mkdir()
     _stage(repo, "data/other.json", _MANIFEST_LINE)
     assert len(_ssn_hits(repo)) == 1
+    assert sps._LAST_SUPPRESSED == 0
 
 
 def test_manifest_basename_in_other_directory_still_blocks(repo: Path) -> None:
-    """A same-named file in another directory is not suppressed (basename is not enough)."""
+    """REWRITTEN after the hex-boundary fix (a bare digest no longer hits the SSN
+    rule): the same SSN-keyed entry line in a same-named file elsewhere is still
+    scanned (basename is not enough)."""
     (repo / "vendor").mkdir()
     _stage(repo, "vendor/manifest-sha256.json", _MANIFEST_LINE)
     assert len(_ssn_hits(repo)) == 1
+    assert sps._LAST_SUPPRESSED == 0
 
 
 def test_non_entry_line_in_integrity_manifest_still_blocks(repo: Path) -> None:
@@ -255,6 +269,25 @@ def test_real_ssn_still_blocks(repo: Path) -> None:
     _stage(repo, "form.txt", "SSN: 123-45-6789\n")
     hits = [h for h in sps.scan_staged(repo) if h.rule == "pii-us_ssn"]
     assert len(hits) == 1
+
+
+
+def test_commit_sha_and_32hex_id_in_reports_do_not_block(repo: Path) -> None:
+    """A reports/ file citing a 12-hex commit sha and a 32-hex id is not an SSN
+    (the 2026-11-14 blocker: hex ids matched the optional-separator SSN shape)."""
+    (repo / "reports").mkdir()
+    _stage(repo, "reports/x.md", (
+        "commit a268903483c2 landed\n"
+        "id 633457257a6c4a5882f1ed46b06af84a\n"
+    ))
+    assert _ssn_hits(repo) == []
+
+
+def test_real_ssn_in_reports_md_still_blocks(repo: Path) -> None:
+    """Negative control: a real dashed SSN in reports/x.md still blocks."""
+    (repo / "reports").mkdir()
+    _stage(repo, "reports/x.md", "SSN: 123-45-6789\n")
+    assert len(_ssn_hits(repo)) == 1
 
 
 def test_personal_home_and_email_still_block(repo: Path) -> None:

@@ -97,8 +97,13 @@ class Rule(NamedTuple):
 #   * 00 group
 #   * 0000 serial
 _US_SSN = re.compile(
-    r"(?<!\d)(?!000|666|9\d{2})(\d{3})[-\s]?"
-    r"(?!00)(\d{2})[-\s]?(?!0000)(\d{4})(?!\d)"
+    # WHY hex-boundary: hex ids (commit shas, uuids, digests) matched this
+    # optional-separator shape through their digit runs and blocked a reports
+    # commit on 2026-11-14; a digit run touching a hex digit is part of a longer
+    # hex token, never an SSN. Keep the three inline copies below (log-call,
+    # error-response, telemetry) identical.
+    r"(?<![\dA-Fa-f])(?!000|666|9\d{2})(\d{3})[-\s]?"
+    r"(?!00)(\d{2})[-\s]?(?!0000)(\d{4})(?![\dA-Fa-f])"
 )
 
 # credit_card: 13-19 digit run with optional spaces/dashes. The Luhn
@@ -187,7 +192,7 @@ _LOG_CALL_WITH_PII = re.compile(
     [^)]{0,400}?
     (?:
       # us_ssn
-      (?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)|
+      (?<![\dA-Fa-f])(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?![\dA-Fa-f])|
       # credit_card (shape only — caller validates via luhn_valid)
       (?<!\d)(?:\d[\ \-]?){12,18}\d(?!\d)|
       # iban
@@ -365,7 +370,7 @@ _ERROR_RESPONSE_WITH_PII = re.compile(
     [^)]{0,200}?
     (?:
       # PII shapes minus email (see comment above)
-      (?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)|
+      (?<![\dA-Fa-f])(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?![\dA-Fa-f])|
       (?<!\d)(?:\d[\ \-]?){12,18}\d(?!\d)|
       \b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b|
       \b[A-Z]\d{8}\b|
@@ -402,7 +407,7 @@ _TELEMETRY_WITH_PII = re.compile(
     [^)]{0,400}?
     (?:
       # us_ssn
-      (?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)|
+      (?<![\dA-Fa-f])(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?![\dA-Fa-f])|
       # credit_card shape
       (?<!\d)(?:\d[\ \-]?){12,18}\d(?!\d)|
       # iban

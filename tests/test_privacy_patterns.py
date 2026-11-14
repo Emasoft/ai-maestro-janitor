@@ -83,6 +83,54 @@ def test_pii_shapes_us_ssn_rejects_000_area() -> None:
     assert not pp.PII_SHAPES["us_ssn"].search("912-34-5678")
 
 
+
+def test_pii_shapes_us_ssn_not_inside_git_short_sha() -> None:
+    """A digit run inside a 12-hex commit sha is not an SSN."""
+    assert not pp.PII_SHAPES["us_ssn"].search("commit a268903483c2 end")
+
+
+def test_pii_shapes_us_ssn_not_inside_32_hex_id() -> None:
+    """A digit run inside a 32-hex id is not an SSN."""
+    assert not pp.PII_SHAPES["us_ssn"].search("id 633457257a6c4a5882f1ed46b06af84a")
+
+
+def test_pii_shapes_us_ssn_not_inside_40_hex_sha() -> None:
+    """A digit run inside a full 40-hex sha is not an SSN."""
+    assert not pp.PII_SHAPES["us_ssn"].search(
+        "sha abc123456789def0123456789abcdef012345678 end"
+    )
+
+
+def test_pii_shapes_us_ssn_not_inside_64_hex_digest() -> None:
+    """A digit run inside a 64-hex sha256 digest is not an SSN."""
+    assert not pp.PII_SHAPES["us_ssn"].search(
+        "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+    )
+
+
+def test_pii_shapes_us_ssn_still_matches_dashed() -> None:
+    """A dashed SSN, bare or in parentheses, still matches."""
+    assert pp.PII_SHAPES["us_ssn"].search("SSN: 123-45-6789")
+    assert pp.PII_SHAPES["us_ssn"].search("(123-45-6789)")
+
+
+def test_pii_shapes_us_ssn_still_matches_bare_nine_digits_in_prose() -> None:
+    """A bare 9-digit SSN between plain words still matches."""
+    assert pp.PII_SHAPES["us_ssn"].search("my ssn is 123456789 thanks")
+
+
+def test_pii_shapes_us_ssn_hex_letter_neighbour_rejected() -> None:
+    """Pinned: an SSN glued to a hex letter (a-f) on either side is not flagged."""
+    assert not pp.PII_SHAPES["us_ssn"].search("e123-45-6789")
+    assert not pp.PII_SHAPES["us_ssn"].search("123-45-6789a")
+
+
+def test_pii_shapes_us_ssn_non_hex_letter_neighbour_still_matches() -> None:
+    """Pinned: an SSN glued to a non-hex letter (x) still matches."""
+    assert pp.PII_SHAPES["us_ssn"].search("x123-45-6789")
+    assert pp.PII_SHAPES["us_ssn"].search("123-45-6789x")
+
+
 def test_pii_shapes_credit_card_positive_shape() -> None:
     """A 16-digit run matches the shape (Luhn validity is a separate check)."""
     assert pp.PII_SHAPES["credit_card"].search("card 4111 1111 1111 1111")
@@ -175,6 +223,13 @@ def test_pii_in_log_console_log_ssn_positive() -> None:
     """console.log call containing an SSN triggers the rule."""
     text = 'console.log("user SSN: 312-45-6789 received")'
     assert _hits("privacy.pii-pattern-in-log-line", text)
+
+
+
+def test_pii_in_log_negative_commit_sha_in_console_log() -> None:
+    """A console.log call carrying a hex commit sha does NOT trigger (hex is not an SSN)."""
+    text = 'console.log("sha a268903483c2")'
+    assert not _hits("privacy.pii-pattern-in-log-line", text)
 
 
 def test_pii_in_log_negative_bare_email_in_yaml() -> None:
@@ -302,6 +357,16 @@ def test_error_body_fastapi_ssn_positive() -> None:
         'detail=f"User not found by SSN: 312-45-6789")'
     )
     assert _hits("privacy.pii-in-error-message-to-client", text)
+
+
+
+def test_error_body_negative_hex_id_in_detail() -> None:
+    """HTTPException(detail=...) carrying a 32-hex id does NOT trigger (hex is not an SSN)."""
+    text = (
+        'raise HTTPException(status_code=404, '
+        'detail="not found: 633457257a6c4a5882f1ed46b06af84a")'
+    )
+    assert not _hits("privacy.pii-in-error-message-to-client", text)
 
 
 def test_error_body_express_traceback_positive() -> None:
