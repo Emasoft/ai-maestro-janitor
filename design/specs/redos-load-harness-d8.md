@@ -48,3 +48,15 @@ One JSON line per probe in `reports_dev/redos-load-harness/`: exit code, pass an
 ## Tests
 
 Pure tests for the worker-count formula and the ambient refusal; an abort test that feeds the sampler a reading of 61 while real workers run and asserts each recorded PID is reaped (`kill(pid, 0)` raises after `waitpid`); an orphan test that SIGKILLs the harness and asserts the workers exit within a few seconds; a smoke run (K=1, N=2) under the `integration` marker, skipped without `claude`, which proves only that the harness runs end to end.
+
+## Step C additions (reviews of c6e06bb4 and bbe8bbf4)
+
+- Probe count wording: the campaign runs all K probes with K = 20; no best-of selection from a larger run.
+- The probe copy goes in the same directory inside the temp assembly: `hooks/secret-shield/tests/load/probe.test.ts`, relative to the temp dir, the same form `assemble_plugin_dir` returns.
+- A fresh temp dir per probe (`assemble_plugin_dir` raises on a non-empty one).
+- Two probe checks: the file header proves the probe was collected; the row check proves all rows ran. The row check asserts the counts per kind recorded here, 6 linear rows (L1, L1c, L2d, L3, L3b, L3c) and 7 mutant rows (Q1, Q2, Q2b, Q3, Q4, Q5, Q6), or their names, not only the `expected-rows` total.
+- A mutant row counts as detected only on a superlinear or escaped verdict; a row that ends because the estimator ran out of rounds is recorded as undecided, not as a detection. If the probe does not expose the reason, step C makes it do so.
+- An import-existence pytest: every name `probe.load.ts` and `old-quadratic.ts` import from `../../patterns` and `../../rules/*` still exists as an export in those files (plain text check). No TypeScript checker covers `hooks/`, and the release gate never loads these files, so this is the only guard between releases.
+- One WHY line in `scripts/run_secret_shield_tests.py` naming `tests/load/*.load.ts` as deliberately uncollected.
+- Before 3.8.14 is published: check whether CPV flags the shipped quadratic fixture.
+- The step B files were copied verbatim from the scratch versions used in the idle 1a runs (25 of 25); the main agent did not reread them line by line.
