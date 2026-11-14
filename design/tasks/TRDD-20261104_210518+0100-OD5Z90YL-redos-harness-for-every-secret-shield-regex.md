@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-14T04:54:06+0100
+updated: 2026-11-14T06:46:02+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -63,3 +63,4 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 - 2026-11-05 — The URL_PASSWORD step this card set out to diagnose is found and fixed in TRDD-HF7GNHNF (group-loop ceilings at about 63.8K and 553K iterations; commits 7d54b062 and b3363706).
 - 2026-11-05 — Correction to the note above that says the step is found and fixed: fixed up to 256 KB (the 32 KB to 256 KB ratio test fails on the old code at load 49 and passes now); at 512 KB the ratio is unmeasured (TRDD-HF7GNHNF Done-when 3). The load-125 median and best figures and the load 185-270 control figures come from worker runs (reports urlpw-fix and urlpw-fix2).
 - 2026-11-05 — Qualifier on the correction note: the 32 KB to 256 KB ratio test is load-sensitive (it failed once at a 5-minute load of 233 on b3363706, then passed twice; see TRDD-T36Z4ACR); the deterministic evidence is the hiding at 256 KB and above.
+2026-11-14 increment 1a capped rerun, NOT MET (loaded half not measured). Idle half: 25 of 25 runs passed, every test green, load 4 to 28. Loaded half (orch5.py, one worker added per 10 s, none added at 1-min load 45 or more, abort above 60, 14-core host): run l01 passed with 13 workers at load 43 to 53; run l02 was aborted by the runner at 60.11; after resuming at 38 the ramp overshot and the main agent found 1-min load 90.00 and stopped all 12 runner processes by recorded PID. The 1-min average lags about 60 s, so a ramp steered by it overshoots on this host twice now (v1 and v2). Next attempt: a fixed worker count with no ramp, sized from l01 (13 workers held 43 to 53), and the load target stated per core (TRDD-Z41A13XV nit) before any further loaded run. Raw: scratchpad est/results-rerun-load2.json, orch5.log.
