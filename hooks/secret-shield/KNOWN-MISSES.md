@@ -259,7 +259,7 @@ Test: KNOWN MISS gitlab-session-cookie-uppercase-hex: an upper-case 32-hex sessi
 ## private-key-header-shapes
 
 Reason: (c) a bound kept for a stated reason: the PEM header is one character class between lookarounds and "Keep that language exact: a wider header would take text the old pattern left alone, and its END could land inside another block and leave that block's tail visible" (hooks/secret-shield/rules/key-material.ts:5-14). The header accepts words each followed by one space and then PRIVATE KEY: it refuses a space right after BEGIN, a double space, and a word glued to PRIVATE. The shield test 'a header glued to PRIVATE whose END lies inside an RSA block' pins the glued case against a wider class.
-Shape: a PEM block whose BEGIN header has a space right after BEGIN (two spaces), or a double space inside the header (RSA, two spaces, PRIVATE KEY), or a word glued to PRIVATE (XPRIVATE KEY), with a body and a matching END line. jr-redact hides all three (its header class is [A-Z ]*).
+Shape: a PEM block whose BEGIN header has a space right after BEGIN (two spaces), or a double space inside the header (RSA, two spaces, PRIVATE KEY), or a word glued to PRIVATE (XPRIVATE KEY), with a body and a matching END line. jr-redact hides all three (its header class is [A-Z ]*; run against the three shapes on 2026-11-14).
 Hidden instead: the same block with a standard header (RSA PRIVATE KEY), hidden whole with the private-key marker.
 Card: none
 Test: KNOWN MISS private-key-header-shapes: a PEM header with a leading space, a double space or a word glued to PRIVATE is not hidden, a standard header is
@@ -279,11 +279,3 @@ Shape: a URL whose password holds a double quote or a backtick, or whose user pa
 Hidden instead: the same URL with a plain password, hidden with the url-password marker.
 Card: none
 Test: KNOWN MISS url-userinfo-quote-backtick-bracket: a URL password holding a double quote or a backtick, or a user part holding a quote, a backtick or an opening bracket, is not hidden, a plain one is
-
-## jwt-header-space-after-brace
-
-Reason: (b) no source was found for the form: a JWT whose header JSON has a space after the opening brace starts with eyAi, not eyJ, and no jwt rule reads it (hooks/secret-shield/rules/key-material.ts, the jwt and jwtWide patterns need eyJ). Searched: 0 three-segment tokens with a first segment eyAi, and 0 with any ey-not-eyJ first segment, in 2656 tracked files (excluding hooks/secret-shield/tests/ and reports) and 73108 plugin-cache files read at fde4d89d; the JOSE specifications were not searched. Widening the first segment beyond eyJ needs its own measured change. jr-redact does not hide it either (not a jr gap).
-Shape: header.payload.signature, the header the base64url of a JSON object with a space after the opening brace (first segment eyAi), the payload starting eyJ, 8 or more characters in each segment.
-Hidden instead: the same token with a standard header (first segment eyJ), hidden with the jwt marker; and the eyAi token as the value of a quoted JSON access_token, hidden by the assignment pass.
-Card: none
-Test: KNOWN MISS jwt-header-space-after-brace: a JWT whose header has a space after the opening brace (first segment eyAi) is not hidden, with a standard header it is

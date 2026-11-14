@@ -180,7 +180,7 @@ describe('known misses: formats and names the shield does not hide on their own'
   })
 })
 
-describe('known misses: PEM headers, URL userinfo and JWT headers the shield does not read', () => {
+describe('known misses: PEM headers and URL userinfo the shield does not read', () => {
   test('KNOWN MISS private-key-header-shapes: a PEM header with a leading space, a double space or a word glued to PRIVATE is not hidden, a standard header is', () => {
     const body = fake('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7')
     const block = (head: string) => `${j('-----BEGIN ', head, '-----')}\n${body}\n${j('-----END ', head, '-----')}`
@@ -200,16 +200,6 @@ describe('known misses: PEM headers, URL userinfo and JWT headers the shield doe
     const userinfos = [`u:pa"${password}`, `u:pa${tick}${password}`, `us"er:${password}`, `us${tick}er:${password}`, `us[er:${password}`]
     for (const userinfo of userinfos) check(`visible in ${userinfo.replace(password, 'P')}`, shown(`postgres://${userinfo}@db.acme.io/app`, password))
     check('hidden with a plain user and password', hiddenAs(`postgres://u:${password}@db.acme.io/app`, password, 'url-password'))
-  })
-
-  test('KNOWN MISS jwt-header-space-after-brace: a JWT whose header has a space after the opening brace (first segment eyAi) is not hidden, with a standard header it is', () => {
-    const signature = fake('dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U')
-    const payload = j('eyJ', fake('zdWIiOiIxMjM0NTY3ODkwIn0'))
-    const spaced = j('eyAi', fake('YWxnIjoiSFMyNTYifQ'), '.', payload, '.', signature)
-    const standard = j('eyJ', fake('hbGciOiJIUzI1NiJ9'), '.', payload, '.', signature)
-    expect(shown(`see ${spaced} here`, signature)).toBe(true)
-    check('hidden with a standard header', hiddenAs(`see ${standard} here`, signature, 'jwt'))
-    check('hidden as a quoted JSON value', hiddenAs(`{"access_token":"${spaced}"}`, signature, 'assignment'))
   })
 })
 

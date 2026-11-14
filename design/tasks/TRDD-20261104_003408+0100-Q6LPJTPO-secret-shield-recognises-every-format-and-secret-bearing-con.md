@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: dev
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-05T04:31:31+0100
+updated: 2026-11-14T03:26:05+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -197,6 +197,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
   - an unquoted value of under 16 characters with no digit that mixes letters and symbols: the 13-character case in entry prop-refused-shapes, refused at patterns.ts:138.
   - the unspaced Password=<word>; setting between other settings of a connection string is hidden, while password=<word> alone stays visible (patterns.ts:138); entry weak-word-value admits the second as (c) on an inferred trade-off, so this inconsistency questions that admission.
   - providers with no rule: the measurement report's list was not found; this card's direct-tests note of 2026-11-04 named the 12 most frequent at that time: gitlab, azure, twilio, discord, twitter, shopify, digitalocean, mailgun, supabase, telegram, square, heroku (Azure storage keys have since been covered by dd145aa4 and a28d3631).
+  - a JWT whose header JSON has a space or newline after the opening brace (first segment eyAi or ewoi) is hidden by neither jwt rule; documented JSON form; 0 such tokens in 2656 tracked + 73108 plugin-cache files (2026-11-14, TRDD-6A3XW3VO); widening the first segment beyond eyJ needs its own measured change (whole-pipeline measure, linear structure of jwtWide).
 - 2026-11-05 — Superseded items on this card:
   - The direct-tests note of 2026-11-04 says accesstoken=, secretkey= and api-key: were not hidden. They are now pinned as hidden by hooks/secret-shield/tests/patterns.test.ts, describe "run-together, kebab and header names are hidden, the name is kept": "accesstoken=V" (:876), "secretkey=V" (:878), "api-key: V" (:882). The rest of the line "known misses after a28d3631" is in the backlog above.
   - The known misses of the "Known-secret propagation" item are KNOWN-MISSES entries prop-*; its two leaks are TRDD-UBWU9AQC and TRDD-0VOXC39W.
