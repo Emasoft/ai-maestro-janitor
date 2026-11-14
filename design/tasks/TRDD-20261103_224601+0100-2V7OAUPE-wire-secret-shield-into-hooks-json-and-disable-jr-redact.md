@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-14T02:38:41+0100
+updated: 2026-11-14T03:28:42+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T22:46:01+0100
-blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, U5O72MGA, 6A3XW3VO]
+blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E, U5O72MGA]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, decision:owner-answers-TEP6F3A3-wiring-gate]
 pre-block-column: design
 blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
@@ -50,6 +50,7 @@ Split out of TRDD-M1218EMH.
 - 2026-11-14 — blocked-by gained A7RII4DN: the jwt rule is superlinear on a long eyJ run (about 600 ms at 64 KB, extrapolated near the hook limit at 256 KB).
 - 2026-11-14 — Done-when gained the gap-7 check (from 6A3XW3VO, review 2026-11-14).
 - 2026-11-14T02:38:41+0100 — A7RII4DN removed from blocked-by by main-agent@ai-maestro-janitor: archived complete in e8b82df3 (jwt rule made linear in 4970ff1f); removal committed in 831e6c4e.
+- 2026-11-14T03:28:41+0100 — 6A3XW3VO removed from blocked-by by main-agent@ai-maestro-janitor: closed 2026-11-14, archived complete (closing commit SHA is in the commit message); removal committed with it.
 
 ## Notes
 
