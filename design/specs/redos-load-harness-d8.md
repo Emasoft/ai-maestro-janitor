@@ -73,3 +73,9 @@ Pure tests for the worker-count formula and the ambient refusal; an abort test t
 - Tests that start real workers or call `claude` run only when the environment variable `REDOS_HARNESS_REAL=1` is set and skip otherwise, so the default pytest run and `publish.py` never run them (`pyproject.toml` deselects no marker by default). Only the pure tests and the import-existence check run in the release gate.
 - Worker lifetime is a harness parameter (default 48 min); tests use about 30 s. Every test that starts workers kills the recorded process group in a `finally` and then asserts each PID is gone, whatever the outcome.
 - Exit code 2 covers aborted, incomplete and invalid; the JSON record names which.
+
+## Reason channel and safety-test owner (review of 52c0e1e0)
+
+- The probe reports a reason line for every row, linear and mutant, through a sandbox-legal channel only: console output if it passes through for passing tests too; else an `expect` failure message if the runner prints it; else test names generated at load time from verdicts computed before `test()` is registered. A file written from inside the plugin test sandbox is not an option (the sandbox refuses `node:fs`), and the sandbox is never worked around. If no channel works, C1 stops, changes nothing, and reports.
+- At idle the probe shows 0 out-of-rounds results and the same linear and superlinear decisions as before C1.
+- Who runs the real-process tests: the campaign procedure runs every `REDOS_HARNESS_REAL=1` test immediately before each campaign, and all must pass; a failure means no campaign. C2's report includes one such run.
