@@ -79,3 +79,9 @@ Pure tests for the worker-count formula and the ambient refusal; an abort test t
 - The probe reports a reason line for every row, linear and mutant, through a sandbox-legal channel only: console output if it passes through for passing tests too; else an `expect` failure message if the runner prints it; else test names generated at load time from verdicts computed before `test()` is registered. A file written from inside the plugin test sandbox is not an option (the sandbox refuses `node:fs`), and the sandbox is never worked around. If no channel works, C1 stops, changes nothing, and reports.
 - At idle the probe shows 0 out-of-rounds results and the same linear and superlinear decisions as before C1.
 - Who runs the real-process tests: the campaign procedure runs every `REDOS_HARNESS_REAL=1` test immediately before each campaign, and all must pass; a failure means no campaign. C2's report includes one such run.
+
+## Reason channel correction (review of bb0aeaa9)
+
+- This section replaces the channel list in the section above. The `expect` failure message is not a channel: it prints only for failing rows, so passing rows would carry no reason. The legal order is console output (only if it passes through for passing tests), else test names generated at load time, else C1 stops and changes nothing.
+- With load-time names the 13 measurements run at module load (collection), not inside `test()`. Each row's measurement is wrapped so an exception becomes that row's verdict `error` rather than a failed file load; C1's report states that the measurement moved; the idle re-check confirms 13 named rows and 0 out-of-rounds.
+- Before C1 is committed, its diff is checked for `node:fs`, `writeFile` and `redos-rows.txt`.
