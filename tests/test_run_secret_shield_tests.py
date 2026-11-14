@@ -8,9 +8,13 @@ rely on these skips: it runs the script itself, which fails closed when `claude`
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -204,8 +208,27 @@ def test_the_file_capture_reports_a_timeout_and_kills_the_group(tmp_path: Path) 
 
 @pytest.mark.real_subprocess("sh", "sleep")
 def test_a_timeout_in_the_group_wait_phase_reports_the_childs_real_exit_code(tmp_path: Path) -> None:
-    """When the direct child exits 0 but a grandchild keeps the group alive past the timeout, the run reports timed_out with returncode 0, so callers must check timed_out first."""
-    result = shield_runner.run_captured_in_own_session(["sh", "-c", "(sleep 30) & exit 0"], tmp_path, 1.0, poll_s=0.1)
+    """When the direct child exits 0 but a grandchild keeps the group alive past the timeout, the run reports timed_out with returncode 0 (callers must check timed_out first) and the group kill reaps the grandchild."""
+    pidfile = tmp_path / "grandchild.pid"
+    result = shield_runner.run_captured_in_own_session(["sh", "-c", 'sleep 30 & echo "$$ $!" > "$1"; exit 0', "sh", str(pidfile)], tmp_path, 1.0, poll_s=0.1)
     assert result.timed_out
     assert not result.aborted
     assert result.returncode == 0
+    group_leader, grandchild = (int(part) for part in pidfile.read_text().split())
+    gone = False
+    try:
+        # WHY a poll: SIGKILL is delivered at once, but the killed grandchild stays visible to os.kill(pid, 0) as a zombie until launchd reaps it (it was orphaned when the sh child exited).
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                gone = True
+                break
+            time.sleep(0.05)
+    finally:
+        if not gone:
+            # WHY killpg on the sh leader and not os.kill on the grandchild: the sandbox guard only lets a test signal a process it spawned, and the orphaned grandchild is neither; the leader pid is the group id (start_new_session) and was spawned by the run.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(group_leader, signal.SIGKILL)
+    assert gone, f"grandchild {grandchild} survived the group kill in the group-wait phase"
