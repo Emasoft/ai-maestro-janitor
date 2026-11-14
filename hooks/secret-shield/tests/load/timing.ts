@@ -20,9 +20,18 @@ export const GROWTH_SAMPLES = 10
 // reached a ratio of 10.5 (1.3 * step) at a load average of 125, and the 1.5 of TRDD-Q6LPJTPO's single-shot rule (12 at 8x) is too tight for that.
 export const LIMIT_FACTOR = 2.6
 
-export type Verdict = 'linear' | 'superlinear' | 'escaped'
+export type Verdict = 'linear' | 'superlinear' | 'escaped' | 'out-of-rounds'
 export type Round = { small: number; big: number }
 export type Timing = { verdict: Verdict; small: number; big: number; ratio: number; rounds: number; smallSize: number; bigSize: number; trajectory: Round[]; sink: number }
+
+// The outcome when no round decided. WHY distinct (TRDD-OD5Z90YL, design/specs/redos-load-harness-d8.md): this used to be a bare 'superlinear' for every undecided trajectory, so a run whose
+// ratio had dropped under the limit only in the last round, with too few rounds left to confirm it, was reported as a superlinear detection. A mutant row must not count that as a detection,
+// and a linear row must not read it as a plain superlinear failure. 'superlinear' stays the verdict when the last ratio is at or over the limit (the ratio never settled under it), and
+// 'out-of-rounds' is returned when the last ratio is under the limit but unconfirmed.
+export const exhausted = (trajectory: Round[], step: number, factor: number): Verdict => {
+  const last = trajectory[trajectory.length - 1]
+  return last.big / last.small >= step * factor ? 'superlinear' : 'out-of-rounds'
+}
 
 // The decision made after the last round of `trajectory`, or undefined when more rounds are needed. Minima in the trajectory are cumulative.
 export const judge = (trajectory: Round[], step: number, factor: number): Verdict | undefined => {
@@ -40,7 +49,7 @@ export const replay = (trajectory: Round[], step: number, factor: number): { ver
     const verdict = judge(trajectory.slice(0, n), step, factor)
     if (verdict !== undefined) return { verdict, round: n }
   }
-  return { verdict: 'superlinear', round: trajectory.length }
+  return { verdict: exhausted(trajectory, step, factor), round: trajectory.length }
 }
 
 // `run` returns a number (a length, a count) so the work cannot be discarded as unused; the sum of the results is returned as `sink`.
@@ -94,5 +103,5 @@ export const measureLinear = (
     if (decided !== undefined && verdict === undefined) verdict = decided
     if (verdict !== undefined && options.stopEarly !== false) break
   }
-  return { verdict: verdict ?? 'superlinear', small, big, ratio: big / small, rounds: trajectory.length, smallSize, bigSize, trajectory, sink }
+  return { verdict: verdict ?? exhausted(trajectory, step, factor), small, big, ratio: big / small, rounds: trajectory.length, smallSize, bigSize, trajectory, sink }
 }

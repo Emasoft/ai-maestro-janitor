@@ -88,7 +88,12 @@ describe('estimator probe', () => {
       console.log(
         `RES|${c.id}|expect=${c.expectLinear}|orig=${JSON.stringify(o)}|sizes=${t.smallSize}-${t.bigSize}|f1.5=${f15.verdict}@${f15.round}|f${LIMIT_FACTOR}=${fx.verdict}@${fx.round}|small=${t.small.toFixed(3)}|big=${t.big.toFixed(3)}|ratio=${t.ratio.toFixed(2)}|sink=${t.sink}|traj=${traj}`,
       )
-      expect(fx.verdict).toBe(c.expectLinear ? 'linear' : 'superlinear')
+      // WHY a REDOS-ROW line per row (TRDD-OD5Z90YL, design/specs/redos-load-harness-d8.md): the runner prints only (pass) or (fail) per test, and the harness must tell a linear row that ran out of rounds
+      // or came out superlinear, and a mutant that ran out of rounds (undecided, not a detection), apart. Console output of passing and failing tests reaches the runner's output (measured), before the
+      // file header; the plugin test sandbox offers no file access, so console output is the only channel. Printed before the assert so a failing row still reports its verdict.
+      console.log(`REDOS-ROW ${c.id.split(' ')[0]} ${c.expectLinear ? 'linear' : 'mutant'} ${fx.verdict}`)
+      if (c.expectLinear) expect(fx.verdict).toBe('linear')
+      else expect(['superlinear', 'escaped']).toContain(fx.verdict)
     })
   }
 })
