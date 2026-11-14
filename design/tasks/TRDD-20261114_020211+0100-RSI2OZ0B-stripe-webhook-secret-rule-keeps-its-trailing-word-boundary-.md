@@ -1,10 +1,10 @@
 ---
 trdd-id: RSI2OZ0B
 title: Stripe webhook secret rule keeps its trailing word boundary so an underscore tail leaves the secret visible
-column: backburner
+column: todo
 status: tasked
 created: 2026-11-14T02:02:11+0100
-updated: 2026-11-14T02:02:11+0100
+updated: 2026-11-14T02:03:41+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
