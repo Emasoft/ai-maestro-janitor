@@ -87,6 +87,21 @@ def _run_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, s
     return proc.returncode, output
 
 
+def assemble_plugin_dir(tmp: Path, mod: str, mod_dir: Path) -> list[str]:
+    """Assemble the temp plugin dir for `claude plugin test` in `tmp`; return the expected test files (paths relative to `tmp`)."""
+    # WHY a function: the load harness planned in TRDD-OD5Z90YL (D8) reuses it, so the harness and the
+    # release gate assemble the plugin identically.
+    (tmp / ".claude-plugin").mkdir()
+    shutil.copy2(_PLUGIN_JSON, tmp / ".claude-plugin" / "plugin.json")
+    (tmp / "hooks").mkdir()
+    (tmp / "hooks" / "hooks.json").write_text(f'{{"modules": ["./{mod}/register.ts"]}}\n', encoding="utf-8")
+    shutil.copytree(mod_dir, tmp / "hooks" / mod, ignore=shutil.ignore_patterns(".DS_Store"))
+    # WHY computed from the copy, never a hardcoded list: a renamed or added test file is checked
+    # automatically, and a stale list would fail on the first rename.
+    tests_dir = tmp / "hooks" / mod / "tests"
+    return sorted(f.relative_to(tmp).as_posix() for pattern in ("*.test.ts", "*.test.tsx") for f in tests_dir.rglob(pattern))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Run a hooks/ mod's tests via `claude plugin test` in a temp assembly.")
     parser.add_argument("--mod", choices=sorted(_MIN_PASSED), default=_DEFAULT_MOD, help=f"which hooks/<mod> to test (default {_DEFAULT_MOD})")
@@ -109,15 +124,7 @@ def main(argv: list[str]) -> int:
 
     with tempfile.TemporaryDirectory(prefix=f"{mod}-tests-") as tmp_name:
         tmp = Path(tmp_name)
-        (tmp / ".claude-plugin").mkdir()
-        shutil.copy2(_PLUGIN_JSON, tmp / ".claude-plugin" / "plugin.json")
-        (tmp / "hooks").mkdir()
-        (tmp / "hooks" / "hooks.json").write_text(f'{{"modules": ["./{mod}/register.ts"]}}\n', encoding="utf-8")
-        shutil.copytree(mod_dir, tmp / "hooks" / mod, ignore=shutil.ignore_patterns(".DS_Store"))
-        # WHY computed from the copy, never a hardcoded list: a renamed or added test file is checked
-        # automatically, and a stale list would fail on the first rename.
-        tests_dir = tmp / "hooks" / mod / "tests"
-        expected = sorted(f.relative_to(tmp).as_posix() for pattern in ("*.test.ts", "*.test.tsx") for f in tests_dir.rglob(pattern))
+        expected = assemble_plugin_dir(tmp, mod, mod_dir)
         try:
             code, output = _run_in_own_session([claude, "plugin", "test", str(tmp)], tmp, args.timeout)
         except subprocess.TimeoutExpired:
