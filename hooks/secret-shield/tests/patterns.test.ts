@@ -4,7 +4,7 @@ import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redac
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
 import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
-import { jwt, privateKey } from '../rules/key-material'
+import { jwt, jwtWide, privateKey } from '../rules/key-material'
 import { stripeSecretKey, stripeWebhookSecret } from '../rules/messaging-payments'
 
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
@@ -2199,7 +2199,8 @@ describe('jwt rule runs in linear time with the same matches (TRDD-A7RII4DN)', (
   for (const [name, text] of handCases) {
     test(`same spans as the old rule: ${name}`, () => {
       const out = sameAsOld(text)
-      expect(redact(text).text).toBe(out)
+      // Since TRDD-6A3XW3VO redact() also runs jwtWide as its last pass, so the oracle is jwt followed by jwtWide; the span-equality assertions still check jwt alone.
+      expect(redact(text).text).toBe(applyRule(out, jwtWide, {}))
     })
   }
 
@@ -2267,4 +2268,290 @@ describe('jwt rule runs in linear time with the same matches (TRDD-A7RII4DN)', (
     expect(hits.jwt).toBe(1)
     expect(text).toBe(jwtMark)
   })
+})
+
+describe('jwt tokens with shorter segments or a non-eyJ payload segment are hidden, nothing hidden today becomes visible', () => {
+  // TRDD-6A3XW3VO. jwtWide is a separate rule applied as the last pass of redact() (see redactInto): 8-character segments, any second segment. A single rule
+  // that replaces jwt cannot be a superset of it (a 5-segment string whose last three segments are a real JWT: the wider rule starts earlier, its third
+  // segment swallows the first segment of today's token, and the 2-segment remainder matches nothing), while sequential application is: jwt's marks
+  // contain no dot, so jwtWide cannot touch them. In TOKENS it would also pre-empt the bearer-token rule and the assignment and connection-string passes (see contextRows).
+  // The jwt rule exactly as it stood when jwtWide was added. The superset check compares redact() against this constant, not against the live rule.
+  const currentJwt = { kind: 'jwt', pattern: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g, group: 1 }
+  // The plain widened shape. It is quadratic on a run of eyJ-, so it only ever sees short strings here.
+  const candidate = /\b(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g
+  // The token is group 1 and ends the match in both rules; the match may start earlier, at the run start.
+  const spans = (pattern: RegExp, text: string): string =>
+    [...text.matchAll(new RegExp(pattern.source, pattern.flags))].map(m => `${m.index + m[0].length - m[1].length}-${m.index + m[0].length}`).join(',')
+  const jwtMark = mark('jwt')
+  const SIG = 'dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'
+  const HEADER = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
+  const standard = j(HEADER, '.', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', '.', SIG)
+  const wide8 = j('eyJ', 'abcdefgh', '.', 'abcdefgh', '.', 'abcdefgh')
+  const around = (token: string): string => `see ${token} end`
+
+  const positives: Array<[string, string]> = [
+    ['8-character segments, any second segment', wide8],
+    ['9-character segments, eyJ second segment', j('eyJ', 'abcdefghi', '.', 'eyJ', 'abcdefghi', '.', 'abcdefghi')],
+    ['8-character first and second segments, a long third', j('eyJ', 'abcdefgh', '.', 'eyJ', 'klmnopqr', '.', SIG)],
+    ['a long first segment, an 8-character second, an 8-character third', j(HEADER, '.', 'abcdefgh', '.', 'abcdefgh')],
+    ['a real header and a payload with a space after the brace (second segment eyAi)', j(HEADER, '.', 'eyAic3ViIjoiMTIzNDU2Nzg5MCJ9', '.', SIG)],
+    ['a real header and a payload with a newline after the brace (second segment ewoi)', j(HEADER, '.', 'ewoic3ViIjoiMTIzNDU2Nzg5MCJ9', '.', SIG)],
+    ['a second segment with - and _', j('eyJ', 'abcd-fgh', '.', 'ab_defgh', '.', 'a-c_efgh')],
+  ]
+  for (const [name, token] of positives) {
+    test(`hidden: ${name}`, () => {
+      const { text, hits } = redact(around(token))
+      expect(text).toBe(around(jwtMark))
+      expect(hits.jwt).toBe(1)
+    })
+  }
+
+  test('the shape hidden today is still hidden, once', () => {
+    const { text, hits } = redact(around(standard))
+    expect(text).toBe(around(jwtMark))
+    expect(hits.jwt).toBe(1)
+  })
+
+  // A segment one character under the floor stays visible: the floor is 8 characters after eyJ, 8 in the second, 8 in the third.
+  const belowFloor: Array<[string, string]> = [
+    ['a 7-character first segment after eyJ', j('eyJ', 'abcdefg', '.', 'abcdefgh', '.', 'abcdefgh')],
+    ['a 7-character second segment', j('eyJ', 'abcdefgh', '.', 'abcdefg', '.', 'abcdefgh')],
+    ['a 7-character third segment', j('eyJ', 'abcdefgh', '.', 'abcdefgh', '.', 'abcdefg')],
+    ['two segments only', j('eyJ', 'abcdefgh', '.', 'abcdefgh')],
+  ]
+  for (const [name, token] of belowFloor) {
+    test(`stays visible: ${name}`, () => {
+      const { text, hits } = redact(around(token))
+      expect(text).toBe(around(token))
+      expect(hits.jwt).toBeUndefined()
+    })
+  }
+
+  test('a 5-segment string whose last three segments are a JWT: everything the current rule hides stays hidden', () => {
+    const five = j('eyJ', 'aaaaaaaa', '.', 'bbbbbbbb', '.', 'eyJ', 'cccccccccc', '.', 'eyJ', 'dddddddddd', '.', 'eeeeeeeeee')
+    // The current rule alone hides segments 3-5 and leaves segments 1-2.
+    expect(applyRule(five, currentJwt, {})).toBe(j('eyJaaaaaaaa.bbbbbbbb.', jwtMark))
+    const { text, hits } = redact(five)
+    expect(text).toBe(j('eyJaaaaaaaa.bbbbbbbb.', jwtMark))
+    expect(hits.jwt).toBe(1)
+    // The plain widened shape alone would have left the tail visible: it takes segments 1-3 and nothing is left for segments 4-5.
+    expect(applyRule(five, { kind: 'jwt', pattern: candidate, group: 1 }, {})).toBe(j(jwtMark, '.', 'eyJdddddddddd.eeeeeeeeee'))
+  })
+
+  // Seeded strings made of the pieces that matter: the floors, eyJ- runs, dots, the eyAi header, whole tokens.
+  const seededStrings = (seed0: number, n: number): string[] => {
+    let seed = seed0
+    const next = (): number => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32)
+    const pieces = [
+      'eyJ', 'eyJ-', 'eyJ_', 'a', 'Z', '0', '-', '_', '.', ' ', 'x-', 'eyAi', '.eyJ', 'x', 'abcdefgh.', 'abcdefghi.', 'abcdefg.', 'abcdefgh', 'abcdefghij',
+      'eyJabcdefgh.', 'eyJabcdefghi.', 'eyJabcdefg.', 'eyJabcdefghij.', 'eyJ-abcdefghij.', 'x-eyJabcdefghijklm.', '_eyJabcdefghijklm.',
+      mark('jwt'), mark('bearer-token'),
+      'eyJabcdefghij.eyJklmnopqrst.uvwxyz0123', 'eyJabcdefgh.abcdefgh.abcdefgh', 'eyJabcdefghij.eyJklmnopqrst.', '.eyJklmnopqrst.uvwxyz0123',
+    ]
+    const out: string[] = []
+    for (let i = 0; i < n; i++) {
+      let text = ''
+      for (let k = 1 + Math.floor(next() * 9); k > 0; k--) text += pieces[Math.floor(next() * pieces.length)]
+      out.push(text)
+    }
+    return out
+  }
+  const seeded = seededStrings(20261114, 600)
+  const MARK_ANY = /\[JANITOR-REDACTED:[A-Za-z0-9_-]+\]/
+
+  // Whether some alignment of the output against the input has every must-hidden character inside a marker: the output is the input with
+  // some spans replaced by markers, so the text between markers must be found in the input, in order, never on a must-hidden character.
+  const hidesAll = (input: string, output: string, must: boolean[]): boolean => {
+    const literals = output.split(MARK_ANY)
+    const memo = new Map<string, boolean>()
+    const fits = (k: number, from: number): boolean => {
+      const key = `${k},${from}`
+      const known = memo.get(key)
+      if (known !== undefined) return known
+      const lit = literals[k]
+      const last = k === literals.length - 1
+      let ok = false
+      for (let p = k === 0 ? 0 : from + 1; p <= (k === 0 ? 0 : input.length) && !ok; p++) {
+        if (!input.startsWith(lit, p) || must.slice(p, p + lit.length).some(Boolean)) continue
+        ok = last ? p + lit.length === input.length : fits(k + 1, p + lit.length)
+      }
+      memo.set(key, ok)
+      return ok
+    }
+    return fits(0, 0)
+  }
+  const mustHide = (text: string): boolean[] => {
+    const must = new Array<boolean>(text.length).fill(false)
+    for (const m of text.matchAll(new RegExp(currentJwt.pattern.source, currentJwt.pattern.flags))) {
+      const start = (m.index ?? 0) + m[0].length - m[1].length
+      for (let i = start; i < start + m[1].length; i++) must[i] = true
+    }
+    return must
+  }
+
+  const handCases: Array<[string, string]> = [
+    ['a token alone', wide8],
+    ['a token after x-, which stands at a word boundary', `x-${wide8}`],
+    ['a token after _, which does not', `_${wide8}`],
+    ['a token glued to a letter', `x${wide8}`],
+    ['a token after a dot', `a.${wide8}`],
+    ['several eyJ in one run: the leftmost start wins', `eyJab-eyJcdefghijklmn-${wide8}`],
+    ['a first segment too short, then a qualifying one in the same run', `eyJabcdefg-${wide8}`],
+    ['a first segment of exactly 8 characters', wide8],
+    ['a first segment of 7 characters', j('eyJ', 'abcdefg', '.', 'abcdefgh', '.', 'abcdefgh')],
+    ['a third segment of 7 characters', j('eyJ', 'abcdefgh', '.', 'abcdefgh', '.', 'abcdefg')],
+    ['a standard token', standard],
+    ['two tokens in one line', `${wide8} ${standard}`],
+    ['two tokens joined by a dot', `${wide8}.${wide8}`],
+    ['a token followed by more segments', `${standard}.${wide8}.${wide8}`],
+    ['a long run that does not end in a dot', `eyJ-eyJ-eyJ-eyJ-eyJ-eyJ- ${wide8}`],
+    ['a long run ending in a dot and a short tail', `eyJ-eyJ-eyJ-eyJ-eyJ-.eyJabc ${wide8}`],
+    ['a space after the brace in the payload', j(HEADER, '.', 'eyAic3ViIjoiMTIzNDU2Nzg5MCJ9', '.', SIG)],
+    ['a marker before .abcdefgh.abcdefgh stays as it is', `${jwtMark}.abcdefgh.abcdefgh`],
+    ['a token glued before a marker', `${wide8}${jwtMark}`],
+    ['a bearer-token marker, then a token', `${mark('bearer-token')} ${wide8}`],
+    ['five segments whose last three are a real JWT', j('eyJ', 'aaaaaaaa', '.', 'bbbbbbbb', '.', 'eyJ', 'cccccccccc', '.', 'eyJ', 'dddddddddd', '.', 'eeeeeeeeee')],
+  ]
+  for (const [name, text] of handCases) {
+    test(`jwtWide takes the plain widened shape's spans: ${name}`, () => {
+      expect(spans(jwtWide.pattern, text)).toBe(spans(candidate, text))
+    })
+    test(`redact() hides at least what the current rule hides: ${name}`, () => {
+      expect(hidesAll(text, redact(text).text, mustHide(text))).toBe(true)
+    })
+  }
+
+  test('600 seeded strings: jwtWide takes the plain widened shape\'s spans', () => {
+    let withMatch = 0
+    for (const text of seeded) {
+      const expected = spans(candidate, text)
+      if (expected !== '') withMatch++
+      expect(spans(jwtWide.pattern, text)).toBe(expected)
+    }
+    // A generator that never produced a match would pass vacuously.
+    expect(withMatch).toBeGreaterThanOrEqual(100)
+  })
+
+  test('600 seeded strings: the characters redact() hides include the ones the current rule alone hides', () => {
+    let withCurrent = 0
+    let widened = 0
+    for (const text of seeded) {
+      const must = mustHide(text)
+      if (must.some(Boolean)) withCurrent++
+      const { text: out } = redact(text)
+      if (out !== applyRule(text, currentJwt, {})) widened++
+      expect(hidesAll(text, out, must)).toBe(true)
+    }
+    // Both halves of the property must be exercised: strings the current rule hides, and strings the wide rule hides more of.
+    expect(withCurrent).toBeGreaterThanOrEqual(40)
+    expect(widened).toBeGreaterThanOrEqual(40)
+  })
+
+  test('the superset oracle can fail: an output that shows a must-hidden character is refused', () => {
+    expect(hidesAll('abcdef', 'abcdef', [false, false, true, false, false, false])).toBe(false)
+    expect(hidesAll('abcdef', `ab${jwtMark}ef`, [false, false, true, true, false, false])).toBe(true)
+    expect(hidesAll('abcdef', `ab${jwtMark}ef`, [false, false, true, true, true, false])).toBe(false)
+  })
+
+  // The rule is linear: a run of n token characters costs O(n). A quadratic rule takes about 16x its 256 KB time at 1 MB.
+  const KB256 = 256 * 1024
+  const MB = 1024 * 1024
+  const repeated = (unit: string, n: number): string => unit.repeat(Math.ceil(n / unit.length)).slice(0, n)
+  const slowShapes: Array<[string, (n: number) => string]> = [
+    ['abcdefgh. repeated', n => repeated('abcdefgh.', n)],
+    ['eyJ-eyJ-eyJ.abcdefg. repeated', n => repeated('eyJ-eyJ-eyJ.abcdefg.', n)],
+    ['eyJ- repeated and ending in .x', n => repeated('eyJ-', n - 2) + '.x'],
+  ]
+  for (const [name, build] of slowShapes) {
+    for (const [size, label] of [[KB256, '256 KB'], [MB, '1 MB']] as const) {
+      test(`${label} of ${name} is redacted in under a second`, () => {
+        const text = build(size)
+        const start = performance.now()
+        const { hits } = redact(text)
+        expect(performance.now() - start).toBeLessThan(1000)
+        expect(hits.jwt).toBeUndefined()
+      })
+    }
+  }
+
+  // JavaScriptCore has silently missed matches of a long loop in this repo (TRDD-AGOEWF2E), so assert the hide, not only the time.
+  for (const [name, build] of slowShapes) {
+    test(`a valid JWT after 1 MB of ${name} is still hidden`, () => {
+      const { text, hits } = redact(`${build(MB)}\n${standard}`)
+      expect(hits.jwt).toBe(1)
+      expect(text).not.toContain(standard)
+      expect(text.endsWith(`\n${jwtMark}`)).toBe(true)
+    })
+  }
+
+  test('a widened-shape token after 1 MB of eyJ- is hidden', () => {
+    const { text, hits } = redact(`${repeated('eyJ-', MB)}\n${wide8}`)
+    expect(hits.jwt).toBe(1)
+    expect(text.endsWith(`\n${jwtMark}`)).toBe(true)
+  })
+
+  // The two later-rule shapes jwtWide must not break. A jr-shape token in a header, an assignment or a connection string is hidden whole by the rule
+  // that owns the context, with that rule's kind, whatever follows the token. jwtWide as a TOKENS entry pre-empted those rules and left the tail
+  // (`Authorization: Bearer [mark]+/=xyz`): 10962 regressions over 39072 contextual inputs (TRDD-6A3XW3VO). As the last pass of redact() it only hides what
+  // every other rule left. The expected text and counts are what the tree printed before jwtWide existed.
+  const contextRows: Array<[string, string, string, Record<string, number>]> = [
+    ["Bearer header + +/=xyz", `Authorization: Bearer ${wide8}+/=xyz`, "Authorization: Bearer [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    ["Bearer header + ~abc", `Authorization: Bearer ${wide8}~abc`, "Authorization: Bearer [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    ["Basic header + +/=xyz", `Authorization: Basic ${wide8}+/=xyz`, "Authorization: Basic [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    ["Basic header + ~abc", `Authorization: Basic ${wide8}~abc`, "Authorization: Basic [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    ["Proxy-Authorization header + +/=xyz", `Proxy-Authorization: Bearer ${wide8}+/=xyz`, "Proxy-Authorization: Bearer [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    ["Proxy-Authorization header + ~abc", `Proxy-Authorization: Bearer ${wide8}~abc`, "Proxy-Authorization: Bearer [JANITOR-REDACTED:bearer-token]", {"bearer-token":1}],
+    [".env TOKEN + +/=xyz", `TOKEN=${wide8}+/=xyz`, "TOKEN=[JANITOR-REDACTED:assignment]", {"assignment":1}],
+    [".env TOKEN + ~abc", `TOKEN=${wide8}~abc`, "TOKEN=[JANITOR-REDACTED:assignment]", {"assignment":1}],
+    ["YAML access_token + +/=xyz", `access_token: ${wide8}+/=xyz`, "access_token: [JANITOR-REDACTED:assignment]", {"assignment":1}],
+    ["YAML access_token + ~abc", `access_token: ${wide8}~abc`, "access_token: [JANITOR-REDACTED:assignment]", {"assignment":1}],
+    ["JSON access_token + +/=xyz", `{"access_token":"${wide8}+/=xyz"}`, "{\"access_token\":\"[JANITOR-REDACTED:assignment]\"}", {"assignment":1}],
+    ["JSON access_token + ,", `{"access_token":"${wide8},"}`, "{\"access_token\":\"[JANITOR-REDACTED:assignment]\"}", {"assignment":1}],
+    ["TS const token + +/=xyz", `const token = '${wide8}+/=xyz'`, "const token = '[JANITOR-REDACTED:assignment]'", {"assignment":1}],
+    ["TS const token + ,", `const token = '${wide8},'`, "const token = '[JANITOR-REDACTED:assignment]'", {"assignment":1}],
+    ["password= + +/=xyz", `password=${wide8}+/=xyz`, "password=[JANITOR-REDACTED:assignment]", {"assignment":1}],
+    ["password= + ~abc", `password=${wide8}~abc`, "password=[JANITOR-REDACTED:assignment]", {"assignment":1}],
+    ["connection string Password + +/=xyz", `Server=h;User Id=u;Password=${wide8}+/=xyz;`, "Server=h;User Id=u;Password=[JANITOR-REDACTED:connection-string-key];", {"connection-string-key":1}],
+    ["connection string Password + ~abc", `Server=h;User Id=u;Password=${wide8}~abc;`, "Server=h;User Id=u;Password=[JANITOR-REDACTED:connection-string-key];", {"connection-string-key":1}],
+    ["connection string AccountKey + +/=xyz", `AccountKey=${wide8}+/=xyz;`, "AccountKey=[JANITOR-REDACTED:connection-string-key];", {"connection-string-key":1}],
+    ["connection string AccountKey + ~abc", `AccountKey=${wide8}~abc;`, "AccountKey=[JANITOR-REDACTED:connection-string-key];", {"connection-string-key":1}],
+    ["connection string SharedAccessKey + +/=xyz", `DefaultEndpointsProtocol=https;SharedAccessKey=${wide8}+/=xyz;Endpoint=x`, "DefaultEndpointsProtocol=https;SharedAccessKey=[JANITOR-REDACTED:connection-string-key];Endpoint=x", {"connection-string-key":1}],
+    ["connection string SharedAccessKey + ~abc", `DefaultEndpointsProtocol=https;SharedAccessKey=${wide8}~abc;Endpoint=x`, "DefaultEndpointsProtocol=https;SharedAccessKey=[JANITOR-REDACTED:connection-string-key];Endpoint=x", {"connection-string-key":1}],
+  ]
+  for (const [name, text, expected, expectedHits] of contextRows) {
+    test(`a jr-shape token keeps the kind of the rule that owns its context: ${name}`, () => {
+      const { text: out, hits } = redact(text)
+      expect(out).toBe(expected)
+      expect(hits).toEqual(expectedHits)
+      expect(out).not.toContain('abcdefgh')
+    })
+  }
+
+  test('a jr-shape token with no context is still hidden as jwt', () => {
+    const { text, hits } = redact(`see ${wide8}+/=xyz end`)
+    expect(hits.jwt).toBe(1)
+    expect(text).toBe(`see ${jwtMark}+/=xyz end`)
+  })
+
+  // 'a' repeated then a dotted tail the lookahead accepts: the lazy loop walks the run once and finds no eyJ, so no match; with eyJ- it finds one.
+  const noMatchShape = (n: number): string => repeated('a', n) + '.abcdefgh.abcdefgh'
+  const oneMatchShape = (n: number): string => repeated('eyJ-', n) + '.abcdefgh.abcdefgh'
+  for (const [size, label] of [[KB256, '256 KB'], [MB, '1 MB']] as const) {
+    test(`${label} of a then .abcdefgh.abcdefgh is redacted in under a second, nothing hidden`, () => {
+      const text = noMatchShape(size)
+      const start = performance.now()
+      const { text: out, hits } = redact(text)
+      expect(performance.now() - start).toBeLessThan(1000)
+      expect(hits.jwt).toBeUndefined()
+      expect(out).toBe(text)
+    })
+    test(`${label} of eyJ- then .abcdefgh.abcdefgh is redacted in under a second, one hit`, () => {
+      const text = oneMatchShape(size)
+      const start = performance.now()
+      const { text: out, hits } = redact(text)
+      expect(performance.now() - start).toBeLessThan(1000)
+      expect(hits.jwt).toBe(1)
+      expect(out).toBe(jwtMark)
+    })
+  }
 })

@@ -311,6 +311,7 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       pypiToken: { prefix: j('pypi', '-AgE'), secret: fake('QhjvrsUhcUCGfRZD0ggKjwgR09UBFYUMNa32dOLUOihkUJwXrV8xATHq_vNl') },
       sendgridKey: { prefix: j('S', 'G.'), secret: fake('UyoLcYn_OTP2AVnN8HHo3Q') + '.' + fake('zd0Dzbfr-051hbSf0q2FAkX09yd9Ojua28m2G_SA3hm') },
       jwt: { prefix: 'eyJ', secret: fake('SERoiffMb4bZ') + '.eyJ' + fake('Uj8OA2qbvyc4') + '.' + fake('ekp09zbYOWXMyF_w6XKS') },
+      jwtWide: { prefix: 'eyJ', secret: fake('Qm8Zr4Tx') + '.' + fake('Wn6Kd2Vp') + '.' + fake('Hs9Lc3Yb') },
       bearerToken: { lead: 'Authorization: Bearer ', prefix: '', secret: fake('lZmCMpd_tO_G_U8ZDnHUJJ5s-_URIH') },
       slackToken: { prefix: j('xo', 'xb-'), secret: fake('5065969875') + '-' + fake('0509749660') + '-' + fake('zDynHn4HnpmBwUjbocXfjj3r') },
       stripeSecretKey: { prefix: j('s', 'k_live_'), secret: fake('npxqRcM4BeQSpqu6xYVOvZwx') },
@@ -326,7 +327,7 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       .filter(([, rule]) => /^(\\b|\(\?<[!=])/.test(rule.pattern.source))
       .map(([name]) => name)
       .sort()
-    expect(led.length).toBe(21)
+    expect(led.length).toBe(22)
     expect(Object.keys(tokens).sort().join(',')).toBe(led.join(','))
     for (const name of led) {
       const { lead = '', prefix, secret } = tokens[name]

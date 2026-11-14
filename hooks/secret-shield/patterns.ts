@@ -4,7 +4,7 @@ import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiPro
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
-import { bearerToken, jwt, privateKey } from './rules/key-material'
+import { bearerToken, jwt, jwtWide, privateKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeSecretKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
 
@@ -589,6 +589,12 @@ function redactInto(text: string, hits: Hits, found: Map<string, string>): strin
   out = redactUrlPasswords(out, hits, found)
   out = redactAssignments(out, hits, found)
   out = redactConnectionStrings(out, hits, found)
+  // WHY jwtWide is the LAST pass and not a TOKENS entry (TRDD-6A3XW3VO): measured over 39072 contextual inputs (22 contexts x 8 tails x 222 tokens), jwtWide in
+  // TOKENS regressed 10962 of them. It pre-empts the bearer-token rule and the assignment and connection-string passes (cookies and URL userinfo were unaffected): they then see a marker, not the
+  // whole value, and leave the value's tail visible (`Authorization: Bearer <jr-shape token>+/=xyz` became `Bearer [mark]+/=xyz`). As the last pass it only hides what
+  // every other rule left, so those values keep their kind and their whole hide (0 regressions over the same inputs). The jwt rule keeps its TOKENS position; its own
+  // pre-emption of current-shape tokens in those contexts is older and tracked separately.
+  out = applyRule(out, jwtWide, hits, found)
   return out
 }
 

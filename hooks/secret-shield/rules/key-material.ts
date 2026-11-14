@@ -26,4 +26,18 @@ export const privateKey: Rule = { kind: 'private-key', pattern: /-----BEGIN ((?!
 // linear time with the same matches') pins the equivalence against the old regex on hand cases and 400 seeded strings, the timing
 // at 256 KB, and the hide of a valid token after a 1 MB run.
 export const jwt: Rule = { kind: 'jwt', pattern: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g, group: 1 }
+// WHY jwtWide is a separate rule applied as the last pass of redact() (see redactInto) and not a replacement of jwt (TRDD-6A3XW3VO): jr (the reference redactor) hides eyJ + 8 characters, any
+// second segment, 8+ characters in the second and third; jwt above needs 10-character segments and an eyJ second segment, so it misses every
+// jr-only shape (15 of 15 jr-only samples were hidden by the wide shape, none by jwt) and a payload that does not start with eyJ (a space or
+// a newline after the opening brace gives eyAi or ewoi). The wide shape found 0 new matches in the three corpora measured (counted, not judged).
+// A single leftmost-consuming rule cannot be a superset of jwt: in a 5-segment string whose last three segments are a real JWT, the wide shape
+// starts at segment 1 and its greedy third segment swallows the first segment of the token jwt hides, and the 2-segment remainder matches
+// nothing, so text jwt hides today would show. Sequential application is a superset: jwt runs first, its marker has no dot, and no other pass's marker holds eyJ
+// followed by a dot, so jwtWide cannot touch any of them. Linear for the same reason as jwt: the first segment's class excludes the dot, so every start inside one run of token characters
+// shares one tail, which the atomic lookahead asserts once from the run start; the lazy loop then skips to the leftmost start with a word
+// boundary before eyJ. Differential against the plain candidate /\b(eyJ[c]{8,}\.[c]{8,}\.[c]{8,})/g: 0 mismatches over 500000 seeded strings;
+// the plain candidate is quadratic on a run of eyJ- (640-700 ms at 64 KB), this rule takes 17-40 ms per MB. NOT covered: a header with a space
+// after the opening brace (first segment eyAi); widening the first segment beyond eyJ needs its own measured change. tests/patterns.test.ts
+// ('jwt tokens with shorter segments ...') pins the spans, the superset against a copy of jwt, the floors and the timing.
+export const jwtWide: Rule = { kind: 'jwt', pattern: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g, group: 1 }
 export const bearerToken: Rule = { kind: 'bearer-token', pattern: /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g, group: 1 }
