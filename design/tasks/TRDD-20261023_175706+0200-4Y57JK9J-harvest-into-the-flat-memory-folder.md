@@ -4,7 +4,7 @@ title: Harvest into the flat memory folder
 column: blocked
 status: tasked
 created: 2026-10-23T17:57:06+0200
-updated: 2026-10-23T18:10:21+0200
+updated: 2026-11-14T09:53:22+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,7 @@ Spec: design/specs/wikimem-layout-spec.md 0.2.8 (draft). Implements WL-20. The h
 
 - 2026-10-23T17:57:06+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-23T18:03:46+0200 — column → blocked. waits on KLT5F93P
+
+## Notes
+
+2026-11-14: live symptom of the split this card resolves: a LOCAL harvest pass (reports/janitor-memory-subconscious-agent/20261114_095020+0100-harvest-local.md) created memory/trdd-card-editing.md through memgrep new-mem-topic (which writes to the scope root, no path flag), but the harvest gate reads <scope>/wikimem/ only, so it could not see the page, abstained and left the watermark unstamped; each later harvest pass re-enters UPDATE for the same buffer note and abstains again.
