@@ -2243,6 +2243,16 @@ describe('jwt rule runs in linear time with the same matches (TRDD-A7RII4DN)', (
     })
   }
 
+  // A quadratic rule takes about 16x its 256 KB time at 1 MB, so on any hardware this case separates the old rule from the linear one;
+  // the 256 KB cases above would pass the old rule on a machine about 3x faster than the one that measured 2.6 s there.
+  test('1 MB of eyJ- repeated and ending in .x is redacted in under a second', () => {
+    const text = run(4 * KB256).slice(0, 4 * KB256 - 2) + '.x'
+    const start = performance.now()
+    const { hits } = redact(text)
+    expect(performance.now() - start).toBeLessThan(1000)
+    expect(hits.jwt).toBeUndefined()
+  })
+
   // JavaScriptCore has silently missed matches of a long loop in this repo (TRDD-AGOEWF2E), so assert the hide, not only the time.
   const MB = 1024 * 1024
   test('a valid JWT after a 1 MB eyJ- run is still hidden', () => {
