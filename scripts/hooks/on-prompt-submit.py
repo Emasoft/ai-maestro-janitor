@@ -18,7 +18,8 @@ UserPromptSubmit channel as real typing — its prompt text starts with a
 the user "present" every ~5 min forever. So any `[janitor-…]`-prefixed prompt is
 skipped WITHOUT touching the breadcrumb.
 
-The hook never blocks and never emits agent-context output — it is invisible to
+The hook never blocks and never emits agent-context output (its one output is a session
+title, `hookSpecificOutput.sessionTitle`, issue #357 — see `_add_session_title`) — it is invisible to
 the model. A failure in the best-effort breadcrumb WRITE (`state.bump_user_presence()`)
 degrades to a no-op, same as `user_intent.record_intent_from_prompt()`'s. A broken `state.py`
 ITSELF (it fails to import at all) is the one exception: that is not a breadcrumb problem, it
@@ -54,6 +55,7 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
@@ -105,6 +107,37 @@ def _is_cron_marker(prompt: str) -> bool:
     return False
 
 
+def _add_session_title(payload: dict[str, Any], output: dict[str, Any]) -> None:
+    """Name a session whose title is missing or a "/command" echo (issue #357).
+
+    WHY. A session the janitor cleared into is titled "/clear clear" by Claude Code (it derives
+    the title of an untitled session from its first prompt, the /clear command record), and every
+    later clear copies that forward. `hookSpecificOutput.sessionTitle` renames the session;
+    measured live on Claude Code 2.1.325: the first prompt after /clear carries `session_title`
+    null, the NEXT prompt carries the name this hook returned and /status shows it.
+
+    Runs BEFORE the cron-marker filter on purpose: the first prompt after a janitor /clear is
+    itself a `[janitor-…]` cue, and it is the only prompt with a null title. `session_title` is
+    set from the second prompt on, so a heartbeat pays only a dict lookup afterwards, and the
+    helper is stdlib-only (no `state` import).
+
+    A null title is renamed ONLY for a clear-born session (transcript head, see
+    `session_title.born_from_clear`): a fresh session titles itself from its first prompt.
+
+    Never fails the hook: any error leaves `output` untouched and writes one log line.
+    """
+    try:
+        session_title = importlib.import_module("session_title")
+        title = session_title.choose_title(payload)
+        if title:
+            session_title.merge_session_title(output, title)
+    except Exception as exc:  # noqa: BLE001 - naming a session must never abort the turn
+        try:
+            importlib.import_module("state").log_line("prompt-submit", f"session title failed: {exc!r}")
+        except Exception:  # noqa: BLE001,S110 - a log write must never abort the turn either
+            pass
+
+
 def main() -> int:
     # Read + parse stdin defensively; any failure → no-op (never crash the turn).
     try:
@@ -120,6 +153,16 @@ def main() -> int:
     if not isinstance(payload, dict):
         return 0
 
+    output: dict[str, Any] = {}
+    _add_session_title(payload, output)
+    rc = _process_prompt(payload)
+    if output:
+        sys.stdout.write(json.dumps(output) + "\n")
+    return rc
+
+
+def _process_prompt(payload: dict[str, Any]) -> int:
+    """The prompt-presence and user-intent bookkeeping; returns the hook exit code (always 0)."""
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return 0

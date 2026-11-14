@@ -51,7 +51,9 @@ def _run_hook(prompt: str, home: Path) -> tuple[int, str, str]:
     env["CLAUDE_PLUGIN_ROOT"] = str(_PROJECT_ROOT)
     proc = subprocess.run(
         [sys.executable, str(_HOOK)],
-        input=json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": prompt}),
+        # A titled session: the hook's only output is a sessionTitle for an untitled one (issue #357),
+        # and these tests assert the presence logic emits nothing else.
+        input=json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": prompt, "session_title": "established"}),
         capture_output=True,
         text=True,
         env=env,
