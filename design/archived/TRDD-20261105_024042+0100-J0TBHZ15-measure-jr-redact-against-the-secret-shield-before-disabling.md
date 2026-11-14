@@ -1,10 +1,10 @@
 ---
 trdd-id: J0TBHZ15
 title: Measure jr-redact against the secret shield before disabling it
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-11-05T02:40:42+0100
-updated: 2026-11-14T01:14:45+0100
+updated: 2026-11-14T01:14:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -30,3 +30,4 @@ Owner decision 2026-11-05 (quoted on TRDD-2V7OAUPE): jr-redact is measured befor
 
 - 2026-11-05T02:40:42+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-14 — Done-when (1) met: worker report reports_dev/sonnet-worker/20261114_011329+0100-j0tbhz15-jr-redact-vs-shield.md (function level, shield suite 656/656 on a scratch copy). Tests set 931: both 68, shield only 568, jr only 5, neither 290. Catalog 4,932: both 416, shield only 330, jr only 75, neither 4,111. Runtime on a fixed 524,288-byte input, median of 9: jr 3.0 ms, shield 21.3 ms (secret-free); 2.7 vs 23.5 ms (64 secrets). Done-when (2) met: every jr-only family is on TRDD-6A3XW3VO.
+- 2026-11-14T01:14:58+0100 — COMPLETE by main-agent@ai-maestro-janitor. both Done-when boxes met, evidence in the Approval log 2026-11-14.
