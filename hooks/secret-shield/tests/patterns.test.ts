@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { applyRule, countOf, isSecretFile, JSON_ESCAPE_BOUND, label, mark, redact, redactBlocks, redactDeep, TOKEN_ORDER, URL_PASSWORD_BOUND, withhold } from '../patterns'
 import { githubTokenClassic, githubTokenFineGrained } from '../rules/code-hosts'
+import { openaiKey48 } from '../rules/ai'
 import { pypiToken } from '../rules/dev-services'
 import { privateKey } from '../rules/key-material'
 import { stripeSecretKey } from '../rules/messaging-payments'
@@ -225,6 +226,75 @@ describe('Stripe keys shorter than the old floor are hidden, nothing the old rul
         const done = redact(text).text
         const newSpans = [...text.matchAll(NEW_STRIPE)].map(m => [m.index, m.index + m[0].length])
         for (const m of text.matchAll(OLD_STRIPE)) {
+          oldSpans++
+          const start = m.index
+          const end = m.index + m[0].length
+          expect(newSpans.some(([s, e]) => s <= start && e >= end)).toBe(true)
+          expect(done).not.toContain(m[1])
+        }
+      }
+    }
+    // A comparison over zero old matches would pass for any new rule.
+    expect(oldSpans).toBeGreaterThan(40)
+  })
+})
+// OpenAI sk- keys (TRDD-6A3XW3VO, 2026-11-14): the third openai rule hid only sk- plus exactly 48 letters and digits, so a key with any other body length, or with a hyphen or underscore in the body, stayed visible.
+// WHY the differential test: the widening must be a superset. Every span the old rule hid must still be hidden, so the old pattern is kept here as a constant. It includes bodies with no digit: a digit-requiring form of the new rule would lose those.
+describe('OpenAI sk- keys with a body of 20 or more characters are hidden, nothing the old rule hid becomes visible', () => {
+  const OLD_OPENAI = /\b(sk-[A-Za-z0-9]{48})\b/g
+  // The new pattern is the shipped rule's own, copied so a run keeps no lastIndex (rules/rule.ts); the old one is the constant above.
+  const NEW_OPENAI = new RegExp(openaiKey48.pattern.source, 'g')
+  const SK = j('s', 'k-')
+  // Mixed fake bodies built from repeated characters at run time: no secret-looking literal is committed.
+  const cycle = (n: number, alphabet: string) => alphabet.repeat(Math.ceil(n / alphabet.length)).slice(0, n)
+  const openai = (n: number, alphabet = A36) => SK + cycle(n, alphabet)
+
+  test('a key with a 20 to 99 character body of letters and digits is hidden, the old rule hid only 48', () => {
+    for (const n of [20, 23, 47, 49, 99]) {
+      const { text, hits } = redact(`value: ${openai(n)} end`)
+      expect(text).toBe(`value: ${mark('openai-key')} end`)
+      expect(hits).toEqual({ 'openai-key': 1 })
+    }
+  })
+
+  test('a key with hyphens or underscores in the body is hidden whole', () => {
+    for (const key of [SK + 'or-v1-' + cycle(30, A36), SK + cycle(12, A36) + '_' + cycle(12, A36), SK + cycle(20, A36) + '-' + cycle(20, A36)]) {
+      expect(redact(`value: ${key} end`).text).toBe(`value: ${mark('openai-key')} end`)
+    }
+  })
+
+  test('a key built to the old shape is still hidden', () => {
+    expect(redact(`value: ${openai(48)} end`).text).toBe(`value: ${mark('openai-key')} end`)
+    expect(redact(`value: ${j(SK, 'proj-', cycle(40, A36))} end`).text).toBe(`value: ${mark('openai-key')} end`)
+    expect(redact(`value: ${j(SK, cycle(20, A36), 'T3BlbkFJ', cycle(20, A36))} end`).text).toBe(`value: ${mark('openai-key')} end`)
+  })
+
+  test('FLOOR pin (minimum length): a body of 19 characters stays visible', () => {
+    expect(redact(`value: ${openai(19)} end`).text).toContain(openai(19))
+  })
+
+  // WHY: the old trailing \b never matched when the 48-character key was followed by an underscore (a word character), so the whole key stayed visible.
+  test('a 48 character key whose tail continues with an underscore is hidden through the tail', () => {
+    expect(redact(`value: ${openai(48)}_suffixtext end`).text).toBe(`value: ${mark('openai-key')} end`)
+  })
+
+  // The widening hides any 20-character-or-longer run after sk-, including a hyphenated lowercase word run that is not a key. The TRDD-6A3XW3VO corpus run found one such run (a test-fixture slug) in 100 MB of third-party text, and 0 in 40 MB of this repo. Accepted over-hiding, the safe direction: a lookahead that needs a digit would also leave a key with no digit visible. The old rule left this text visible, so this test fails on the old rule. A change that stops hiding it must change this test on purpose.
+  test('deliberate over-hide pin: a hyphenated word run after sk- that the old rule left visible is now hidden, the safe direction', () => {
+    expect(redact(`value: ${SK}task-planner-helper-notes end`).text).toBe(`value: ${mark('openai-key')} end`)
+  })
+
+  test('every span the old rule matched is still hidden by the new rule, over generated 48 character bodies including no-digit ones', () => {
+    const rotate = (k: number) => A36.slice(k) + A36.slice(0, k)
+    const bodies = [...Array(10).keys()].map(k => cycle(48, rotate(k)))
+    bodies.push(cycle(48, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'), cycle(48, '0123456789'), cycle(48, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'))
+    const contexts = [(t: string) => t, (t: string) => `value: ${t} end`, (t: string) => `{"token":"${t}"}`, (t: string) => `a ${t}\n`, (t: string) => `${t}-tail`]
+    let oldSpans = 0
+    for (const body of bodies) {
+      for (const frame of contexts) {
+        const text = frame(SK + body)
+        const done = redact(text).text
+        const newSpans = [...text.matchAll(NEW_OPENAI)].map(m => [m.index, m.index + m[0].length])
+        for (const m of text.matchAll(OLD_OPENAI)) {
           oldSpans++
           const start = m.index
           const end = m.index + m[0].length
@@ -1595,7 +1665,7 @@ describe('token rule order', () => {
       id('anthropic-key', /\b(sk-ant-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,})/g),
       id('openai-key', /\b(sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/g),
-      id('openai-key', /\b(sk-[A-Za-z0-9]{48})\b/g),
+      id('openai-key', /\b(sk-[A-Za-z0-9_-]{20,})/g),
       id('slack-app-token', /(?i:xapp-\d-[A-Z0-9]+-\d+-[a-z0-9]+)/g),
       id('slack-config-token', /(?i:xoxe.xox[bp]-\d-[A-Z0-9]{163,166})/g),
       id('slack-config-token', /(?i:xoxe-\d-[A-Z0-9]{146})/g),
