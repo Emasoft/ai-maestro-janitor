@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-14T04:52:06+0100
+updated: 2026-11-14T04:54:06+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -25,11 +25,11 @@ approval-datetime: 2026-11-04T21:05:18+0100
 
 Plan (reports_dev, gitignored): this STATE is the durable copy. Increments, one commit each:
 
-- 1a — scratch proof of the timing estimator (hooks/secret-shield/tests/timing.ts candidate, interleaved best-of with min accumulation and a round cap): a linear rule passes 20/20 under one generated load at the exact sizes and threshold the tests will use; old quadratic jwt before 4970ff1f and JSON_ESCAPED before f38c30c8 fail every run. Check: 20 consecutive runs under generated load, recorded.
-- 1b — migrate only patterns.test.ts:661 (the failing assert of TRDD-Z41A13XV) onto tests/timing.ts and record the result on TRDD-Z41A13XV. Check: python scripts/run_secret_shield_tests.py green; quadratic mutant still red.
+- 1a — scratch proof of the timing estimator (hooks/secret-shield/tests/timing.ts candidate, interleaved best-of with min accumulation and a round cap): a linear rule passes 20/20 under one generated load at the exact sizes and threshold the tests will use; old quadratic jwt before 4970ff1f and JSON_ESCAPED before f38c30c8 fail every run. Check: 20 consecutive runs under generated load, recorded. A run that exhausts the round cap without a passing round fails closed (never passes). The load generator is started and killed by its own recorded PID; no second full pytest run alongside.
+- 1b — migrate only patterns.test.ts:661 (the failing assert of TRDD-Z41A13XV) onto tests/timing.ts and record the result on TRDD-Z41A13XV. Check: python scripts/run_secret_shield_tests.py green; the regex :661 was written to guard (find it with git log -S on that assert) restored as a constant copy turns it red.
 - 1c — migrate the remaining timing tests (patterns.test.ts :650-665, :801-806, :672, the later bestOf/linear copies), re-running each migrated test's original mutant. :592-612 absolute bounds are kept unless the replacement sizes straddle the URL_PASSWORD step (~63.8K / 553K iterations). Keep the TRDD-AGOEWF2E hide assertions. Meets req 4 (method), req 7. Check: gate run; uv run pytest tests/test_run_secret_shield_tests.py.
-- 2 — tests/redos-registry.ts + tests/redos.test.ts for the 47 rules/ exports: tails T1-T3 with design basis, req 4/5 runs (prefix alone: zero hits; prefix + separator + short real match: exactly one hit, exact marked ending; split-string samples), in-sandbox completeness (namespace imports vs registry vs TOKEN_ORDER, notInTokens: jwtWide). Build the source scanner here as well: it checks the plan's unverified counts (47 rules / 22 module-level regexes / ~38 function-local literals). Check: gate run; scratch mutant: an unregistered export const x: Rule in a rules/ file turns the harness red.
-- 3 — add the export keyword to the 22 module-level regexes in patterns.ts (diff is export insertions only, verified with fastedit diff; existing tests unchanged; run tests/test_secret_shield_jwtwide_last_pass.py after) + registry rows for the module-level and function-local regexes, tails T4-T7, drive via redact()/isSecretFile(), raw exec on clones for MARK/MARKS/MARK_SPLIT. Check: gate run.
+- 2 — tests/redos-registry.ts + tests/redos.test.ts for the rules/ exports (47 per the plan, unverified until the scanner runs): tails T1-T3 with design basis, req 4/5 runs (prefix alone: zero hits; prefix + separator + short real match: exactly one hit, exact marked ending; split-string samples), in-sandbox completeness (namespace imports vs registry vs TOKEN_ORDER, notInTokens: jwtWide). Build the source scanner here as well: it checks the plan's unverified counts (47 rules / 22 module-level regexes / ~38 function-local literals). Check: gate run; scratch mutant: an unregistered export const x: Rule in a rules/ file turns the harness red.
+- 3 — add the export keyword to the module-level regexes the increment-2 scanner lists (22 per the plan, unverified) in patterns.ts (diff is export insertions only, verified with fastedit diff; existing tests unchanged; run tests/test_secret_shield_jwtwide_last_pass.py after) + registry rows for the module-level and function-local regexes, tails T4-T7, drive via redact()/isSecretFile(), raw exec on clones for MARK/MARKS/MARK_SPLIT. Check: gate run. Depends on increment 2's scanner output.
 - 4 — tests/test_secret_shield_regex_registry.py (scanner + registry-text comparison + rules/ file list vs imports) + tests/redos-old.ts (V1 before 133a766a, V2 before 6decd71d, V3 before 7d54b062, jwt before 4970ff1f, JSON_ESCAPED before f38c30c8) + synthetic variants; raise _MIN_PASSED. Record the three Done-when mutants (new private regex in patterns.ts; new rules/ export absent from registry and TOKENS; new regex in register.ts and in rows.ts). Check: uv run pytest tests/test_secret_shield_regex_registry.py; gate run; ruff, mypy and pyright all clean.
 
 Main-agent rulings (2026-11-14, main-agent) on the plan's owner decisions; vetoable by the owner:
@@ -37,8 +37,8 @@ Main-agent rulings (2026-11-14, main-agent) on the plan's owner decisions; vetoa
 - D1 — red-on-variant only where a known quadratic exists, plus one synthetic variant per tail class. This narrows req 3 ("for each regex one run shows its tail turning a known-quadratic variant red"), unsatisfiable for ~36 simple prefix rules.
 - D2 — function-local inline regexes are covered by a driver (not hoisted, not individually timed); the pytest scanner fails on any regex literal or new RegExp( that is in neither the registry nor an explicit per-site covered-by map. This narrows req 1.
 - D3 — export the module-level regexes from patterns.ts (export-only diff); run tests/test_secret_shield_jwtwide_last_pass.py after.
-- D4 — interleaved best-of (min accumulation) with a round cap, no load gate; chosen among the options the 2026-11-05 note listed (interleave, best of N, gate on load). TRDD-MEYVDFJ9 to be aligned to the same method.
-- D5 — red-on-old at reduced sizes (V1/V2 take 19-33 s at 256 KB); req 4's 256 KB applies to the current regexes only.
+- D4 — interleaved best-of (min accumulation) with a round cap, no load gate; chosen among the options the 2026-11-05 note listed (interleave, best of N, gate on load). TRDD-MEYVDFJ9 to be aligned to the same method; this amends req 4's 'median of at least 5' per the 2026-11-05 note; vetoable by the owner.
+- D5 — red-on-old at reduced sizes (V1/V2 take 19-33 s at 256 KB); req 4's 256 KB applies to the current regexes only. This narrows req 4 for the old regexes; vetoable by the owner.
 - D6 — raise _MIN_PASSED only to the new measured count minus margin, in the commit that adds tests.
 - D7 — completeness source scan is a pytest in tests/ (the plugin sandbox refuses node:fs), part of the same release gate (publish.py runs pytest tests/).
 
