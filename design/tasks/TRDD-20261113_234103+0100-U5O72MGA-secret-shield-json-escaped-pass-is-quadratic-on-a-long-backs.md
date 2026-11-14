@@ -4,7 +4,7 @@ title: Secret shield JSON_ESCAPED pass is quadratic on a long backslash run
 column: todo
 status: tasked
 created: 2026-11-13T23:41:03+0100
-updated: 2026-11-13T23:41:03+0100
+updated: 2026-11-14T01:01:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -26,3 +26,7 @@ Found during the change-2 measurements of TRDD-AGOEWF2E. Measured 2026-11-13 by 
 ## Approval log
 
 - 2026-11-13T23:41:03+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Done-when (1) answer — 2026-11-14
+
+From the Claude Code mods docs bundled on this machine (they describe v2.1.290; installed is 2.1.325) and the shield source, worker-read (reports_dev/sonnet-worker/20261114_010108+0100-u5o72mga-hook-timeout.md), not observed live. Limit: 10 s per hook per event, time inside next() excluded; a .catch handler gets 1 s; no per-hook setting. A hook that times out is skipped. session.append, the model-facing gate, has a .catch that withholds the row when the scan did not finish, so the model copy FAILS CLOSED (unless the handler itself fails). tool.call has no .catch, so the displayed and stored copy of a tool result FAILS OPEN on a timeout. claude plugin test does not enforce the limit (a 13 s hook ran to completion), so a real timeout can only be observed in a live session with the shield wired into a scratch plugin dir. Per Done-when (3), closing on this needs owner acceptance; the open tool.call copy is the part to decide on.
