@@ -2,7 +2,7 @@
 name: janitor-beat-tasks-and-limitations
 description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / the heartbeat keeps telling me to resume an agent I stopped / pending agents nag after TaskStop / how do I clear a pending agent entry / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go / why is marketplace-refresh missing / is marketplace-refresh retired / UserPromptSubmit hook timed out after 2s / why did my hook time out under load / the heartbeat cron is now staggered offset-59/N / never parse cron with startswith slash-star / is the external_clear next-fire fix landed yet — the janitor's two-clock schedule and its known limitations"
 ocd: 2026-07-12
-lmd: 2026-10-08
+lmd: 2026-11-15
 metadata:
   node_type: memory
   type: project
@@ -167,7 +167,7 @@ A staggered cron is NOT the plain */N shape any more: every reader of the armed/
 
 ## See also
 
-- [[claude-md-canonical-form]] — the per-turn cost measured here is WHY CLAUDE.md is capped to five elements.
+- [[claude-md-canonical-form]] — the per-turn cost measured here is WHY CLAUDE.md is capped to four elements (PRRD G7.3).
 
 
 - [[oauth-rotation-renew-reauth-cascade]] — what the 60 s `oauth-rotator-tick` / 10 min

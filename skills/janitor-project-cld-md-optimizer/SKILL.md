@@ -1,6 +1,6 @@
 ---
 name: janitor-project-cld-md-optimizer
-description: Migrate a bloated CLAUDE.md into PROJECT-scope wikimem pages, leaving only the slim janitor-managed contract (description, repo urls, build instructions, project map, wikimem index). Use when the project-map-drift detector nudges "CLAUDE.md breaks the slim contract", when the user asks to shrink/slim/restructure/optimize CLAUDE.md, or via `/janitor-project-cld-md-optimizer`.
+description: Migrate a bloated CLAUDE.md into PROJECT-scope wikimem pages, leaving only the slim janitor-managed contract (description, repo urls, build instructions, wikimem index). Use when the project-map-drift detector nudges "CLAUDE.md breaks the slim contract", when the user asks to shrink/slim/restructure/optimize CLAUDE.md, or via `/janitor-project-cld-md-optimizer`.
 ---
 
 # Janitor CLAUDE.md slim
@@ -14,9 +14,11 @@ contains ONLY:
 2. the github repo url (and the urls of connected projects — plugins, marketplaces,
    dependencies),
 3. the basic lint/build/compile/test/publish instructions,
-4. the janitor-generated project map (the `JANITOR-REPO-MAP` fence),
-5. the topic-ordered index of PROJECT-scope wikimem pages (the `JANITOR-WIKIMEM-INDEX`
+4. the topic-ordered index of PROJECT-scope wikimem pages (the `JANITOR-WIKIMEM-INDEX`
    fence).
+
+The project map is NOT one of them (PRRD G7.3): it lives in the root, git-excluded
+`PROJECT_MAP.md`.
 
 Everything else moves into PROJECT-scope wikimem pages, where it is recalled by symptom
 instead of paid on every turn. This skill is the EDITORIAL half; the mechanics and the
@@ -27,16 +29,16 @@ proofs live in `scripts/claudemd_slim.py` (TRDD-H12K9JYX). You never lose conten
 
 - A PROJECT wikimem corpus exists (`<repo>/.claude/project/memory/` has pages). If not,
   run `/janitor-memory-bootstrap` first — the index has nothing to point at otherwise.
-- Do this at a CACHE-CHEAP moment (fresh session, post-compaction, or pre-commit):
-  CLAUDE.md sits in the cached prompt prefix, and rewriting it mid-session busts the
-  cache for the whole context.
+- Any moment works: a CLAUDE.md write mid-session does NOT measurably bust the cache
+  (MEASURED 2026-08-26, TRDD-LFSWY0C6: median cache_creation 1,525 tokens across 307 turns
+  right after a CLAUDE.md edit).
 
 ## Instructions
 
 1. **Snapshot.** `cp CLAUDE.md CLAUDE.md.pre-slim.bak` (keep it until step 6 passes; the
    verify gate needs it, and RULE-0 wants the undo mechanical).
 
-2. **Classify the narrative.** Read CLAUDE.md. Everything outside the two janitor fences
+2. **Classify the narrative.** Read CLAUDE.md. Everything outside the wikimem-index fence
    that is not items 1–3 above must move. Group it into TOPICS. RECALL FIRST: for each
    topic run `memgrep recall "<topic symptom>" .claude/project/memory` — most topics
    already have a page; EXTEND it (update, don't duplicate). Mint a new page only when
@@ -49,7 +51,9 @@ proofs live in `scripts/claudemd_slim.py` (TRDD-H12K9JYX). You never lose conten
    `memgrep validate <page> && memgrep lint <page>` after each edit.
 
 4. **Assemble the slim CLAUDE.md.** Keep: description, urls, build/test/publish
-   instructions, the untouched `JANITOR-REPO-MAP` fence. Delete the moved narrative.
+   instructions, the `JANITOR-WIKIMEM-INDEX` fence. Delete the moved narrative. The
+   project map is NOT a CLAUDE.md element (PRRD G7.3); a leftover legacy `JANITOR-REPO-MAP`
+   fence is stripped by `scripts/repomap_generate.py`, never by hand.
    Aim under the narrative cap (8 KiB by default —
    `CLAUDE_PLUGIN_OPTION_CLAUDEMD_NARRATIVE_MAX_BYTES`).
 
@@ -99,7 +103,7 @@ proofs live in `scripts/claudemd_slim.py` (TRDD-H12K9JYX). You never lose conten
 
 ## Output
 
-A slim CLAUDE.md (items 1–5 only, both fences fresh), the moved knowledge living in
+A slim CLAUDE.md (items 1–4 only, wikimem-index fence fresh), the moved knowledge living in
 validated PROJECT wikimem pages, and a preservation proof (`verify` exit 0) on record.
 
 ## Scope

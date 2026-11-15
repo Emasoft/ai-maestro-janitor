@@ -1,6 +1,6 @@
 """CLAUDE.md narrative migration PLANNER — the DECISION half only (TRDD-LFSWY0C6).
 
-Per `design/specs/claude-md-canonical-form.md` §CM-2, narrative outside the five permitted
+Per `design/specs/claude-md-canonical-form.md` §CM-2, narrative outside the four permitted
 CLAUDE.md elements is a defect the janitor must repair by moving it into the PROJECT
 wikimem. This module computes WHAT WOULD MOVE WHERE. It never writes CLAUDE.md, never
 creates or edits a memory page, and never removes a line — that is the DELIVERY half, a
@@ -225,9 +225,9 @@ def classify_exemption(block_text: str) -> str | None:
 
 # ── 3. The permitted-element classifier (spec §CM-1 elements 1 and 2) ──────────────────
 
-# §CM-1 lists FIVE permitted elements, in order. Elements 4 and 5 are the janitor's own
-# fenced regions, and `narrative_outside_fences` has already removed them before any block
-# reaches here — so exactly THREE can appear in the narrative:
+# PRRD G7.3 lists FOUR permitted elements, in order. Element 4 is the janitor's own
+# fenced wikimem-index region, and `narrative_outside_fences` has already removed it before
+# any block reaches here — so exactly THREE can appear in the narrative:
 #
 #   1. the one-paragraph project description
 #   2. the project URLs
@@ -525,10 +525,11 @@ def plan_migration(
 
     - **WHETHER to plan at all** — `slim_violations`. A file `check` already calls
       conforming plans nothing. This is a deliberate SCOPE choice, not a correctness
-      requirement: §CM-1 says "these five and nothing else", so a small non-permitted block
-      under the byte cap is technically a defect this planner will not report. Editing
-      CLAUDE.md busts the prompt-cache prefix of every live session (TRDD-e247a349 §5), so
-      churning a file the contract check calls fine costs more than the stray block does.
+      requirement: PRRD G7.3 says "exactly four elements and nothing else", so a small
+      non-permitted block under the byte cap is technically a defect this planner will not
+      report. (The earlier claim here that a CLAUDE.md edit busts every live session's
+      prompt cache was measured negligible on 2026-08-26, TRDD-LFSWY0C6, so cache cost is
+      not the reason for this scope choice.)
     - **WHICH blocks are the defect** — `classify_permitted`, per block. `slim_violations`
       structurally cannot answer this (it is four whole-file checks), and using it as if it
       could was the `20f226ba` partial fix: it silenced the CONFORMING case and left every
@@ -583,7 +584,7 @@ def render_plan(plans: list[BlockPlan]) -> str:
     """Human-readable plan, one entry per block. Reused by the CLI; kept pure (no I/O) so
     tests can assert on its text directly."""
     if not plans:
-        return "claudemd-migration-plan: no narrative blocks found outside the five permitted elements"
+        return "claudemd-migration-plan: no narrative blocks found outside the four permitted elements"
     migratable = [p for p in plans if p.verdict != "permitted"]
     lines = [
         f"claudemd-migration-plan: {len(migratable)} migratable block(s) of {len(plans)} narrative "

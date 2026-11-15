@@ -1,6 +1,6 @@
 ---
 name: janitor-auto-repomap-off
-description: Disable the auto-maintained project map - removes the fenced repo-map block from this project's CLAUDE.md entirely (human narrative untouched, byte-preserved) and clears the opt-in flag so the stale-map heartbeat nudge stops. Use when the user says "turn off the repo map", "remove the auto map from CLAUDE.md", "disable the project map", "stop the repomap nudges".
+description: Disable the auto-maintained project map - deletes the generated root PROJECT_MAP.md (only a file the generator wrote) and clears the opt-in flag so the stale-map heartbeat nudge stops. Use when the user says "turn off the repo map", "remove the auto map", "disable the project map", "stop the repomap nudges".
 ---
 
 # Janitor auto-repomap OFF
@@ -8,15 +8,15 @@ description: Disable the auto-maintained project map - removes the fenced repo-m
 ## Overview
 
 Turns OFF the auto-maintained project map (TRDD-e247a349) for THIS project:
-splices the fenced `JANITOR-REPO-MAP` block out of `CLAUDE.md` (everything
-outside the fences is preserved byte-for-byte; the removal is atomic and
-backed up) and clears the project-scoped opt-in flag so the
-`project-map-drift` detector goes back to a total no-op.
+deletes the generated root `PROJECT_MAP.md` (a file this generator wrote; a
+hand-written one is never removed) and clears the project-scoped opt-in flag so
+the `project-map-drift` detector goes back to a total no-op. `CLAUDE.md` is
+not touched.
 
 ## Instructions
 
-1. Remove the fenced block (atomic; backs up CLAUDE.md first; takes the same
-   generator lock as writes, so it can never interleave with a refresh):
+1. Remove the generated map file (only one this generator wrote, recognized by its
+   header; takes the same generator lock as writes, so it can never interleave with a refresh):
 
    ```bash
    uv run "${CLAUDE_PLUGIN_ROOT}/scripts/repomap_generate.py" \
@@ -29,20 +29,20 @@ backed up) and clears the project-scoped opt-in flag so the
    rm -f "${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state/repomap-opt-in.flag"
    ```
 
-3. Report one line: block removed (or "no block"), nudge disarmed.
+3. Report one line: map file removed (or "no map file"), nudge disarmed.
 
 ## Output
 
-`CLAUDE.md` without the fenced block (narrative untouched), no opt-in flag.
-The rolling backup at `.janitor/state/CLAUDE.md.pre-repomap.bak` and the
-persisted excludes file are left in place (harmless state; re-enabling reuses
-the excludes).
+No generated `PROJECT_MAP.md` at the project root, no opt-in flag; `CLAUDE.md` is never
+touched. The rolling backup at `.janitor/state/CLAUDE.md.pre-repomap.bak` (from the
+one-time legacy-fence strip) and the persisted excludes in `.repomapignore` are left in
+place (harmless state; re-enabling reuses the excludes).
 
 ## Error handling
 
-- No block present → exit 0, "no map block to remove" (flag still cleared).
-- Malformed fences → exit 3, CLAUDE.md untouched — fix the fence pair by hand
-  (the block is plain text between two unique marker lines).
+- No `PROJECT_MAP.md` present → exit 0, "no PROJECT_MAP.md to remove" (flag still cleared).
+- `PROJECT_MAP.md` without a generated-map header (hand-written) → exit 3, file left in
+  place; delete it yourself if it is really unwanted.
 - Lock held → exit 3; re-run in a moment.
 
 ## Scope

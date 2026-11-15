@@ -185,8 +185,8 @@ modifies your repos — it only operates on `~/.claude/plugins/`.
 
 Across v0.21.0 → v0.24.1 the janitor gained a self-healing spine so an
 unattended overnight session keeps running through crashes, bad self-updates,
-compaction, and frozen sessions. The full design lives in the
-[CLAUDE.md project map](./CLAUDE.md) and
+compaction, and frozen sessions. The full design lives in the generated, git-excluded
+`PROJECT_MAP.md` project map (`/janitor-auto-repomap-on`) and
 `design/tasks/TRDD-*-fe45babc-*.md`; the summary:
 
 **Four layers, each resurrecting the one below.** L0 — an OS keepalive
