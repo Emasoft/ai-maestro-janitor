@@ -1,10 +1,10 @@
 ---
 trdd-id: 7XDBJZCZ
 title: A deterministic llm-ext classify refusal is mapped to kind unknown and retried for the whole 300 s Jev budget
-column: todo
+column: verify_assumptions
 status: tasked
 created: 2026-11-15T17:41:44+0100
-updated: 2026-11-15T17:41:44+0100
+updated: 2026-11-15T17:46:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,7 @@ MAIN-VERIFIED 2026-11-15 (code read): scripts/lib/jev_compaction.py raises a pla
 ## Approval log
 
 - 2026-11-15T17:41:44+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Investigation
+
+2026-11-15T17:46+0100 Research started (read-only sonnet worker; report to come under reports_dev/sonnet-worker, local and gitignored): which llm-ext exit codes or message shapes separate deterministic refusals from transient failures.
