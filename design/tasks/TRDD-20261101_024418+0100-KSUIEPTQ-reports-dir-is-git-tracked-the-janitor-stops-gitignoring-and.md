@@ -4,7 +4,7 @@ title: reports dir is git-tracked, the janitor stops gitignoring and purging it
 column: testing
 status: tasked
 created: 2026-11-01T02:44:18+0100
-updated: 2026-11-11T14:22:00+0100
+updated: 2026-11-15T02:09:39+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,6 +38,7 @@ Changes:
 - 2026-11-01T02:44:18+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-11-04 main-agent: the working-tree .gitignore again carries '/reports/' under the comment 'janitor: report dirs carry private data' (git diff, 2026-11-04). It is re-added by the installed 3.8.13 janitor, which predates 010be429. Restore .gitignore to HEAD right before publish.py runs (a dirty tree blocks it). After 3.8.14 is installed, check that the line does not come back.
 - 2026-11-11T14:22:00+0100 — column → testing by user. code complete (010be429+bb9dc94b), release pending — dev-cards assessment 2026-11-11
+2026-11-15 owner directive on the reports folder, verbatim, relayed by the llm-externalizer session: "reports folder is always git tracked and sanitized from secrets before committing. reports folder only contains final reports and complete/merged reports, or updated checklists with some progress tracking. while reports_dev is always gitignored and it contains intermediate artifacts, partial reports or temporary scratch files. In general the *_dev version of a folder is the gitignored one, the other without the _dev suffix is git tracked. Make sure to instruct the subagents to save their temporary or scratch files in the *_dev folders, and the final files in the other ones." This card is its home: 010be429 built the rules text and the agents report paths; no release tag contains it yet.
 
 ## Correction 2026-11-01
 
