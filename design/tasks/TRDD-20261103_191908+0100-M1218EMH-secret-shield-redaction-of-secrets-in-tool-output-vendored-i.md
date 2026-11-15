@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: blocked
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-15T19:52:41+0100
+updated: 2026-11-15T19:59:24+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -52,6 +52,7 @@ Known risk (adversarial review, 2026-11-03): while it is on, Read shows the plac
 
 NEXT ACTION: (1) rename the command to /janitor-secret-shield; (2) cards for the write-back guard, error-result redaction, and pre-wiring checks (older Claude Code with a modules key, tool.call order against PostToolUse updatedToolOutput, a Python warning when the env block sets CLAUDE_PLUGIN_OPTION_SECRET_SHIELD_*); (3) DONE: tests/test_secret_shield_wiring_gate.py (5722ca3c, 4cc1c5c3, 50fa82cb) refuses a hooks.json "modules" key unless every blocker of TRDD-2V7OAUPE (the test's BLOCKERS plus the card's blocked-by) is in a column that is terminal AND done, the condition trdd-drift applies, and fails if plugin.json declares its own hooks; test_try_unblock_holds_when_blocked_by_is_terminal_but_not_done (842a8835) pins drift's hold; (4) CPV --strict on the vendored folder; (5) README and memory page; (6) wiring, jr-redact off and removing "Not active yet." are on TRDD-2V7OAUPE, blocked by TRDD-0Y3UW1NF and TRDD-TEP6F3A3; the gate test in (3) must read those two cards. Done: vendoring (03c05cbc), marker (136ab76b), URL slash (26f667c4), review fixes (aaec9c68), options (4a25880b). Wording: 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b.
 2026-11-15 NEXT ACTION (supersedes the NEXT ACTION line above): items 1, 2, 4 and 5 are DONE. (1) rename: note of 2026-11-03 below. (2) the three cards exist: TRDD-0Y3UW1NF write-back guard (design), TRDD-337UVA3J error results (complete), TRDD-TEP6F3A3 pre-wiring checks (design). (4) met by the release gate: cpv-remote-validate plugin . --strict on 03cb2e99, a tree holding hooks/secret-shield/, gave CRITICAL 0, MAJOR 0, MINOR 0, NIT 0 and no finding naming a secret-shield path (reports_dev/release/20261115_091625+0100-cpv-strict-03cb2e99.log); v3.9.1 ships the folder. (5) README section 3907ae2c, stale plugin.json clause 913f1db0, PROJECT memory page secret-shield d88743d5. This card has no work of its own left: (6) is TRDD-2V7OAUPE, and it cannot reach complete until its EHTs 0Y3UW1NF, TEP6F3A3 and 2V7OAUPE are terminal, so it waits in blocked on them. The owner requirement of 2026-11-14 is carried by TRDD-11KWFU5L (skill) and TRDD-2V7OAUPE (mod).
+2026-11-15 correction to the NEXT ACTION line above, item 4: the evidence is the 3.9.1 publish gate itself, not only the 03cb2e99 precheck (which ran with the integrity exemption): reports_dev/release/20261115_112227+0100-publish-3.9.1.log line 311 runs cpv-remote-validate plugin . --strict and line 843 gives CRITICAL 0, MAJOR 0, MINOR 0, NIT 0. CPV raised nothing on hooks/secret-shield/; that is not proof it inspected the TypeScript there. Known limit of the park: trdd-drift restores this card, to dev, only when every EHT is complete, published or live; a cancelled or failed EHT keeps it blocked, and the card must then be moved by hand. Once it is back in dev, its only action left is the move to complete.
 
 ## Approval log
 

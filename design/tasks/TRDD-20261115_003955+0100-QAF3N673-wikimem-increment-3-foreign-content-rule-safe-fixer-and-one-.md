@@ -4,7 +4,7 @@ title: Wikimem increment 3 foreign-content rule safe fixer and one owner for ato
 column: dev
 status: tasked
 created: 2026-11-15T00:39:55+0100
-updated: 2026-11-15T19:53:30+0100
+updated: 2026-11-15T19:59:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -31,6 +31,7 @@ NEXT ACTION: research worker first (read-only): (1) explain D12's 16 PROJECT pla
 2026-11-15 PAUSED at its proposal step: the owner's absolute mandate for TRDD-FADYLSQB (root PROJECT_MAP.md) is taken first; resume here afterwards.
 2026-11-15 REOPENS the grammar choice in the 'pre-proposal reads done' NEXT ACTION (harness review): the proposal decides from side-by-side counts under the committed WM-NOTE-10 and the candidate grammar, and considers exempting cross-scope pointer, file and TRDD-reference bullets or reporting them under a separate code; the 7-of-9 one-sided figure is the worker's unverified estimate (it depends on whether a code-spanned back-mention counts as a link).
 2026-11-15 RESUMED (supersedes the PAUSED line): TRDD-FADYLSQB's build is committed (b52fe354 to d24989d9) and only owner questions remain there. NEXT ACTION: the increment-3 proposal. Advisor 2026-11-15 on the grammar: split the decision into two populations. Code-spanned wikilink bullets stay foreign on construction (row 1 re-checked; the 7-of-9 figure is not relied on). Edge-less reference bullets (cross-scope pointers, file or glob refs, TRDD refs) are decided by WM-LINT-13 per class: the legal remedy that exists in increment-3 code, the cheapest silencing edit, and what catches it; deleting the bullet silences every class and nothing catches it (no edge, so neither WM-WIKI-07 nor the D7 gate as written), so each class needs a legal form, a remedy, or a new increment-4 gate clause. The proposal carries a specgrep amendment of WM-NOTE-10 and WM-LINT-12 with a version bump, labels every count a replica estimate, and names only verbs that exist.
+2026-11-15 correction to the RESUMED line: TRDD-FADYLSQB's remaining items are not all owner questions (inserting S27.1 now or waiting for TRDD-4A4HXDIN is an agent decision; its spec increment 6 waits on TRDD-DXBJMT1K). None of them blocks this card.
 
 ## Scope (parent TRDD-F8EIVTSG, design D5 and D9; spec WM-LINT-11, WM-LINT-12, WM-NOTE-06, WM-NOTE-08)
 
