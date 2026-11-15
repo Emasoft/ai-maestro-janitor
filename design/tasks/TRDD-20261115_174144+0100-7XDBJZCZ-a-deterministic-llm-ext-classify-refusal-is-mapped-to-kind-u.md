@@ -1,10 +1,10 @@
 ---
 trdd-id: 7XDBJZCZ
 title: A deterministic llm-ext classify refusal is mapped to kind unknown and retried for the whole 300 s Jev budget
-column: verify_assumptions
+column: testing
 status: tasked
 created: 2026-11-15T17:41:44+0100
-updated: 2026-11-15T17:46:12+0100
+updated: 2026-11-15T17:56:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-15T17:41:44+0100
+implementation-commits: [84ad09ba]
 ---
 
 # A deterministic llm-ext classify refusal is mapped to kind unknown and retried for the whole 300 s Jev budget
@@ -30,3 +31,4 @@ MAIN-VERIFIED 2026-11-15 (code read): scripts/lib/jev_compaction.py raises a pla
 ## Investigation
 
 2026-11-15T17:46+0100 Research started (read-only sonnet worker; report to come under reports_dev/sonnet-worker, local and gitignored): which llm-ext exit codes or message shapes separate deterministic refusals from transient failures.
+2026-11-15T17:56+0100 IMPLEMENTED in 84ad09ba. Main-verified chain (code read): llm-ext InputError/PolicyError/IdError -> exit 1 (llm-externalizer classifiers/run-decision.ts:172-173; the path refusal is wrapped as InputError at l2/inputs.ts:130-136); jev_compaction.py now raises JevValidationError on exit 1 and JevAuthError on exit 3; jev_compact.py:590 stamps _stamp_kind_for_error (:276-281: auth, invalid); the lane breaks on kinds in _NON_RETRYABLE_KINDS (jev_compaction_lane.py:1208, :1515) and falls back; only unavailable/unreachable/rate_limited decline other callers (jev_compact.py:47-50). Exit 4 deliberately stays retryable: llm-ext reports the worst code across requests (run-decision.ts:131-141, 3 > 4 > 5), so one rejected item among transient failures exits 4. Gate checks run by the main agent: ruff 0, mypy scripts/ 0 (543 files), pyright project-wide 0 errors; UBS no critical. Tests: 4 new in tests/test_jev_compaction.py (the worker ran them filtered, 4 passed, against the instruction; disclosed). ACCEPTANCE NARROWED: 'one Jev attempt, then the fallback' is shown by the code chain above, not by an end-to-end lane test; no CLI stamp-kind test was added. Known trade-off: an llm-ext crash also exits 1 and now stops Jev at once (the llm-ext fallback still runs). The lane's auth finding for exit 3 embeds llm-ext's message, but its remedy line still names OPENROUTER_API_KEY.
