@@ -4,7 +4,7 @@ title: The janitor must never inject a /clear into a session whose context is fa
 column: dev
 status: tasked
 created: 2026-10-20T21:11:31+0200
-updated: 2026-11-15T09:38:56+0100
+updated: 2026-11-15T10:07:38+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,6 +29,7 @@ implementation-commits: [d88e10ff, 07c2d2bd, 2af3417e, 610a2afc, 16708ffe]
 - 2026-11-15T06:11:28+0100 — column → verify_assumptions. 2026-11-15 05:58 read-only audit dispatched (one sonnet-worker): on current HEAD, which /clear paths can fire below 300k own-context tokens and which the auto_clear_enabled gate (64768ab7) does not cover; report reports_dev/sonnet-worker/*-8zy3ju2h-clear-path-audit.md
 - 2026-11-15T06:22:36+0100 — column → dev. root cause fixed in d88e10ff; wrong-session readings of paths 1, 3, 4, 5 still open
 - 2026-11-15T09:38:05+0100 — 207fb817 (test only): an autouse fixture re-pins cold_cache_compact, external_clear, global_state and state in sys.modules, so tests/test_cold_cache_clear_loop_guard.py survives xdist neighbours that delete those entries; the 09:23 publish attempt failed on 4 of its tests under xdist. It should fix them; only the release gate pytest run confirms it. Its commit body says 5 failures: that is the worker serial repro (test_global_state and test_dispatch_phases first); the gate showed 4. OPEN: one [write-guard] warning naming plugin-DATA paths (memory-maint-conflict-LOCAL-*.corpus, usage-probe/*.json) appeared in the worker three-file serial run; cause unproven (the guard named the live daemon and the ai-maestro server); check the gate pytest output for write-guard lines.
+- 2026-11-15T10:05:00+0100 — First run of the increment B, C and D tests and of the 207fb817 loop-guard tests: all passed in the full suite run without -x at 73c6da35 (reports_dev/release/20261115_095647+0100-pytest-full-no-x.log; its 2 failures are in other files). The mutation check named in the acceptance is still open.
 
 ## The report
 
