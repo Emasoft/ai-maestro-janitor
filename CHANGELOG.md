@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.3] — 2026-11-15
+
+### Bug Fixes
+
+- **cspell:** Allow the five words of a2e5807c that the CI-parity preflight rejects (TRDD-G14LKPEC) (bc1abf6)
+- **env-secret-on-disk:** Clear the CI-parity cspell and bandit B108 failures of af9bedf7 (TRDD-G14LKPEC) (29b8d55)
+
+### Documentation
+
+- **trdd:** G14LKPEC records 29b8d55f and its clean CI-parity preflight (TRDD-G14LKPEC) (84835a8)
+
+### Features
+
+- **bash-guard:** Deny commands that print a process environment (TRDD-G14LKPEC, #354) (a2e5807)
+- **env-secret-on-disk:** On-demand detector for live session secrets written in agent folders (TRDD-G14LKPEC, #354) (af9bedf)
 ## [3.9.2] — 2026-11-15
 
 ### Bug Fixes
@@ -104,6 +119,7 @@ All notable changes to this project will be documented in this file.
 - **weekly-audit:** Drop runner-only noise from the audit issue (TRDD-6ESS2MGE, #353, #332) (56b1f90)
 - **terminal:** Log each malformed read-back with the field text and box width ([#343](https://github.com/Emasoft/ai-maestro-janitor/issues/343)) (87ff6f8)
 - **claude-md:** Refresh the wikimem index block (new secret-shield page) (e0c5639)
+- Bump version to 3.9.2 (943ee52)
 
 ### Refactor
 
