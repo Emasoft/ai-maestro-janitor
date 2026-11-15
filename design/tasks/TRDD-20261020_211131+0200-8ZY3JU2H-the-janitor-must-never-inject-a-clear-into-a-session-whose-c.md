@@ -1,10 +1,10 @@
 ---
 trdd-id: 8ZY3JU2H
 title: The janitor must never inject a /clear into a session whose context is far below the cap
-column: verify_assumptions
+column: dev
 status: tasked
 created: 2026-10-20T21:11:31+0200
-updated: 2026-11-15T06:20:22+0100
+updated: 2026-11-15T06:22:36+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-20T21:11:31+0200
 relevant-rules: [12.1]
+implementation-commits: [d88e10ff]
 ---
 
 # The janitor must never inject a /clear into a session whose context is far below the cap
@@ -26,6 +27,7 @@ relevant-rules: [12.1]
 
 - 2026-10-20T21:11:31+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-15T06:11:28+0100 — column → verify_assumptions. 2026-11-15 05:58 read-only audit dispatched (one sonnet-worker): on current HEAD, which /clear paths can fire below 300k own-context tokens and which the auto_clear_enabled gate (64768ab7) does not cover; report reports_dev/sonnet-worker/*-8zy3ju2h-clear-path-audit.md
+- 2026-11-15T06:22:36+0100 — column → dev. root cause fixed in d88e10ff; wrong-session readings of paths 1, 3, 4, 5 still open
 
 ## The report
 
@@ -54,4 +56,4 @@ THE FIX, once the audit names the path. Three properties every /clear path must 
 
 ## STATE
 
-2026-11-15 06:30 ROOT CAUSE FOUND AND VERIFIED: token_meter._usage_total sums the top-level usage block, and when an assistant message contains an advisor call that block is the SUM of its 'message' iterations, so every context reading roughly doubles right after an advisor call (transcript 1603e47a, entry at line 1105: reads 790576, real context = last message iteration 397165; verified by the main agent with jq). A real 240k session then reads about 480k, above every /clear floor and the Stop hook's 83 and 92 percent points: this explains the owner's 240k/1M report as a lead (the owner's own session was not located). Audit report: reports_dev/sonnet-worker/20261115_061528+0100-8zy3ju2h-clear-path-audit.md (8 /clear paths; the auto_clear_enabled gate of 64768ab7 is not in the installed 3.8.13 cache; 12 of 15 drops over 80k in 6 transcripts follow an advisor entry, 3 unexplained). The cost readers (token_history.py, token_report.py) sum every call correctly and are untouched. NEXT ACTION: review the fix worker's diff (one function, _usage_total uses the last 'message' iteration; tests written, not run), commit, then move to testing.
+2026-11-15 06:30 ROOT CAUSE FOUND AND VERIFIED: token_meter._usage_total sums the top-level usage block, and when an assistant message contains an advisor call that block is the SUM of its 'message' iterations, so every context reading roughly doubles right after an advisor call (transcript 1603e47a, entry at line 1105: reads 790576, real context = last message iteration 397165; verified by the main agent with jq). A real 240k session then reads about 480k, above every /clear floor and the Stop hook's 83 and 92 percent points: this explains the owner's 240k/1M report as a lead (the owner's own session was not located). Audit report: reports_dev/sonnet-worker/20261115_061528+0100-8zy3ju2h-clear-path-audit.md (8 /clear paths; the auto_clear_enabled gate of 64768ab7 is not in the installed 3.8.13 cache; 12 of 15 drops over 80k in 6 transcripts follow an advisor entry, 3 unexplained). CORRECTION 06:40: the cost readers (token_history.py, token_report.py) are untouched, but they do NOT count every call: the top-level usage block leaves out the advisor_message iteration entirely (input 398793 and output 11231 in the example), and neither file reads iterations, so advisor spend is missing from the cost reports; filed as its own card. The audit's figures (8 paths, 12 of 15 drops) are the worker's, re-read from its table by the main agent but not re-measured. FIX COMMITTED d88e10ff: _usage_total uses the last 'message' iteration (tests written, not run). It corrects the reading of paths 1 to 6 (all read through token_meter); path 7 (manual handoff-and-clear) has no size check by design; path 8 (the chain landing) only logs. STILL OPEN on this card: paths 1, 3a, 3b, 4 and 5 measure the project's NEWEST transcript, not this session's own (property 2 of the fix section), and the chain re-checks no size at landing. NEXT ACTION: route those paths through the session's own transcript, one bounded change after an advisor consult.
