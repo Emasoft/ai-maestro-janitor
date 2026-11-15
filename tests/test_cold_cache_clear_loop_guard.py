@@ -24,8 +24,12 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts"))
@@ -33,6 +37,8 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import cold_cache_compact as ccc  # noqa: E402
 import external_clear as ec  # noqa: E402
+import global_state as gs  # noqa: E402
+import state  # noqa: E402
 
 
 def _hook():
@@ -45,16 +51,73 @@ def _hook():
     return mod
 
 
-def _run_main_with_source(monkeypatch, source: str, tmp_path: Path) -> int:
+def _run_main_with_source(
+    monkeypatch, source: str, tmp_path: Path, extra: dict | None = None
+) -> int:
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
     monkeypatch.setenv(ec.ENABLED_ENV, "1")  # prove the short-circuit beats even an ENABLED lever
-    monkeypatch.setattr(
-        sys,
-        "stdin",
-        io.StringIO(f'{{"source": "{source}", "session_id": "s1", "cwd": "{tmp_path}"}}'),
-    )
+    payload = {"source": source, "session_id": "s1", "cwd": str(tmp_path), **(extra or {})}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     return _hook().main()
+
+
+def _write_transcript(path: Path, tokens: int) -> Path:
+    """A real one-entry transcript whose sole assistant usage sums to `tokens`."""
+    path.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "uuid": "u1",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "message": {"id": "m1", "usage": {"input_tokens": tokens}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _capture_watcher_spawn(monkeypatch) -> dict:
+    """Intercept ONLY the watcher spawn (`external_handoff_clear.py`) and record its argv; any
+    other `subprocess.Popen` in this process runs for real. Also pins the TCC-stable interpreter
+    resolution, which shells out to `codesign` and is denied by this suite's subprocess sandbox."""
+    captured: dict = {}
+    real_popen = subprocess.Popen
+    watcher_path = str(_ROOT / "scripts" / "external_handoff_clear.py")
+
+    def _fake_popen(argv, **kwargs):  # noqa: ANN001, ANN003
+        if any(watcher_path in str(a) for a in argv):
+            captured["argv"] = [str(a) for a in argv]
+
+            class _Proc:
+                def wait(self, timeout=None):  # noqa: ANN001, ARG002
+                    return 0
+
+            return _Proc()
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(gs, "automation_python_path", lambda: sys.executable)
+    # Patch the SHARED `subprocess` module object: `_run_main_with_source` builds a FRESH hook
+    # module each call, so a per-module patch would patch a copy nobody executes.
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    return captured
+
+
+def _capture_hook_log(monkeypatch) -> list[str]:
+    """Record every `cold-cache-clear` log line the hook writes (the decision line carries
+    `fire=`, `why=` and the `transcript=` the verdict was measured from)."""
+    lines: list[str] = []
+    real_log_line = state.log_line
+
+    def _log_line(name: str, message: str) -> None:
+        if name == "cold-cache-clear":
+            lines.append(message)
+        real_log_line(name, message)
+
+    monkeypatch.setattr(state, "log_line", _log_line)
+    return lines
 
 
 def test_source_compact_never_evaluates_cache_staleness(monkeypatch, tmp_path):
@@ -177,43 +240,81 @@ def test_restart_with_a_stale_cache_spawns_the_jev_clear_watcher(monkeypatch, tm
     the same clear-then-inject-compacted-context chain every other automatic lever uses. This
     is the positive half of `test_resume_source_routes_through_the_shared_recovery_helper_and_
     the_widened_reader` above, which only proved what gets PASSED to the decider, not that a
-    firing verdict actually launches the chain."""
-    captured: dict = {}
-    real_popen = __import__("subprocess").Popen
-    watcher_path = str(_ROOT / "scripts" / "external_handoff_clear.py")
-
-    def _fake_popen(argv, **kwargs):  # noqa: ANN001, ANN003
-        # Only intercept the watcher spawn — other subprocess.Popen calls in this same
-        # process (e.g. a codesign probe elsewhere in the import chain) must run for real,
-        # since this module-level patch applies to the shared `subprocess` object.
-        if any(watcher_path in str(a) for a in argv):
-            captured["argv"] = argv
-
-            class _Proc:
-                def wait(self, timeout=None):  # noqa: ANN001, ARG002
-                    return 0
-
-            return _Proc()
-        return real_popen(argv, **kwargs)
-
-    import global_state as gs  # noqa: PLC0415 -- local import, matches the hook's own lazy style
-
+    firing verdict actually launches the chain. TRDD-8ZY3JU2H: the session names its OWN
+    transcript in the payload, and the spawned watcher is handed that same path."""
+    own = _write_transcript(tmp_path / "own.jsonl", 500_000)
+    captured = _capture_watcher_spawn(monkeypatch)
     monkeypatch.setattr(ec, "cache_certainly_expired", lambda *a, **kw: None)
     monkeypatch.setattr(ec, "recovery_pending", lambda sd: False)
     monkeypatch.setattr(ccc, "context_tokens_for_resume", lambda *a, **kw: 500_000)
     monkeypatch.setattr(
         ec, "should_clear_on_resume", lambda **kw: ec.ClearVerdict(True, why="cache-expired")
     )
-    # The TCC-stable interpreter resolution shells out to `codesign` for real — this suite's
-    # subprocess sandbox denies that by default (deliberately: an allow-list, not a block-list).
-    # Not what this test is about, so pin it to a fixed path instead of touching the sandbox.
-    monkeypatch.setattr(gs, "automation_python_path", lambda: sys.executable)
-    # Patch the SHARED `subprocess` module object directly, not a `_hook()` module's own
-    # attribute — `_run_main_with_source` (below) calls `_hook()` again internally, a FRESH
-    # module instance, so patching an already-imported hook object's `.subprocess` here would
-    # patch a copy nobody executes.
-    monkeypatch.setattr(__import__("subprocess"), "Popen", _fake_popen)
-    assert _run_main_with_source(monkeypatch, "startup", tmp_path) == 0
+    extra = {"transcript_path": str(own)}
+    assert _run_main_with_source(monkeypatch, "startup", tmp_path, extra) == 0
     assert "argv" in captured, "the watcher subprocess was never spawned"
-    assert watcher_path in [str(a) for a in captured["argv"]]
+    assert str(_ROOT / "scripts" / "external_handoff_clear.py") in captured["argv"]
     assert "--on-resume" in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--transcript-path") + 1] == str(own)
+
+
+def _resume_env(monkeypatch) -> None:
+    """Pin the knobs the real (unpatched) decision reads, so these tests do not depend on the
+    host: default 300k floor, no agentlensPro subprocess."""
+    monkeypatch.delenv(ec.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")
+
+
+_HARNESS_EXPIRED = {"prompt_cache_likely_expired": True}
+
+
+def test_a_big_sibling_transcript_never_triggers_a_clear_in_a_small_session(monkeypatch, tmp_path):
+    """TRDD-8ZY3JU2H: the project's newest transcript (patched to be a 900k SIBLING) must not
+    size this session. The session's OWN transcript (240k, under the 300k floor) refuses the
+    clear, whatever the cache verdict. With the old `newest_transcript` read it would fire."""
+    _resume_env(monkeypatch)
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 900_000)
+    own = _write_transcript(tmp_path / "own.jsonl", 240_000)
+    monkeypatch.setattr(ccc, "newest_transcript", lambda root: sibling)
+    captured = _capture_watcher_spawn(monkeypatch)
+    log = _capture_hook_log(monkeypatch)
+    extra = {"transcript_path": str(own), **_HARNESS_EXPIRED}
+    assert _run_main_with_source(monkeypatch, "resume", tmp_path, extra) == 0
+    assert any(f"transcript={own}" in line and "fire=False" in line for line in log), log
+    assert "argv" not in captured, "a small session was cleared because of a big sibling"
+
+
+@pytest.mark.parametrize("own_payload", [{}, {"transcript_path": "no-such-file.jsonl"}])
+def test_an_absent_or_missing_own_transcript_never_clears_even_beside_a_big_sibling(
+    monkeypatch, tmp_path, own_payload
+):
+    """TRDD-8ZY3JU2H: no `transcript_path`, or one naming a file that does not exist, means the
+    session's size is UNKNOWN, and unknown never authorises a clear -- even though
+    `newest_transcript` (patched) would hand back a 900k sibling that the old code measured."""
+    _resume_env(monkeypatch)
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 900_000)
+    monkeypatch.setattr(ccc, "newest_transcript", lambda root: sibling)
+    captured = _capture_watcher_spawn(monkeypatch)
+    log = _capture_hook_log(monkeypatch)
+    extra = {**own_payload, **_HARNESS_EXPIRED}
+    assert _run_main_with_source(monkeypatch, "startup", tmp_path, extra) == 0
+    assert any("transcript=missing" in line and "fire=False" in line for line in log), log
+    assert "argv" not in captured, "a session with no known own transcript was cleared"
+
+
+def test_a_big_expired_own_transcript_fires_and_is_handed_to_the_watcher(monkeypatch, tmp_path):
+    """TRDD-8ZY3JU2H: a 500k OWN transcript with a harness-expired cache fires, and the watcher
+    is spawned with `--transcript-path <own>` so it measures and summarises the same session.
+    The patched `newest_transcript` is a tiny SIBLING: the old code would have refused."""
+    _resume_env(monkeypatch)
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 10_000)
+    own = _write_transcript(tmp_path / "own.jsonl", 500_000)
+    monkeypatch.setattr(ccc, "newest_transcript", lambda root: sibling)
+    captured = _capture_watcher_spawn(monkeypatch)
+    log = _capture_hook_log(monkeypatch)
+    extra = {"transcript_path": str(own), **_HARNESS_EXPIRED}
+    assert _run_main_with_source(monkeypatch, "resume", tmp_path, extra) == 0
+    assert any(f"transcript={own}" in line and "fire=True" in line for line in log), log
+    argv = captured["argv"]
+    assert argv[argv.index("--transcript-path") + 1] == str(own)
+    assert "--on-resume" in argv

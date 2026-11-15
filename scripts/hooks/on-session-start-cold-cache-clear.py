@@ -144,7 +144,15 @@ def main() -> int:
         key = f"cold-cache-clear@{session_id or 'no-session-id'}"
         already = _fire_recorded(sd / _FIRED_STAMP, key)
 
-        newest = cold_cache_compact.newest_transcript(root)
+        # TRDD-8ZY3JU2H: size, age and summarise THIS session from the transcript_path the
+        # SessionStart payload names for it -- never `cold_cache_compact.newest_transcript(root)`,
+        # which is the PROJECT's newest transcript and can be a SIBLING session's. With it, a
+        # big sibling triggered a clear in a small session (and `startup` was measured from a
+        # sibling too), and the sibling's transcript became this session's handoff. An absent
+        # or unreadable own transcript is None, which every consumer below treats as "unknown"
+        # and therefore NO clear (fail-closed: unknown context never authorises a clear).
+        own_raw = str(data.get("transcript_path", "") or "").strip()
+        own = Path(own_raw) if own_raw and Path(own_raw).is_file() else None
         now = int(time.time())
         # TRDD-GK35MOXU: the SAME SessionStart `data` payload this hook already parsed may
         # carry the harness's own `prompt_cache_likely_expired` verdict (CC >= 2.1.251). Read
@@ -171,7 +179,7 @@ def main() -> int:
                 # `compact` path above, and now also skipped whenever the harness already
                 # answered.
                 else ec.cache_certainly_expired(root),
-                last_turn_age_s=cold_cache_compact.transcript_age_s(newest, now=now),
+                last_turn_age_s=cold_cache_compact.transcript_age_s(own, now=now),
                 ttl_minutes=ec.read_ttl_minutes(sd),
             )
         )
@@ -200,7 +208,7 @@ def main() -> int:
             source=source,
             cache_expired=cache_expired,
             context_tokens=cold_cache_compact.context_tokens_for_resume(
-                newest, project_dir=root, session_id=session_id, now=now,
+                own, project_dir=root, session_id=session_id, now=now,
             ),
             min_context=ec.min_context_tokens(),
             # `now`, not a second `time.time()`: one decision reads one clock, so the age and the
@@ -211,7 +219,8 @@ def main() -> int:
         )
         state.log_line(
             "cold-cache-clear",
-            f"source={source} fire={verdict.fire} trigger={verdict.trigger or '-'} why={verdict.why}",
+            f"source={source} fire={verdict.fire} trigger={verdict.trigger or '-'} why={verdict.why} "
+            f"transcript={own or 'missing'}",
         )
         if not verdict.fire:
             return 0
@@ -286,7 +295,15 @@ def main() -> int:
         # attached, so both ceilings compose: our wait releases session start, never kills
         # the work.
         proc = subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
-            [*argv, "--project-root", str(root), "--on-resume", "--session-id", session_id],
+            [
+                *argv,
+                "--project-root", str(root),
+                "--on-resume",
+                "--session-id", session_id,
+                # TRDD-8ZY3JU2H: the watcher must measure and summarise THIS session's
+                # transcript, not re-resolve the project's newest (possibly a sibling's).
+                "--transcript-path", str(own or ""),
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

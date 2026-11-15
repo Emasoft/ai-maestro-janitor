@@ -13,6 +13,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts"))
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
@@ -328,7 +330,8 @@ def _armed_run(root: Path, *, on_resume: bool) -> tuple[int, str]:
 
     sd = root / ".janitor" / "state"
     args = argparse.Namespace(
-        dry_run=False, force=False, on_resume=on_resume, project_root=str(root), session_id=""
+        dry_run=False, force=False, on_resume=on_resume, project_root=str(root), session_id="",
+        transcript_path=""
     )
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -484,47 +487,171 @@ def test_awaiting_user_veto_reaches_the_watcher_end_to_end(tmp_path, monkeypatch
     )
 
 
+def _write_transcript(path: Path, tokens: int) -> Path:
+    """A real one-entry transcript whose sole assistant usage sums to `tokens`."""
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "uuid": "u1",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "message": {"id": "m1", "usage": {"input_tokens": tokens}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _resume_gate_env(monkeypatch) -> None:
+    """Pin what the on-resume gate reads besides the transcript: the default 300k floor, no
+    agentlensPro subprocess, a cache verdict of "certainly expired" and no model/effort switch."""
+    monkeypatch.delenv(ec.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")
+    monkeypatch.setattr(ec, "cache_certainly_expired", lambda *_a, **_k: True)
+    monkeypatch.setattr(ec, "prefix_invalidated", lambda *_a, **_k: None)
+
+
 def test_decide_on_resume_uses_the_widened_reader_when_a_session_id_is_given(tmp_path, monkeypatch):
     """Adversarial-review finding (TRDD-L32WC0H7 card 1 follow-up): the confirmatory `--on-resume`
     re-check must use the SAME widened `cold_cache_compact.context_tokens_for_resume` reader the
     SessionStart hook used, not silently disagree with it via the narrower plain reading — this
-    is what the new `session_id` parameter on `_decide` threads through for."""
+    is what the new `session_id` parameter on `_decide` threads through for. TRDD-8ZY3JU2H: it
+    reads the session's OWN transcript (`transcript_path`), and names it in `facts`."""
     import cold_cache_compact
 
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
     root = _project(tmp_path)
     sd = root / ".janitor" / "state"
     now = int(time.time())
+    own = _write_transcript(tmp_path / "own.jsonl", 1_000)
     captured: dict = {}
 
     def _fake_resume_reader(transcript_path, *, project_dir, session_id, now):
         captured["called"] = True
+        captured["transcript"] = transcript_path
         captured["session_id"] = session_id
         return 424_242
 
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for_resume", _fake_resume_reader)
-    verdict, facts = ehc._decide(root, sd, now, force=False, on_resume=True, session_id="s1")
+    verdict, facts = ehc._decide(
+        root, sd, now, force=False, on_resume=True, session_id="s1", transcript_path=str(own)
+    )
     assert captured.get("called") is True
     assert captured.get("session_id") == "s1"
+    assert Path(captured["transcript"]) == own
     assert facts["context_tokens"] == 424_242
+    assert facts["transcript"] == str(own)
 
 
-def test_decide_on_resume_falls_back_to_the_plain_reader_without_a_session_id(tmp_path, monkeypatch):
-    """No `session_id` (a bare CLI `--on-resume` invocation) keeps the pre-existing behaviour --
-    the widened reader is never even called, so this path costs nothing extra for that caller."""
+@pytest.mark.parametrize("session_id", ["", "s1"])
+@pytest.mark.parametrize("transcript_path", ["", "no-such-file.jsonl"])
+def test_decide_on_resume_without_a_readable_own_transcript_never_measures_a_sibling(
+    tmp_path, monkeypatch, session_id, transcript_path
+):
+    """TRDD-8ZY3JU2H (replaces the old "falls back to the plain reader" contract): with no
+    `--transcript-path`, or one naming a missing file, the on-resume lane has NO transcript --
+    context is unknown, nothing is measured (the old fallback read `newest_transcript`, here a
+    patched 900k SIBLING, and would fire), and `facts["transcript"]` stays empty so
+    `_capture_summary_source` can never summarise the sibling."""
     import cold_cache_compact
 
-    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
+    _resume_gate_env(monkeypatch)
     root = _project(tmp_path)
     sd = root / ".janitor" / "state"
-    now = int(time.time())
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 900_000)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
 
     def _boom(*a, **kw):
-        raise AssertionError("the widened reader must not be called without a session_id")
+        raise AssertionError("no own transcript -> nothing to measure, the reader must not run")
 
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for_resume", _boom)
-    verdict, facts = ehc._decide(root, sd, now, force=False, on_resume=True)
-    assert verdict.fire is False  # no transcript in this bare tmp project -> unmeasurable
+    verdict, facts = ehc._decide(
+        root, sd, int(time.time()), force=False, on_resume=True,
+        session_id=session_id, transcript_path=transcript_path,
+    )
+    assert verdict.fire is False
+    assert facts["context_tokens"] is None
+    assert facts["transcript"] == ""
+
+
+def test_decide_on_resume_measures_the_own_transcript_not_a_big_sibling(tmp_path, monkeypatch):
+    """TRDD-8ZY3JU2H: a small OWN transcript (240k, under the 300k floor) refuses the clear even
+    though `newest_transcript` (patched) is a 900k sibling that the old code would have sized."""
+    import cold_cache_compact
+
+    _resume_gate_env(monkeypatch)
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 900_000)
+    own = _write_transcript(tmp_path / "own.jsonl", 240_000)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
+    verdict, facts = ehc._decide(
+        root, sd, int(time.time()), force=False, on_resume=True,
+        session_id="s1", transcript_path=str(own),
+    )
+    assert verdict.fire is False
+    assert facts["context_tokens"] == 240_000
+    assert facts["transcript"] == str(own)
+
+
+def test_decide_on_resume_fires_on_a_big_expired_own_transcript_and_names_it(tmp_path, monkeypatch):
+    """TRDD-8ZY3JU2H: a 500k OWN transcript with an expired cache fires, and `facts["transcript"]`
+    is that own transcript (the summary source), while `newest_transcript` (patched) is a tiny
+    sibling the old code would have measured and refused."""
+    import cold_cache_compact
+
+    _resume_gate_env(monkeypatch)
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 10_000)
+    own = _write_transcript(tmp_path / "own.jsonl", 500_000)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
+    verdict, facts = ehc._decide(
+        root, sd, int(time.time()), force=False, on_resume=True,
+        session_id="s1", transcript_path=str(own),
+    )
+    assert verdict.fire is True, verdict
+    assert facts["context_tokens"] == 500_000
+    assert facts["transcript"] == str(own)
+
+
+def test_run_threads_the_transcript_path_argument_into_decide_and_the_chain(tmp_path, monkeypatch):
+    """TRDD-8ZY3JU2H: `--transcript-path` reaches `_decide`, and the transcript `_decide` names
+    is what `_fire` is handed (it is the chain payload's summary source)."""
+    import argparse
+    import contextlib
+    import io
+
+    import fleet_restart
+
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    own = _write_transcript(tmp_path / "own.jsonl", 500_000)
+    seen: dict = {}
+
+    def _fake_decide(*_a, **kw):
+        seen["decide_kwargs"] = kw
+        return ec.ClearVerdict(True, "resumed-cold", "test"), {"transcript": kw["transcript_path"]}
+
+    def _fake_fire(*_a, **kw):
+        seen["fire_transcript"] = kw.get("transcript")
+
+    monkeypatch.setattr(ehc, "_decide", _fake_decide)
+    monkeypatch.setattr(ehc, "_fire", _fake_fire)
+    monkeypatch.setattr(fleet_restart, "recorded_terminal", lambda _r: {"kind": "tmux"})
+    monkeypatch.setattr(ec, "terminal_from_record", lambda _r: {"kind": "tmux", "pane": "%1"})
+    args = argparse.Namespace(
+        dry_run=False, force=False, on_resume=True, project_root=str(root), session_id="s1",
+        transcript_path=str(own),
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert ehc._run(root, sd, int(time.time()), args) == 0
+    assert seen["decide_kwargs"]["transcript_path"] == str(own)
+    assert seen["fire_transcript"] == str(own)
 
 
 def test_unknown_idle_holds_end_to_end_and_touches_nothing(tmp_path):
@@ -849,7 +976,8 @@ def test_dry_run_never_arms_the_summary_hold(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(ehc, "_fire", lambda *_a, **_k: setattr(fired, "count", fired.count + 1))
 
     args = argparse.Namespace(
-        dry_run=True, force=False, on_resume=False, project_root=str(root), session_id=""
+        dry_run=True, force=False, on_resume=False, project_root=str(root), session_id="",
+        transcript_path=""
     )
     assert ehc._run(root, sd, int(time.time()), args) == 0
     out = capsys.readouterr().out

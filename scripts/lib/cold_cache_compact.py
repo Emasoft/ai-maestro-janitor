@@ -347,6 +347,12 @@ def context_tokens_for_resume(
     `resolve_context` when that reading is None. Best-effort, never raises -- a bad transcript
     or a missing snapshot must never break a resume.
     """
+    # TRDD-8ZY3JU2H: no own transcript => unknown, never a number. Without it the mtime ordering
+    # check below is skipped (it needs the transcript), so a statusline snapshot ALONE -- possibly
+    # one a sibling or a prior run left -- could authorise a clear for a session whose size we
+    # cannot actually verify.
+    if not transcript_path:
+        return None
     live = context_tokens_for(transcript_path)
     if live is not None:
         return live

@@ -161,6 +161,25 @@ def test_context_tokens_for_resume_stays_none_when_neither_source_has_anything(
     got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="no-such-session", now=1_000_000)
     assert got is None
 
+
+def test_context_tokens_for_resume_without_a_transcript_is_none_even_with_a_snapshot(
+    tmp_path: Path,
+) -> None:
+    """TRDD-8ZY3JU2H: with no own transcript the mtime ordering check cannot run, so a statusline
+    snapshot ALONE must not yield a number (it could authorise a clear nothing verified)."""
+    import json
+
+    snap_dir = tmp_path / ".claude" / "janitor"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "context-usage.s1.json").write_text(
+        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": 999_999}),
+        encoding="utf-8",
+    )
+    for absent in (None, ""):
+        got = ccc.context_tokens_for_resume(absent, project_dir=tmp_path, session_id="s1", now=1_000_000)
+        assert got is None
+
+
 def test_context_tokens_for_resume_discards_a_snapshot_the_transcript_has_outgrown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

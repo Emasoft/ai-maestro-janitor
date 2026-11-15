@@ -314,7 +314,14 @@ def _last_turn_age(root: Path, now: int) -> int | None:
 
 
 def _decide(
-    root: Path, sd: Path, now: int, *, force: bool, on_resume: bool = False, session_id: str = ""
+    root: Path,
+    sd: Path,
+    now: int,
+    *,
+    force: bool,
+    on_resume: bool = False,
+    session_id: str = "",
+    transcript_path: str = "",
 ) -> tuple[ec.ClearVerdict, dict]:
     """Gather every runtime fact and run the pure gate. Returns (verdict, facts-for-logging)."""
     import cold_cache_compact  # noqa: PLC0415
@@ -464,15 +471,21 @@ def _decide(
         # silently declines -- so nothing is ever cleared and the hook's own fire decision becomes
         # a no-op, with no signal that it happened. `session_id` (passed by the hook via
         # `--session-id` when it spawns this watcher) lets this re-check use the SAME widened
-        # reader on the SAME facts. Absent (a bare CLI `--on-resume` invocation with no
-        # `--session-id`) this falls back to the pre-existing plain reading -- unchanged for that
-        # caller.
+        # reader on the SAME facts.
+        #
+        # TRDD-8ZY3JU2H: the transcript on this lane is the one the hook was handed by the
+        # SessionStart payload (`--transcript-path`), NOT `newest` (the project's newest, possibly a
+        # SIBLING session's -- it made a small session clear on a big sibling's size, and the
+        # sibling's transcript became this session's handoff). No own transcript => unknown
+        # context => the gate refuses: the old fallback to `gate["context_tokens"]` measured
+        # `newest` and is dropped on purpose.
+        own = Path(transcript_path) if transcript_path and Path(transcript_path).is_file() else None
         resume_context_tokens = (
             cold_cache_compact.context_tokens_for_resume(
-                newest, project_dir=root, session_id=session_id, now=now
+                own, project_dir=root, session_id=session_id, now=now
             )
-            if session_id
-            else gate["context_tokens"]
+            if own
+            else None
         )
         verdict = ec.should_clear_on_resume(
             source="resume",
@@ -483,7 +496,16 @@ def _decide(
             already_fired_this_session=False,
             recovery_pending=recovery_pending,
         )
-        return verdict, {**facts, "gate": "resume", "context_tokens": resume_context_tokens}
+        return verdict, {
+            **facts,
+            "gate": "resume",
+            "context_tokens": resume_context_tokens,
+            # TRDD-8ZY3JU2H: the summary source on this lane is THIS session's own transcript
+            # (or "" => `_capture_summary_source` declines), never `newest` -- the project's
+            # newest transcript can be a sibling's, whose content would become this session's
+            # handoff.
+            "transcript": str(own) if own else "",
+        }
     verdict = ec.should_clear_externally(**gate)
     if force and not verdict.fire and verdict.why.startswith(("idle ", "no-headroom")):
         # --force overrides the two TRIGGER terms ONLY (is it idle enough / would the next fire
@@ -677,8 +699,11 @@ def main() -> int:
                     "with --on-resume passes its OWN session_id here so the confirmatory "
                     "_decide re-check can use the SAME widened context_tokens_for_resume reader "
                     "the hook already used, instead of silently re-measuring with the narrower "
-                    "plain reader and disagreeing with the hook's own fire decision. Absent, "
-                    "_decide falls back to the pre-existing plain reading unchanged.")
+                    "plain reader and disagreeing with the hook's own fire decision.")
+    ap.add_argument("--transcript-path", default="", help="TRDD-8ZY3JU2H: the SessionStart "
+                    "hook's OWN session transcript. On --on-resume it is the ONLY transcript "
+                    "measured and summarised; absent or missing means unknown context and no "
+                    "clear (the project's newest transcript can be a sibling session's).")
     args = ap.parse_args()
 
     root = Path(args.project_root or os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd()).resolve()
@@ -730,7 +755,8 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     """The body of `main` past the singleflight lock — split so the lock's try/finally stays
     two lines instead of indenting the whole flow."""
     verdict, facts = _decide(
-        root, sd, now, force=args.force, on_resume=args.on_resume, session_id=args.session_id
+        root, sd, now, force=args.force, on_resume=args.on_resume, session_id=args.session_id,
+        transcript_path=args.transcript_path,
     )
     # Name the signal behind an active-waiting hold (TRDD-DMH25CYD): the bare `why` left an
     # operator unable to tell which of four unrelated signals was holding the watcher.
