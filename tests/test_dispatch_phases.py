@@ -4184,7 +4184,8 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
     # card-4 property: an automatic caller must never type a manual-only handoff command.
     assert "/janitor-handoff-and-clear" not in sent[0]["then"]
     assert "/janitor-write-handoff" not in sent[0]["then"]
-    assert list(sent[0]["then"]) == list(clear_trigger.BOOTSTRAP_CMDS)
+    # TRDD-5ID9CQY8: the clear chain only resumes; the cron survives /clear, so no /janitor-arm.
+    assert list(sent[0]["then"]) == list(clear_trigger.CLEAR_BOOTSTRAP_CMDS) == ["/janitor-resume"]
 
 
 def test_idle_clear_names_THIS_sessions_own_transcript_not_the_project_newest(

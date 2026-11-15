@@ -154,6 +154,20 @@ def test_session_start_skips_replumb_on_clear_when_armed(tmp_path: Path, monkeyp
     assert "re-plumbing" not in out, f"must not re-plumb mid-session on clear, got {out!r}"
 
 
+def test_session_start_emits_heartbeat_self_check_on_clear_when_armed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """source="clear" + armed → the heartbeat self-check line IS emitted (TRDD-5ID9CQY8 box 2).
+
+    The clear chain no longer types `/janitor-arm`, so a session whose cron did die at a clear
+    depends on this reminder (CronList, re-arm only when no [janitor-heartbeat] job exists). The
+    armed-re-plumb branch stays silent on clear (test above); this line is the backstop.
+    """
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="clear")
+    assert "heartbeat self-check" in out, f"the backstop reminder must fire on clear, got {out!r}"
+    assert "CronList" in out, f"the reminder must tell the agent to check the cron, got {out!r}"
+
+
 def test_replumb_line_never_reads_as_a_user_chore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The re-plumb line is rendered to the USER, so it must say no action is required and must
     NOT carry a slash-command imperative the user's eye reads as an instruction to type."""

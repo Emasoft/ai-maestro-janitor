@@ -203,7 +203,8 @@ class TestClearPreservesLiveSubagent(unittest.TestCase):
         self.assertEqual(len(self._fork_calls), 1, self._fork_calls)
         payload, _env = self._fork_calls[0]
         self.assertEqual(payload["first"], clear_trigger.CLEAR_CMD, payload)
-        self.assertEqual(payload["then"], list(clear_trigger.BOOTSTRAP_CMDS), payload)
+        # TRDD-5ID9CQY8: the clear chain's phase B only resumes (the cron survives /clear).
+        self.assertEqual(payload["then"], list(clear_trigger.CLEAR_BOOTSTRAP_CMDS), payload)
 
         # 5. The subagent PROCESS is untouched -- proves "leaves that subagent alive"
         # against the real OS, not against a mock's call count. No code anywhere in the

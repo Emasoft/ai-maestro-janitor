@@ -21,7 +21,7 @@ window. **Nothing here costs this session a turn of authoring** — the compacti
 the window it is meant to shrink.
 
 It then reuses `clear_trigger`'s already-ratified verified injection chain to type `/clear` and
-bootstrap the fresh session (`/janitor-arm`, `/janitor-resume`).
+bootstrap the fresh session (`/janitor-resume`; no `/janitor-arm`, the cron survives `/clear`, TRDD-5ID9CQY8).
 
 This skill is the manual trigger for the exact same chain the janitor's automatic levers already
 fire on their own schedule (the Stop-boundary size trigger in `on-stop-token-meter.py`, the

@@ -278,3 +278,29 @@ def test_skills_chain_puts_the_reload_before_arm_too() -> None:
     assert then[0] == rst.RELOAD_SKILLS_CMD
     assert then.index(rst.RELOAD_SKILLS_CMD) < then.index(ct.ARM_CMD)
     assert then[-1] == ct.RESUME_CMD
+
+
+# --- 6. TRDD-5ID9CQY8: the clear chain drops the re-arm, the reload chains keep it ----
+
+def _dry_run_plan(mod, monkeypatch, capsys) -> str:
+    """Run a reload trigger's real main() as `--shrink force --dry-run`; return its printed plan."""
+    monkeypatch.setattr(sys, "argv", [mod.__file__, "--shrink", "force", "--dry-run"])
+    assert mod.main() == 0
+    return capsys.readouterr().out
+
+
+def test_clear_plan_resumes_only_while_both_reload_plans_still_rearm(monkeypatch, capsys) -> None:
+    """The cron SURVIVES `/clear` (measured 2026-10-18 x2, 2026-11-15), so the clear chain's
+    phase B is `/janitor-resume` alone; a plugin RELOAD may drop the cron, so both reload plans
+    keep `/janitor-arm` straight after the reload command. Drives the real `main()` of each
+    reload trigger, so a regression that drops the arm from either one (or re-adds it to the
+    clear) fails here instead of passing a self-composed list."""
+    phase_a, phase_b = ct.plan_clear()
+    assert (phase_a, phase_b) == (["/clear"], ["/janitor-resume"])
+
+    plugins_out = _dry_run_plan(rt, monkeypatch, capsys)
+    assert "/reload-plugins --force -> /janitor-arm -> /janitor-resume" in plugins_out
+
+    rst = _load("reload_skills_trigger_plan_uut", "scripts/reload_skills_trigger.py")
+    skills_out = _dry_run_plan(rst, monkeypatch, capsys)
+    assert f"{rst.RELOAD_SKILLS_CMD} -> /janitor-arm -> /janitor-resume" in skills_out

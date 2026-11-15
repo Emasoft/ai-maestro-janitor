@@ -2651,8 +2651,9 @@ def _phase_clear_resume() -> bool:
 
     The `/janitor-handoff-and-clear` primitive (TRDD-Z582IKIR P1) writes
     `resume-after-clear.flag` (the link-only handoff directive) + a `.ts` sidecar
-    BEFORE firing `/clear`, then bootstraps the fresh session to re-arm the cron
-    `/clear` destroyed. The re-armed cron's FIRST fire is this phase: it reads the
+    BEFORE firing `/clear`, then types `/janitor-resume` into the fresh session (the cron
+    survives `/clear`, so no re-arm is typed, TRDD-5ID9CQY8). That typed run, or the next idle
+    heartbeat fire, is this phase: it reads the
     flag, emits ONE `[janitor-resume]` cue carrying the directive (which points at
     `.janitor/state/agent-handoff.md`), and clears the flag so the resume fires
     exactly once.
@@ -2675,7 +2676,7 @@ def _phase_clear_resume() -> bool:
     only when a clear was observed AT OR AFTER the flag was written.
 
     Rejected alternatives, both of which fire on the wrong event: `heartbeat-armed-at.ts`
-    and `heartbeat-cron-id.txt` do change across a /clear (it destroys the cron), but a
+    and `heartbeat-cron-id.txt` change only on a re-arm (a /clear does not touch the cron), but a
     routine `[janitor-renew]` re-arm changes them too, so a renew in the pre-clear window
     would arm the flag early — the same bug via a different path. The session id does NOT
     change at all: /clear keeps the SAME process and session (see the SessionStart hook's
@@ -2695,9 +2696,9 @@ def _phase_clear_resume() -> bool:
 
     SESSION-SCOPED once armed (TRDD-2MLFZ7DL sub-step 4): `on-session-start.py` stamps the
     observing session's id into a sidecar alongside `clear-observed.ts`. Whether `/clear`
-    changes the session id is UNMEASURED — a handoff-clear verify report in this repo found
-    the cron destroyed and recreated by `/clear`, and per-session log tags differ across a
-    clear, so the earlier "same session id" claim was an assumption, not a measurement. Given
+    changes the session id is UNMEASURED — per-session log tags differ across a clear (the
+    heartbeat cron itself survives it, TRDD-5ID9CQY8), so the earlier "same session id" claim was
+    an assumption, not a measurement. Given
     that gap this check is FAIL-OPEN on a mismatch too: it logs and resumes anyway rather than
     risk discarding the very resume it exists to deliver. An absent stamp, or no readable
     `CLAUDE_CODE_SESSION_ID` for THIS process, also never blocks the resume.
@@ -3905,8 +3906,9 @@ def _phase_idle_clear_nudge() -> bool:
         # FIRE IT, don't ask for it (owner directive 2026-08-04: *"it MUST handoff and clear
         # automatically"*) -- and never by typing a skill for the model to run (card 4 item 1):
         # `spawn_shrink_chain` IS the fire -- it writes the resume state, types `/clear`, then
-        # the two-command bootstrap (`/janitor-arm`, `/janitor-resume`) into THIS session's own
-        # pane, all without any model turn in between. The fresh session's own SessionStart then
+        # the bootstrap (`/janitor-resume`, or `/goal <goal>`; no `/janitor-arm`, the cron survives
+        # `/clear`, TRDD-5ID9CQY8) into THIS session's own pane, all without any model turn in
+        # between. The fresh session's own SessionStart then
         # composes and injects the Jev-compacted context (card 3), so nothing here authors a
         # handoff -- there is no handoff to author.
         #

@@ -6,11 +6,10 @@
 
 The `/clear` continuity primitive: a `/clear` resets the session to base-context
 with NO residual compaction summary (cheaper in steady state than `/compact`),
-but it is UNRECOVERABLE — no scrollback, no summary — and it DESTROYS the
-session-scoped heartbeat cron (per code.claude.com/docs/en/scheduled-tasks; only
-`--resume`/`--continue` restores it, not `/clear`). So the whole trick is: persist
+but it is UNRECOVERABLE — no scrollback, no summary. The session-scoped heartbeat cron
+SURVIVES it (measured three times, TRDD-5ID9CQY8). So the whole trick is: persist
 everything the next session needs to a FILE first, fire `/clear`, then bootstrap
-the fresh session to RE-ARM the cron and RESUME from that file.
+the fresh session to RESUME from that file.
 
 This script is the analogue of compact_trigger.py, with two structural differences
 that `/clear` forces:
@@ -25,27 +24,25 @@ that `/clear` forces:
   2. It injects a TWO-PHASE keystroke sequence into THIS session's own pane:
      phase A types `/clear`; then, after a settle delay long enough for the fresh
      session + its SessionStart hooks to come up, phase B types the BOOTSTRAP —
-     `/janitor-arm` (re-arm the cron `/clear` just destroyed) then `/janitor-resume`
-     (run the dispatcher stub, which re-enters `_phase_clear_resume` → emits
+     `/janitor-resume` (run the dispatcher stub, which re-enters `_phase_clear_resume` → emits
      `[janitor-resume]` + the handoff directive → the session resumes).
 
 The bootstrap keystroke is LOAD-BEARING, not optional (TRDD-Z582IKIR "step-3→4
-bootstrap gap"): a SessionStart hook is a SHELL script and CANNOT call CronCreate
-(a MODEL tool) — it only injects context. On a genuinely unattended machine there
-is no human to trigger the model turn that would process that injected re-arm
-nudge, so the janitor types the re-arm command into its own pane exactly as it
-already does for /compact and /reload-plugins.
+bootstrap gap"): a SessionStart hook is a SHELL script and CANNOT start a model turn
+— it only injects context. On a genuinely unattended machine there is no human to
+trigger the turn that consumes the handoff, so the janitor types `/janitor-resume`
+into its own pane exactly as it already does for /compact and /reload-plugins. It
+does NOT type `/janitor-arm` (TRDD-5ID9CQY8): the cron survives `/clear`.
 
 Both phases are SOFT (no ESC): the invoking skill fires this script and ENDS ITS
 TURN, so the enqueued `/clear` runs at that turn boundary, then the bootstrap lands
 on the fresh idle prompt. The presence gate is checked ONCE up front so the two
-phases are atomic — we never fire `/clear` and then refuse the re-arm because the
+phases are atomic — we never fire `/clear` and then refuse the resume because the
 user happened to appear in the settle window.
 
 Outside an automatable terminal ($ITERM_SESSION_ID unset and not tmux) self-trigger
 isn't available: the script prints NO_ITERM and the skill asks the user to run
-`/clear` then `/janitor-arm` manually (the resume state is still recorded, so a
-manual clear + re-arm still auto-resumes).
+`/clear` manually (the resume state is still recorded, so a manual clear still auto-resumes).
 """
 
 from __future__ import annotations
@@ -76,20 +73,29 @@ import terminal_trigger  # noqa: E402
 CLEAR_CMD = "/clear"
 ARM_CMD = "/janitor-arm"
 RESUME_CMD = "/janitor-resume"
-# The bootstrap re-arms the cron `/clear` destroyed, THEN resumes from the handoff.
-# Ordered: arm first (the cron must exist), resume second (it runs the dispatcher
-# stub which consumes the resume-after-clear.flag). Both enqueue back-to-back.
+# The CLEAR chain's phase B only RESUMES (TRDD-5ID9CQY8). WHY there is no `/janitor-arm` in it: the
+# heartbeat cron SURVIVES `/clear` -- measured three times (2026-10-18 03:44 and 08:10 on Claude Code
+# 2.1.302, 2026-11-15 14:12 on 2.1.325: the typed re-arm's CronDelete of the prior heartbeat id
+# succeeded each time) -- and SessionStart already logs "source=clear keeps the live cron -> no
+# re-arm". The typed arm only replaced a live cron for one extra billed turn. Do NOT add it back; a
+# session whose cron did die is caught by the SessionStart heartbeat self-check + armed.flag re-plumb.
+CLEAR_BOOTSTRAP_CMDS: tuple[str, ...] = (RESUME_CMD,)
+# The RELOAD chains keep arm-then-resume: a plugin reload may drop the cron, so they must re-arm.
+# Ordered: arm first (the cron must exist), resume second (it runs the dispatcher stub which
+# consumes the resume-after-clear.flag). Both enqueue back-to-back.
 _BOOTSTRAP_CMDS: tuple[str, ...] = (ARM_CMD, RESUME_CMD)
-# Public alias: other triggers compose their own bootstrap on top of this pair via
+# Public alias: the RELOAD triggers compose their own bootstrap on top of this pair via
 # `spawn_shrink_chain`. Exported so they never open-code (ARM, RESUME) and silently
-# drift if the bootstrap ever gains a third step.
+# drift if the bootstrap ever gains a third step. The clear chain does NOT use it.
 BOOTSTRAP_CMDS: tuple[str, ...] = _BOOTSTRAP_CMDS
-# Every command this script types, in order. No longer passed to `injection_allowed` (the
+# Every command this script or a reload chain composed on `BOOTSTRAP_CMDS` types (the clear chain
+# itself no longer types `ARM_CMD`). No longer passed to `injection_allowed` (the
 # presence cancel is gone) but kept as the one place the full set is named — the `clear` verb
 # in `user_intent._VERB_COMMANDS` exists to cover `/clear` from here.
 _ALL_CMDS: tuple[str, ...] = (CLEAR_CMD, *_BOOTSTRAP_CMDS)
 __all__ = [
     "BOOTSTRAP_CMDS",
+    "CLEAR_BOOTSTRAP_CMDS",
     "CLEAR_CMD",
     "_ALL_CMDS",
     "check_handoff_concise",
@@ -130,8 +136,9 @@ def plan_clear(transcript_path: str | None = None) -> tuple[list[str], list[str]
     """The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
 
     Pure -- the single source of truth for what gets typed, so tests and the dry-run
-    plan agree with what really fires. Phase B re-arms AND resumes, in that order (or
-    re-arms and re-sets an unmet goal, TRDD-B3PY3HV7: see `clear_bootstrap`).
+    plan agree with what really fires. Phase B only resumes (or re-sets an unmet goal,
+    TRDD-B3PY3HV7): it does NOT re-arm, because the cron survives `/clear` (TRDD-5ID9CQY8,
+    see `clear_bootstrap`).
     """
     return [CLEAR_CMD], clear_bootstrap(transcript_path)
 
@@ -161,13 +168,18 @@ def sanitize_goal(text: str) -> str:
 
 
 def clear_bootstrap(transcript_path: str | None) -> list[str]:
-    """Phase B for a CLEAR: arm, then `/goal <goal>` INSTEAD of `/janitor-resume` when the cleared
-    session had an unmet goal, else the plain bootstrap.
+    """Phase B for a CLEAR: `/goal <goal>` when the cleared session had an unmet goal, else
+    `/janitor-resume`. NEVER `/janitor-arm` (TRDD-5ID9CQY8).
+
+    The heartbeat cron survives `/clear` (measured three times: 2026-10-18 03:44 and 08:10 on
+    Claude Code 2.1.302, 2026-11-15 14:12 on 2.1.325 -- the typed re-arm's CronDelete of the prior
+    heartbeat id succeeded each time, and SessionStart logs "source=clear keeps the live cron -> no
+    re-arm"), so a typed `/janitor-arm` only replaced a live cron for one extra billed turn.
 
     TRDD-B3PY3HV7: one push, one turn -- `/goal` kicks off a turn that waits for the SessionStart
     context (Continuity block + NEXT ACTION), and mirrors native compaction, which keeps the goal
     active. The resume flag `/janitor-resume` would have consumed is left for the next idle fire.
-    Reload chains must NOT call this: they keep `BOOTSTRAP_CMDS`.
+    Reload chains must NOT call this: they keep `BOOTSTRAP_CMDS` (a plugin reload may drop the cron).
     """
     if transcript_path:
         import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other chain imports
@@ -182,10 +194,10 @@ def clear_bootstrap(transcript_path: str | None) -> list[str]:
             # TRDD-B3PY3HV7: without this a raise here (truncated/partly written transcript) would
             # abort the chain after /clear and the fresh session would idle -- the original complaint.
             state.log_line("clear-trigger", f"clear_bootstrap: goal read failed ({exc!r}) -- plain bootstrap")
-            return list(_BOOTSTRAP_CMDS)
+            return list(CLEAR_BOOTSTRAP_CMDS)
         if goal:
-            return [ARM_CMD, f"{GOAL_CMD} {goal}"]
-    return list(_BOOTSTRAP_CMDS)
+            return [f"{GOAL_CMD} {goal}"]
+    return list(CLEAR_BOOTSTRAP_CMDS)
 
 
 def is_goal_bootstrap(cmds: Sequence[str]) -> bool:
@@ -1031,7 +1043,7 @@ def _run_chain_payload(payload_b64: str) -> int:
             first=data["first"],
             then=list(data["then"]),
             # TRDD-9ORKPQCX: the chain types into THIS session's own pane (payload `state_dir`), so
-            # its machine-typed crumbs (/clear, /janitor-arm, /janitor-resume, /goal ...) go to this
+            # its machine-typed crumbs (/clear, /janitor-resume, /goal ..., plus /janitor-arm on reload chains) go to this
             # state dir, where this session's UserPromptSubmit hook looks.
             state_dir=sd,
             gate_stamp=sd / _GATE_STAMP,
@@ -1175,7 +1187,7 @@ def spawn_shrink_chain(
     of growing a second, unverified `/clear` sender. A second sender is how you get two `/clear`
     commands typed into one session, which is the failure `_CHAIN_LOCK` exists to prevent.
 
-    `then` REPLACES the default `[/janitor-arm, /janitor-resume]` bootstrap, so a caller that
+    `then` REPLACES the reload `[/janitor-arm, /janitor-resume]` bootstrap, so a caller that
     drops either one strands the fresh session unarmed or unresumed. Callers should build on
     `BOOTSTRAP_CMDS` rather than open-coding the pair.
 
@@ -1359,7 +1371,7 @@ def main() -> int:
         type=float,
         default=8.0,
         help="extra seconds after /clear before the bootstrap is typed, so the fresh "
-        "session + its SessionStart hooks are up before /janitor-arm lands",
+        "session + its SessionStart hooks are up before /janitor-resume lands",
     )
     ap.add_argument(
         "--dry-run",
@@ -1461,7 +1473,7 @@ def main() -> int:
         if not ok:
             print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}", file=sys.stderr)
 
-    # 5. Fire the two phases. Phase A: /clear. Phase B: bootstrap (re-arm + resume),
+    # 5. Fire the two phases. Phase A: /clear. Phase B: bootstrap (resume or goal; no re-arm),
     #    delayed by --clear-settle so the fresh session is up first. Both soft (no ESC):
     #    the invoking skill ends its turn right after this, so the enqueued /clear runs
     #    at the turn boundary and the bootstrap lands on the fresh idle prompt.
@@ -1526,7 +1538,7 @@ def main() -> int:
         status_b = _fire_phase(boot_cmds, delay=delay + settle, dry_run=args.dry_run)
     # Both phases share the same pane, so they degrade together: if the pane isn't
     # automatable, NEITHER fired. The resume state is still recorded, so a manual
-    # /clear + /janitor-arm still auto-resumes (only within _UNARMED_CLEAR_FLAG_MAX_AGE_S,
+    # /clear still auto-resumes (only within _UNARMED_CLEAR_FLAG_MAX_AGE_S,
     # one hour, of this write).
     if status_a == _NO_ITERM and status_b == _NO_ITERM:
         print("NO_ITERM")

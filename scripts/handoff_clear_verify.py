@@ -6,24 +6,25 @@
 
 The handoff+clear primitive rests on several assumptions that must be PROVEN LIVE,
 not inferred:
-  1. The heartbeat cron is HEALTHY after `/clear` — either it SURVIVES unchanged
-     (the common case: `/clear` resets the conversation but keeps the same process,
-     so the in-memory cron usually just survives it) or it is destroyed-and-recreated
-     on builds where `/clear` does drop it. `on-session-start.py`'s own re-arm nudge
-     is CONDITIONAL — "if it is missing, run /janitor-arm" — so a cron that never went
-     missing is never re-armed, and that is healthy, not a defect (see #186; a prior
-     version of this harness asserted destruction+recreation UNCONDITIONALLY and
-     FAILED on a build where the cron simply survived — the false assumption, not the
-     primitive). Only a cron that is GONE after `/clear` and never comes back is real.
+  1. ASSUMPTION UNDER TEST: the heartbeat cron is healthy after `/clear` — either it SURVIVES (the common case:
+     `/clear` resets the conversation but keeps the same process, so the in-memory cron
+     usually just survives it) or it is destroyed-and-recreated on builds where `/clear`
+     does drop it. `on-session-start.py`'s own re-arm nudge is CONDITIONAL — "if it is
+     missing, run /janitor-arm" — so a cron that never went missing is never re-armed, which
+     is not a defect (see #186; a prior version of this harness asserted
+     destruction+recreation UNCONDITIONALLY and FAILED on a build where the cron simply
+     survived). The clear chain no longer re-arms either (TRDD-5ID9CQY8), so an UNCHANGED id
+     cannot prove survival and reads SKIP; a changed id reads PASS (neutral wording). Only a
+     cron that is GONE after `/clear` and never comes back is a real FAIL.
   2. `/clear` collapses the context to base-size (the whole reason to prefer it
      over `/compact`).
   3. The link-only handoff is RECOVERABLE — every `[[wikimem link]]` it carries
      resolves via memgrep in the fresh session.
   4. The `resume-after-clear.flag` is consumed and `[janitor-resume]` is emitted.
   5. SessionStart re-armed AFTER the clear — but ONLY when assumption 1 found the
-     cron missing/destroyed. When the cron simply survived unchanged, SessionStart's
-     conditional re-arm correctly did nothing, so "no fresh re-arm" there is the
-     healthy outcome (#186), not a failure.
+     cron missing/destroyed. When the cron id is unchanged, SessionStart's
+     conditional re-arm may correctly have done nothing, so "no fresh re-arm" there is
+     not a failure (#186).
 
 This harness spans the boundary with a PERSISTENT log that survives /clear
 (`.janitor/state/handoff-clear-verify.json` — a filesystem file, not session
@@ -35,11 +36,11 @@ state):
       token-meter log tails. Written to the JSON.
 
   --phase after   (run by the resumed session, driven by the resume directive):
-      re-read the cron id (≠ before ⇒ classified by the re-arm's CronDelete evidence when
-      present in the after-snapshot; neutral wording otherwise — see compute_verdicts), the
+      re-read the cron id (unchanged ⇒ SKIP, not verifiable; changed ⇒ a re-arm by something else, neutral
+      wording — see compute_verdicts), the
       context size (« before ⇒ collapse proven), resolve EACH persisted link via memgrep (all
       resolve ⇒ handoff recoverable), confirm the resume flag was consumed, and
-      confirm a re-arm happened after the snapshot (⇒ SessionStart ran on clear).
+      only when the cron id changed, confirm the re-arm came after the snapshot.
       Emits a PASS/FAIL table to reports_dev/continuity-build/.
 
 FAIL-OPEN throughout: this is a DIAGNOSTIC. A fault here must NEVER break the
@@ -78,11 +79,6 @@ _TOKEN_METER_FILENAME = "token-meter.jsonl"
 _CHARS_PER_TOKEN = 4
 # A new session counts as the clear's only if its first record is this soon after the before-phase ts.
 _NEW_SESSION_WINDOW_S = 15 * 60
-# The tool-result line a successful CronDelete prints ("Cancelled job <id>") — direct evidence
-# the deleted id still existed, when paired with its CronDelete tool_use. CronDelete fails
-# not-found for a dead id, so this line for the PRIOR heartbeat id proves that id SURVIVED the
-# /clear (TRDD-5ID9CQY8 box 4).
-_CANCELLED_JOB_RE = re.compile(r"Cancelled job ([A-Za-z0-9_-]{1,64})")
 
 # A wikilink target: the text inside [[ ]], up to a `|` alias or `#` anchor. Kept
 # permissive (letters/digits/dash/underscore/slash/dot/space) so a real page slug is
@@ -304,14 +300,14 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     """
     v: dict[str, dict] = {}
 
-    # 1. The heartbeat cron is HEALTHY after /clear — either it SURVIVED unchanged (the
-    #    common case: /clear does not restart the process, so the in-memory cron usually
-    #    just survives, and SessionStart's re-arm is CONDITIONAL — "if missing" — so it
-    #    correctly does nothing) or it was destroyed-and-recreated (a build where /clear
-    #    does drop it). Both are healthy. #186: a prior version of this check FAILED on
-    #    the survived-unchanged case, asserting destruction+recreation as if it were
-    #    unconditional — that assumption, not the primitive, was wrong. Only a cron that
-    #    is GONE after /clear and never came back is a real failure.
+    # 1. After /clear the heartbeat cron either survives (the in-memory cron usually does, and
+    #    SessionStart's re-arm is CONDITIONAL — "if missing" — so it correctly does nothing) or was
+    #    destroyed-and-recreated (a build where /clear drops it). #186: a prior
+    #    version FAILED on the survived-unchanged case, asserting destruction+recreation as if it
+    #    were unconditional — that assumption, not the primitive, was wrong. TRDD-5ID9CQY8: the
+    #    clear chain no longer re-arms, so an unchanged id (written only by arm_record) is the
+    #    normal case whether the live cron survived or died: it is SKIP, not PASS. Only a cron
+    #    that is GONE after /clear and never came back is a real failure.
     b_id = (before.get("cron_id") or "").strip()
     a_id = (after.get("cron_id") or "").strip()
     cron_survived_unchanged = bool(b_id) and a_id == b_id
@@ -326,28 +322,21 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
             )
     elif cron_survived_unchanged:
         v["cron_recreated"] = _verdict(
-            "PASS",
-            f"cron {a_id} survived /clear unchanged — this build does not drop the session "
-            "cron on /clear, so SessionStart's conditional re-arm ('if missing') correctly "
-            "did nothing (see #186)",
+            "SKIP",
+            f"cron id {a_id} unchanged after /clear — not verifiable from the stamp file (the clear "
+            "chain no longer re-arms, TRDD-5ID9CQY8); a later [janitor-heartbeat] fire in the new "
+            "session is the live evidence",
         )
     else:
-        # TRDD-5ID9CQY8 box 4: the re-arm's CronDelete of the PRIOR id is the only signal that can
-        # tell "the prior cron SURVIVED the clear" from any other id change — CronDelete fails
-        # not-found for a dead id, so a successful delete of exactly the prior id proves it still
-        # existed after /clear. The evidence arrives as the after-snapshot's `prior_cron_deleted`
-        # MATCHED ID — only from a tool_result paired with a real CronDelete tool_use; anything
-        # else stays neutral (TRDD-JK2MLS8Z).
-        matched = after.get("prior_cron_deleted")
-        if isinstance(matched, str) and matched == b_id:
-            v["cron_recreated"] = _verdict(
-                "PASS",
-                f"cron id changed {b_id or '∅'} → {a_id} — SURVIVED the clear: the re-arm's "
-                f"CronDelete of the prior id {b_id} succeeded (CronDelete fails not-found for a "
-                "dead id), so the prior cron still existed after /clear and the re-arm replaced it",
-            )
-        else:
-            v["cron_recreated"] = _verdict("PASS", f"cron id changed {b_id or '∅'} → {a_id}")
+        # TRDD-5ID9CQY8: the clear chain no longer types /janitor-arm, so a changed id here is a
+        # re-arm by something else (the SessionStart backstop, a renew). The verifier cannot tell
+        # a surviving cron from a dead one from the id alone, so the wording stays neutral. The
+        # earlier "SURVIVED" evidence (the chain's own re-arm deleting the prior id) no longer
+        # exists, and a heartbeat prompt in the new session cannot replace it: the after-phase
+        # runs in the first resumed turn and the cron fires at this project's cadence (timing is
+        # n=1, measured 2026-11-15: resume typed 29 s after the clear, first heartbeat prompt 310 s
+        # after it).
+        v["cron_recreated"] = _verdict("PASS", f"cron id changed {b_id or '∅'} → {a_id}")
 
     # 2. context collapsed to base-size.
     b_ctx = before.get("context_tokens")
@@ -459,7 +448,7 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     a_armed = after.get("armed_at_ts")
     if cron_survived_unchanged:
         v["session_restarted"] = _verdict(
-            "SKIP", "cron survived /clear unchanged — no re-arm was needed (see cron_recreated)"
+            "SKIP", "cron id unchanged after /clear — no re-arm observed, none provable as needed (see cron_recreated)"
         )
     elif not isinstance(b_ts, int) or not isinstance(a_armed, int) or a_armed <= 0:
         v["session_restarted"] = _verdict("SKIP", "no post-clear re-arm timestamp observed")
@@ -735,76 +724,6 @@ def _session_start_injected_tokens(path: Path) -> int | None:
     return -(-chars // _CHARS_PER_TOKEN) if chars > 0 else None
 
 
-def _prior_cron_deleted(path: Path, prior_id: str) -> str | bool:
-    """The prior heartbeat id, when a real CronDelete call for it SUCCEEDED in this transcript.
-
-    A "Cancelled job <id>" tool_result is direct evidence the deleted cron still existed
-    (CronDelete fails not-found for a dead id), but ONLY when the result is paired — by
-    `tool_use_id` — with the `tool_use` block that issued the delete AND that call's own
-    `input.id` is the prior id: transcripts freely quote the same string inside OTHER
-    tool_results (a Read of a report or card quoting "Cancelled job <id>" is text, not
-    evidence), so a bare text scan false-positives on quoted lines (TRDD-5ID9CQY8 review
-    item 1). Returns the MATCHED id (== `prior_id`) on success, False otherwise — an
-    unpaired line or a delete of an unrelated job is no evidence about the prior id.
-    Best-effort: False on any read failure, which just leaves the id-change verdict's
-    wording neutral.
-    """
-    import jsonl_walk  # noqa: PLC0415 - local sibling lib
-
-    if not prior_id:
-        return False
-    delete_ids: set[str] = set()
-    try:
-        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
-            message = entry.get("message")
-            content = message.get("content") if isinstance(message, dict) else None
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict) or block.get("type") != "tool_use":
-                    continue
-                name = block.get("name")
-                tool_input = block.get("input")
-                if (
-                    isinstance(name, str)
-                    and "CronDelete" in name
-                    and isinstance(tool_input, dict)
-                    and tool_input.get("id") == prior_id
-                ):
-                    use_id = block.get("id")
-                    if isinstance(use_id, str) and use_id:
-                        delete_ids.add(use_id)
-        for _line_no, entry in jsonl_walk.iter_jsonl_entries(path, malformed_lines=[]):
-            message = entry.get("message")
-            content = message.get("content") if isinstance(message, dict) else None
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict) or block.get("type") != "tool_result":
-                    continue
-                if block.get("tool_use_id") not in delete_ids:
-                    continue
-                inner = block.get("content")
-                if isinstance(inner, str):
-                    texts = [inner]
-                elif isinstance(inner, list):
-                    texts = [
-                        b.get("text", "")
-                        for b in inner
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    ]
-                    texts += [c for c in inner if isinstance(c, str)]
-                else:
-                    texts = []
-                for text in texts:
-                    m = _CANCELLED_JOB_RE.search(text)
-                    if m and m.group(1) == prior_id:
-                        return m.group(1)
-    except OSError:
-        return False
-    return False
-
-
 def _rotator_log_tail(n: int) -> list[str]:
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
@@ -958,14 +877,6 @@ def gather_after(before: dict, now: int) -> dict:
     after = {
         "ts": now,
         "cron_id": _read_text(sd / _CRON_ID_FILENAME).strip(),
-        # TRDD-5ID9CQY8 box 4: the MATCHED id of a successful CronDelete of the PRIOR id in the new
-        # session's transcript (result paired with its CronDelete tool_use) — direct evidence the
-        # PRIOR cron survived the clear, since CronDelete fails not-found for a dead id. False when
-        # no paired delete matched the prior id, and also when the successor transcript is
-        # unidentifiable.
-        "prior_cron_deleted": _prior_cron_deleted(new_transcript, before.get("cron_id") or "")
-        if new_transcript is not None
-        else False,
         "context_tokens": ctx,
         "context_source": ctx_src,
         "injected_tokens": injected,

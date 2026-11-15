@@ -110,11 +110,12 @@ def _seed_handoff(project: Path) -> Path:
 # ---------- pure helpers ---------------------------------------------------
 
 def test_plan_clear_is_clear_then_bootstrap() -> None:
-    """The plan is exactly two phases: /clear, then re-arm + resume, in order."""
+    """The plan is exactly two phases: /clear, then resume only (TRDD-5ID9CQY8: the cron survives
+    /clear, so the clear chain never types /janitor-arm)."""
     mod = _import()
     phase_a, phase_b = mod.plan_clear()
     assert phase_a == ["/clear"]
-    assert phase_b == ["/janitor-arm", "/janitor-resume"], "bootstrap re-arms THEN resumes"
+    assert phase_b == ["/janitor-resume"], "the clear bootstrap resumes and never re-arms"
 
 
 def _goal_transcript(path: Path, *, met: bool | None, condition: str = "ship C4") -> str:
@@ -129,18 +130,20 @@ def _goal_transcript(path: Path, *, met: bool | None, condition: str = "ship C4"
 
 
 def test_plan_unmet_goal_types_goal_instead_of_resume(tmp_path: Path) -> None:
-    """TRDD-B3PY3HV7: an unmet goal -> phase B is arm then `/goal <goal>`, never `/janitor-resume`."""
+    """TRDD-B3PY3HV7: an unmet goal -> phase B is `/goal <goal>` alone, never `/janitor-resume`
+    and (TRDD-5ID9CQY8) never `/janitor-arm`."""
     mod = _import()
     phase_a, phase_b = mod.plan_clear(_goal_transcript(tmp_path / "t.jsonl", met=False))
     assert phase_a == ["/clear"]
-    assert phase_b == ["/janitor-arm", "/goal ship C4"]
+    assert phase_b == ["/goal ship C4"]
     assert "/janitor-resume" not in phase_b
+    assert "/janitor-arm" not in phase_b
 
 
 def test_plan_met_or_absent_goal_keeps_resume(tmp_path: Path) -> None:
     """TRDD-B3PY3HV7: met goal, no goal record, unreadable transcript and no transcript all keep /janitor-resume."""
     mod = _import()
-    plain = ["/janitor-arm", "/janitor-resume"]
+    plain = ["/janitor-resume"]
     assert mod.plan_clear(_goal_transcript(tmp_path / "met.jsonl", met=True))[1] == plain
     assert mod.plan_clear(_goal_transcript(tmp_path / "none.jsonl", met=None))[1] == plain
     assert mod.plan_clear(str(tmp_path / "missing.jsonl"))[1] == plain
@@ -201,7 +204,7 @@ def test_corrupt_transcript_falls_back_to_plain_bootstrap(tmp_path: Path, monkey
         pass
     else:
         raise AssertionError("fixture no longer raises in clear_fields; pick a new corrupt record")
-    assert mod.plan_clear(path)[1] == ["/janitor-arm", "/janitor-resume"]
+    assert mod.plan_clear(path)[1] == ["/janitor-resume"]
 
 
 def test_cleared_goal_is_treated_as_met(tmp_path: Path) -> None:
@@ -260,8 +263,8 @@ def _flag_after_chain(mod, monkeypatch, tmp_path: Path, then: list[str]) -> bool
 def test_goal_path_leaves_no_resume_flag(tmp_path: Path, monkeypatch) -> None:
     """TRDD-B3PY3HV7: the flag exists until `/goal` is typed, then is consumed; the plain path keeps it."""
     mod = _import()
-    assert _flag_after_chain(mod, monkeypatch, tmp_path / "goal", ["/janitor-arm", "/goal ship C4"]) is False
-    assert _flag_after_chain(mod, monkeypatch, tmp_path / "plain", ["/janitor-arm", "/janitor-resume"]) is True
+    assert _flag_after_chain(mod, monkeypatch, tmp_path / "goal", ["/goal ship C4"]) is False
+    assert _flag_after_chain(mod, monkeypatch, tmp_path / "plain", ["/janitor-resume"]) is True
 
 
 def test_daemon_goal_comes_from_the_recorded_pane_not_the_newest_transcript(tmp_path: Path, monkeypatch) -> None:
@@ -407,10 +410,11 @@ def test_dry_run_shows_the_CHAINED_plan_and_writes_NOTHING(tmp_path: Path) -> No
         iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
     )
     assert proc.returncode == 0, proc.stderr
-    # The plan must show /clear BEFORE the bootstrap, and name both bootstrap commands.
+    # The plan must show /clear BEFORE the bootstrap (resume only: no /janitor-arm, TRDD-5ID9CQY8).
     out = proc.stdout
     assert "DRY_RUN would chain /clear" in out
-    assert out.index("/clear") < out.index("/janitor-arm") < out.index("/janitor-resume")
+    assert out.index("/clear") < out.index("/janitor-resume")
+    assert "/janitor-arm" not in out
     assert "CLEAR_FIRED" not in out, "dry-run must not fire"
     assert "CLEAR_CHAIN_SPAWNED" not in out, "dry-run must not spawn the chain either"
     sd = _state_dir(p)

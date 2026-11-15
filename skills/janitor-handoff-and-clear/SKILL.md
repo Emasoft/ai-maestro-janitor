@@ -1,6 +1,6 @@
 ---
 name: janitor-handoff-and-clear
-description: Harvest the session's material state into wikimem, write a CONCISE LINK-ONLY handoff (an index of [[wikimem]]/ATOM-id/TRDD links, never inlined content), then /clear this session and bootstrap the fresh one to re-arm the heartbeat and resume from the handoff. Prefer over /janitor-compact-context when the in-flight work is fully captured in TRDDs/wikimem/files already — /clear resets to base-context with NO residual summary (cheaper steady-state than /compact) but is UNRECOVERABLE, so the handoff must be complete first. Trigger with /janitor-handoff-and-clear, or by asking to hand off and clear.
+description: Harvest the session's material state into wikimem, write a CONCISE LINK-ONLY handoff (an index of [[wikimem]]/ATOM-id/TRDD links, never inlined content), then /clear this session and bootstrap the fresh one to resume from the handoff (the heartbeat cron survives /clear). Prefer over /janitor-compact-context when the in-flight work is fully captured in TRDDs/wikimem/files already — /clear resets to base-context with NO residual summary (cheaper steady-state than /compact) but is UNRECOVERABLE, so the handoff must be complete first. Trigger with /janitor-handoff-and-clear, or by asking to hand off and clear.
 ---
 
 # Janitor handoff-and-clear
@@ -10,17 +10,14 @@ description: Harvest the session's material state into wikimem, write a CONCISE 
 `/compact` keeps a session going across a context ceiling, but it drags a
 compaction **summary** forward in the transcript forever after. `/clear` resets to
 **base-context only** — no residual summary, cheaper in steady state — but it is
-**UNRECOVERABLE** (no scrollback, no summary). Whether it also destroys the
-session-scoped heartbeat cron is **build-dependent** — `/clear` keeps the same
-process, so the in-memory cron often just survives it; `on-session-start.py`'s
-own re-arm nudge is conditional ("if it is missing, run `/janitor-arm`") for
-exactly this reason (#186). Either way this skill's bootstrap re-arms
-unconditionally, so it is correct whether or not the cron actually needed it.
+**UNRECOVERABLE** (no scrollback, no summary). The session-scoped heartbeat cron survives
+`/clear` (measured three times, TRDD-5ID9CQY8), so the bootstrap does not re-arm it. If a
+build ever drops it, the SessionStart self-check (conditional: "if it is missing, run
+`/janitor-arm`", #186) and the armed.flag re-plumb restore it.
 
 This skill makes `/clear` safe to use as a continuity primitive: it captures
 everything the next session needs into durable storage FIRST, fires `/clear`, then
-types a bootstrap into the fresh pane that re-arms the cron and resumes from the
-persisted handoff.
+types a bootstrap into the fresh pane that resumes from the persisted handoff.
 
 **The memory system IS the payload store; the handoff is only a short INDEX of
 pointers.** The resumed session's first read is the tax this primitive pays every
@@ -106,7 +103,7 @@ The degradation is to the mechanical handoff, never to the model.
 
 `clear_trigger.py` waits briefly for this pane to go idle, then either spawns a
 VERIFIED keystroke chain (the common case: types `/clear`, waits for the fresh
-session to come up, then types the re-arm bootstrap) or falls back to a blind
+session to come up, then types the resume bootstrap) or falls back to a blind
 two-phase send on a channel it cannot read back. Give it a `--directive` whose FIRST
 instruction is to run the verification `after` phase (so the proof completes
 automatically on resume), then to read the handoff and resume:
@@ -120,7 +117,7 @@ Read the result (#154, #136 — this is the CURRENT contract; older docs describ
 `USER_PRESENT` as an outcome, which no longer exists):
 - `CLEAR_CHAIN_SPAWNED` → the common case (a readable pane — tmux, or an ai-maestro
   agent). A detached child now types `/clear`, waits for the fresh session, then
-  types the re-arm bootstrap. The resume state (`resume-directive.txt` +
+  types the resume bootstrap. The resume state (`resume-directive.txt` +
   `resume-after-clear.flag`) is written by THAT child, immediately before the
   verified `/clear` keystroke — NOT synchronously here. Proceed to step 4.
 - `DIRECTIVE_WRITTEN <path>` + `CLEAR_MARKER_WRITTEN <path>`, then `CLEAR_FIRED` →
@@ -129,8 +126,8 @@ Read the result (#154, #136 — this is the CURRENT contract; older docs describ
   Proceed to step 4.
 - `DIRECTIVE_WRITTEN <path>` + `CLEAR_MARKER_WRITTEN <path>`, then `NO_ITERM` → same
   fallback path, but no automatable terminal was found. Tell the user: *"Handoff
-  written — please run `/clear`, then `/janitor-arm` to re-arm the heartbeat."* The
-  resume state IS recorded, so a manual clear + re-arm still auto-resumes.
+  written — please run `/clear`."* The resume state IS recorded, so a manual
+  clear still auto-resumes.
 - `DEFERRED <reason>` (stderr) → you are actively typing in this pane and the script
   gave up waiting for it to go idle (120s). NOTHING was written and `/clear` did NOT
   fire — re-run this step once the pane is idle.
@@ -159,7 +156,7 @@ This is critical, and it is also an INPUT-SAFETY requirement (wikimem
 and floods later, so `/clear` must land on an IDLE line. The trigger fired a
 *detached, soft* keystroke sender (no ESC, no Ctrl+C) — `/clear` runs the moment
 this turn ends, so stopping now is what makes it land on an idle prompt. Emit one
-short line like *"Handoff written; clearing now, I'll re-arm and auto-resume."* and
+short line like *"Handoff written; clearing now, I'll auto-resume."* and
 stop. Do NOT do more work: the next thing that must run is `/clear`.
 
 ## What happens after /clear (the resume, unattended)
@@ -168,22 +165,21 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
    re-arm nudge tells the model to verify the cron and arm it **if missing** (#186 —
    `/clear` keeps the same process, so the cron often just survives it; the nudge is
    conditional for exactly that reason) — but a shell hook cannot call CronCreate, so
-   on an unattended machine the **bootstrap keystroke is what actually re-arms it when
-   needed**, not a human. That same hook stamps `clear-observed.ts`, which is what ARMS
-   the pre-clear marker below (see step 2) — `/clear` has no hook of its own, so
+   on an unattended machine the **SessionStart self-check reminder prompts the resumed
+   session to re-arm it when needed**. That same hook stamps `clear-observed.ts`, which is
+   what ARMS the pre-clear marker below (see step 2) — `/clear` has no hook of its own, so
    `source=clear` is the only unambiguous observation that it happened.
-2. The bootstrap types `/janitor-arm` (idempotent — re-arms the cron if `/clear` dropped
-   it, no-op if it survived) then `/janitor-resume`
-   (runs the dispatcher stub → `dispatch.py::_phase_clear_resume` reads
-   `resume-after-clear.flag` → emits `[janitor-resume]` + the handoff directive). The
-   phase requires `clear-observed.ts` to be at or newer than the flag: the flag is
-   written BEFORE the clear, so presence alone would let a heartbeat firing in that gap
-   consume a resume for a clear that has not happened yet.
+2. The bootstrap types `/janitor-resume`, or `/goal <goal>` for an unmet goal (no
+   `/janitor-arm`: the cron survives `/clear`, TRDD-5ID9CQY8); it runs the dispatcher
+   stub → `dispatch.py::_phase_clear_resume` reads `resume-after-clear.flag` → emits
+   `[janitor-resume]` + the handoff directive. The phase requires `clear-observed.ts` to be
+   at or newer than the flag: the flag is written BEFORE the clear, so presence alone would
+   let a heartbeat firing in that gap consume a resume for a clear that has not happened yet.
 3. The directive's FIRST instruction runs `handoff_clear_verify.py --phase after`,
    which reads the `before` snapshot (it survived `/clear`) and emits a PASS/FAIL table
-   to `reports_dev/continuity-build/` — proving the heartbeat cron is healthy (survived
-   unchanged or was destroyed+recreated, whichever this build does), the context
-   collapsed, and every handoff link resolves.
+   to `reports_dev/continuity-build/`: the heartbeat cron id (an unchanged id is SKIP,
+   because the stamp file cannot prove the cron survived), whether the context
+   collapsed, and whether every handoff link resolves.
 4. The fresh session reads the newest `.janitor/state/agent-handoff-*.md` and
    reconstructs the issues/needs by following its wikimem/TRDD links (`memgrep recall`)
    on demand.
@@ -191,7 +187,7 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
 ## Scope
 
 ONLY writes the resume state into THIS project's `.janitor/state/` and types `/clear` +
-the re-arm/resume bootstrap into THIS session's own pane (matched by
+the resume bootstrap into THIS session's own pane (matched by
 `$ITERM_SESSION_ID` UUID in iTerm, or `$TMUX_PANE` in tmux — never other panes, so
 concurrent Claude instances are untouched). Does NOT change plugin config, does NOT
 disarm the heartbeat, does NOT clear other sessions.
@@ -210,7 +206,7 @@ disarm the heartbeat, does NOT clear other sessions.
   session's handoffs in write order. The fixed `agent-handoff.md` is RETIRED — several
   writers, no coordination, one silently destroying another.
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-after-clear.flag` — the pre-clear resume
-  marker `dispatch.py::_phase_clear_resume` consumes on the re-armed cron's first fire.
+  marker `dispatch.py::_phase_clear_resume` consumes on the typed `/janitor-resume` run, or the next heartbeat fire, after the clear.
   ONLY that phase may consume it; no other resume phase may treat it as subsumed, since
   it describes an event that has not happened yet. An UNARMED flag older than
   `clear_resume_max_age_s` (default 24h) is swept as an abandoned clear.
