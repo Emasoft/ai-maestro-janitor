@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-15T20:02:53+0100
+updated: 2026-11-15T20:03:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -138,6 +138,7 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 2026-11-15T17:46+0100 Pick order note: trddgrep next ranks ZKXQXHBI, JY0OBQZ4, G9Z8PXCM (human_review, owner-gated), HL3WBA2Q (testing, needs a release) and AWIWXJIG (backburner) first; none is workable by the agent now, so TRDD-7XDBJZCZ (same Jev clear path as the just-fixed 2GCJ5D3M and MVUJG3C4) is taken next.
 2026-11-15T18:22+0100 POSITION before an expected auto-compact: Jev clear-path fixes committed and in testing: 2GCJ5D3M (db4db2d5, closes on a live source=jev clear), MVUJG3C4 (e9ebc702, closes on the pre-push suite), 7XDBJZCZ (84ad09ba, closes on the pre-push suite; acceptance narrowed to the code chain). OPEN review findings on the last report: (1) state each card's closing criterion separately (done here); (2) releasing 3.9.2 now would be an owner-granted exception to drain-before-publish, with 11 dev cards still open; (3) rename test_llm_ext_exit_4_and_5_stay_plain_retryable_errors to ..._raise_plain_jeverror; (5) replace line-number cites in the 84ad09ba comment with symbol names (runDecision catch, failureCode, the _is_max_tokens_exceeded handler); (7) the exit-3 auth finding's remedy names OPENROUTER_API_KEY, needs an llm-ext wording or a card. Owner question still open: release 3.9.2?
 - 2026-11-15T20:20+0100 — DRAIN PROGRESS (main agent): M1218EMH items 1, 2, 4, 5 done (913f1db0, 3907ae2c, d88743d5, 2a09d06d, 9772b2b1) and parked in blocked on its EHTs (47fc6cf1); validate ERROR triage (worker report reports_dev/board-drain/20261115_195713+0100-blocker-released-24-v2.md, re-checked with gh): 12 BLOCKER-RELEASED are gh-only blockers, the doctor false positive Emasoft/ai-maestro#188; RSSN9A0P and 6054NY8H had CLOSED issues but sit under the owner's rotator code freeze, moved to backburner (ea00cc2a); 3BSPFS7R archived, 1T9034NC and 2AVXCT2L unblock-when fixed (6b3050e1); probes on F1NZMDWF, A56E22AL, XSO4N6AW (acec2d68). Errors 25 to 21. NEXT: the QAF3N673 increment-3 proposal (draft reports_dev/main-agent/20261115_195535+0100-qaf3n673-proposal-draft.md).
+- 2026-11-15T20:22+0100 — correction to the entry above: errors went 25 to 19, not 21 (measured with trddgrep validate): 11 BLOCKER-RELEASED, all gh-only (#188, XSO4N6AW joined once it named #243), and 8 on frozen archived cards.
 
 ## Rules added by the review of 4de85716
 
