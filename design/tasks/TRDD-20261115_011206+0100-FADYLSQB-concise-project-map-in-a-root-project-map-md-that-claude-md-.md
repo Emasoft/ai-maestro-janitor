@@ -4,7 +4,7 @@ title: Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
 column: dev
 status: tasked
 created: 2026-11-15T01:12:06+0100
-updated: 2026-11-15T13:16:17+0100
+updated: 2026-11-15T13:28:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-15T01:12:06+0100
+implementation-commits: [b52fe354, 24b550d8, 4511cb20, 65cb4fb1, ef5b90dd, 8f60d985, d24989d9]
 ---
 
 # Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
@@ -33,6 +34,8 @@ Queued 2026-11-15 behind TRDD-F8EIVTSG increment 3 (TRDD-QAF3N673), whose resear
 2026-11-15 correction: commit 8f60d985 says the main agent re-checked claudemd_slim after the CLAUDE.md edit; that post-edit run was the worker's. The main agent ran `claudemd_slim.py check` itself later the same day and it exited 0.
 2026-11-15 deviation from S27.1 as drafted: `/PROJECT_MAP.md` is now also listed in the tracked `.gitignore` (line 66), beside the info/exclude entry. Why: cspell (`useGitignore: true`) reads `.gitignore`, not `.git/info/exclude`; a proxy run with unpinned `npx cspell@8` over `**/*.md` found 8 issues in PROJECT_MAP.md before and none after. One CPV file collector (`gitignore_filter.py`, CPV 5.23.0 from the plugin cache) also reads `.gitignore` only; the CPV version `uvx cpv-remote-validate` runs was not checked, and markdownlint was not checked. The map is still generated per clone and never committed. When S27.1 is inserted, its text must name the `.gitignore` line too.
 2026-11-15 map state: this repo's PROJECT_MAP.md (header sha=d64e74bb2da2) still matches the structure; `--check` prints `structure unchanged (digest moved; refresh optional)` because a later commit and uncommitted edits moved the HEAD/status digest. No regeneration is owed.
+2026-11-15 NEXT ACTION (supersedes every earlier NEXT ACTION line above): the build is committed (b52fe354, 24b550d8, 4511cb20, 65cb4fb1, ef5b90dd, 8f60d985, d24989d9). Open: (1) owner question on how sessions discover the map (TRDD-3M5MDPPD options); (2) inserting S27.1 now out of order or waiting for a prrdgrep insert verb (TRDD-4A4HXDIN); (3) spec increment 6 is blocked (TRDD-DXBJMT1K); (4) a release needs an owner decision, because this card is not one of the board-drain publish exceptions in TRDD-S6GX1DHN (the 2026-11-14 listed fixes and the 3.9.0 one-off). After a release: create the opt-in flag, then run the field checks AGV84UGC, XVJ30M61, 8ZY3JU2H and 6HFOB5S4.
+2026-11-15 known limitation: in every other repo the generator excludes the map only through .git/info/exclude, so a local tool that reads .gitignore but not info/exclude (cspell with useGitignore; one CPV file collector) will scan the generated PROJECT_MAP.md there. d24989d9 changed only this repo's .gitignore. Candidate follow-ups: say so in the janitor-auto-repomap-on skill, or a derived card.
 
 ## Owner directive (verbatim, 2026-11-15)
 
