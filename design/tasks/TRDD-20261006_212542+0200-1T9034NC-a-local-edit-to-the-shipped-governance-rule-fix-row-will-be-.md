@@ -4,7 +4,7 @@ title: A local edit to the shipped governance rule fix row will be reverted by t
 column: blocked
 status: tasked
 created: 2026-10-06T21:25:42+0200
-updated: 2026-10-10T23:17:37+0200
+updated: 2026-11-15T20:01:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,7 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:42+0200
 blocked-by: [gh:Emasoft/ai-maestro#173]
-unblock-when: [issue:Emasoft/ai-maestro#173]
+unblock-when: [issue:Emasoft/ai-maestro#173 closed]
 pre-block-column: todo
 blocker-probe: gh issue view 173 --repo Emasoft/ai-maestro --json state --jq .state
 blocker-holds-if: not-match:CLOSED

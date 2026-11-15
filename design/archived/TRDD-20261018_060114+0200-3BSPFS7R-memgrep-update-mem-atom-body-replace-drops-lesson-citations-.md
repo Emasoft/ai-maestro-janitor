@@ -2,9 +2,9 @@
 trdd-id: 3BSPFS7R
 title: memgrep update-mem-atom body replace drops lesson citations and two sibling defects
 column: complete
-status: tasked
+status: archived
 created: 2026-10-18T06:01:14+0200
-updated: 2026-10-19T17:40:52+0200
+updated: 2026-11-15T20:01:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -49,3 +49,4 @@ Close list 2026-10-18 (review of ff66f6f9): (1) memory note ATOM-26TJ-AML8 quote
 - 2026-10-18T06:48:59+0200 — column → dev by main-agent@ai-maestro-janitor. working the three #337 items
 - 2026-10-18T06:58:33+0200 — column → testing by main-agent@ai-maestro-janitor. built and tested at f0f760e3; unreleased, and the installed memgrep still runs the old code
 - 2026-10-19T17:40:52+0200 — Close list executed: (1) note ATOM-26TJ-AML8 now quotes the real fragments verbatim (commit on current branch); (2) installed memgrep upgraded 5497043 → e5cf088 via `cargo install --path scripts/memgrep`, release 0.2.0 carries f0f760e3, `memgrep validate` clean. Both deferred items closed. Card moves to complete.
+- 2026-11-15T20:01:50+0100 — COMPLETE by main-agent@ai-maestro-janitor. zone repair only: the card was already complete (boxes ticked with evidence f0f760e3, closed 8556e32a) but sat in design/tasks/ (ZONE-MISMATCH).
