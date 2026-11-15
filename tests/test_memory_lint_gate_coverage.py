@@ -1,7 +1,7 @@
 """janitor#200: every memgrep lint CODE must map to a chore gate that can dispatch on it —
 or be explicitly, consciously tracked as orphaned.
 
-`memgrep lint` (codes registered in scripts/memgrep/src/rules_gen.rs) can emit ~47 distinct finding codes. The
+`memgrep lint` (codes registered in scripts/memgrep/src/rules_gen.rs) can emit ~48 distinct finding codes. The
 seven `*_has_work` prechecks in `memory_content_precheck.py` are what actually turn a
 finding into a dispatched agent. Before this file, the mapping between the two existed
 only in an issue-tracker table (janitor#200) that nothing checked against the source —
@@ -168,6 +168,10 @@ _CODE_COVERAGE: dict[str, str | None] = {
     "stray-display-bracket": None,
     # janitor#315: WARN-only detection of a pasted-twice section; no chore repairs it (fix=none).
     "page-duplicated-section": None,
+    # TRDD-QAF3N673 (WM-LINT-12, #358): foreign content in a link section. Report-only in phase 1:
+    # no fixer is registered and no content_has_work gate acts on it, so it is orphaned at the chore
+    # layer; the moves its message names go through the write verbs, not a scheduled chore.
+    "foreign-content-in-link-section": None,
     # TRDD-CGA3U0BN: the eight registry names that had no row. All orphaned at the chore layer,
     # each for a reason read from its rule definition (rules_gen.rs) and its emitter (memory.rs).
     # MGPERF-001/-002/-003 are PERFORMANCE telemetry about memgrep itself (a recall/lint run over
@@ -257,7 +261,9 @@ def test_classification_table_matches_the_source_exactly():
     # chore layer — it drains through step B's MEMCORP-002 ticket path instead — see its row.
     # 38 -> 39: `page-duplicated-section` (janitor#315), WARN-only, no chore — see its row.
     # 39 -> 47: the eight registry names that had no row (TRDD-CGA3U0BN), all orphaned — see rows.
-    assert len(_CODE_COVERAGE) == 47
+    # 47 -> 48: `foreign-content-in-link-section` (TRDD-QAF3N673, WM-LINT-12), WARN, report-only,
+    # classified ORPHANED at the chore layer — see its row.
+    assert len(_CODE_COVERAGE) == 48
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():

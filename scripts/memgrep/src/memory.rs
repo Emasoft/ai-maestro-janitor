@@ -1053,6 +1053,39 @@ pub(crate) struct Graph {
     pub(crate) backlinks: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
+/// Every key under which the link graph registers `n` — the lowercased file stem, its `_`→`-`
+/// normalized twin, the frontmatter `name:`/`topic:` slug and the `trdd-<id8>` alias. ONE
+/// definition: `build_graph` registers notes under these keys and the WM-LINT-12 own-scope index
+/// (`link_section_lint::OwnScope`) resolves names through the same set, so the two can never
+/// disagree about which page a name means.
+pub(crate) fn note_link_keys(n: &Note, trdd_re: &Regex) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    if let Some(stem) = n.path.file_stem().and_then(|s| s.to_str()) {
+        let stem_l = stem.to_ascii_lowercase();
+        // issue #49: also register the `_`→`-` normalized stem as a FALLBACK, so a hyphenated
+        // `[[name-slug]]` resolves to an underscore-named file that carries no frontmatter
+        // `name:`. Don't clobber a real stem.
+        let norm = stem_l.replace('_', "-");
+        keys.push(stem_l.clone());
+        if norm != stem_l {
+            keys.push(norm);
+        }
+    }
+    // issue #49: register the frontmatter `name:`/`topic:` slug — the canonical `[[name]]`
+    // wikilink target. The protocol links by the `name:` slug (often hyphenated) while the
+    // harness names files with underscores, so without this every `[[hyphen-slug]]` falsely
+    // reported BROKEN (59/94 on a real corpus). Mirrors index.rs `topic_of` so the link graph
+    // keys on the same identity as the SQLite index.
+    if let Some(slug) = &n.name {
+        keys.push(slug.clone());
+    }
+    if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
+        && let Some(c) = trdd_re.captures(name)
+    {
+        keys.push(format!("trdd-{}", c[1].to_ascii_lowercase()));
+    }
+    keys
+}
 pub(crate) fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
     let files = collect_md(paths, hidden);
     let notes: Vec<Note> = files.iter().filter_map(|p| read_note(p)).collect();
@@ -1100,31 +1133,7 @@ pub(crate) fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
         let ridx = root_of(&canon);
         home_of.insert(n.path.clone(), ridx);
 
-        let mut keys: Vec<String> = Vec::new();
-        if let Some(stem) = n.path.file_stem().and_then(|s| s.to_str()) {
-            let stem_l = stem.to_ascii_lowercase();
-            // issue #49: also register the `_`→`-` normalized stem as a FALLBACK, so a hyphenated
-            // `[[name-slug]]` resolves to an underscore-named file that carries no frontmatter
-            // `name:`. Don't clobber a real stem.
-            let norm = stem_l.replace('_', "-");
-            keys.push(stem_l.clone());
-            if norm != stem_l {
-                keys.push(norm);
-            }
-        }
-        // issue #49: register the frontmatter `name:`/`topic:` slug — the canonical `[[name]]`
-        // wikilink target. The protocol links by the `name:` slug (often hyphenated) while the
-        // harness names files with underscores, so without this every `[[hyphen-slug]]` falsely
-        // reported BROKEN (59/94 on a real corpus). Mirrors index.rs `topic_of` so the link graph
-        // keys on the same identity as the SQLite index.
-        if let Some(slug) = &n.name {
-            keys.push(slug.clone());
-        }
-        if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
-            && let Some(c) = trdd_re.captures(name)
-        {
-            keys.push(format!("trdd-{}", c[1].to_ascii_lowercase()));
-        }
+        let keys = note_link_keys(n, trdd_re);
         for key in keys {
             // First-wins (`or_insert`) is a DETERMINISTIC, lexicographic tie-break — `notes` is
             // already sorted by full path (`collect_md` sorts before `build_graph` ever sees it),
@@ -1595,7 +1604,7 @@ pub(crate) fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
 /// (WM-ATOM-07): the lint's own `mangled_atom_marker` / `unclosed_atom_marker` already anchored, so
 /// until now the two disagreed about what an atom even is — and the parser's answer is the one that
 /// reaches the index.
-fn first_block_property_marker(line: &str) -> Option<(usize, usize, String, String)> {
+pub(crate) fn first_block_property_marker(line: &str) -> Option<(usize, usize, String, String)> {
     let b = line.as_bytes();
     let mut i = 0usize;
     while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
@@ -5347,7 +5356,7 @@ fn mask_inline_code(raw: &str) -> String {
 /// lines), or a comment that opens/closes around a skipped line desyncs the state. Handles more than
 /// one comment per line. Length-preserving in bytes, like `mask_inline_code`, so byte-offset logic
 /// downstream (e.g. `scan_footnotes`'s label positions) stays valid.
-fn mask_html_comment(raw: &str, in_comment: &mut bool) -> String {
+pub(crate) fn mask_html_comment(raw: &str, in_comment: &mut bool) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
     loop {
@@ -7251,6 +7260,9 @@ fn lint_paths_pass(paths: &[PathBuf], hidden: bool, fix: bool, pass: FixPass) ->
     // blinding the check to a copy-pasted duplicate page — a defect this corpus actually carries. So
     // the mirror is simply not a lint target; the three scope roots never include it.
     let mut linted: BTreeSet<PathBuf> = BTreeSet::new();
+    // WM-LINT-12: one lazily built own-scope page index per scope root, shared by the whole run.
+    let own_roots = link_graph_roots(paths);
+    let mut own_scopes: BTreeMap<PathBuf, crate::link_section_lint::OwnScope> = BTreeMap::new();
     for path in collect_md(paths, hidden) {
         if !linted.insert(path.canonicalize().unwrap_or_else(|_| path.clone())) {
             continue;
@@ -7272,7 +7284,19 @@ fn lint_paths_pass(paths: &[PathBuf], hidden: bool, fix: bool, pass: FixPass) ->
                 .or_default()
                 .push((p.clone(), a.line));
         }
-        violations.extend(lint_page_text(&path, &text, fix));
+        // WM-LINT-12: the page's own scope root is the longest root the link graph is built over
+        // that contains it (`link_graph_roots`: a named directory, or a named file's owning scope
+        // root), else the page's owning scope root.
+        let root = own_roots
+            .iter()
+            .filter(|r| path.starts_with(r))
+            .max_by_key(|r| r.as_os_str().len())
+            .cloned()
+            .unwrap_or_else(|| owning_scope_root_pub(&path));
+        let own = own_scopes
+            .entry(root.clone())
+            .or_insert_with(|| crate::link_section_lint::OwnScope::new(root));
+        violations.extend(lint_page_text_scoped(&path, &text, fix, own));
     }
 
     // ── Check 8 — atom ids are CORPUS-unique. The one atom property no single file can decide: a
@@ -7533,6 +7557,19 @@ pub(crate) fn duplicated_section_lines(text: &str) -> Vec<usize> {
 /// `publish-globally` check below). The parameter is kept so the A2 write-gate step can make
 /// per-page fixing page-local without another signature change.
 pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
+    lint_page_text_scoped(path, text, fix, &crate::link_section_lint::OwnScope::new(owning_scope_root_pub(path)))
+}
+
+/// `lint_page_text` with the own-scope page index supplied by the caller. `lint_paths_pass` builds
+/// one `OwnScope` per scope root and shares it across the pages of a run, so the index (a walk of
+/// the root) is built at most once per root and only when a link-section bullet holds a code span
+/// (WM-LINT-12).
+pub(crate) fn lint_page_text_scoped(
+    path: &Path,
+    text: &str,
+    fix: bool,
+    own: &crate::link_section_lint::OwnScope,
+) -> Vec<Violation> {
     let _ = fix; // see doc comment — report-only today; the A2 gate owns per-page fixing.
     let p = rel(path);
     let mut violations: Vec<Violation> = Vec::new();
@@ -8076,8 +8113,11 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 msg: format!(
                     "atom `^{}` sits AT OR AFTER the page's trailing footer region (starts \
                      line {}) — a link-section lookup like `--in \"Governed by\"` misreads it \
-                     as part of that section; move it back above the footer",
+                     as part of that section; move the atom block, marker line and body, above \
+                     line {}, the earliest footer heading, keeping every `[[link]]` it sat among \
+                     as a bare bullet",
                     a.id,
+                    footer_start + 1,
                     footer_start + 1
                 ),
                 code: "atom-after-footer",
@@ -8196,6 +8236,29 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             // The missing delimiter is a page-shape convention, not a named element — empty.
             anchor: String::new(),
         });
+    }
+    // WM-LINT-12 (TRDD-F8EIVTSG D5, revised by TRDD-QAF3N673, #358): foreign content in a link
+    // section, REPORT-ONLY in this phase (no fixer is registered). The grammar and the message
+    // live in `link_section_lint.rs`; this is only the call site. Skipped when the page file is a
+    // symlink: it is a page published from another scope and is linted in the scope that owns it.
+    // The atom marker that WMATOM-009 reports above (same predicate: a trailing footer region
+    // exists and the marker is after its start) is skipped, so one defect gives one finding.
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        let layout_line = layout_boundary(text).map_or(1, |i| i + 1);
+        for f in crate::link_section_lint::foreign_lines(
+            text,
+            &|key| own.resolve(key),
+            &|marker_line| footer_trailing.is_some_and(|footer_start| marker_line > footer_start),
+        ) {
+            violations.push(Violation {
+                sev: rule_sev("foreign-content-in-link-section"),
+                path: p.clone(),
+                line: f.line,
+                msg: f.message(layout_line),
+                code: "foreign-content-in-link-section",
+                anchor: f.anchor(&p),
+            });
+        }
     }
     // Lesson-level: a body-less lesson (invisible to `find --only-notes`), a supersession missing
     // its `SUPERSEDED BODY:` (the never-delete violation), an unquoted-prose `desc:`, and the

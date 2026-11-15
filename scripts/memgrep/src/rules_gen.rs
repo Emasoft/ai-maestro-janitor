@@ -36,6 +36,7 @@ pub(crate) const RULES: &[Rule] = &[
     Rule { code: "WMLESS-010", name: "lesson-superseded-no-pointer", family: "WMLESS", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "lesson is `status:superseded` but carries no pointer to its replacement" },
     Rule { code: "WMLINK-001", name: "link-downward-cross-scope", family: "WMLINK", sev: Severity::Error, fix: Fix::None, gate_floor: false, summary: "a link points downward across memory scopes" },
     Rule { code: "WMLINK-002", name: "link-one-sided", family: "WMLINK", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "one-sided link: the target does not link back" },
+    Rule { code: "WMLINK-003", name: "foreign-content-in-link-section", family: "WMLINK", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "a link section holds content its bullet grammar makes foreign" },
     Rule { code: "WMPAGE-001", name: "page-no-ocd", family: "WMPAGE", sev: Severity::Error, fix: Fix::None, gate_floor: false, summary: "missing required frontmatter field `ocd`" },
     Rule { code: "WMPAGE-002", name: "page-no-lmd", family: "WMPAGE", sev: Severity::Error, fix: Fix::None, gate_floor: false, summary: "missing required frontmatter field `lmd`" },
     Rule { code: "WMPAGE-003", name: "page-no-description", family: "WMPAGE", sev: Severity::Error, fix: Fix::None, gate_floor: false, summary: "missing required frontmatter field `description`" },

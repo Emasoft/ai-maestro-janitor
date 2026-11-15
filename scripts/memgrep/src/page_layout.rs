@@ -248,6 +248,87 @@ pub(crate) fn superseded_insertion_line(text: &str) -> Option<usize> {
     Some(at + start)
 }
 
+
+/// Which of the three link sections a heading opens (WM-NOTE-10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkKind {
+    AppliesTo,
+    GovernedBy,
+    SeeAlso,
+}
+
+impl LinkKind {
+    /// The heading text, as the link law spells it.
+    pub(crate) fn heading(self) -> &'static str {
+        match self {
+            LinkKind::AppliesTo => "Applies to",
+            LinkKind::GovernedBy => "Governed by",
+            LinkKind::SeeAlso => "See also",
+        }
+    }
+}
+
+/// One link section of a page (WM-NOTE-10, WM-LINT-12): a heading whose text is exactly
+/// `Applies to`, `Governed by` or `See also` (case-insensitive, any level, outside fenced code),
+/// running to the next heading of any level or the end of the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LinkSection {
+    pub(crate) kind: LinkKind,
+    /// 0-based line index of the heading line in the FULL text.
+    pub(crate) heading: usize,
+    /// 0-based, EXCLUSIVE: the index of the next heading line, else the page's line count.
+    pub(crate) end: usize,
+}
+
+/// Every link section of `text`, in page order. Frontmatter-free like `layout_boundary` (a YAML
+/// comment such as `# See also` inside the frontmatter is never a heading), fence-aware, and the
+/// same heading predicate as `first_link_section_line_in_body`, so the two can never disagree
+/// about what a link section is. A heading line that is not a link heading still ENDS the section
+/// before it (WM-NOTE-10: "to the next heading of any level").
+pub(crate) fn link_sections(text: &str) -> Vec<LinkSection> {
+    let start = body_start_line(text);
+    let mut fence: Option<Fence> = None;
+    let mut out: Vec<LinkSection> = Vec::new();
+    let mut line_count = 0usize;
+    for (i, line) in text.lines().enumerate() {
+        line_count = i + 1;
+        if i < start {
+            continue;
+        }
+        if fence_step(line, &mut fence) {
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
+        let t = line.trim_start();
+        if !t.starts_with('#') {
+            continue;
+        }
+        if let Some(open) = out.last_mut()
+            && open.end == usize::MAX
+        {
+            open.end = i;
+        }
+        let low = t.to_ascii_lowercase();
+        let kind = match low.trim_start_matches('#').trim() {
+            "applies to" => Some(LinkKind::AppliesTo),
+            "governed by" => Some(LinkKind::GovernedBy),
+            "see also" => Some(LinkKind::SeeAlso),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            out.push(LinkSection { kind, heading: i, end: usize::MAX });
+        }
+    }
+    for s in &mut out {
+        if s.end == usize::MAX {
+            s.end = line_count;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,6 +518,47 @@ mod tests {
         let tight = "# p\n## Superseded\n^o [status: superseded]\nx\n";
         assert_eq!(superseded_insertion_line(tight), Some(2), "no blank to skip");
         assert_eq!(superseded_insertion_line("# p\n## Notes and lessons learned\n"), None);
+    }
+
+
+    // TRDD-QAF3N673 — `link_sections`: the link-section spans WM-LINT-12 scans.
+
+    #[test]
+    fn link_sections_spans_run_to_the_next_heading_of_any_level() {
+        let text = "# p\nbody\n## Applies to\n- [[a]]\n### sub\nx\n## Governed by\n- [[b]]\n## Notes and lessons learned\n";
+        assert_eq!(
+            link_sections(text),
+            vec![
+                LinkSection { kind: LinkKind::AppliesTo, heading: 2, end: 4 },
+                LinkSection { kind: LinkKind::GovernedBy, heading: 6, end: 8 },
+            ],
+            "the `### sub` heading ends Applies to; the Notes heading ends Governed by"
+        );
+    }
+
+    #[test]
+    fn link_sections_last_section_runs_to_the_end_of_the_page() {
+        let text = "# p\n## See also\n- [[x]]\n\n";
+        assert_eq!(link_sections(text), vec![LinkSection { kind: LinkKind::SeeAlso, heading: 1, end: 4 }]);
+    }
+
+    #[test]
+    fn link_sections_is_case_insensitive_and_level_blind() {
+        let text = "# p\n### APPLIES TO\n- [[x]]\n# see also\n- [[y]]\n";
+        let kinds: Vec<LinkKind> = link_sections(text).iter().map(|s| s.kind).collect();
+        assert_eq!(kinds, vec![LinkKind::AppliesTo, LinkKind::SeeAlso]);
+    }
+
+    #[test]
+    fn link_sections_ignores_fenced_headings_and_frontmatter_comments() {
+        let text = "---\nname: p\n# See also\n---\n# p\n```\n## Applies to\n```\nbody\n";
+        assert!(link_sections(text).is_empty());
+    }
+
+    #[test]
+    fn link_sections_none_without_a_link_heading() {
+        assert!(link_sections("# p\n## Notes and lessons learned\n").is_empty());
+        assert!(link_sections("---\nname: p\n## See also\n").is_empty(), "unclosed frontmatter has no body");
     }
 
 }

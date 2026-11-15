@@ -332,7 +332,7 @@ unattended access to your repository.
 
 ## All codes by family
 
-90 code(s) across every emitter.
+91 code(s) across every emitter.
 
 ### AICTX
 
@@ -514,6 +514,7 @@ unattended access to your repository.
 |---|---|---|---|---|
 | `WMLINK-001` | ERROR | none | memgrep | a link points downward across memory scopes |
 | `WMLINK-002` | WARN | none | memgrep | one-sided link: the target does not link back |
+| `WMLINK-003` | WARN | none | memgrep | a link section holds content its bullet grammar makes foreign |
 
 ### WMPAGE
 

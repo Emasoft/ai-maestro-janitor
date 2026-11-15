@@ -20,6 +20,7 @@ mod mem_replace;
 mod mem_split;
 mod memory;
 mod page_layout;
+mod link_section_lint;
 mod predicate;
 mod pre_write;
 mod query_dsl;

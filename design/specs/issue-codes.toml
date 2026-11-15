@@ -769,7 +769,7 @@ gate_floor = false
 emitter = "memgrep"
 summary = "atom sits at or after the page's trailing footer region"
 why = "A link-section lookup like `--in \"Governed by\"` misreads the atom as part of that section."
-fix_text = "Move the atom back above the footer."
+fix_text = "Move the atom block, marker line and body, above the page's trailing footer region, keeping every `[[link]]` it sat among as a bare bullet."
 
 [[issue]]
 code = "WMATOM-010"
@@ -1010,6 +1010,18 @@ emitter = "memgrep"
 summary = "one-sided link: the target does not link back"
 why = "THE LINK LAW: every link is bidirectional."
 fix_text = "Add the reverse link on the target page in the same edit."
+
+[[issue]]
+code = "WMLINK-003"
+name = "foreign-content-in-link-section"
+family = "WMLINK"
+severity = "WARN"
+fix = "none"
+gate_floor = false
+emitter = "memgrep"
+summary = "a link section holds content its bullet grammar makes foreign"
+why = "Every link-section lookup (`--in \"Governed by\"`) and the link law treat a link section as a list of edges, so prose, atoms, footnotes and link-less bullets in it are misread as part of the section or lost when it is rewritten (WM-LINT-12, issue 358)."
+fix_text = "Hidden link: remove the code span in place, keeping the annotation, then add the reciprocal typed link on the target. Atom block: move it above the layout boundary. Anything else: move it, through a write verb, into the atom or the lesson it belongs to. Deleting it is never the fix."
 
 [[issue]]
 code = "WMENC-001"
