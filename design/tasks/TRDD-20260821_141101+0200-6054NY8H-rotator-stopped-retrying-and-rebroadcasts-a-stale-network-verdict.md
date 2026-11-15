@@ -1,10 +1,10 @@
 ---
 trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
-column: blocked
+column: backburner
 created: 2026-08-21T14:11:01+0200
-updated: 2026-10-08T17:05:19+0200
-blocked-by: [gh:ai-maestro#152]
+updated: 2026-11-15T20:01:17+0100
+blocked-by: []
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -21,6 +21,7 @@ implementation-commits: [2d30dd7b]
 relevant-rules: []
 min-approval-requirement: none
 unblock-when: [issue:Emasoft/ai-maestro#152 closed]
+status: tasked
 ---
 
 # The rotator gave up, kept the reason, and stopped checking whether it still applies
@@ -533,6 +534,7 @@ being frozen at one value for 6 h 40 m is the whole finding, and it is invisible
 compare occurrences instead of reading the newest line.
 
 ## Approval log
+- 2026-11-15T20:01:17+0100 — column → backburner. its gh blocker is CLOSED (gh issue view, 2026-11-15), but the owner froze all rotator code work on 2026-11-05 ('you must stop any work on the rotator code too', LOCAL memory ATOM-9IVN-Z4S7, not lifted); parked until the owner lifts it, then to todo Cleared blocked-by (--clear-blocker override).
 
 ## ⏵ 2026-08-28 — mechanism RE-VERIFIED in source; the fix is a DESIGN decision, not a patch
 
