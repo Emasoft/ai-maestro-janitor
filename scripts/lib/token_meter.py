@@ -301,7 +301,20 @@ def _usage_total(usage: Mapping) -> int:
     """Total INPUT context of one assistant `usage` block: input + cache_read + cache_creation.
 
     The ONE place this sum lives, shared by `latest_context_entry` and `first_context_entry`.
+    When `usage.iterations` lists per-call blocks (written when the message contains an advisor
+    call), the live context is the LAST `type == "message"` iteration, not the top-level sum
+    (TRDD-8ZY3JU2H). `advisor_message` iterations are the advisor model's own context and are
+    never counted.
     """
+    # WHY (TRDD-8ZY3JU2H): with an advisor call the top-level fields are the SUM of every
+    # "message" iteration, so the reading roughly doubled right after an advisor call (a 240k
+    # session read ~480k, above every /clear floor). The last "message" iteration is the real
+    # current context. Without it the /clear and Stop-hook thresholds fire spuriously.
+    iterations = usage.get("iterations")
+    if isinstance(iterations, list):
+        messages = [it for it in iterations if isinstance(it, dict) and it.get("type") == "message"]
+        if messages:
+            usage = messages[-1]
     return int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
 
 

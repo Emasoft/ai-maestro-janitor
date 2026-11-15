@@ -767,5 +767,53 @@ class TestTailDamageAndBoundary(unittest.TestCase):
             self.assertEqual(u.output_tokens, 3)
 
 
+class TestAdvisorIterationsContext(unittest.TestCase):
+    """TRDD-8ZY3JU2H: with an advisor call the top-level usage is the SUM of the "message"
+    iterations, so the live context is the LAST "message" iteration, never the top-level sum."""
+
+    _ADVISOR_USAGE = {
+        "input_tokens": 4,
+        "cache_read_input_tokens": 773750,
+        "cache_creation_input_tokens": 16822,
+        "output_tokens": 10,
+        "iterations": [
+            {"type": "message", "input_tokens": 2, "cache_read_input_tokens": 380341, "cache_creation_input_tokens": 13068},
+            {"type": "advisor_message", "input_tokens": 398793, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            {"type": "message", "input_tokens": 2, "cache_read_input_tokens": 393409, "cache_creation_input_tokens": 3754},
+        ],
+    }
+
+    def test_latest_context_uses_last_message_iteration(self):
+        """The advisor example reads 397165 (last message iteration), not 790576."""
+        with TemporaryDirectory() as d:
+            p = _write(Path(d), _user("hi"), _assistant(text="a", usage=self._ADVISOR_USAGE, msg_id="a"))
+            self.assertEqual(token_meter.latest_context_size(p), 397165)
+
+    def test_only_advisor_iterations_fall_back_to_top_level_sum(self):
+        """With no "message" iteration the top-level sum is used; the advisor's own context is never counted."""
+        usage = {
+            "input_tokens": 10,
+            "cache_read_input_tokens": 100,
+            "cache_creation_input_tokens": 5,
+            "iterations": [{"type": "advisor_message", "input_tokens": 999999, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}],
+        }
+        with TemporaryDirectory() as d:
+            p = _write(Path(d), _user("hi"), _assistant(text="a", usage=usage, msg_id="a"))
+            self.assertEqual(token_meter.latest_context_size(p), 115)
+
+    def test_no_iterations_keeps_top_level_sum(self):
+        """A usage block with no `iterations` key still sums the top-level fields."""
+        usage = {"input_tokens": 10, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 5}
+        with TemporaryDirectory() as d:
+            p = _write(Path(d), _user("hi"), _assistant(text="a", usage=usage, msg_id="a"))
+            self.assertEqual(token_meter.latest_context_size(p), 115)
+
+    def test_first_context_entry_uses_last_message_iteration(self):
+        """first_context_entry on a first record with iterations reads the last message iteration."""
+        with TemporaryDirectory() as d:
+            p = _write(Path(d), _user("hi"), _assistant(text="a", usage=self._ADVISOR_USAGE, msg_id="a"))
+            self.assertEqual(token_meter.first_context_entry(p), 397165)
+
+
 if __name__ == "__main__":
     unittest.main()
