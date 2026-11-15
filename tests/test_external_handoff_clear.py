@@ -41,6 +41,22 @@ def test_last_turn_age_is_none_without_a_transcript(tmp_path):
     assert ehc._last_turn_age(_project(tmp_path), int(time.time())) is None
 
 
+def test_last_turn_age_with_an_explicit_transcript_ignores_a_newer_sibling(tmp_path, monkeypatch):
+    """TRDD-8ZY3JU2H: an explicit transcript is the clock, even when `newest_transcript` (patched)
+    names a fresher sibling that the old code would have aged instead."""
+    import cold_cache_compact
+
+    root = _project(tmp_path)
+    now = int(time.time())
+    own = _write_transcript(tmp_path / "own.jsonl", 1_000)
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 1_000)
+    _set_mtime(own, now - 3_600)
+    _set_mtime(sibling, now - 5)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
+    assert ehc._last_turn_age(root, now, transcript=own) == 3_600
+    assert ehc._last_turn_age(root, now) == 5
+
+
 # --- pending_summary_key (TRDD-QZVAEWQH) --------------------------------------
 
 
@@ -617,6 +633,62 @@ def test_decide_on_resume_fires_on_a_big_expired_own_transcript_and_names_it(tmp
     assert verdict.fire is True, verdict
     assert facts["context_tokens"] == 500_000
     assert facts["transcript"] == str(own)
+
+
+def _capture_reload_probe(monkeypatch) -> dict:
+    """Patch `ec.reload_invalidated` to record the kwargs `_decide` hands it."""
+    captured: dict = {}
+
+    def _fake(state_dir, *, now, last_turn_ts=None):
+        captured["last_turn_ts"] = last_turn_ts
+        captured["called"] = True
+        return None
+
+    monkeypatch.setattr(ec, "reload_invalidated", _fake)
+    return captured
+
+
+def test_decide_on_resume_reload_probe_clock_is_the_own_transcript_not_a_newer_sibling(
+    tmp_path, monkeypatch
+):
+    """TRDD-8ZY3JU2H: the reload probe's paid-detector `last_turn_ts` comes from the session's OWN
+    transcript on the resume lane; the fresh sibling that `newest_transcript` (patched) returns
+    would make the old code report "already re-cached" and decline the clear."""
+    import cold_cache_compact
+
+    _resume_gate_env(monkeypatch)
+    captured = _capture_reload_probe(monkeypatch)
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    now = int(time.time())
+    own = _write_transcript(tmp_path / "own.jsonl", 500_000)
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 10_000)
+    _set_mtime(own, now - 3_600)
+    _set_mtime(sibling, now - 5)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
+    ehc._decide(
+        root, sd, now, force=False, on_resume=True, session_id="s1", transcript_path=str(own)
+    )
+    assert captured.get("called") is True
+    assert captured["last_turn_ts"] == now - 3_600
+
+
+def test_decide_on_resume_without_an_own_transcript_gives_the_reload_probe_no_clock(
+    tmp_path, monkeypatch
+):
+    """TRDD-8ZY3JU2H: no own transcript on the resume lane => `last_turn_ts` is None, never the
+    age of the fresh sibling that `newest_transcript` (patched) returns."""
+    import cold_cache_compact
+
+    _resume_gate_env(monkeypatch)
+    captured = _capture_reload_probe(monkeypatch)
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    sibling = _write_transcript(tmp_path / "sibling.jsonl", 10_000)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: sibling)
+    ehc._decide(root, sd, int(time.time()), force=False, on_resume=True, session_id="s1")
+    assert captured.get("called") is True
+    assert captured["last_turn_ts"] is None
 
 
 def test_run_threads_the_transcript_path_argument_into_decide_and_the_chain(tmp_path, monkeypatch):

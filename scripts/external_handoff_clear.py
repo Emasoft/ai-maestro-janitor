@@ -294,18 +294,23 @@ def pending_summary_key(sd: Path, now: int, clear_ts: int | None = None) -> str:
     return ""
 
 
-def _last_turn_age(root: Path, now: int) -> int | None:
+def _last_turn_age(root: Path, now: int, transcript: Path | None = None) -> int | None:
     """Seconds since the last turn of ANY kind — the PROMPT-CACHE clock.
 
     Deliberately raw transcript mtime, NOT `fleet_scan.transcript_activity`'s substantive age:
     a heartbeat fire is a real API request and refreshes the cache even though it is not
     substantive work. Using the substantive age here would claim the cache had expired while
     5-minute beats were keeping it hot, and the watcher would clear a warm session for nothing.
+
+    `transcript` names the session whose clock this is (the `--on-resume` lane passes its OWN
+    transcript); omitted, the project's newest transcript is used (the daemon lane, where the
+    watcher serves the project's most recently active session).
     """
     try:
-        import cold_cache_compact  # noqa: PLC0415
+        if transcript is None:
+            import cold_cache_compact  # noqa: PLC0415
 
-        transcript = cold_cache_compact.newest_transcript(root)
+            transcript = cold_cache_compact.newest_transcript(root)
         if transcript is None:
             return None
         return max(0, now - int(transcript.stat().st_mtime))
@@ -393,7 +398,17 @@ def _decide(
     # event to trigger a SECOND clear on the next beat -- one dead prefix, two clears.
     # `last_turn_age` doubles as the reload probe's paid-detector: a transcript turn newer
     # than an ack stamp means the re-cache already happened and the event must not fire.
-    last_turn_age = _last_turn_age(root, now)
+    # TRDD-8ZY3JU2H: on the `--on-resume` lane the paid-detector clock is THIS session's own
+    # transcript (`--transcript-path`), resolved once here and reused by the resume branch below.
+    # `newest_transcript` can be a newer SIBLING session's: its turn would make the reload probe
+    # read "already re-cached" and decline a clear the hook approved for THIS session. No own
+    # transcript on that lane => age unknown (None), never a fall back to the newest. The daemon
+    # lane (not on_resume) keeps the project's newest transcript.
+    own = Path(transcript_path) if transcript_path and Path(transcript_path).is_file() else None
+    if on_resume:
+        last_turn_age = None if own is None else _last_turn_age(root, now, transcript=own)
+    else:
+        last_turn_age = _last_turn_age(root, now)
     reload_dead = (
         None
         if (active_waiting or in_cooldown)
@@ -479,7 +494,6 @@ def _decide(
         # sibling's transcript became this session's handoff). No own transcript => unknown
         # context => the gate refuses: the old fallback to `gate["context_tokens"]` measured
         # `newest` and is dropped on purpose.
-        own = Path(transcript_path) if transcript_path and Path(transcript_path).is_file() else None
         resume_context_tokens = (
             cold_cache_compact.context_tokens_for_resume(
                 own, project_dir=root, session_id=session_id, now=now
