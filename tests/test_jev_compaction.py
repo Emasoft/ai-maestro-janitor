@@ -3559,7 +3559,7 @@ def test_llm_ext_exit_3_raises_auth_error(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 @pytest.mark.parametrize("code", [4, 5])
-def test_llm_ext_exit_4_and_5_stay_plain_retryable_errors(
+def test_llm_ext_exit_4_and_5_raise_plain_jeverror(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
 ) -> None:
     """Exits 4 and 5 raise a plain JevError, neither validation nor auth, so the lane keeps retrying them."""

@@ -1261,15 +1261,16 @@ def score_items_via_llm_ext(
             msg = f"llm-ext classify filter failed: {detail}"
             # WHY (TRDD-7XDBJZCZ): the exit code decides whether a retry can ever help. Exit 1 =
             # a refusal that cannot change between attempts (refused input path, unknown profile,
-            # bad flag, bad items file; run-decision.ts:45, :172-173 PolicyError/IdError/InputError
-            # -> 1) and also an llm-ext crash via main().catch; exit 3 = key/credits. Both mapped
-            # to plain JevError were stamped "unknown" and retried every 15 s for the whole 300 s
-            # Jev budget (283 s on a real clear, 2026-11-15). Stopping at once on a crash is
-            # acceptable: the llm-ext fallback still runs. Exit 4 stays a plain (retryable)
-            # JevError ON PURPOSE: llm-ext reports the WORST code across requests
-            # (run-decision.ts:131-141, 3 > 4 > 5), so one rejected item among transient 429/503
-            # failures exits 4. On this route a context overflow (exit 4) is not split and retried
-            # as the direct path does (~line 1000). 5, 124, 130, signals: also plain JevError.
+            # bad flag, bad items file; run-decision.ts runDecision's catch: PolicyError/IdError/
+            # InputError -> 1) and also an llm-ext crash via main().catch; exit 3 = key/credits.
+            # Both mapped to plain JevError were stamped "unknown" and retried every 15 s for the
+            # whole 300 s Jev budget (283 s on a real clear, 2026-11-15). Stopping at once on a
+            # crash is acceptable: the llm-ext fallback still runs. Exit 4 stays a plain
+            # (retryable) JevError ON PURPOSE: llm-ext reports the WORST code across requests
+            # (run-decision.ts failureCode, 3 > 4 > 5), so one rejected item among transient
+            # 429/503 failures exits 4. On this route a context overflow (exit 4) is not split and
+            # retried as the direct path's _is_max_tokens_exceeded handler does. 5, 124, 130,
+            # signals: also plain JevError.
             if proc.returncode == 1:
                 raise JevValidationError(msg)
             if proc.returncode == 3:
