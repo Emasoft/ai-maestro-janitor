@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-15T19:47:48+0100
+updated: 2026-11-15T19:53:03+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,8 +20,8 @@ approval-datetime: 2026-11-03T22:46:01+0100
 blocked-by: [0Y3UW1NF, TEP6F3A3, 3GP0D06D, KADV0ZO6, AGOEWF2E]
 unblock-when: [trdd:0Y3UW1NF terminal, trdd:TEP6F3A3 terminal, trdd:3GP0D06D terminal, trdd:KADV0ZO6 terminal, trdd:AGOEWF2E terminal, decision:owner-answers-TEP6F3A3-wiring-gate, decision:hook-timeout-model-copy, decision:hook-timeout-stored-copy]
 pre-block-column: design
-blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
-blocker-holds-if: not-match:^3$
+blocker-probe: for i in 0Y3UW1NF TEP6F3A3 3GP0D06D KADV0ZO6 AGOEWF2E; do trddgrep --porcelain show $i | cut -f3; done | grep -cE '^(complete|published|live)$'
+blocker-holds-if: not-match:^5$
 ---
 
 # Wire secret-shield into hooks.json and disable jr-redact
@@ -63,6 +63,7 @@ Split out of TRDD-M1218EMH.
 - 2026-11-05 — blocked-by now also names AGOEWF2E, HF7GNHNF and J0TBHZ15, the three items the owner-decision note above waits for. The 'Read as' reading in that note was put to the owner, whose next message ('decide yourself on anything else, but decide on verified facts') did not contest it. Correction to commit f0453a7d: its message says 'until both land'; the blockers are three.
 - 2026-11-13 — TRDD-R9NLNV3W's liveness hooks module (hooks/liveness/, unwired) also needs the plugin's single modules slot; wiring must use one shared entry module registering both the shield and liveness.
 2026-11-15 added by TRDD-M1218EMH item 5 (3907ae2c, 913f1db0): wiring must also update README.md: the heading 'Secret shield (vendored, not active yet)', its anchor #secret-shield-vendored-not-active-yet in the Configuration table row for secret_shield_enabled, and the 'Not active yet' paragraph; plus the 'Not active yet.' text in the plugin.json userConfig descriptions and the PROJECT memory page secret-shield (its not-loaded atom).
+2026-11-15 blocker-probe fixed: it counted 3 ids (0Y3UW1NF, TEP6F3A3, 3GP0D06D) while blocked-by lists 5, so it read released with KADV0ZO6 and AGOEWF2E still open; it now counts all five (holds-if not-match:^5$). Also, from the advisor: the README and plugin.json say secrets are hidden before the session transcript sees them, but TRDD-5KLWOC0U leaves the stored structured toolUseResult record unverified and MCP error rows were never probed; the live probe of this card must settle both before that claim is made unconditionally.
 
 ## Done when
 
