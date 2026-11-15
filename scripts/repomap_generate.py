@@ -56,12 +56,12 @@ may run it AT ANY TIME.
 
      The old text here also claimed a mid-session rewrite "busts the context
      cache (TRDD-e247a349 §5)", and told the reader to wait for a cache-cheap
-     moment. MEASURED FALSE 2026-08-26 (TRDD-LFSWY0C6): across 307 turns that
+     moment. MEASURED NEGLIGIBLE 2026-08-26 (TRDD-LFSWY0C6): across 307 turns that
      immediately followed a CLAUDE.md Edit/Write, max cache_creation was
      65,923 tokens and the median 1,525 — versus 598,351 max across the other
-     108,303 turns. The catastrophic rewrite is real but never follows a
-     CLAUDE.md edit. Kept as a correction rather than deleted, because the
-     false claim is what made agents defer the refresh for days.
+     108,303 turns. The 598k-scale rewrite is real but never followed a CLAUDE.md edit in that sample;
+     the cache-bust on the turns right after an edit, in the same session, is negligible, and it is not why this script never runs from the heartbeat. Kept as a correction, because the
+     old claim is what made agents defer the refresh for days.
 
 Freshness is two-tier, cheapest first: the repo-change `digest=` (git HEAD +
 porcelain-status hash) is compared BEFORE any extraction; only a digest

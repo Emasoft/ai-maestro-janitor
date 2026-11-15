@@ -338,10 +338,10 @@ _WIKI_BLOCK = f"{WIKIMEM_FENCE_START} v1 digest=x generated=y\nindex\n{WIKIMEM_F
 
 
 def _conforming_claude_md() -> str:
-    """A file that GENUINELY conforms to the slim contract: both fences present, a
+    """A file that GENUINELY conforms to the slim contract (`slim_violations` reports nothing): the wikimem fence plus a leftover legacy map fence the checker deliberately ignores, a
     github URL in the narrative, and the narrative — title, one-paragraph description,
     a `## Links` URL, a `## Commands` dev-ops line — well under the byte cap. This is
-    exactly the shape of the five PERMITTED elements the 2026-08-13 pre-check found the
+    exactly the shape of the PERMITTED narrative elements of PRRD G7.3 (description, URLs, dev-ops commands); the 2026-08-13 pre-check found the
     planner wrongly proposing to migrate."""
     return (
         "# proj\n\n"

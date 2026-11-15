@@ -61,6 +61,9 @@ id_rsa*
 # Plugin runtime state (per-project, not tracked)
 .janitor/
 .rechecker/
+# Generated locally per clone by scripts/repomap_generate.py (TRDD-FADYLSQB); tools that honor
+# .gitignore but not .git/info/exclude (cspell useGitignore, one CPV file collector) must skip it.
+/PROJECT_MAP.md
 
 # Test and coverage artifacts
 .coverage
