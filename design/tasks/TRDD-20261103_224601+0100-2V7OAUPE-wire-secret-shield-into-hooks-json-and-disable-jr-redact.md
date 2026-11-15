@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-14T03:47:00+0100
+updated: 2026-11-15T19:47:48+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -62,6 +62,7 @@ Split out of TRDD-M1218EMH.
 - 2026-11-05 — Owner decision ("you must stop any work on the rotator code too. also never write or present anything in repos not belonging to Emasoft (me) unless i explicitly ask you to. measure and fix everything you said. you can file any bug you want in my Emasoft repos. but the trddgrep is now handled by the 3-pillars-task-system plugin. you can sendmessage to it, a claude instance updating the plugin it is running right now."). Read as: no upstream report of the URL-password slowdown; it is measured and fixed here (TRDD-OD5Z90YL diagnosis, TRDD-AGOEWF2E long-password miss), and jr-redact is measured before it is disabled. This card stays blocked until those land.
 - 2026-11-05 — blocked-by now also names AGOEWF2E, HF7GNHNF and J0TBHZ15, the three items the owner-decision note above waits for. The 'Read as' reading in that note was put to the owner, whose next message ('decide yourself on anything else, but decide on verified facts') did not contest it. Correction to commit f0453a7d: its message says 'until both land'; the blockers are three.
 - 2026-11-13 — TRDD-R9NLNV3W's liveness hooks module (hooks/liveness/, unwired) also needs the plugin's single modules slot; wiring must use one shared entry module registering both the shield and liveness.
+2026-11-15 added by TRDD-M1218EMH item 5 (3907ae2c, 913f1db0): wiring must also update README.md: the heading 'Secret shield (vendored, not active yet)', its anchor #secret-shield-vendored-not-active-yet in the Configuration table row for secret_shield_enabled, and the 'Not active yet' paragraph; plus the 'Not active yet.' text in the plugin.json userConfig descriptions and the PROJECT memory page secret-shield (its not-loaded atom).
 
 ## Done when
 
