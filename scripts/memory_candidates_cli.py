@@ -38,6 +38,7 @@ Read-only — it names candidates, it never edits or records refusals itself.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import memory_content_precheck  # noqa: E402
 import memory_refusals  # noqa: E402
+import memory_scopes  # noqa: E402
 
 
 def _rel(root: Path, path: Path) -> str:
@@ -223,6 +225,49 @@ def relocate_candidates(
         out.append((f"{_rel(root, p)}#{footnote}", f"lesson-uncited at :{line} — move or link"))
     return sorted(out)
 
+
+def retro_lesson_candidates(
+    root: Path, *, scope: str, now: int | None, max_bytes: int
+) -> list[tuple[str, str]]:
+    """`(page, "superseded-atom-without-superseded-by")` for every curated page
+    `memory_content_precheck.retro_lesson_page_defect` flags — the same per-page predicate
+    `retro_lesson_has_work` calls, so the scheduler's gate and this list cannot drift
+    (TRDD-S41TV0I7).
+
+    Deliberately NOT modelled on the scheduler's gate in two ways: (1) NO unchanged-corpus
+    fingerprint short-circuit — that gate suppresses a dispatch the skill already handled,
+    while this list answers "does work exist NOW" for the drain; a short-circuit here could
+    report an empty list over a corpus that still has a pointer-less atom and expire real
+    work. (2) NO refusal ledger — the chore has none (the fingerprint was its only
+    protection), so there is nothing to filter. An unreadable page is NAMED, never skipped
+    (see `repair_candidates`): returning [] on a failure to read would let the drain expire
+    a record whose work it could not measure."""
+    out: list[tuple[str, str]] = []
+    if not root.is_dir():
+        raise NotADirectoryError(root)  # the drain must not read a missing root as "no work"
+    # `_candidate_pages` (-> `memory_scopes.iter_note_files`) returns [] SILENTLY when the walk
+    # raises OSError, so an unreadable directory would look identical to a clean corpus and the
+    # drain would expire a record whose work it could not measure. Probe the walk ourselves and
+    # NAME every directory it cannot enter (a second, directory-only traversal: accepted cost,
+    # the lister offers no error channel to reuse).
+    walk_errors: list[OSError] = []
+    for _dirpath, dirnames, _filenames in os.walk(root, onerror=walk_errors.append):
+        # Prune the dirs the lister never enters (user-mem is PRIVATE and agent-invisible by
+        # design): an unreadable one is not a measurement failure, and must not pin a record.
+        dirnames[:] = [d for d in dirnames if d not in memory_scopes.EXCLUDED_DIRNAMES]
+    for err in walk_errors:
+        out.append((_rel(root, Path(str(err.filename))), "unreadable-dir"))
+    for p in memory_content_precheck._candidate_pages(root):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            out.append((_rel(root, p), "unreadable-page"))
+            continue
+        if memory_content_precheck.retro_lesson_page_defect(text):
+            out.append((_rel(root, p), "superseded-atom-without-superseded-by"))
+    return out
+
+
 def resolve_max_bytes(*, strict: bool = False) -> int:
     """The scheduler's own `split_max_bytes` knob (review 2026-08-08: the SKILL used to say
     `--max-bytes <split_max_bytes>` with no way to resolve the placeholder, so an agent could
@@ -250,7 +295,7 @@ def candidates_for(
     WHY the allow-list: `enrich` and `relocate` ask `memgrep lint` through a subprocess, and
     `memory_content_precheck` deliberately fails those toward "no candidates" when memgrep is
     missing or errors — right for the scheduler, wrong for a caller that EXPIRES work on an
-    empty answer. Those chores answer None (unknown, keep the record). The four listed ones
+    empty answer. Those chores answer None (unknown, keep the record). The five listed ones
     only read files here: no subprocess, no network. A size-knob error RAISES (strict)."""
     if intervention not in _READ_ONLY_CHORES:
         return None
@@ -265,12 +310,16 @@ _INTERVENTIONS = {
     "enrich": enrich_candidates,
     "split-topic": split_topic_candidates,
     "relocate": relocate_candidates,
+    "retro-lesson": retro_lesson_candidates,
 }
 
 # Chores whose candidate function only reads page files (verified by reading each:
-# repair/atomize/consolidate/split-topic call no subprocess, no network). `enrich` and
-# `relocate` shell out to `memgrep lint` and fail toward "empty" — see `candidates_for`.
-_READ_ONLY_CHORES = frozenset({"repair", "atomize", "consolidate", "split-topic"})
+# repair/atomize/consolidate/split-topic/retro-lesson call no subprocess, no network).
+# `enrich` and `relocate` shell out to `memgrep lint` and fail toward "empty" — see
+# `candidates_for`.
+_READ_ONLY_CHORES = frozenset(
+    {"repair", "atomize", "consolidate", "split-topic", "retro-lesson"}
+)
 
 
 def main() -> int:

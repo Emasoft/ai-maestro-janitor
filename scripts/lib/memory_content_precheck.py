@@ -1020,6 +1020,37 @@ def _props_without_quoted_values(props: str) -> str:
     return _QUOTED_PROP_VALUE_RE.sub(lambda m: '"' + " " * (len(m.group(0)) - 2) + '"', props)
 
 
+def retro_lesson_page_defect(text: str) -> bool:
+    """True iff this CURATED page `text` has an atom marker that is `status:superseded`
+    but carries NO `superseded-by:` forward pointer (the retro-lesson candidate shape).
+
+    WHY a separate function (TRDD-S41TV0I7): `retro_lesson_has_work` (the scheduler's
+    boolean gate) and the drain's candidate list (`memory_candidates_cli.
+    retro_lesson_candidates`) must judge a page by ONE predicate, or a page the scheduler
+    dispatches on could be absent from the list the drain checks — the janitor#227
+    disagreement class `repair_defect`/`atomize_defect` already exist to prevent. RAW
+    buffer notes are never candidates (coexistence discriminator). Misspelling tolerance
+    mirrors memgrep's parser (`superseeded` accepted on the status value and the pointer
+    key)."""
+    if not memory_scopes.is_curated_wiki_page(text):
+        return False  # RAW buffer note — never a retro-lesson candidate
+    for ln in text.splitlines():
+        m = memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln)
+        if not m:
+            continue
+        # Both searches run over the KEY-ONLY view: a `desc:` value is prose and may
+        # quote either token verbatim (measured — see _props_without_quoted_values).
+        # The pointer check needs it just as much as the status check: a desc reading
+        # "…set superseded-by: to the lesson id…" would otherwise mark a genuinely
+        # pointer-less atom as already converted, hiding real work instead of inventing it.
+        props = _props_without_quoted_values(m.group(2))
+        superseded = bool(_SUPERSEDED_STATUS_RE.search(props))
+        has_pointer = bool(re.search(r"supers?e+ded-by\s*:", props))
+        if superseded and not has_pointer:
+            return True
+    return False
+
+
 def retro_lesson_has_work(
     root: Path,
     *,
@@ -1057,22 +1088,10 @@ def retro_lesson_has_work(
             text = p.read_text(encoding="utf-8")
         except OSError:
             return True  # FAIL-OPEN: unreadable → not provably idle
-        if not memory_scopes.is_curated_wiki_page(text):
-            continue  # RAW buffer note — never a retro-lesson candidate
-        for ln in text.splitlines():
-            m = memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln)
-            if not m:
-                continue
-            # Both searches run over the KEY-ONLY view: a `desc:` value is prose and may
-            # quote either token verbatim (measured — see _props_without_quoted_values).
-            # The pointer check needs it just as much as the status check: a desc reading
-            # "…set superseded-by: to the lesson id…" would otherwise mark a genuinely
-            # pointer-less atom as already converted, hiding real work instead of inventing it.
-            props = _props_without_quoted_values(m.group(2))
-            superseded = bool(_SUPERSEDED_STATUS_RE.search(props))
-            has_pointer = bool(re.search(r"supers?e+ded-by\s*:", props))
-            if superseded and not has_pointer:
-                return True
+        # The per-page judgment lives in `retro_lesson_page_defect`, shared with the drain's
+        # candidate list so the two cannot drift (TRDD-S41TV0I7).
+        if retro_lesson_page_defect(text):
+            return True
     return False
 
 
