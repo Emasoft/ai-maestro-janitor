@@ -5,8 +5,8 @@
 """claudemd_slim — the slim janitor-managed CLAUDE.md CLI (TRDD-H12K9JYX).
 
 Owner directive 2026-08-02: a janitor-managed CLAUDE.md carries ONLY the concise project
-description, the repo URLs, the basic lint/build/test/publish instructions, and a
-topic-ordered index of the PROJECT-scope wikimem pages (no map: it lives in the git-excluded
+description, the repo URLs, the basic lint/build/test/publish instructions, and an
+index of the PROJECT-scope wikimem ROOT topics (no map: it lives in the git-excluded
 PROJECT_MAP.md, PRRD G7.3). This CLI is
 the MECHANICAL half of that contract; the editorial half (which narrative becomes which
 wikimem page) is the `janitor-project-cld-md-optimizer` skill.

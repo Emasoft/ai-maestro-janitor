@@ -52,58 +52,47 @@ def _corpus(root: Path) -> Path:
 
 
 def test_scan_pages_filters_and_parses(tmp_path: Path) -> None:
-    """scan_pages reads name/description/tier/wikilinks from frontmatter+body and skips
-    MEMORY.md and maintenance artifacts — the index must never list the harness stub."""
+    """scan_pages reads name/description/tier/topic from frontmatter and skips MEMORY.md and
+    maintenance artifacts — the index must never list the harness stub."""
     memdir = _corpus(tmp_path)
     (memdir / "memory-reorg-proposed.md").write_text("proposals\n", encoding="utf-8")
     pages = cs.scan_pages(memdir)
     names = [p.name for p in pages]
     assert names == ["arch-hub", "daemon-page", "orphan-page", "proj-overview"]
     hub = next(p for p in pages if p.name == "arch-hub")
-    assert hub.tier == "hub" and hub.wikilinks == ["daemon-page", "missing-page"]
+    assert hub.tier == "hub" and hub.description.startswith("architecture topics")
     assert next(p for p in pages if p.name == "proj-overview").is_overview
 
 
-def test_render_index_topic_order_and_truncation(tmp_path: Path) -> None:
-    """Overview first, hubs as topic groups with their linked pages beneath, orphans
-    under Other; descriptions truncated to the first symptom segment (the index rides
-    every turn — entries stay one line)."""
+def test_render_index_lists_root_topics_only(tmp_path: Path) -> None:
+    """WM-IDX-15: overview first, then each hub as a root topic; pages beneath a root topic
+    and unclaimed pages are NOT listed; descriptions truncated to the first symptom segment."""
     pages = cs.scan_pages(_corpus(tmp_path))
     block = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
     assert block.startswith(cs.WIKIMEM_FENCE_START)
     assert block.rstrip("\n").endswith(cs.WIKIMEM_FENCE_END)
-    body = block.splitlines()
-    ov = next(i for i, ln in enumerate(body) if "proj-overview" in ln and ln.startswith("- "))
-    hub = next(i for i, ln in enumerate(body) if ln.startswith("**arch-hub**"))
-    child = next(i for i, ln in enumerate(body) if ln.startswith("  - [daemon-page]"))
-    other = next(i for i, ln in enumerate(body) if ln.startswith("**Other topics**"))
-    orphan = next(i for i, ln in enumerate(body) if "orphan-page" in ln)
-    assert ov < hub < child < other < orphan
-    # Truncation: the hub's multi-symptom description keeps only the first segment.
-    assert "more symptoms" not in "\n".join(body)
-    # A wikilink naming no real page is silently skipped, never rendered as a dead link.
+    lines = block.splitlines()
+    ov = next(i for i, ln in enumerate(lines) if ln.startswith("- [proj-overview]"))
+    hub = next(i for i, ln in enumerate(lines) if ln.startswith("- [arch-hub]"))
+    assert ov < hub
+    assert "daemon-page" not in block and "orphan-page" not in block
+    assert "Other topics" not in block
+    assert "more symptoms" not in block
     assert "missing-page" not in block
 
 
 def test_corpus_digest_tracks_description_not_lmd(tmp_path: Path) -> None:
-    """The freshness digest mixes (name, description) — the two fields the rendered index
-    actually shows. A changed description MUST churn CLAUDE.md; an `lmd` bump alone must NOT.
-
-    `lmd` used to be in the mix and was harmless only because nothing ever bumped it
-    (janitor#265). memgrep's write verbs now stamp it on every add-atom/add-lesson/edit, so
-    keeping it would flip this digest on every atom edit — precisely the cache-bust the
-    nudge-only discipline exists to avoid."""
+    """The freshness digest follows what the index renders. A changed ROOT-topic description
+    MUST churn CLAUDE.md; an `lmd` bump alone must NOT (memgrep write verbs stamp `lmd` on every
+    edit, janitor#265); a changed description beneath a root topic must NOT either (janitor#328)."""
     memdir = _corpus(tmp_path)
     d1 = cs.corpus_digest(cs.scan_pages(memdir))
-
-    # lmd alone moves: the index renders nothing that changed, so the digest must hold.
-    _page(memdir, "daemon-page", tier="component",
-          desc="how the daemon works / when it dies", lmd="2026-08-02")
+    hub_body = "Links: [[daemon-page]] and [[missing-page]]."
+    _page(memdir, "arch-hub", tier="hub", desc="architecture topics / more symptoms", body=hub_body, lmd="2026-08-02")
     assert cs.corpus_digest(cs.scan_pages(memdir)) == d1
-
-    # The description changes: the index WOULD render differently, so the digest must move.
-    _page(memdir, "daemon-page", tier="component",
-          desc="a materially different symptom surface", lmd="2026-08-02")
+    _page(memdir, "daemon-page", tier="component", desc="a materially different symptom surface", lmd="2026-08-02")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) == d1
+    _page(memdir, "arch-hub", tier="hub", desc="a materially different root topic", body=hub_body, lmd="2026-08-02")
     assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
 
 
@@ -116,8 +105,9 @@ def test_corpus_digest_unchanged_by_description_edit_past_first_segment(tmp_path
     memdir = _corpus(tmp_path)
     d1 = cs.corpus_digest(cs.scan_pages(memdir))
 
-    _page(memdir, "daemon-page", tier="component",
-          desc="how the daemon works / when it dies / a brand new trailing symptom")
+    _page(memdir, "arch-hub", tier="hub",
+          desc="architecture topics / more symptoms / a brand new trailing symptom",
+          body="Links: [[daemon-page]] and [[missing-page]].")
     assert cs.corpus_digest(cs.scan_pages(memdir)) == d1
 
 
@@ -129,15 +119,14 @@ def test_corpus_digest_changes_on_page_rename(tmp_path: Path) -> None:
     memdir = _corpus(tmp_path)
     d1 = cs.corpus_digest(cs.scan_pages(memdir))
 
-    (memdir / "orphan-page.md").rename(memdir / "orphan-page-renamed.md")
+    (memdir / "arch-hub.md").rename(memdir / "arch-hub-renamed.md")
     assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
 
 
 def test_corpus_digest_changes_on_hub_tier_change(tmp_path: Path) -> None:
     """TRDD-Q3WSQ9M5 / janitor#298 (under-fires): a non-overview hub's `tier:` flipping to
-    `component` moves it out of the Hub topic-group section entirely (it also stops
-    exposing its `wikilinks` children), which changes the rendered body — the digest
-    must follow."""
+    `component` removes its line from the hub root-topic list (it stops being a root
+    topic), which changes the rendered body — the digest must follow."""
     memdir = _corpus(tmp_path)
     d1 = cs.corpus_digest(cs.scan_pages(memdir))
 
@@ -156,54 +145,34 @@ def test_corpus_digest_stable_across_noop_regeneration(tmp_path: Path) -> None:
     assert d1 == d2
 
 
-def test_render_index_no_topic_anywhere_is_byte_identical_to_hub_grouping(tmp_path: Path) -> None:
-    """TRDD-KI0H9C8N / janitor#299 acceptance box 1: a corpus where no page carries
-    `metadata.topic:` must render EXACTLY what the pre-change hub grouping produced —
-    calling `_render_by_hub` directly (the old code path, still reachable) and comparing
-    against `render_index`'s dispatched output proves the fallback is truly a no-op."""
+def test_render_index_without_topics_renders_hub_roots(tmp_path: Path) -> None:
+    """TRDD-KI0H9C8N / janitor#299 fallback + WM-IDX-15: a corpus where no page carries
+    `metadata.topic:` renders the overview entry then the hub root lines, and the header digest
+    is the digest of that body."""
     memdir = _corpus(tmp_path)
     pages = cs.scan_pages(memdir)
     assert all(p.topic == "" for p in pages), "fixture must carry no topic for this to test the fallback"
-    dispatched = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
-    overview = next(p for p in pages if p.is_overview)
-    hand_built_body = "\n".join(
-        [
-            "## Wikimem index (PROJECT scope) — recall by symptom, read on demand",
-            "",
-            'Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.',
-            "",
-            cs._entry(overview, ".claude/project/memory"),
-            "",
-            *cs._render_by_hub(pages, ".claude/project/memory", overview),
-        ]
-    ).rstrip("\n")
-    assert cs._render_body(pages, ".claude/project/memory") == hand_built_body
-    assert "digest=" + cs.corpus_digest(pages) in dispatched
+    rel = ".claude/project/memory"
+    roots = cs._render_hub_roots(pages, rel)
+    assert roots == [cs._entry(next(p for p in pages if p.name == "arch-hub"), rel)]
+    body = cs._render_body(pages, rel)
+    assert body.splitlines()[-len(roots):] == roots
+    assert "digest=" + cs.corpus_digest(pages) in cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
 
 
 def test_render_index_groups_by_topic_when_present(tmp_path: Path) -> None:
-    """TRDD-KI0H9C8N / janitor#299 acceptance box 2: pages carrying `metadata.topic:`
-    render under a topic heading instead of the hub grouping; an untopiced page still
-    falls under "Other topics"."""
+    """TRDD-KI0H9C8N / janitor#299 + WM-IDX-15: with `metadata.topic:` present the root topics
+    are the distinct topic values, one bare line each; hub pages, member pages and untopiced
+    pages are not listed, and the overview stays first and is never a topic of its own."""
     memdir = _corpus(tmp_path)
-    _page(memdir, "arch-hub", tier="hub", desc="architecture topics", topic="architecture",
-          body="Links: [[daemon-page]].")
+    _page(memdir, "arch-hub", tier="hub", desc="architecture topics", topic="architecture", body="Links: [[daemon-page]].")
     _page(memdir, "daemon-page", tier="component", desc="how the daemon works", topic="architecture")
-    # orphan-page and proj-overview keep no topic — orphan must land under Other topics,
-    # never lost, and the overview must never be double-listed under its own topic.
-    pages = cs.scan_pages(memdir)
-    body = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
-    lines = body.splitlines()
-    topic_heading = next(i for i, ln in enumerate(lines) if ln == "**architecture**")
-    hub_line = next(i for i, ln in enumerate(lines) if "[arch-hub]" in ln)
-    daemon_line = next(i for i, ln in enumerate(lines) if "[daemon-page]" in ln)
-    other = next(i for i, ln in enumerate(lines) if ln == "**Other topics**")
-    orphan = next(i for i, ln in enumerate(lines) if "orphan-page" in ln)
-    assert topic_heading < hub_line < daemon_line < other < orphan
-    # The old hub/wikilink grouping heading must not appear — topic mode fully replaces it.
-    assert not any(ln.startswith("**arch-hub**") for ln in lines)
-    assert lines.count("**Other topics**") == 1
-    assert lines.count("proj-overview") <= 1  # never double-listed under a topic group
+    lines = cs.render_index(cs.scan_pages(memdir), generated_iso="2026-08-02T18:00:00+0200").splitlines()
+    assert lines.count("- **architecture**") == 1
+    ov = next(i for i, ln in enumerate(lines) if ln.startswith("- [proj-overview]"))
+    assert ov < lines.index("- **architecture**")
+    assert not any("[arch-hub]" in ln or "[daemon-page]" in ln or "orphan-page" in ln for ln in lines)
+    assert "Other topics" not in "\n".join(lines)
 
 
 def test_render_index_overview_first_in_both_grouping_modes(tmp_path: Path) -> None:
@@ -318,12 +287,16 @@ def test_this_repos_rendered_wikimem_index_never_names_the_map_or_pages_an_accou
 
 
 def test_index_is_stale_tracks_corpus(tmp_path: Path) -> None:
+    """The index is stale only when a ROOT topic changed: a new page beneath a root topic leaves
+    it fresh (WM-IDX-15), a new hub page makes it stale, and no fence at all is always stale."""
     memdir = _corpus(tmp_path)
     pages = cs.scan_pages(memdir)
     idx = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
     text = f"# P\n\n{idx}"
     assert cs.index_is_stale(text, pages) is False
     _page(memdir, "new-page", tier="component", desc="fresh knowledge")
+    assert cs.index_is_stale(text, cs.scan_pages(memdir)) is False
+    _page(memdir, "new-hub", tier="hub", desc="a new root topic")
     assert cs.index_is_stale(text, cs.scan_pages(memdir)) is True
     assert cs.index_is_stale("# no fence at all\n", pages) is True
 
@@ -368,6 +341,43 @@ def test_cli_index_consecutive_runs_leave_claude_md_byte_identical(tmp_path: Pat
     time.sleep(1.1)  # `generated=` has one-second resolution
     assert _run_cli(tmp_path, "index").returncode == 0
     assert claude_md.read_bytes() == first
+
+
+def test_cli_index_ignores_edits_beneath_root_topics(tmp_path: Path) -> None:
+    """janitor#328 option (b) / WM-IDX-15: re-describing a page, or adding one, BENEATH a root
+    topic must leave CLAUDE.md byte-identical and unwritten — the tracked file goes dirty only
+    when a root topic changes. Run across a clock tick so a timestamp-only rewrite would show."""
+    memdir = _corpus(tmp_path)
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# P — https://github.com/o/r\n\nnarrative stays\n", encoding="utf-8")
+    assert _run_cli(tmp_path, "index").returncode == 0
+    first = claude_md.read_bytes()
+    _page(memdir, "daemon-page", tier="component", desc="a materially different symptom surface")
+    _page(memdir, "brand-new-page", tier="component", desc="added after the first run")
+    time.sleep(1.1)  # `generated=` has one-second resolution
+    res = _run_cli(tmp_path, "index")
+    assert res.returncode == 0 and "no write" in res.stdout, res.stdout + res.stderr
+    assert claude_md.read_bytes() == first
+
+
+def test_cli_index_rewrites_when_a_root_topic_changes(tmp_path: Path) -> None:
+    """janitor#328 option (b): the other half — a root topic (a hub page) re-described or added
+    DOES rewrite the block, exactly one fence pair stays, and the marker lines keep their shape."""
+    memdir = _corpus(tmp_path)
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# P — https://github.com/o/r\n\nnarrative stays\n", encoding="utf-8")
+    assert _run_cli(tmp_path, "index").returncode == 0
+    first = claude_md.read_text(encoding="utf-8")
+    assert "daemon-page" not in first and "orphan-page" not in first
+    _page(memdir, "arch-hub", tier="hub", desc="architecture re-described", body="Links: [[daemon-page]].")
+    _page(memdir, "new-hub", tier="hub", desc="a brand new root topic")
+    res = _run_cli(tmp_path, "index")
+    assert res.returncode == 0 and "wrote wikimem index" in res.stdout, res.stdout + res.stderr
+    after = claude_md.read_text(encoding="utf-8")
+    assert after != first
+    assert "architecture re-described" in after and "[new-hub]" in after
+    assert after.count(cs.WIKIMEM_FENCE_START) == 1 and after.count(cs.WIKIMEM_FENCE_END) == 1
+    assert "narrative stays" in after
 
 
 def test_cli_check_exit_codes(tmp_path: Path) -> None:

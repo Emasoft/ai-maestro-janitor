@@ -14,7 +14,7 @@ contains ONLY:
 2. the github repo url (and the urls of connected projects — plugins, marketplaces,
    dependencies),
 3. the basic lint/build/compile/test/publish instructions,
-4. the topic-ordered index of PROJECT-scope wikimem pages (the `JANITOR-WIKIMEM-INDEX`
+4. the index of PROJECT-scope wikimem ROOT topics (the overview, then each hub page, or each bare `metadata.topic:` label when any page carries one; the `JANITOR-WIKIMEM-INDEX`
    fence).
 
 The project map is NOT one of them (PRRD G7.3): it lives in the root, git-excluded
