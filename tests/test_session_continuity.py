@@ -154,6 +154,68 @@ def test_non_ascii_truncation_is_character_safe(tmp_path):
             value.encode("utf-8")
 
 
+def test_next_action_names_the_newest_assistant_message_open_launches_and_the_compaction_intent(tmp_path):
+    """Issue #356: the real state of a heartbeat-driven session lives after the last human message."""
+    agent_launch = {
+        "type": "tool_use", "id": "toolu_A", "name": "Agent",
+        "input": {"description": "Implement X", "run_in_background": "true", "prompt": "p"},
+    }
+    bash_launch = {
+        "type": "tool_use", "id": "toolu_B", "name": "Bash",
+        "input": {"command": "sleep 900", "run_in_background": True},
+    }
+    done_launch = {
+        "type": "tool_use", "id": "toolu_C", "name": "Bash",
+        "input": {"command": "finished-job", "run_in_background": True},
+    }
+    summary = {
+        "type": "user", "isCompactSummary": True,
+        "message": {"role": "user", "content": "This session is being continued.\nSummary:\n1. Primary Request and Intent:\n- keep draining the board\n\n2. Key Technical Concepts:\n- x\n"},
+    }
+    notice = _user("<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>toolu_C</tool-use-id>\n<status>completed</status>\n</task-notification>")
+    agent_result = {
+        "type": "user", "toolUseResult": {"agentId": "a1b2c3"},
+        "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_A", "content": "ok"}]},
+    }
+    path = _write(
+        tmp_path / "old.jsonl",
+        [
+            summary,
+            _user("go on"),
+            _assistant(_text("Old reply listing fixes that are all done.")),
+            _user("[janitor-heartbeat]\nkeep going"),
+            _assistant(agent_launch, bash_launch, done_launch),
+            agent_result,
+            notice,
+            _assistant(_text("The worker is running the full suite; commit after review.")),
+            *_heartbeat_turns(2),
+        ],
+    )
+    fields = sc.clear_fields(path)
+    action = sc.next_action(fields)
+    assert action is not None
+    assert "go on" in action, "the human quote stays (issue 338 protections)"
+    assert "The worker is running the full suite" in action
+    assert "Implement X" in action and "agentId a1b2c3" in action and "sleep 900" in action
+    assert "finished-job" not in action, "a launch with a completion notice is not open"
+    assert "keep draining the board" in action
+    assert "janitor heartbeat" not in action
+    assert action.index("A previous session") < action.index("Your most recent message"), "the #338 framing must precede any quoted message"
+
+
+def test_next_action_extra_context_is_capped(tmp_path):
+    """Issue #356: the extra sentences are bounded because next_action is never trimmed by the handoff budget."""
+    big = "x" * 5000
+    launches = [{"type": "tool_use", "id": f"toolu_{i}", "name": "Bash", "input": {"command": big, "run_in_background": True}} for i in range(8)]
+    summary = {
+        "type": "user", "isCompactSummary": True,
+        "message": {"role": "user", "content": "Summary:\n1. Primary Request and Intent:\n" + big + "\n\n2. Key Technical Concepts:\n- x\n"},
+    }
+    path = _write(tmp_path / "old.jsonl", [summary, _user("go on"), _assistant(*launches), _assistant(_text(big)), *_heartbeat_turns(2)])
+    fields = sc.clear_fields(path)
+    assert len(sc._extra_context(fields)) < 1600
+
+
 def test_goal_is_the_last_unmet_goal_status(tmp_path):
     """A later met:true goal_status clears the goal; an unmet one is reported."""
     unmet = {"type": "attachment", "attachment": {"type": "goal_status", "met": False, "condition": "ship C2"}}

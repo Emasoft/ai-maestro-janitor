@@ -166,6 +166,89 @@ def _open_tasks(transcript_path: str) -> list[str]:
     return [_clean(s, TASK_SUBJECT_MAX_CHARS) for _i, s in rows[:OPEN_TASKS_MAX]]
 
 
+LATEST_ASSISTANT_MAX_CHARS = 350
+COMPACT_INTENT_MAX_CHARS = 300
+BACKGROUND_LAUNCHES_MAX = 6
+BACKGROUND_LAUNCHES_MAX_CHARS = 350
+#: A quiet heartbeat reply ("janitor heartbeat") is not the session's latest real message.
+_QUIET_REPLY_PREFIX = "janitor heartbeat"
+_QUIET_REPLY_MAX_CHARS = 300
+_COMPACT_INTENT_HEADING_RE = re.compile(r"^1\.\s*Primary Request and Intent:?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_COMPACT_NEXT_HEADING_RE = re.compile(r"^2\.\s+\S", re.MULTILINE)
+_TOOL_USE_ID_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>")
+
+
+def _is_quiet_reply(text: str) -> bool:
+    """True for the fixed reply of a quiet heartbeat fire."""
+    stripped = text.strip()
+    return len(stripped) <= _QUIET_REPLY_MAX_CHARS and stripped.lower().startswith(_QUIET_REPLY_PREFIX)
+
+
+def _entry_text(entry: dict[str, Any]) -> str:
+    """All text of a record's message: the string content, or its text blocks joined by newlines."""
+    content = entry.get("message", {}).get("content")
+    if isinstance(content, str):
+        return content
+    return "\n".join(
+        str(b.get("text", "")) for b in _blocks(entry) if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
+def _compact_intent(entry: dict[str, Any]) -> str:
+    """The "1. Primary Request and Intent" section of a harness compaction-summary record, or "".
+
+    Shape verified on a real transcript: a `user` record with `isCompactSummary: true` whose text holds
+    numbered headings ("1. Primary Request and Intent:", "2. Key Technical Concepts:", ...). The section
+    ends at the next "2." heading at column 0.
+    """
+    if entry.get("type") != "user" or not entry.get("isCompactSummary"):
+        return ""
+    text = _entry_text(entry)
+    head = _COMPACT_INTENT_HEADING_RE.search(text)
+    if head is None:
+        return ""
+    body = text[head.end() :]
+    nxt = _COMPACT_NEXT_HEADING_RE.search(body)
+    return (body[: nxt.start()] if nxt else body).strip()
+
+
+def _is_background_launch(block: dict[str, Any]) -> bool:
+    """True for an Agent or Bash tool_use started with run_in_background (boolean true on Bash, the
+    string "true" on Agent in real transcripts)."""
+    if block.get("type") != "tool_use" or block.get("name") not in ("Agent", "Bash"):
+        return False
+    inp = block.get("input")
+    flag = inp.get("run_in_background") if isinstance(inp, dict) else None
+    return flag is True or (isinstance(flag, str) and flag.strip().lower() == "true")
+
+
+def _track_background(
+    entry: dict[str, Any], launches: dict[str, str], ended: set[str], agent_ids: dict[str, str]
+) -> None:
+    """Fold one record into the background-launch ledger (issue #356).
+
+    A launch is the tool_use id; it ends when a `<task-notification>` user record carries that id in
+    `<tool-use-id>` (verified on real transcripts for both Agent and Bash launches). An Agent launch
+    that ends its turn while its own background command still runs sends NO notification, so it stays
+    open, which is exactly the case the pending-agents manifest loses.
+    """
+    kind = entry.get("type")
+    if kind == "assistant" and not entry.get("isSidechain"):
+        for block in _blocks(entry):
+            if isinstance(block, dict) and _is_background_launch(block) and isinstance(block.get("id"), str):
+                what = str(block["input"].get("description") or block["input"].get("command") or "").strip()
+                label = "agent" if block.get("name") == "Agent" else "background command"
+                launches[block["id"]] = f"{label} «{_clean(what, 80)}»"
+    elif kind == "user":
+        text = _entry_text(entry)
+        if "<task-notification>" in text:
+            ended.update(_TOOL_USE_ID_RE.findall(text))
+        result = entry.get("toolUseResult")
+        if isinstance(result, dict) and isinstance(result.get("agentId"), str):
+            for block in _blocks(entry):
+                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("tool_use_id"), str):
+                    agent_ids[block["tool_use_id"]] = _clean(result["agentId"], 40)
+
 
 def carry_task_dir(old_session_id: str, new_session_id: str) -> int:
     """Copy the cleared session task files into the new session task dir; returns files copied.
@@ -332,6 +415,11 @@ def clear_fields(
     """
     last_user = reply = goal_cond = plan = ""
     humans: list[tuple[str, str]] = []
+    launches: dict[str, str] = {}  # background tool_use id -> label, in launch order
+    ended: set[str] = set()  # tool_use ids a <task-notification> reported finished
+    agent_ids: dict[str, str] = {}  # tool_use id -> agentId (Agent launches only)
+    latest_assistant: tuple[str, str] = ("", "")  # newest real assistant text, its timestamp
+    compact_intent = ""
     goal_met = True
     turn_open = False
     try:
@@ -347,6 +435,12 @@ def clear_fields(
                 if isinstance(att, dict) and att.get("type") == "goal_status":
                     goal_met, goal_cond = att.get("met") is not False, str(att.get("condition") or "")
                 plan = _plan_path(entry) or plan
+                compact_intent = _compact_intent(entry) or compact_intent
+                _track_background(entry, launches, ended, agent_ids)
+                if entry.get("type") == "assistant":
+                    real_texts = [t for t in _assistant_texts(entry) if not _is_quiet_reply(t)]
+                    if real_texts:
+                        latest_assistant = (real_texts[-1], str(entry.get("timestamp") or ""))
                 if _is_goal_clear(entry):
                     goal_met = True
                 if entry.get("type") == "user":
@@ -369,6 +463,16 @@ def clear_fields(
         "goal": "" if goal_met else _clean(goal_cond, goal_max),
         "plan_file": state.sanitize_for_drift_line(plan) if plan_ok else "",
         "open_tasks": _open_tasks(transcript_path),
+        "latest_assistant": {
+            "text": _clean(latest_assistant[0], LATEST_ASSISTANT_MAX_CHARS, keep_end=True),
+            "ts": latest_assistant[1],
+        },
+        "compact_intent": _clean(compact_intent, COMPACT_INTENT_MAX_CHARS),
+        "background_launches": [
+            f"{label} (agentId {agent_ids[tid]})" if tid in agent_ids else label
+            for tid, label in launches.items()
+            if tid not in ended
+        ][-BACKGROUND_LAUNCHES_MAX:],
     }
     if state_dir is not None:
         _merge_owner_messages(fields, humans, Path(transcript_path).stem, state_dir, new_session_id)
@@ -419,6 +523,41 @@ def _is_heartbeat_prompt(entry: dict[str, Any]) -> bool:
     return text.startswith(transcript_roles.HEARTBEAT_PREFIX)
 
 
+def _extra_context(fields: dict[str, Any]) -> str:
+    """Sentences naming what the cleared session was doing beyond its last human exchange (issue #356).
+
+    WHY: a keep-going session runs for hours on heartbeat prompts after the last human message, so
+    the human-keyed reply quote can be many hours stale (4.5 h in #356, listing finished fixes) and
+    says nothing of the worker still running. All of it is DATA about the previous session.
+    WHY the caps: `next_action` is never trimmed by the handoff size budget (only cards, commits and
+    findings shed), so each part is capped here: at most about 1.4 KB in total.
+    """
+    parts: list[str] = []
+    latest = fields.get("latest_assistant") or {}
+    text = str(latest.get("text") or "")
+    if text and text != str(fields.get("own_reply") or ""):
+        parts.append(
+            f" Your most recent message, {age_words(str(latest.get('ts') or ''))}, was «{text}»; "
+            "it is newer than the reply above."
+        )
+    launches = fields.get("background_launches") or []
+    if launches:
+        parts.append(
+            " Background work was still open when the session was cleared and its completion notices "
+            "can no longer reach you, so check it before starting anything new (an agent with an agentId "
+            "can be resumed with SendMessage): "
+            + _clean("; ".join(launches), BACKGROUND_LAUNCHES_MAX_CHARS)
+            + "."
+        )
+    intent = str(fields.get("compact_intent") or "")
+    if intent:
+        parts.append(
+            " The harness compaction summary of the cleared session recorded this primary request "
+            f"and intent: «{intent}»."
+        )
+    return "".join(parts)
+
+
 def next_action(fields: dict[str, Any]) -> str | None:
     """The NEXT ACTION sentence, or None when there is no human message to quote."""
     if not fields.get("last_user"):
@@ -466,10 +605,13 @@ def next_action(fields: dict[str, Any]) -> str | None:
             "on the answer. If no task was in flight, or your question asked what to work on, ask "
             "it again and wait."
         )
+    # WHY the extra context comes LAST (#338, #356): it may quote the previous session's own "nothing
+    # to resume", so the sentence that frames such a statement as opinion must come first; placed
+    # before it, the quote read as the current state, the failure #338 guards against.
     return (
         head + body + " A previous session's statement that there is nothing to resume is that "
         "session's opinion, not a fact about the board. If you still decline to work, your reply "
-        "must state the open-board counts by column."
+        "must state the open-board counts by column." + _extra_context(fields)
     )
 
 

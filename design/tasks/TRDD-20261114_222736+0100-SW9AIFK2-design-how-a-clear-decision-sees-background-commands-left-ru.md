@@ -4,7 +4,7 @@ title: Design how a clear decision sees background commands left running by an e
 column: design
 status: tasked
 created: 2026-11-14T22:27:36+0100
-updated: 2026-11-14T22:27:36+0100
+updated: 2026-11-15T21:24:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -25,6 +25,7 @@ approval-datetime: 2026-11-14T22:27:36+0100
 
 - NEXT ACTION: DESIGN CARD, nothing to build yet. (1) Fetch the discriminating evidence named below (subagent-stop log and pending-agents history around the 19:11 incident, plus 2-3 real transcripts to sample the record shapes). (2) Consult the Fable advisor (fable-advisor:advisor; run agentlenspro model-headroom fable -q first): touches 3+ files and decides what "live work" means for every clear decision. (3) Write the chosen design into this card, get it reviewed, then move to todo.
 - Status: not started. Parent work: TRDD-V8GWJVFN; GitHub issue 356. Related: archived TRDD-R3YEXX4L (a command that outlives its tool timeout keeps running unwatched), TRDD-C9CO0I7L, TRDD-Q4T4PQ4J.
+2026-11-15 DEFERRED clear-chain Step 7a (scripts/hooks/on-stop-token-meter.py _maybe_clear: defer a below-ceiling clear while background launches or a handoff compose are open). Reason: it adds a transcript-tail read of up to 16 MiB to every Stop once context is past the clear point and below the ceiling, while the clear it would defer never spawns, because auto clear is off (owner, 2026-11-03). Steps 5, 6, 7b (clear_trigger.py, the manual lanes) and 8 are planned separately; 7b gets no test of its own, because the plan's Step 7 test drives 7a. The verbatim code is in the gitignored plan reports_dev/fanout-research/20261115_213500+0100-clear-chain-plan.md, Step 7 (snippet g1_meter.txt); re-apply 7a when the owner turns auto_clear_enabled on.
 
 ## Problem (GitHub issue 356)
 
