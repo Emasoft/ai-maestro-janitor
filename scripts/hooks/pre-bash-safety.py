@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""PreToolUse hook — bash-exfil, sensitive-write, and outbound-publication blocker.
+"""PreToolUse hook — bash-exfil, sensitive-write, outbound-publication and environment-dump blocker.
 
 OPT-IN by default (set `CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED=true`
 to activate). When active, the hook fires on every `Bash` tool call and
@@ -35,6 +35,12 @@ regex on the command string cannot:
 Per-class exit contracts mirror pre-tool-pkg-guard.py: deny by default,
 ask-mode when CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ALLOW_OVERRIDE=true.
 
+Class E (environment dump, janitor issue #354) — a command that PRINTS a process environment:
+    `ps eww -p 4242 > out.txt`, `env`, `printenv`, `cat /proc/4242/environ`, `pm2 env 0`
+    The text lands in a file or in the conversation, and both are stored in a transcript on
+    disk. Denied unless the next stage of the same pipeline reduces it to a count (`wc`,
+    `grep -c`) or to names (`cut -d= -f1`). The logic lives in scripts/lib/env_dump_guard.py.
+
 Empty / no-op / informational commands pass through silently.
 """
 
@@ -44,6 +50,16 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+# BOTH entries are needed (memory page janitor-hooks-two-import-conventions): `from lib import ...` resolves
+# through scripts/, and a lib module bare-imports its siblings (env_dump_guard imports secret_names), which
+# resolves only with scripts/lib/ on the path too. Dropping the second line kills the hook at import.
+_SCRIPTS = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_SCRIPTS))
+sys.path.insert(0, str(_SCRIPTS / "lib"))
+
+from lib import env_dump_guard  # noqa: E402
 
 # Sensitive source patterns — paths/env vars that an attacker would
 # want to read out of the workstation.
@@ -409,6 +425,25 @@ def check_foreign_repo_publish(command: str) -> str | None:
     )
 
 
+# The helper the deny message points at: it reads one process's environment in memory and hides every value
+# except the names the caller allows (and never shows a secret-named one).
+_ENV_HELPER = _SCRIPTS / "janitor_env.py"
+
+
+def check_environment_dump_command(command: str) -> str | None:
+    """Deny a command that prints a process environment unless the next pipeline stage reduces it to a count
+    or to names (janitor issue #354). The printed text lands in a file or in the conversation, and both are
+    stored in a transcript on disk. The reason names the three ways to get what the caller legitimately needs."""
+    reason = env_dump_guard.check_environment_dump(command)
+    if reason is None:
+        return None
+    return (
+        f"{reason}. A printed environment ends up in a file or in the conversation, and both are stored on disk. "
+        "Count it (`env | wc -l`), list its names (`env | cut -d= -f1`), or read chosen variables of one process with "
+        f"`uv run {_ENV_HELPER} --pid <PID> --allow 'NAME*'` (the value of a secret-named variable stays hidden)."
+    )
+
+
 def main() -> int:
     if not _is_truthy_env(
         "CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED", False,
@@ -431,6 +466,7 @@ def main() -> int:
         or check_sensitive_write(cmd)
         or check_outbound_publication(cmd)
         or check_foreign_repo_publish(cmd)
+        or check_environment_dump_command(cmd)
     )
     if reason is None:
         return 0  # silent allow

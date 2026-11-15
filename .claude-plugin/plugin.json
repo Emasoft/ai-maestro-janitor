@@ -740,7 +740,7 @@
     },
     "pre_bash_safety_enabled": {
       "title": "Pre-Bash-Safety Hook Enabled (OPT-IN)",
-      "description": "When true, the `pre-bash-safety` PreToolUse hook fires on every Bash tool call and DENIES (or asks, with override) commands matching the two compositional-attack classes the static regex tier cannot catch: (1) source+sink exfil chains where `cat ~/.ssh/id_rsa` is piped/chained into `curl -X POST` / `nc` / a known exfil sink; (2) surgical writes to sensitive paths (.git/hooks/*, ~/.ssh/authorized_keys, ~/.aws/credentials, .github/workflows/*.yml). OPT-IN by default (false) because some legitimate workflows touch these paths; turn it on once you've audited your repo's normal shell usage.",
+      "description": "When true, the `pre-bash-safety` PreToolUse hook fires on every Bash tool call and DENIES (or asks, with override) commands matching attack shapes the static regex tier cannot catch, among them: (1) source+sink exfil chains where `cat ~/.ssh/id_rsa` is piped/chained into `curl -X POST` / `nc` / a known exfil sink; (2) surgical writes to sensitive paths (.git/hooks/*, ~/.ssh/authorized_keys, ~/.aws/credentials, .github/workflows/*.yml); (3) commands that print a process environment (`ps eww -p N > file`, `env`, `printenv`, `cat /proc/N/environ`, `pm2 env`) unless the next pipeline stage reduces the output to a count or to variable names. OPT-IN by default (false) because some legitimate workflows touch these paths; turn it on once you've audited your repo's normal shell usage. While it is false, none of these checks is enforced.",
       "type": "boolean",
       "default": false,
       "sensitive": false
