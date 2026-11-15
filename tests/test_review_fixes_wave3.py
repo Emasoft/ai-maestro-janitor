@@ -66,7 +66,7 @@ def test_post_compact_resume_preserves_id_case() -> None:
 def test_map_drift_detector_confirms_with_structure_hash() -> None:
     """A digest mismatch alone must not nudge — the structure probe gates it."""
     text = (_ROOT / "scripts" / "detectors" / "project-map-drift.py").read_text(encoding="utf-8")
-    assert "structure_hash(maps)" in text
+    assert "current_map_sha(root, header)" in text  # the shared probe, hashed WITH the coverage note (TRDD-6HFOB5S4)
     assert "project-map-fresh-at.digest" in text  # per-digest verdict cache
 
 

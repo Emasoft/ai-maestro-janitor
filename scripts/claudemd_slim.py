@@ -5,8 +5,9 @@
 """claudemd_slim — the slim janitor-managed CLAUDE.md CLI (TRDD-H12K9JYX).
 
 Owner directive 2026-08-02: a janitor-managed CLAUDE.md carries ONLY the concise project
-description, the repo URLs, the basic lint/build/test/publish instructions, the janitor
-project map, and a topic-ordered index of the PROJECT-scope wikimem pages. This CLI is
+description, the repo URLs, the basic lint/build/test/publish instructions, and a
+topic-ordered index of the PROJECT-scope wikimem pages (no map: it lives in the git-excluded
+PROJECT_MAP.md, PRRD G7.3). This CLI is
 the MECHANICAL half of that contract; the editorial half (which narrative becomes which
 wikimem page) is the `janitor-project-cld-md-optimizer` skill.
 
@@ -91,8 +92,9 @@ def _verified_index_candidate(current: str, block: str) -> str:
 
 
 def _splice_index(claude_md: Path, block: str) -> bool:
-    """The lost-update write loop, mirroring rg.splice_with_verify for the index fence
-    (same signature check + settle-delay torn-read handling; see the long notes there)."""
+    """The lost-update write loop for the index fence, mirroring the signature re-check and
+    retry loop of rg.strip_legacy_fence (see the long notes there). Unlike that strip, this
+    splice-in ALSO needs the settle-delay torn-read guard below."""
     for attempt in range(rg._SPLICE_ATTEMPTS):
         if attempt:
             time.sleep(rg._SPLICE_SETTLE_S)
@@ -146,10 +148,7 @@ def cmd_check(root: Path) -> int:
         print("claudemd-slim: no CLAUDE.md")
         return 3
     text = claude_md.read_text(encoding="utf-8")
-    # Only demand the project-map fence from a project that opted IN to the auto map —
-    # see `slim_violations(require_map=...)`. Opting out is a supported, deliberate state.
-    opted_in = (root / ".janitor" / "state" / "repomap-opt-in.flag").is_file()
-    problems = slim_violations(text, require_map=opted_in)
+    problems = slim_violations(text)
     if index_is_stale(text, scan_pages(_memdir(root))):
         problems.append("wikimem index is STALE vs the corpus (run scripts/claudemd_slim.py index)")
     if not problems:
@@ -216,7 +215,9 @@ def _project_corpus(root: Path) -> list[str]:
 
 
 def _apply_with_verify(claude_md: Path, block_texts: list[str], corpus: list[str]) -> cma.ApplyResult:
-    """The anti-corruption write for a REMOVAL, mirroring rg.splice_with_verify.
+    """The anti-corruption write for a REMOVAL, mirroring the signature re-check and retry
+    loop of rg.strip_legacy_fence (see the long notes there), plus the same torn-read settle
+    as `_splice_index`.
 
     The candidate is recomputed from the file's CURRENT text on every attempt — never
     computed once and written later — so a human edit landing mid-apply is respected rather

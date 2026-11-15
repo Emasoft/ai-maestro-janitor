@@ -615,44 +615,124 @@ def test_discovery_follows_the_registry_not_a_hardcoded_extension():
             del mod.EXTRACTORS[".fake"]
 
 
-def test_detector_nudges_only_when_opted_in_and_stale():
-    """project-map-drift (still reading the legacy CLAUDE.md fence until its own rewrite): silent without the flag; silent when fresh; ONE deduped nudge when the digest moved — and it NEVER modifies CLAUDE.md."""
+def _run_detector(root: Path) -> str:
+    """Run the real project-map-drift detector against `root`; its stdout is the nudge text."""
     detector = _PROJECT_ROOT / "scripts" / "detectors" / "project-map-drift.py"
+    res = subprocess.run(
+        [sys.executable, str(detector)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)},
+        cwd=root,
+    )
+    assert res.returncode == 0, res.stderr
+    return res.stdout
 
-    def run_detector(root: Path) -> str:
-        env = dict(os.environ)
-        env["CLAUDE_PROJECT_DIR"] = str(root)
-        res = subprocess.run(
-            [sys.executable, str(detector)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=env,
-            cwd=root,
-        )
-        assert res.returncode == 0, res.stderr
-        return res.stdout
 
+def _opt_in(root: Path) -> None:
+    flag_dir = root / ".janitor" / "state"
+    flag_dir.mkdir(parents=True, exist_ok=True)
+    (flag_dir / "repomap-opt-in.flag").write_text("on")
+
+
+def test_detector_nudges_only_when_opted_in_and_stale():
+    """project-map-drift reads PROJECT_MAP.md: silent without the flag; silent when fresh; ONE deduped STALE nudge when the structure changed — and it NEVER writes CLAUDE.md or the map."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
-        mod = _load_module()
-        # the generator no longer writes the fence, so plant the legacy one the detector reads
-        block = render_block(mod.extract_all(root, []), generated_iso="2026-01-01T00:00:00+0000", digest=mod.repo_digest(root))
-        (root / "CLAUDE.md").write_text(insert_map_block(_NARRATIVE, block))
-        assert run_detector(root) == ""  # no opt-in flag -> silent
+        assert _run(root)[0] == 0
+        assert _run_detector(root) == ""  # no opt-in flag -> silent
 
-        flag_dir = root / ".janitor" / "state"
-        flag_dir.mkdir(parents=True, exist_ok=True)
-        (flag_dir / "repomap-opt-in.flag").write_text("on")
-        assert run_detector(root) == ""  # fresh -> silent
+        _opt_in(root)
+        assert _run_detector(root) == ""  # fresh -> silent
 
-        (root / "pkg" / "alpha.py").write_text("# changed\n")  # dirty -> digest moves
-        before = (root / "CLAUDE.md").read_text()
-        out = run_detector(root)
-        assert "[project-map-drift]" in out and "STALE" in out
-        assert (root / "CLAUDE.md").read_text() == before, "detector must never write"
-        assert run_detector(root) == ""  # deduped on repeat
+        (root / "pkg" / "alpha.py").write_text("def changed_fn() -> None:\n    pass\n")  # structure changes
+        claude_before = (root / "CLAUDE.md").read_text()
+        map_before = (root / "PROJECT_MAP.md").read_text()
+        out = _run_detector(root)
+        assert "[project-map-drift]" in out and "PROJECT_MAP.md is STALE" in out
+        assert "CLAUDE.md project map" not in out
+        assert (root / "CLAUDE.md").read_text() == claude_before, "detector must never write"
+        assert (root / "PROJECT_MAP.md").read_text() == map_before, "detector must never write"
+        assert _run_detector(root) == ""  # deduped on repeat
+
+
+def test_detector_stays_silent_on_a_comment_only_change_when_the_map_has_a_coverage_note():
+    """TRDD-6HFOB5S4: the writer hashes the map WITH the coverage note, so a detector that hashed without it never matched and nudged STALE forever on a TS-heavy repo; a real structure change must still nudge."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_ts_heavy_project(root)
+        assert _run(root)[0] == 0
+        assert "Python-only extractor" in (root / "PROJECT_MAP.md").read_text(), "the fixture must carry a coverage note or this proves nothing"
+        _opt_in(root)
+        assert _run_detector(root) == ""  # fresh
+
+        helper = root / "scripts" / "helper.py"
+        helper.write_text(helper.read_text() + "\n# comment only\n")
+        assert _run_detector(root) == "", "structure is unchanged, so no STALE nudge may fire"
+
+        # Commit first: the digest hashes `git status --porcelain`, whose " M" line does not change
+        # when an already-dirty file is edited again, so a second edit would not move the digest.
+        _git(root, "commit", "-qam", "comment only")
+        assert _run_detector(root) == ""
+        helper.write_text(helper.read_text() + "\n\ndef another_fn() -> None:\n    pass\n")
+        assert "PROJECT_MAP.md is STALE" in _run_detector(root)
+
+
+def test_detector_nudges_once_when_an_opted_in_project_has_no_map():
+    """Opted in but PROJECT_MAP.md absent -> ONE deduped 'missing' nudge; opted out -> silent."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        assert _run_detector(root) == ""  # not opted in
+        _opt_in(root)
+        out = _run_detector(root)
+        assert "PROJECT_MAP.md is missing" in out and "repomap_generate.py" in out
+        assert _run_detector(root) == ""  # deduped
+        assert not (root / "PROJECT_MAP.md").exists(), "detector must never write"
+        # A condition that cleared and came back is a NEW episode, not a latched key.
+        assert _run(root)[0] == 0
+        assert _run_detector(root) == ""  # map present -> clear (re-arms the key)
+        (root / "PROJECT_MAP.md").unlink()
+        assert "PROJECT_MAP.md is missing" in _run_detector(root)
+
+
+def test_detector_flags_a_leftover_legacy_fence_even_without_the_opt_in_flag():
+    """A legacy REPO-MAP fence in CLAUDE.md is dead weight whether or not the project opted in: ONE deduped nudge naming the generator, which strips it; the detector itself never writes."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        text = _with_legacy_fence(root)
+        out = _run_detector(root)
+        assert "legacy REPO-MAP block" in out and "strips the fence once" in out
+        assert (root / "CLAUDE.md").read_text() == text, "detector must never write"
+        assert _run_detector(root) == ""  # deduped
+        assert _run(root)[0] == 0  # the generator strips it...
+        assert _FENCE_START not in (root / "CLAUDE.md").read_text()
+        assert "legacy REPO-MAP block" not in _run_detector(root)  # clear (re-arms the key)
+        _with_legacy_fence(root)  # e.g. an older plugin on another machine writes it back
+        assert "legacy REPO-MAP block" in _run_detector(root)
+        assert "side effect" in out, "the nudge must say the generator also writes the map"
+
+
+def test_detector_flags_a_claude_md_that_names_the_map_only_when_opted_in():
+    """CLAUDE.md has no map element: a mention of PROJECT_MAP nudges once for an opted-in project."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        assert _run(root)[0] == 0
+        (root / "CLAUDE.md").write_text(_NARRATIVE + "\nSee PROJECT_MAP.md for the code map.\n")
+        assert _run_detector(root) == ""  # not opted in -> the map half is off
+        _opt_in(root)
+        out = _run_detector(root)
+        assert "CLAUDE.md names PROJECT_MAP" in out
+        assert _run_detector(root) == ""  # deduped
+        # The env-var name merely CONTAINS the token; it is not a mention, and fixing the file re-arms.
+        (root / "CLAUDE.md").write_text(_NARRATIVE + "\nTune `CLAUDE_PLUGIN_OPTION_PROJECT_MAP_DRIFT_INTERVAL`.\n")
+        assert _run_detector(root) == ""
+        (root / "CLAUDE.md").write_text(_NARRATIVE + "\nSee PROJECT_MAP.md again.\n")
+        assert "CLAUDE.md names PROJECT_MAP" in _run_detector(root)
 
 
 @pytest.mark.parametrize(

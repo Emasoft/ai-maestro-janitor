@@ -138,7 +138,7 @@ _EXCLUDE_DIRS = frozenset(
 )
 
 # The generated map file, in the project root (TRDD-FADYLSQB).
-_MAP_NAME = "PROJECT_MAP.md"
+MAP_NAME = "PROJECT_MAP.md"
 
 # Lost-update guard: how many read→strip→verify→replace attempts before the
 # generator gives up (someone is actively editing CLAUDE.md — let them win).
@@ -547,7 +547,7 @@ def _check_ignored(root: Path) -> bool | None:
     None when `root` is not in a git work tree."""
     if _git(root, "rev-parse", "--show-prefix") is None:
         return None
-    res = _git_run(root, "check-ignore", "-q", "--", _MAP_NAME)
+    res = _git_run(root, "check-ignore", "-q", "--", MAP_NAME)
     return res is not None and res.returncode == 0
 
 
@@ -564,7 +564,7 @@ def ensure_excluded(root: Path) -> str | None:
     prefix = _git(root, "rev-parse", "--show-prefix")
     if prefix is None:
         return None
-    tracked = _git_run(root, "ls-files", "--error-unmatch", "--", _MAP_NAME)
+    tracked = _git_run(root, "ls-files", "--error-unmatch", "--", MAP_NAME)
     if tracked is None:
         return "repomap: git could not be run to check whether PROJECT_MAP.md is tracked"
     if tracked.returncode not in (0, 1):
@@ -583,7 +583,7 @@ def ensure_excluded(root: Path) -> str | None:
     exclude.parent.mkdir(parents=True, exist_ok=True)
     existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
     with exclude.open("a", encoding="utf-8") as fh:
-        fh.write(("\n" if existing and not existing.endswith("\n") else "") + f"/{prefix.strip()}{_MAP_NAME}\n")
+        fh.write(("\n" if existing and not existing.endswith("\n") else "") + f"/{prefix.strip()}{MAP_NAME}\n")
     if not _check_ignored(root):
         return f"repomap: REFUSING — PROJECT_MAP.md is still not ignored after writing {exclude}"
     return None
@@ -598,8 +598,19 @@ def _map_verified(target: Path, expected_sha: str) -> bool:
     return header is not None and header["sha"] == expected_sha
 
 
+def current_map_sha(root: Path, header: dict[str, str]) -> str:
+    """The sha the map WOULD carry if regenerated now, judged on the terms its own header
+    names. ONE path for `--check` and the drift detector (TRDD-6HFOB5S4): the writer hashes
+    the body WITH the coverage note, so a reader that dropped the note never matched and
+    nudged STALE forever on a repo that has one. `methods=` comes from the header, so a map
+    written with a different default is judged on its own terms, not reported stale."""
+    excludes = load_excludes(root)
+    maps = extract_all(root, excludes)
+    return map_sha(maps, include_methods=header["methods"] == "1", coverage_note=coverage_note(root, maps, excludes))
+
+
 def cmd_check(root: Path) -> int:
-    target = root / _MAP_NAME
+    target = root / MAP_NAME
     if not target.is_file():
         print("repomap: no PROJECT_MAP.md (run repomap_generate.py to write one)")
         return 2
@@ -610,15 +621,10 @@ def cmd_check(root: Path) -> int:
     if header["digest"] == repo_digest(root):
         print("repomap: fresh (digest match)")
         return 0
-    # Digest moved — only now pay for extraction (with the SAME persisted
-    # excludes the map was generated with); a structure match still counts as
-    # fresh (comment-only change), but report it distinctly. The hash uses the
-    # `methods=` value the HEADER names, so a map written with a different default
-    # is judged on its own terms instead of reporting a phantom STALE forever.
-    excludes = load_excludes(root)
-    maps = extract_all(root, excludes)
-    sha = map_sha(maps, include_methods=header["methods"] == "1", coverage_note=coverage_note(root, maps, excludes))
-    if header["sha"] == sha:
+    # Digest moved — only now pay for extraction; a structure match still counts as
+    # fresh (comment-only change), but report it distinctly. current_map_sha is the
+    # ONE hash path shared with the drift detector.
+    if header["sha"] == current_map_sha(root, header):
         print("repomap: structure unchanged (digest moved; refresh optional)")
         return 0
     print("repomap: STALE — structure changed; refresh with repomap_generate.py")
@@ -626,7 +632,7 @@ def cmd_check(root: Path) -> int:
 
 
 def cmd_remove(root: Path) -> int:
-    target = root / _MAP_NAME
+    target = root / MAP_NAME
     lock = _GenLock(root)
     if not lock.acquire():
         print("repomap: another generator holds the lock — skipping")
@@ -649,7 +655,7 @@ def cmd_remove(root: Path) -> int:
 
 def _write_map(root: Path, maps: list[FileMap], note: str | None, text: str) -> int:
     """Under the lock: ignore rule → write → re-read verify → ONLY THEN strip the legacy fence."""
-    target = root / _MAP_NAME
+    target = root / MAP_NAME
     err = ensure_excluded(root)
     if err is not None:
         print(err)

@@ -270,26 +270,51 @@ def test_both_fences_coexist_and_neither_eats_the_other(tmp_path: Path) -> None:
 
 def test_slim_violations_conforming_and_violating(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty on a conforming file; names each missing element and the narrative
-    overflow otherwise."""
+    overflow otherwise; a map is never among the violations (PRRD G7.3)."""
     pages = cs.scan_pages(_corpus(tmp_path))
     idx = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
-    map_block = f"{MAP_START} v1 sha=x digest=y generated=z\nmap\n{MAP_END}\n"
-    good = f"# P — a project (https://github.com/o/r)\n\nBuild: `uv run pytest`\n\n{map_block}\n{idx}"
+    good = f"# P — a project (https://github.com/o/r)\n\nBuild: `uv run pytest`\n\n{idx}"
     assert cs.slim_violations(good) == []
+    # CLAUDE.md has no map element, so a leftover legacy fence is not a slim violation (it
+    # is project-map-drift's own nudge) and its bytes do not count against the narrative.
+    legacy = f"{MAP_START} v1 sha=x digest=y generated=z\nmap\n{MAP_END}\n"
+    assert cs.slim_violations(f"{good}\n{legacy}") == []
     bare = "# P\n\njust prose, no fences, no url\n"
-    probs = cs.slim_violations(bare, require_map=True)
-    assert any("project-map fence" in p for p in probs)
-    # ...but ONLY for an opted-in project. The map is opt-in
-    # (`/janitor-auto-repomap-on`), so for everyone else a missing fence is the normal
-    # state, not a defect — reporting it flagged every project that correctly declined,
-    # and kept demanding the map back after a deliberate `/janitor-auto-repomap-off`.
-    assert not any(
-        "project-map fence" in p for p in cs.slim_violations(bare)
-    ), "opted-out (the default) must not be told to generate a map it declined"
+    probs = cs.slim_violations(bare)
+    assert not any("map" in p.lower() for p in probs), "a map is no part of the slim contract"
     assert any("wikimem-index fence" in p for p in probs)
     assert any("github repo url" in p for p in probs)
     monkeypatch.setenv(cs.NARRATIVE_MAX_BYTES_ENV, "10")
     assert any("narrative is" in p for p in cs.slim_violations(good))
+
+
+# `@name` pages a real GitHub account at a word boundary, but never before `/`
+# (`@types/node`) — measured with the GitHub markdown API.
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+_BARE_MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@[A-Za-z0-9_-]+(?![A-Za-z0-9_/-])")
+
+
+def _bare_mentions(text: str) -> list[str]:
+    return _BARE_MENTION_RE.findall(_CODE_SPAN_RE.sub("", text))
+
+
+def test_bare_mention_scanner_flags_only_what_pages_an_account() -> None:
+    """The guard below is only worth anything if it can fail: it flags a bare mention and
+    ignores code spans, scoped packages and e-mail-like text."""
+    assert _bare_mentions("ping @janitor. and (@foo-bar)") == ["@janitor", "@foo-bar"]
+    assert _bare_mentions("`@janitor` `@lru_cache` @types/node a@b.c") == []
+
+
+def test_this_repos_rendered_wikimem_index_never_names_the_map_or_pages_an_account() -> None:
+    """TRDD-FADYLSQB: the index is what CLAUDE.md carries on every turn. A page description
+    naming PROJECT_MAP would point every session at the whole map file; a bare @name in it
+    would page a real GitHub account each time the index is read. Rendered from this repo's
+    real PROJECT corpus, the way `claudemd_slim.py index` renders it."""
+    pages = cs.scan_pages(_PROJECT_ROOT / ".claude" / "project" / "memory")
+    assert pages, "this repo's PROJECT wikimem corpus must exist for the guard to mean anything"
+    index = cs.render_index(pages, generated_iso="2026-11-15T00:00:00+0100")
+    assert "PROJECT_MAP" not in index
+    assert _bare_mentions(index) == []
 
 
 def test_index_is_stale_tracks_corpus(tmp_path: Path) -> None:

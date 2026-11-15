@@ -33,10 +33,9 @@ def queue_if_stale(root: Path) -> bool:
     if not claude_md.is_file():
         return False
     text = claude_md.read_text(encoding="utf-8")
-    opted_in = (root / ".janitor" / "state" / "repomap-opt-in.flag").is_file()
     pages = cms.scan_pages(cms._memdir(root))
     stale = cms.index_is_stale(text, pages)
-    violations = cms.slim_violations(text, require_map=opted_in)
+    violations = cms.slim_violations(text)
     if not stale and not violations:
         return False
     state.atomic_write(root / _MARKER_REL, "1\n")

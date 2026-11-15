@@ -1,8 +1,9 @@
 """Slim janitor-managed CLAUDE.md — the wikimem-index half (TRDD-H12K9JYX).
 
 Owner directive 2026-08-02: a janitor-managed CLAUDE.md contains ONLY a concise project
-description, the repo URLs, the basic lint/build/test/publish instructions, the janitor
-project map, and a topic-ordered index of the PROJECT-scope wikimem pages. Everything
+description, the repo URLs, the basic lint/build/test/publish instructions, and a
+topic-ordered index of the PROJECT-scope wikimem pages (no map: it lives in the
+git-excluded PROJECT_MAP.md, PRRD G7.3). Everything
 else lives in wikimem pages, where it is RECALLED by symptom instead of PAID on every
 turn (CLAUDE.md rides the prompt prefix of every session).
 
@@ -285,7 +286,9 @@ def render_index(pages: list[PageInfo], *, generated_iso: str, memdir_rel: str =
 
 def narrative_outside_fences(text: str) -> str:
     """Everything OUTSIDE both janitor-owned fenced regions — the human/agent narrative
-    the slim contract budgets. Malformed fences raise (never guess)."""
+    the slim contract budgets. Malformed fences raise (never guess). The LEGACY map fence
+    is still cut out, so a not-yet-stripped block never counts against the narrative
+    budget while `repomap_generate.py` has yet to strip it."""
     for start, end in ((MAP_FENCE_START, MAP_FENCE_END), (WIKIMEM_FENCE_START, WIKIMEM_FENCE_END)):
         span = _fence_span(text, start, end)
         if span is not None:
@@ -293,27 +296,19 @@ def narrative_outside_fences(text: str) -> str:
     return text
 
 
-def slim_violations(text: str, *, require_map: bool = False) -> list[str]:
+def slim_violations(text: str) -> list[str]:
     """The slim-contract check — an ADVISORY list, one string per violation, empty when
-    conforming. The detector nudges on it; nothing auto-rewrites CLAUDE.md (it sits in
-    the cached prompt prefix — TRDD-e247a349 §5's nudge-only discipline applies).
+    conforming. The detector nudges on it; nothing auto-rewrites CLAUDE.md (it is co-owned
+    with the human — the nudge-only discipline of TRDD-e247a349 §5 applies).
 
-    `require_map` DEFAULTS TO FALSE because the project map is OPT-IN
-    (`/janitor-auto-repomap-on`), and an absent fence is the NORMAL state for every
-    project that never opted in — or that deliberately opted out. Demanding it
-    unconditionally was circular: this module's own detector documents the fence as
-    the thing that "opted it in", so requiring it flagged exactly the files that had
-    correctly declined. It fired for real here on 2026-08-14, after the map was removed
-    from this repo's CLAUDE.md to stop paying ~46k tokens per turn: the removal was
-    correct and left this check demanding the map back, forever.
-
-    Callers that KNOW the project opted in (the flag at
-    `.janitor/state/repomap-opt-in.flag`) pass `require_map=True` to get a stale/missing
-    fence reported — that is a real defect for an opted-in project.
+    There is deliberately NO map check (TRDD-FADYLSQB, PRRD G7.3): the project map lives in
+    the git-excluded PROJECT_MAP.md, so CLAUDE.md has no map element, and a violation about
+    the map would be unfixable by a CLAUDE.md edit. Worse, `claudemd_queue` queues a CLAUDE.md
+    write on ANY violation while its drain only rewrites the wikimem index — a map violation
+    would owe a write after every compaction that the drain can never discharge. Map problems
+    are the detector's own nudges (project-map-drift.py), which never queue anything.
     """
     violations: list[str] = []
-    if require_map and _fence_span(text, MAP_FENCE_START, MAP_FENCE_END) is None:
-        violations.append("no project-map fence (run scripts/repomap_generate.py)")
     if _fence_span(text, WIKIMEM_FENCE_START, WIKIMEM_FENCE_END) is None:
         violations.append("no wikimem-index fence (run scripts/claudemd_slim.py index)")
     narrative = narrative_outside_fences(text)
