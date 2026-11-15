@@ -320,11 +320,11 @@ read directly by the daemon — set them in your project's
 
 ### Secret shield (vendored, not active yet)
 
-A Claude Code mod in `hooks/secret-shield/` replaces API keys, tokens, private keys and passwords in known formats in tool output with `[JANITOR-REDACTED:<type>]` (for example `[JANITOR-REDACTED:github-token]`) before Claude or the session transcript sees them. Error results that reach Claude are covered too (TRDD-337UVA3J, probed for Bash on Claude Code 2.1.318).
+A Claude Code mod in `hooks/secret-shield/` replaces API keys, tokens, private keys and passwords in known formats in tool output with `[JANITOR-REDACTED:<type>]` (for example `[JANITOR-REDACTED:github-token]`) before Claude sees them and before they are stored in the session transcript. Error results that reach Claude are covered too (TRDD-337UVA3J, probed for Bash on Claude Code 2.1.318; MCP error results were not probed). Whether the transcript's structured copy of a tool result (toolUseResult) keeps the raw text is unverified (TRDD-5KLWOC0U).
 
 It is vendored from Singh-AP/awesome-claude-mods, folder `mods/safety/secret-shield`, version 1.0.0, MIT (see `hooks/secret-shield/LICENSE` and `hooks/secret-shield/NOTICE`), and extended with the rule catalog in `hooks/secret-shield/rules/`. Known gaps are in `hooks/secret-shield/KNOWN-MISSES.md`.
 
-**Not active yet.** `hooks/hooks.json` has no `"modules"` key, so the mod is not loaded and `/janitor-secret-shield` does not exist yet. Wiring is TRDD-2V7OAUPE, blocked until the write-back guard (TRDD-0Y3UW1NF) and the pre-wiring checks (TRDD-TEP6F3A3) are done; `tests/test_secret_shield_wiring_gate.py` fails if the key is added earlier.
+**Not active yet.** `hooks/hooks.json` has no `"modules"` key, so the mod is not loaded and `/janitor-secret-shield` does not exist yet. Wiring is TRDD-2V7OAUPE, blocked until its blocking cards are done, among them the write-back guard (TRDD-0Y3UW1NF) and the pre-wiring checks (TRDD-TEP6F3A3); `tests/test_secret_shield_wiring_gate.py` fails if the key is added earlier.
 
 The guard comes first because, while the shield is on, Read shows the marker instead of the value. A later Write or Edit that restates that line would then write the marker over the real secret.
 
