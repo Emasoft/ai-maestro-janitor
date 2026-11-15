@@ -4,7 +4,7 @@ title: Wikimem increment 3 foreign-content rule safe fixer and one owner for ato
 column: dev
 status: tasked
 created: 2026-11-15T00:39:55+0100
-updated: 2026-11-15T20:16:44+0100
+updated: 2026-11-15T20:18:01+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,6 +33,7 @@ NEXT ACTION: research worker first (read-only): (1) explain D12's 16 PROJECT pla
 2026-11-15 RESUMED (supersedes the PAUSED line): TRDD-FADYLSQB's build is committed (b52fe354 to d24989d9) and only owner questions remain there. NEXT ACTION: the increment-3 proposal. Advisor 2026-11-15 on the grammar: split the decision into two populations. Code-spanned wikilink bullets stay foreign on construction (row 1 re-checked; the 7-of-9 figure is not relied on). Edge-less reference bullets (cross-scope pointers, file or glob refs, TRDD refs) are decided by WM-LINT-13 per class: the legal remedy that exists in increment-3 code, the cheapest silencing edit, and what catches it; deleting the bullet silences every class and nothing catches it (no edge, so neither WM-WIKI-07 nor the D7 gate as written), so each class needs a legal form, a remedy, or a new increment-4 gate clause. The proposal carries a specgrep amendment of WM-NOTE-10 and WM-LINT-12 with a version bump, labels every count a replica estimate, and names only verbs that exist.
 2026-11-15 correction to the RESUMED line: TRDD-FADYLSQB's remaining items are not all owner questions (inserting S27.1 now or waiting for TRDD-4A4HXDIN is an agent decision; its spec increment 6 waits on TRDD-DXBJMT1K). None of them blocks this card.
 2026-11-15 grammar MEASURED (ESTIMATES, scripts_dev/qaf3n673-grammar/grammar_counts.py, report reports_dev/qaf3n673-grammar/20261115_201239+0100-grammar-counts.md; PROJECT spot-check 0 label mismatches, USER re-sampled): PROJECT A 7 strict or 9 under the same-target reading (macos-keychain L64, L66 carry a raw link to a different page), all one-sided; B 4, C 6, D 6 (5 duplicate globs:), E 2, F 1, P 1. USER A 4 (stems of published PROJECT pages via USER symlinks, one-sided), B 0, C 8, F 4, P 2 plus 1 other placeholder, U 188, foreign paragraphs 8 plus 49 wrapped lines, 2 footnote defs, 1 atom marker. LOCAL 4 legal rows. Three classifier rules are corpus heuristics (literal [[wikilink]] ignored, HTML comments, wrapped remainders). NEXT ACTION: put the proposal to review in a turn that writes nothing, with the PROPOSAL FOR ACTION marker, built from reports_dev/main-agent/20261115_195535+0100-qaf3n673-proposal-draft.md plus these counts; take the same-target reading of A (a code-spanned target without a raw link to that same target in the block is hidden).
+2026-11-15 correction to the MEASURED line (harness review): the same-target reading of class A is a CANDIDATE for the proposal, not a decision; the review decides it. The spot-check results (PROJECT 0 label mismatches, USER re-sampled) are the worker's, from its report, not re-read by the main agent. One of the 4 USER A rows (debugging-methodology-verify-before-concluding-causal-claims L71) is a C pointer in intent; the other 3 are deliberate pointers to published PROJECT pages.
 
 ## Scope (parent TRDD-F8EIVTSG, design D5 and D9; spec WM-LINT-11, WM-LINT-12, WM-NOTE-06, WM-NOTE-08)
 
