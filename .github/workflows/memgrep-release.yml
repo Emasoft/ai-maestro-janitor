@@ -45,7 +45,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # macos-15 is the arm64 label (macos-15-intel is the x64 one). GitHub retired every
+          # macos-14 image on 2026-11-02 (actions/runner-images#13518): the v3.9.0 run 43701838188
+          # failed this job in 1s with "The configuration 'macos-14-arm64-us-default' is not
+          # supported", so v3.9.0 shipped with no memgrep binaries attached.
+          - os: macos-15
             target: aarch64-apple-darwin
             asset: memgrep-darwin-arm64
           - os: macos-15-intel

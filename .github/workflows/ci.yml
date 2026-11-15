@@ -97,6 +97,31 @@ jobs:
           uv tool install git-cliff==2.14.2
           uv tool dir --bin >> "$GITHUB_PATH"
 
+      # sanitize-reports (TRDD-KSUIEPTQ): tests/test_redact_staged_reports.py runs the REAL
+      # `sanitize-reports` CLI and fails its fixture, never skips, when it is absent (a missing
+      # redactor is the condition the helper must refuse to commit through). The 3.9.0 CI run
+      # 43701851552 failed 5 tests at setup because this runner had no such CLI. It is a public
+      # single-file uv script (no dependencies), so it is fetched at an exact commit SHA and
+      # checked against a sha256 before it is made executable: a moved branch or a tampered
+      # download fails the step instead of running unreviewed code. The script is installed into
+      # the tool bin dir that the git-cliff step above already put on GITHUB_PATH.
+      - name: Install sanitize-reports (pinned)
+        env:
+          SANITIZER_SHA: 16c9a12cae854667df36c23587b9db0d0617dbe6
+          SANITIZER_SHA256: 9ea55934a621f20afeded953c2ac298608a3f294c117c6cc8172af41642968ae
+        run: |
+          set -euo pipefail
+          bin_dir="$(uv tool dir --bin)"
+          mkdir -p "$bin_dir"
+          tmp_file="$(mktemp)"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://raw.githubusercontent.com/Emasoft/report-sanitizer/${SANITIZER_SHA}/sanitize_reports.py" \
+            -o "$tmp_file"
+          echo "${SANITIZER_SHA256}  ${tmp_file}" | sha256sum -c -
+          install -m 0755 "$tmp_file" "$bin_dir/sanitize-reports"
+          rm -f "$tmp_file"
+          command -v sanitize-reports
+
       # `--extra dev` is load-bearing: pytest and pytest-xdist live in
       # [project.optional-dependencies].dev. A bare `uv run pytest` succeeds
       # locally only because the developer's .venv already has them installed, so
