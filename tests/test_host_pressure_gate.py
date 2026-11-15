@@ -149,7 +149,10 @@ def test_a_chore_is_deferred_when_the_host_is_over_the_bar(
     task = daemon.Task("some-chore", 1, lambda: ran.__setitem__("n", ran["n"] + 1))
     # Force the stamp into the past so the task is genuinely DUE.
     task.last_run_path.parent.mkdir(parents=True, exist_ok=True)
-    task.last_run_path.write_text(str(int(time.time()) - 60), encoding="utf-8")
+    # Compared below to the value WRITTEN, not to a re-read clock: under host load the second can tick between
+    # the write and the assert (it did on 2026-11-16, load 144: 1794784291 vs 1794784352 - 60).
+    seeded = int(time.time()) - 60
+    task.last_run_path.write_text(str(seeded), encoding="utf-8")
     assert task.is_due(), "the subject must be DUE or the gate is never reached"
 
     _logged_lines(daemon, monkeypatch)
@@ -158,7 +161,7 @@ def test_a_chore_is_deferred_when_the_host_is_over_the_bar(
     assert ran["n"] == 0, "the chore ran while the host was over the bar"
     # The stamp is UNTOUCHED: a deferred chore stays DUE and runs at the next
     # calm beat. A stamp written here would make the deferral permanent.
-    assert task._last_run() == int(time.time()) - 60, (
+    assert task._last_run() == seeded, (
         "the deferred chore's last-run stamp was written — it would never run again"
     )
     assert task.is_due(), "a deferred chore must stay due"
