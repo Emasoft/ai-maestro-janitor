@@ -4,7 +4,7 @@ title: Wikimem link sections redesign for GitHub issues 358 and 328 option b
 column: dev
 status: tasked
 created: 2026-11-14T23:49:01+0100
-updated: 2026-11-15T00:08:31+0100
+updated: 2026-11-15T01:12:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -31,6 +31,7 @@ Increment 4 note: cargo install puts a refusing gate under every project's sessi
 Host load was 91 to 168 on 2026-11-14/15: one worker at a time.
 2026-11-15 increment 1 spec text DONE: wikimem-memgrep-spec.md 2.5.0 to 3.0.0 via one specgrep batch; codifies today's footer as WM-NOTE-08, WM-NOTE-09, WM-LINT-11 (boundary copies memory.rs:2493 earliest, memory.rs:2545 trailing, memory_content_precheck.py:697 trailing); new WM-NOTE-07, WM-NOTE-10, WM-WIKI-07, WM-LINT-12, WM-LINT-13, WM-CLI-28, WM-CLI-29, WM-IDX-15, amended WM-NOTE-06, WM-CLI-08, WM-CLI-25, each marked with its increment. specgrep lint 20 findings, all on old letter-suffixed ids, none on new text. Worker-authored choices open to veto: WM-IDX-15 root topic = overview plus hub pages; WM-LINT-12 severity WARN. NEXT ACTION: dry-run counts script in scripts_dev/ over LOCAL, PROJECT, USER (estimates), then mint the increment-2 card.
 2026-11-15 dry-run counts (ESTIMATES, scripts_dev/f8eivtsg-dryrun/count_link_sections.py, report reports_dev/sonnet-worker/20261115_000747+0100-f8eivtsg-dryrun-counts.md): WM-LINT-12 would fire on 0 of 12 LOCAL, 16 of 78 PROJECT, 73 of 253 USER pages; WM-WIKI-07 finds 58 one-sided typed edges in PROJECT and 141 in USER where today's lint reports 7 and 6 one-sided pairs, so increment 4 must not ship the typed rule before a reciprocity migration (dry-run it in increment 6 first); WMATOM-009 parity 0 pages but weak (no positives); USER section-blind pairs differ by 1, a link inside a footnote definition the Rust parser skips; D12's 16 PROJECT placeholders vs 28 linkless bullets is unexplained. Corrected 2026-11-15: memgrep has no lint --json flag, it is --output-format json, and plain lint autofixes publish-globally drift (writes the store), so every read-only caller passes --no-fix (spec WM-LINT-12 and D2 fixed). NEXT ACTION: mint the increment-2 card (one Rust parser plus #289).
+2026-11-15 SUPERSEDES the 'Open, the owner's alone' line about the project-map fence: the owner answered 2026-11-15, verbatim: "no, the project map is important. it was a little too big for the context, so i asked you to make a more concise version of the map. if you succeed, you can amend the block from CLAUDE.md". Tracked as TRDD-FADYLSQB, outside this redesign.
 
 ## Owner directive (verbatim, 2026-11-14)
 

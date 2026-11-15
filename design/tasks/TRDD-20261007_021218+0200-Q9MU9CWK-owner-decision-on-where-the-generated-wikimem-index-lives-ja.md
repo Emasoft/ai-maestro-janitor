@@ -4,7 +4,7 @@ title: Owner decision on where the generated wikimem index lives (janitor#328)
 column: todo
 status: tasked
 created: 2026-10-07T02:12:18+0200
-updated: 2026-11-14T23:13:57+0100
+updated: 2026-11-15T01:12:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -35,6 +35,7 @@ Golden PRRD rules G7.1 and G10.1 require the wikimem index fence in CLAUDE.md an
 2026-10-10 04:05 REVERSAL of the 2026-10-07 CORRECTION line's intent to build option (b) unless told otherwise: the main session will NOT build it. This card is min-approval-requirement user and approved false, and whether a block limited to root topics satisfies golden rule G10.1 is a reading of a golden rule, which is the owner's alone; the mandate of 2026-10-09 (quoted on TRDD-S6GX1DHN) keeps human-only acts with the owner. The question was put to the owner in the session's replies of 2026-10-10 about 03:55 and 04:00; no answer yet. NEXT ACTION: wait for the owner's yes or no on option (b).
 2026-10-10 04:25 CORRECTION to the 04:05 line: 'was put to the owner' overstates. The question is written in the session's replies and on this card and the drain card; no human has been present in the session since it began, so the owner has not seen it.
 2026-11-14T23:13:55+0100 SUPERSEDES the NEXT ACTION 'owner picks (a), (b) or (c)' above, the 2026-10-10 04:05 and 04:25 lines and the NEXT ACTION 'wait for the owner's yes or no on option (b)': the owner HAS now seen the question and answered it in session 1603e47a (AskUserQuestion on issue 328), verbatim "(b) Root topics only (Recommended)"; recorded in the Approval log. NEXT ACTION: build option (b), the index block listing only ROOT topics, as part of the wikimem redesign for GitHub issues 358 and 328 (proposal to the owner first). STILL OPEN and still the owner's: G7.1 and G10.1 also require a project-map fence that CLAUDE.md lacks; that question was not part of this answer.
+2026-11-15 the project-map fence question (G7.1, G10.1) is ANSWERED, the owner answered 2026-11-15, verbatim: "no, the project map is important. it was a little too big for the context, so i asked you to make a more concise version of the map. if you succeed, you can amend the block from CLAUDE.md". G7.1 and G10.1 stand; the concise map is TRDD-FADYLSQB (todo).
 
 ## Background
 
