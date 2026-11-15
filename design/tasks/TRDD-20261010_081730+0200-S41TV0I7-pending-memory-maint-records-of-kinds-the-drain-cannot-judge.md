@@ -1,10 +1,10 @@
 ---
 trdd-id: S41TV0I7
 title: Pending memory-maint records of kinds the drain cannot judge have no way out of the queue
-column: verify_assumptions
+column: testing
 status: tasked
 created: 2026-10-10T08:17:30+0200
-updated: 2026-11-15T14:08:50+0100
+updated: 2026-11-15T15:01:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T08:17:30+0200
+implementation-commits: [299392a0]
 ---
 
 # Pending memory-maint records of kinds the drain cannot judge have no way out of the queue
@@ -39,3 +40,4 @@ Split from TRDD-K5F7US68 box 5 on 2026-10-10. FACTS: memory_dispatch_claim.is_dr
 2026-11-15 read-only checks for the proposal: pending record 1788453141-8f370851 has intervention retro-lesson, scope PROJECT, root the PROJECT memory dir via the ~/Code alias (exists); memory_settings.interval_s_for('retro-lesson') = 86400; retro_lesson_has_work(root) with no fingerprint = False today; expire_drained runs at the start of every claim_one (scripts/memory_dispatch_claim.py ~421), so the next memory-chore claim drains. Still unread before implementing: whether is_orphaned is true for this record, and the retro-lesson emit path in scripts/detectors/memory-maintenance.py (whether a dropped record is re-emitted when work remains; the 2026-10-11 line says not guaranteed).
 2026-11-15 IMPLEMENTED (uncommitted at write time): retro_lesson_page_defect + retro_lesson_candidates, retro-lesson registered as a read-only chore; tests a-d run green (TDD exception), e/f written for the pre-push run. Pre-implementation checks: record 1788453141-8f370851 is 72.9 days old and is_orphaned True; a content-suppressed chore is not stamped and re-checks every heartbeat, so a dropped record is re-emitted once work reappears and the cadence/noop gates pass (memory-maintenance.py _first_due_intervention ~457-503).
 2026-11-15 CORRECTION: the 'Pre-implementation checks' figures above (72.9 days, is_orphaned True, _first_due_intervention ~457-503) were supplied by the dispatching agent and NOT re-measured by the implementing worker. Review finding: iter_note_files returns [] silently on a walk OSError, so retro_lesson_candidates now names unreadable directories (unreadable-dir) and raises NotADirectoryError on a missing root; tests g/h added and run green (10 passed).
+2026-11-15T14:58+0100 RE-MEASURED by the main session (read-only, checkout code at 299392a0): record 1788453141-8f370851 retro-lesson PROJECT age 72.9 d, cadence 86400 s, omm.is_orphaned True, candidates_for returns [] (0), is_drained True. Re-emit path read in scripts/detectors/memory-maintenance.py _first_due_intervention (457-505): a chore whose content_has_work is False is not returned, so it is never stamped (mark_ran) and re-checks on every heartbeat; it is emitted once work appears and the cadence and recent-noop gates pass. This supersedes the 2026-11-15 CORRECTION's 'not re-measured'. FIELD CHECK for testing: the claim step runs from the installed plugin cache, so the record can drain only after a release carrying 299392a0 is installed; then the next memory-chore claim must log 'drained 1788453141-8f370851: aged out and no candidates left' in .janitor/logs/memory_dispatch_claim.log. Side observation, not this card: pending 1793836259-c797f1fa (split USER, 10.6 d, orphaned) gets candidates_for None (unknown), so it stays claimable.
