@@ -4,7 +4,7 @@ title: Wikimem increment 3 foreign-content rule safe fixer and one owner for ato
 column: dev
 status: tasked
 created: 2026-11-15T00:39:55+0100
-updated: 2026-11-15T00:39:55+0100
+updated: 2026-11-15T01:01:53+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -25,6 +25,7 @@ parent-trdd: F8EIVTSG
 ## STATE
 
 NEXT ACTION: research worker first (read-only): (1) explain D12's 16 PROJECT placeholders vs the dry run's 28 linkless bullets (blocks the D5 fixer's placeholder classes); (2) map today's repair path for atom-after-footer: Python repair_defect and its candidate step (memory_content_precheck.py around 877-886), the janitor-memory-repair skill procedure, the chore routing; (3) list every place that would read the WMATOM-009 verdict if the trailing boundary changed. Then write the increment-3 proposal (PROPOSAL FOR ACTION marker), then build.
+2026-11-15 research done (reports_dev/sonnet-worker/20261115_005113+0100-qaf3n673-research.md; estimates from a Python replica, not memgrep): Q1 D12's 16 fits 'bullets with no raw [[' (a fit, not proof); of 28 PROJECT linkless bullets 26 are foreign under WM-NOTE-10 as committed (9 code-spanned same-scope links, 4 code-spanned USER links, 6 cross-scope pointer prose, 6 file or glob refs, 2 TRDD refs, 1 prose), the only bootstrap placeholder is the overview page L54. Q2 no WMATOM-009-specific repair procedure (negative search); deleting or renaming a footer heading silences Rust and Python verdicts and nothing refuses it (read from code). Q3 widening the trailing run to include ## Superseded closes NONE of the 18-atom blind-spot estimate and adds only 5 warnings on live-looking atoms under ## Superseded: DROPPED (replica estimate). WM-LINT-12 catches the 2 atoms really inside link sections (PROJECT janitor-beat-tasks-and-limitations L179, USER manager-is-a-guide-not-a-gate L47). Q4 adding a code: toml row, build_issue_codes.py --write, emitter in memory.rs, safe fixer needs a fixers/mod.rs arm and ARM_NAMES, test_memory_lint_gate_coverage.py needs a row and its == 47 count bumped. Advisor 2026-11-15, before the proposal: (a) the L179 atom says it holds the ### Control flow section verbatim, so the fixer must use memgrep's atom extent and refuse that shape; (b) find every unattended caller of lint --apply-fixes before registering a fixer; (c) decide bullet legality from data: read the 9 code-spanned same-scope links (a dodge of one-sided-link would break WM-LINT-13), sample 10 of USER's 190 unbulleted [[ lines and 10 of its 107 prose lines, re-count under the proposed grammar; (d) hold cargo install until increment 4's gate lands, dry-run target/release/memgrep instead; (e) repair_defect takes text, lint takes paths: list callers passing unsaved text; a missing or old binary is an error, never zero candidates. Separate cards later: the 5 atoms under ## Superseded (verify status first; the spot-check grep cut the markers) and the 18 atoms in ordinary sections after the links. NEXT ACTION: second research worker for (a), (b), (c), (e); then the proposal.
 
 ## Scope (parent TRDD-F8EIVTSG, design D5 and D9; spec WM-LINT-11, WM-LINT-12, WM-NOTE-06, WM-NOTE-08)
 
