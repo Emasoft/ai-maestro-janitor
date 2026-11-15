@@ -58,7 +58,7 @@ D12 Migration by `lint --apply-fixes` batches (mechanical, no lmd bump), not age
 Out-of-band file edits bypass the gate; the post-edit lint hook (D4, D5) is the defence there.
 
 Increments (one card each, spec first): 1 spec + issue-codes + dry-run counts; 2 parser + #289; 3 remedy text + D5 rule + fixer + repair skill + Python candidate source; 4 typed lint + tier rule + verbs + per-verb gate + merge re-pointing; 5 #328(b); 6 skills/agent/rules/--help sweep + migration.
-Ship: rebuild and reinstall memgrep (`cargo install --path scripts/memgrep`); plugin publish still blocked (TRDD-AGV84UGC: the CPV skillaudit REGEX_DOS finding on the secret-shield URL_PASSWORD regex, todo; corrected 2026-11-15, the earlier "CPV MAJOR on reports/ not gitignored" cause was wrong).
+Ship: rebuild and reinstall memgrep (`cargo install --path scripts/memgrep`) after each increment, except increment 3, which installs together with increment 4 (decided 2026-11-15 on TRDD-QAF3N673: a lone install of the new WARN without the heading-deletion gate recreates the #358 conditions); plugin publish still blocked (TRDD-AGV84UGC: the CPV skillaudit REGEX_DOS finding on the secret-shield URL_PASSWORD regex, todo; corrected 2026-11-15, the earlier "CPV MAJOR on reports/ not gitignored" cause was wrong).
 Unverified: who made the #358 destructive edit.
 Owner questions: (1) defer frontmatter-as-source; (2) the project-map fence G7.1/G10.1 require and CLAUDE.md lacks.
 
