@@ -4,7 +4,7 @@ title: Remove the temporary reports gitignore line once CPV stops requiring it
 column: backburner
 status: tasked
 created: 2026-11-15T09:10:44+0100
-updated: 2026-11-15T09:10:44+0100
+updated: 2026-11-15T09:16:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -28,3 +28,4 @@ OWNER DECISION (verbatim, AskUserQuestion, 2026-11-15). Question: 'The release i
 ## Approval log
 
 - 2026-11-15T09:10:44+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T09:16:17+0100 — OWNER DECISION 2 (verbatim, AskUserQuestion, 2026-11-15). Question: 'Ignoring /reports/ isn't enough. CPV --strict on 4b777921 still finds 2 MAJORs, both caused by the 4 tracked benchmark reports in reports/llm-externalizer/benchmark/. (1) They are tracked yet match .gitignore, which CPV treats as scan evasion. (2) Git reports a folder holding tracked files as not ignored, so the reports/ coverage check still fails; I confirmed this in a scratch repo. The lint NIT is fixed. The plan you approved said these files stay tracked, and that turns out to be impossible. What should I do?' Answer: 'Untrack them for now (Recommended)'; that option's plan: 'Move the 4 benchmark reports to reports_dev/llm-externalizer/benchmark/: git rm --cached plus a move. The files stay on disk and in git history. Revert card TRDD-W5GXPT7T will move them back and re-track them once CPV fixes issue #275.' Evidence: reports_dev/release/20261115_091131+0100-cpv-strict-4b777921.log (CRITICAL 0, MAJOR 2, NIT 0); scratch repo: git check-ignore -q reports/ exits 0 with no tracked file under it and 1 with one. Done-when ADDED to this card: move the 4 files (20261113_235933, 20261114_081449, 20261114_090845, 20261114_092125 model-comparison.md, committed in 064d3c4f) back from reports_dev/llm-externalizer/benchmark/ to reports/llm-externalizer/benchmark/ and git add them. CORRECTION to the body: the CPV pin bump is the existing card TRDD-KCU6QCAP, not a new one.
