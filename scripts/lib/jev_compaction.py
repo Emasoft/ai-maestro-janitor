@@ -1182,10 +1182,13 @@ def _llm_ext_reachable_tmp_root(tempdir: str, home: str) -> str | None:
     def _under(child: str, root: str) -> bool:
         return child == root or child.startswith(root.rstrip(os.sep) + os.sep)
 
+    # "/tmp" is a ROOT llm-ext accepts (scan-pipeline.ts:206-231), compared against and returned as a
+    # directory name; this function creates no file in it, so bandit B108 (insecure temp file) does not apply.
+    tmp_root = "/tmp"  # nosec B108
     real_tmpdir = os.path.realpath(tempdir)
-    if _under(real_tmpdir, os.path.realpath(home)) or _under(real_tmpdir, os.path.realpath("/tmp")):
+    if _under(real_tmpdir, os.path.realpath(home)) or _under(real_tmpdir, os.path.realpath(tmp_root)):
         return None
-    return "/tmp" if os.path.isdir("/tmp") else None
+    return tmp_root if os.path.isdir(tmp_root) else None
 
 
 def score_items_via_llm_ext(
