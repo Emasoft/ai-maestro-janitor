@@ -180,7 +180,7 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-18 code(s).
+19 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -190,6 +190,7 @@ unattended access to your repository.
 | `BRPROT-002` | branch-protection | high | the branch-protection baseline on {slug} has drifted: {detail} |
 | `BRPROT-003` | branch-protection | high | the branch-protection applier cannot identify the repo in {where} |
 | `CRED-001` | remote-credentials | critical | a credential appears to be exposed in {path} |
+| `CRED-002` | env-secret-on-disk | critical | a live secret of the session environment is written in {path} |
 | `DEP-001` | supply-chain | high | {package} {version} carries a known advisory: {advisory} |
 | `DEP-002` | historical-cache-scan | critical | a KNOWN-MALICIOUS package version is present: {package} {version} |
 | `DEP-003` | typosquat-watcher | high | `{package}` is one edit away from the popular package `{target}` |
@@ -244,6 +245,13 @@ unattended access to your repository.
 - **What it is:** A high-entropy secret matching a known credential shape is present in a file that is (or could be) committed or transmitted.
 - **Why it matters:** A secret in a repo is a secret in every clone, every fork, and every CI log — forever, even after the commit is 'removed'.
 - **Fix attempted:** FLAG IT — do NOT rotate anything automatically. Confirm whether it is live, tell the user to rotate it, and only then remove it from the file and purge it from history.
+
+### `CRED-002` — a live secret of the session environment is written in {path}
+
+- **Scanner:** `env-secret-on-disk` · **Severity:** `critical` · **Kind:** `leaked-credential`
+- **What it is:** The exact value of a secret-named variable of the environment this session runs in, or a copy of it (URL-quoted, JSON-escaped, base64, its token part, a cut head or tail), is present in a file under a folder that agents write to. The finding names the variable, the file and the line, never the value.
+- **Why it matters:** Output redirected into a file never passes through any tool-output filter, and a file in a tracked, synced or backed-up folder carries the secret off this machine. A value already printed into a conversation has already been sent.
+- **Fix attempted:** FLAG IT — do NOT rotate anything automatically and do NOT rewrite the file. Confirm the secret is live, tell the user to rotate it, then remove the value from the file (and from history if the file is tracked). An overwritten file can survive in snapshots and backups.
 
 ### `DEP-001` — {package} {version} carries a known advisory: {advisory}
 
@@ -332,7 +340,7 @@ unattended access to your repository.
 
 ## All codes by family
 
-91 code(s) across every emitter.
+92 code(s) across every emitter.
 
 ### AICTX
 
@@ -360,6 +368,7 @@ unattended access to your repository.
 | Code | Severity | Fix | Emitter | Summary |
 |---|---|---|---|---|
 | `CRED-001` | CRITICAL | none | janitor:remote-credentials | a credential appears to be exposed in {path} |
+| `CRED-002` | CRITICAL | none | janitor:env-secret-on-disk | a live secret of the session environment is written in {path} |
 
 ### DAEMON
 
