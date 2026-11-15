@@ -1532,7 +1532,14 @@ def _track_detector_streak(name: str, outcome: str) -> None:
             if line:
                 sys.stdout.write(line + "\n")
     except (OSError, ValueError):
-        pass
+        # #342 fail-open: a state error must not hide the failure itself. Two cases reach here:
+        # state_dir() raised before the append, or the stamp write raised after an unchanged
+        # failure skipped the append. In the second case the stamp never advances, so the
+        # failure is announced on every pass while the state stays unwritable; accepted, since an
+        # unwritable state dir is itself worth seeing. The membership test avoids a second entry
+        # when the append already ran on this pass.
+        if outcome.startswith("error:") and f"{name}={outcome}" not in _fire_degraded:
+            _fire_degraded.append(f"{name}={outcome}")
 
 
 def _record_default_outcome(name: str, outcome: str, started: int) -> None:

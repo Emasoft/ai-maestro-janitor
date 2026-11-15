@@ -3768,6 +3768,49 @@ def test_track_detector_streak_announces_a_changed_outcome_and_a_failure_after_r
     ]
 
 
+def test_track_detector_streak_announces_when_the_stamp_cannot_be_written(
+    env_isolation: dict,
+) -> None:
+    """#342 fail-open: an unchanged failure is normally announced once per episode, but when the
+    streak stamp cannot be written the episode cannot advance, so the except branch announces it
+    on that pass instead of hiding it. Real filesystem: a read-only state dir keeps the stamp
+    readable but not writable."""
+    import os
+    import stat
+
+    dispatch = _import_dispatch()
+    sdir = _seed_state_dir(dispatch)
+    (sdir / "detector-fail-streak-test-det.ts").write_text("1 error:rc=1", encoding="utf-8")
+    setattr(dispatch, "_fire_degraded", [])
+    mode = sdir.stat().st_mode
+    os.chmod(sdir, stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        dispatch._track_detector_streak("test-det", "error:rc=1")
+    finally:
+        os.chmod(sdir, mode)
+    assert dispatch._fire_degraded == ["test-det=error:rc=1"]
+
+
+def test_track_detector_streak_announces_once_when_the_write_fails_after_the_append(
+    env_isolation: dict,
+) -> None:
+    """#342 fail-open: when this pass already appended the failure and only the stamp write
+    fails, the except branch adds no second entry."""
+    import os
+    import stat
+
+    dispatch = _import_dispatch()
+    sdir = _seed_state_dir(dispatch)
+    setattr(dispatch, "_fire_degraded", [])
+    mode = sdir.stat().st_mode
+    os.chmod(sdir, stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        dispatch._track_detector_streak("test-det", "error:rc=1")
+    finally:
+        os.chmod(sdir, mode)
+    assert dispatch._fire_degraded == ["test-det=error:rc=1"]
+
+
 def _seed_state_dir(dispatch):
     import state
 
