@@ -1168,6 +1168,25 @@ def score_items(
     return scores
 
 
+def _llm_ext_reachable_tmp_root(tempdir: str, home: str) -> str | None:
+    """Parent dir for the scoring temp dir so `llm-ext` accepts the path, or None to keep the default.
+
+    WHY (TRDD-2GCJ5D3M): `llm-ext` rejects an input path whose realpath is not under
+    realpath(cwd), realpath($HOME) or realpath("/tmp") (llm-externalizer
+    scripts/llm-ext/src/scan-pipeline.ts:206-231, "Path traversal blocked"). macOS's default temp
+    dir (/var/folders/..., realpath /private/var/folders/...) is outside all three, so every
+    clear's Jev attempt failed. A tempdir already under home or /tmp (a deliberate TMPDIR, or
+    Linux) is kept; otherwise /tmp is used when it exists.
+    """
+    def _under(child: str, root: str) -> bool:
+        return child == root or child.startswith(root.rstrip(os.sep) + os.sep)
+
+    real_tmpdir = os.path.realpath(tempdir)
+    if _under(real_tmpdir, os.path.realpath(home)) or _under(real_tmpdir, os.path.realpath("/tmp")):
+        return None
+    return "/tmp" if os.path.isdir("/tmp") else None
+
+
 def score_items_via_llm_ext(
     items: list[Item],
     digest: str,
@@ -1199,7 +1218,15 @@ def score_items_via_llm_ext(
     # WHY one JSONL temp dir for both the items file and the report: `llm-ext` discovers items
     # by path and writes `<output_dir>/<timestamp>-filter-<id>.json`; keeping both in one
     # `mkdtemp` tree makes cleanup a single rmtree and never touches the caller's CWD.
-    tmp_dir = tempfile.mkdtemp(prefix="jev-score-llm-ext-")
+    # WHY `dir=` (TRDD-2GCJ5D3M): llm-ext only reads input under realpath(cwd), realpath($HOME) or
+    # realpath("/tmp") (llm-externalizer scripts/llm-ext/src/scan-pipeline.ts:206-231); macOS's default
+    # temp dir (/private/var/folders/...) is outside all three, so the default mkdtemp made every
+    # clear fail with "Path traversal blocked". We move the TEMP DIR, not the subprocess cwd:
+    # llm-ext uses its cwd for usage history and file-reading roots, which must not change.
+    tmp_dir = tempfile.mkdtemp(
+        prefix="jev-score-llm-ext-",
+        dir=_llm_ext_reachable_tmp_root(tempfile.gettempdir(), os.path.expanduser("~")),
+    )
     try:
         items_path = Path(tmp_dir) / "items.jsonl"
         with items_path.open("w", encoding="utf-8") as fh:

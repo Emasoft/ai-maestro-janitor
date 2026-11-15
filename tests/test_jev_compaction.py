@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -3447,3 +3450,78 @@ def test_full_render_keeps_every_heartbeat_status_reply() -> None:
     """TRDD-U119W52S: the cap is for the injected view only; the full copy stays verbatim."""
     doc = jc.compose([], {}, budget_tokens=8000, header=_H, conversation=_status_conversation())
     assert doc.count(_STATUS_REPLY) == 9
+
+
+def test_tmp_root_outside_home_and_tmp_returns_tmp(tmp_path: Path) -> None:
+    """A tempdir outside the home dir and /tmp (macOS /var/folders shape) is redirected to /tmp."""
+    outside = Path("/var").resolve()
+    if not outside.is_dir() or outside.is_relative_to(Path("/tmp").resolve()):
+        pytest.skip("no /var directory outside /tmp on this host")
+    if not os.path.isdir("/tmp"):
+        pytest.skip("no /tmp on this host")
+    assert jc._llm_ext_reachable_tmp_root(str(outside), str(tmp_path)) == "/tmp"
+
+
+def test_tmp_root_under_slash_tmp_keeps_default() -> None:
+    """A tempdir already under /tmp is reachable by llm-ext, so no redirect (None)."""
+    assert jc._llm_ext_reachable_tmp_root("/tmp/some-deliberate-tmpdir", "/nonexistent-home-x") is None
+
+
+def test_tmp_root_under_home_keeps_default(tmp_path: Path) -> None:
+    """A tempdir under the given home dir is reachable by llm-ext, so no redirect (None)."""
+    home = tmp_path / "home"
+    (home / "tmpdir").mkdir(parents=True)
+    assert jc._llm_ext_reachable_tmp_root(str(home / "tmpdir"), str(home)) is None
+
+
+def test_scoring_temp_dir_is_placed_where_llm_ext_will_accept_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With TMPDIR outside HOME and /tmp the items file still lands under /tmp.
+
+    The stand-in llm-ext records its --items argument only; it does NOT run llm-ext real path guard.
+    """
+    if sys.platform == "darwin":
+        # The per-user platform default (/var/folders/..., realpath /private/var/folders/...) is the
+        # real bug shape; confstr gives it even when TMPDIR is unset.
+        base = os.confstr(65537) or ""  # macOS _CS_DARWIN_USER_TEMP_DIR; Python exposes no name for it; None -> "" -> skip below
+    else:
+        base = "/var/tmp"
+    if not os.path.isdir(base) or not os.access(base, os.W_OK):
+        pytest.skip(f"{base} is not a writable directory on this host")
+    outside = tempfile.mkdtemp(dir=base)
+    try:
+        real_outside = Path(outside).resolve()
+        reachable_roots = [Path("/tmp").resolve(), Path(os.path.expanduser("~")).resolve()]
+        if any(real_outside.is_relative_to(root) for root in reachable_roots):
+            pytest.skip(f"{real_outside} is under HOME or /tmp; cannot reproduce the unreachable-TMPDIR case")
+        monkeypatch.setenv("TMPDIR", outside)
+        monkeypatch.setattr(tempfile, "tempdir", None)
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        record = tmp_path / "items-path.txt"
+        stand_in = bin_dir / "llm-ext"
+        stand_in.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "argv = sys.argv[1:]\n"
+            "items = argv[argv.index(\"--items\") + 1]\n"
+            "out = argv[argv.index(\"--output_dir\") + 1]\n"
+            "open(os.environ[\"LLM_EXT_STANDIN_RECORD\"], \"w\").write(items)\n"
+            "os.makedirs(out, exist_ok=True)\n"
+            "rows = [{\"id\": json.loads(line)[\"id\"], \"p\": 0.9} for line in open(items)]\n"
+            "json.dump({\"decision\": {\"rows\": rows}}, open(os.path.join(out, \"r.json\"), \"w\"))\n",
+            encoding="utf-8",
+        )
+        stand_in.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.setenv("LLM_EXT_STANDIN_RECORD", str(record))
+
+        scores = jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
+
+        assert scores["i0:0"].kept is True
+        recorded = Path(record.read_text(encoding="utf-8"))
+        assert recorded.resolve().is_relative_to(Path("/tmp").resolve())
+    finally:
+        shutil.rmtree(outside, ignore_errors=True)
