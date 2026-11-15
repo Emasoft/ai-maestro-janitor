@@ -4,7 +4,7 @@ title: Secret shield URL password user part and its query and password loops are
 column: todo
 status: tasked
 created: 2026-11-14T22:28:32+0100
-updated: 2026-11-14T22:28:32+0100
+updated: 2026-11-15T03:25:29+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ approval-datetime: 2026-11-14T22:28:32+0100
 
 - NEXT ACTION: read redactUrlPasswords and its guard walk (USER_RUN, MARK_AT, the colon it ends at) in hooks/secret-shield/patterns.ts, then build the rewrite below as one bounded change with differential tests against the old regex; re-run the scoped CPV skillaudit on hooks/secret-shield and confirm the findings at the URL_PASSWORD, QUERY and password-loop lines are gone. Tests only run before the push. Consult the Fable advisor first: the unrolling constraints (TRDD-HF7GNHNF, TRDD-AGOEWF2E) must not regress.
 - Status: not started. Blocks the CPV publish gate (v5.16.2 skillaudit) together with the JSON_OVER_BOUND card TRDD-MC895I0A. Related: archived TRDD-HF7GNHNF (URL_PASSWORD slowed between 96 KB and 128 KB), TRDD-AGOEWF2E (dev; very long URL password), TRDD-OD5Z90YL (plan; ReDoS harness).
+2026-11-15 PROGRESS: research report reports_dev/sonnet-worker/20261115_023330+0100-agv84ugc-design-research.md (design: drop NOT_PASSWORD, QUERY and URL_PASSWORD; password = run up to PASSWORD_END; port skip via PORT_START /\d{1,5}[/?]/y and QUERY_STOP /[=\s@#]|:\/\//g, only under the bound; proxy scan: the only non-test finding is patterns.ts:66, the MC895I0A finding is gone). Step 1 DONE in fa7294e2: hooks/secret-shield/tests/url-password-walk.test.ts pins today's outputs (captured with Bun from the pre-change code; not yet run in the plugin engine; first run is the pre-push gate unless the owner allows dev runs of this one file, asked 2026-11-15, unanswered). NEXT ACTION: step 2, one worker applies the design to patterns.ts (constants, the :307-333 block, comments at :22-61, :70, :249, :278, :456, rules/code-hosts.ts:107, tests/patterns.test.ts:660), then scans the whole patched shield with the CPV scanner; the release also needs a finished tests/harness/redos_load_harness.py run (D8 cron waits for a quiet host).
 
 ## Finding
 
