@@ -380,11 +380,13 @@ def _read_handoff() -> str | None:
 
 _GATE_STAMP = "clear-observed.ts"
 
-# Item 1 fix (card 5 orchestrator review): the post-Enter gate `run_chained_inject`
+# Item 1 fix (card 5 orchestrator review): the BASE post-Enter gate `run_chained_inject`
 # (scripts/lib/terminal_trigger.py) waits on before this chain persists
 # `resume-after-clear.flag` -- duplicated here (not imported; nothing else in this file
 # imports terminal_trigger at module scope) because the call below never passes
-# `gate_timeout_s`, so this IS the value actually in effect.
+# `gate_timeout_s`, so this is the BASE wait actually in effect. It is NOT the longest wait
+# (TRDD-AIT2KNBU F2): the call below also passes `gate_extend`, which keeps the chain waiting
+# past it, up to `gate_extend_cap_s()`, while the pane is busy or shows our /clear queued.
 _POST_ENTER_GATE_TIMEOUT_S = 180.0  # == terminal_trigger.run_chained_inject gate_timeout_s default, same pin
 _POST_ENTER_GATE_MARGIN_S = 600.0  # 10 min slack for a merely-slow (not stuck) gate
 
@@ -436,6 +438,45 @@ def _gate_baseline() -> int:
         return int((_project_root() / ".janitor" / "state" / _GATE_STAMP).read_text().strip() or 0)
     except (OSError, ValueError):
         return 0
+
+
+def gate_extend_cap_s() -> float:
+    """Hard cap on how long the chain keeps waiting for the fresh session once its base gate has
+    expired, counted from the verified Enter (TRDD-AIT2KNBU F2). It IS the arming window
+    `external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S` -- the same constant F3's late-landing guard in
+    both SessionStart hooks uses -- so a chain never waits for a clear the hooks would no longer
+    hand over. Deliberately NOT `_CLEAR_CHAIN_GIVEUP_S`, which is the typing give-up and equals
+    3600 only by coincidence; a drift test pins this function to the constant.
+    """
+    import external_clear  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+    return float(external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S)
+
+
+def gate_extend_decision(frame: str | None) -> tuple[bool, str]:
+    """PURE. Given the pane frame, should the chain keep waiting for the fresh session? (True, why)
+    / (False, why) (TRDD-AIT2KNBU F2).
+
+    True while the pane still explains the missing `clear-observed.ts` stamp: the frame is
+    unreadable or unrecognised (`None` from `main_turn_busy` counts as busy, as everywhere else:
+    waiting blind is bounded by the cap, giving up blind strands the session), the MAIN turn is
+    busy or compacting (our queued `/clear` runs at the next turn boundary), or the input field
+    shows queued messages. False only when the pane is idle and nothing is queued: the `/clear`
+    then really went nowhere. A fresh session also looks idle before its SessionStart hook stamps,
+    which is why `_await_fresh_session` asks twice before it believes a False.
+    """
+    import pane_state  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+    if frame is None:
+        return True, "pane unreadable"
+    busy = pane_state.main_turn_busy(frame)
+    if busy is None:
+        return True, "pane state unrecognised"
+    if busy:
+        return True, "main turn busy or compacting"
+    if pane_state.parse(frame).input_field.kind == pane_state.InputFieldKind.QUEUED:
+        return True, "a queued message sits in the input field"
+    return False, "pane idle and nothing queued"
 
 
 def _run_chain_payload(payload_b64: str) -> int:
@@ -807,8 +848,18 @@ def _run_chain_payload(payload_b64: str) -> int:
                 # consumed flag (heartbeat merely hasn't fired since the observation) must
                 # keep vetoing, or a second /clear from THIS chain could overwrite the
                 # pending resume directive before dispatch.py ever surfaces it. The short
-                # bound (gate_timeout_s + a margin) applies only to the genuinely orphaned
+                # bound (the base gate + a margin) applies only to the genuinely orphaned
                 # case: never armed at all.
+                #
+                # TRDD-AIT2KNBU F2 re-check: the chain may now outlive that base gate (it keeps
+                # waiting up to `gate_cap_s` while the pane is busy or shows our /clear queued),
+                # yet 780 s stays right, because this function is only ever reached by a chain
+                # that already holds `clear-chain.lock` (taken non-blocking at the top of
+                # `_run_chain_payload`; the loser returns before any check). A waiting chain
+                # holds the lock for its whole wait, so no OTHER chain ever judges its flag by
+                # this bound; the bound only decides when a flag whose chain has EXITED (gave
+                # up, was killed) stops vetoing. Tying it to `gate_cap_s` would instead keep a
+                # dead chain's orphaned flag vetoing every clear for an hour.
                 (
                     _POST_ENTER_GATE_TIMEOUT_S + _POST_ENTER_GATE_MARGIN_S
                     if not _clear_resume_armed(sd)
@@ -958,6 +1009,22 @@ def _run_chain_payload(payload_b64: str) -> int:
             turn_gate["deferred"] = True
         return busy
 
+    def _gate_extend() -> bool:
+        # TRDD-AIT2KNBU F2: asked by `_await_fresh_session` once its base wait has expired, to decide whether
+        # the missing `clear-observed.ts` stamp is still explained by the pane. Any fault counts as "keep
+        # waiting": the hard `gate_cap_s` bounds it, and giving up early is the unarmed-session outcome.
+        try:
+            extend, reason = gate_extend_decision(terminal_trigger.read_pane_text(data["terminal"]))
+            key = reason
+        except Exception as exc:  # noqa: BLE001 — a probe fault must never end a pending clear's wait
+            extend, reason, key = True, f"pane probe failed: {exc!r}", "probe_failed"
+        _log_veto_once(
+            f"gate_extend:{key}",
+            f"chain: {'still waiting for the fresh session' if extend else 'no pending /clear on the pane'}"
+            f" — {reason}",
+        )
+        return extend
+
     try:
         ok, why = terminal_trigger.run_chained_inject(
             data["terminal"],
@@ -985,6 +1052,13 @@ def _run_chain_payload(payload_b64: str) -> int:
             still_wanted=_still_wanted,
             # #355/#356: hold `/clear` back while the MAIN turn is running (or the screen cannot be read).
             main_turn_busy=_main_turn_busy,
+            # TRDD-AIT2KNBU F2: past the base 180 s gate keep waiting for the fresh session while the pane
+            # still explains the missing stamp (busy, or our `/clear` queued); `clear-chain.lock` stays held
+            # for the whole wait because this function holds it until its `finally`. The cap is the arming
+            # window (`external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S`, which is also F3's late-landing guard
+            # in both SessionStart hooks), NOT `_CLEAR_CHAIN_GIVEUP_S`, which equals it only by coincidence.
+            gate_extend=_gate_extend,
+            gate_cap_s=gate_extend_cap_s(),
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
         # TRDD-B3PY3HV7: the flag had to exist until now (SessionStart stamps `clear-observed.ts`, the

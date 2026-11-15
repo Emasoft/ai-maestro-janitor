@@ -54,6 +54,9 @@ _CASES: list[tuple[str, ps.StatusKind, ps.InputFieldKind]] = [
     ("synthetic-garbage-empty.txt", ps.StatusKind.UNKNOWN, ps.InputFieldKind.EMPTY),
     ("synthetic-done-row-idle.txt", ps.StatusKind.IDLE, ps.InputFieldKind.EMPTY),
     ("synthetic-stale-glyph-row-then-done-row.txt", ps.StatusKind.IDLE, ps.InputFieldKind.EMPTY),
+    # TRDD-AIT2KNBU F2: SYNTHETIC frames (not captures) for the chain's gate-extension probe.
+    ("synthetic-compacting-native.txt", ps.StatusKind.COMPACTING, ps.InputFieldKind.EMPTY),
+    ("synthetic-queued-slash-command.txt", ps.StatusKind.IDLE, ps.InputFieldKind.QUEUED),
 ]
 
 

@@ -1272,7 +1272,8 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
 # shrink over it -- so the shared helper is more conservative than the chain's own cancel check.
 # WHY no clear-chain.lock flock probe: winning LOCK_EX|LOCK_NB even for an instant can make a
 # NEW chain's own LOCK_NB acquire fail ("already pending", /clear silently lost); past this age
-# a legitimate chain (180 s gate + phase B) is long gone, so a probe adds nothing.
+# a legitimate chain is gone or only typing phase B (its post-Enter wait is capped at this
+# same age, TRDD-AIT2KNBU F2), so a probe adds nothing.
 # This constant is BOTH the unarmed-veto age (recovery_pending) and the arming window
 # (clear_flag_armed). The two must stay equal: a flag that stopped vetoing must never be
 # re-armable by a later stamp.

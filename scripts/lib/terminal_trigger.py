@@ -1837,6 +1837,8 @@ def run_chained_inject(
     pre_submit_first=None,
     gate_timeout_s: float = 180.0,
     settle_between_s: float = 0.0,
+    gate_extend=None,
+    gate_cap_s: float | None = None,
     giveup_s: float | None = None,
     still_wanted=None,
     main_turn_busy=None,
@@ -1858,6 +1860,12 @@ def run_chained_inject(
 
     `main_turn_busy` is passed to the FIRST command only, like `still_wanted`: the `then` commands
     run on the fresh session's idle prompt, after the landing gate.
+
+    `gate_extend` / `gate_cap_s` (TRDD-AIT2KNBU F2) are passed straight to `_await_fresh_session`
+    and are None by default, which keeps the plain `gate_timeout_s` give-up. With them, the wait
+    for the fresh session outlasts `gate_timeout_s` while `gate_extend()` says the pane still
+    explains the missing stamp (see `_await_fresh_session`), bounded by `gate_cap_s` seconds
+    from the verified Enter. The caller's singleton lock stays held for the whole wait.
 
     THIS IS THE WHOLE POINT OF THE REDESIGN. `clear_trigger` used to fire two INDEPENDENT
     delayed children — `/clear` at t=2s, the bootstrap at t=10s — each typing blind. Applying
@@ -1895,11 +1903,18 @@ def run_chained_inject(
     if not ok:
         return False, f"{first} not sent: {why}"
 
-    if not _await_fresh_session(gate_stamp, gate_baseline, timeout_s=gate_timeout_s, sleeper=sleeper):
+    # Real elapsed time for the failure text: with `gate_extend` the wait can outlast
+    # `gate_timeout_s` by up to `gate_cap_s`, so quoting `gate_timeout_s` (the pre-F2 text, "within
+    # 180s") would misreport a chain that actually waited many minutes (TRDD-AIT2KNBU F2).
+    gate_started = time.monotonic()
+    if not _await_fresh_session(
+        gate_stamp, gate_baseline, timeout_s=gate_timeout_s, sleeper=sleeper,
+        gate_extend=gate_extend, gate_cap_s=gate_cap_s,
+    ):
         # The fresh session never appeared. STOP — do not type the bootstrap into whatever is
         # there now. This is the exact stranding the chain exists to prevent, and reporting a
         # session that needs a manual `/janitor-arm` beats silently arming the wrong one.
-        return False, f"{first} submitted but no fresh session within {gate_timeout_s:.0f}s"
+        return False, f"{first} submitted but no fresh session after {time.monotonic() - gate_started:.0f}s"
 
     for i, cmd in enumerate(then):
         # Settle AFTER the previous command's verified submit, before typing this one —
@@ -1919,7 +1934,16 @@ def run_chained_inject(
 
 
 def _await_fresh_session(
-    stamp: Path, baseline: int, *, timeout_s: float, sleeper=time.sleep, clock=time.monotonic
+    stamp: Path,
+    baseline: int,
+    *,
+    timeout_s: float,
+    sleeper=time.sleep,
+    clock=time.monotonic,
+    gate_extend=None,
+    gate_cap_s: float | None = None,
+    extend_probe_every_s: float = 15.0,
+    extend_recheck_s: float = 5.0,
 ) -> bool:
     """Block until `stamp` reads STRICTLY NEWER than `baseline` — i.e. a /clear actually
     landed and the fresh session's SessionStart hook stamped it. Returns False on timeout.
@@ -1927,16 +1951,58 @@ def _await_fresh_session(
     `baseline` is captured BEFORE /clear is typed, so a stamp left by an earlier clear can
     never be mistaken for this one. Compared as an integer, not by mtime: an atomic_write
     replaces the file, and a same-second replace would leave mtime indistinguishable.
+
+    `gate_extend` (TRDD-AIT2KNBU F2) is None by default and then this is exactly the plain
+    `timeout_s` wait. WHY it exists: `/clear` typed into a busy pane is QUEUED by Claude Code and
+    runs at the next turn boundary — 19 minutes later in issue #355, 261 s and 672 s later in the
+    2026-11-14/15 incidents — long after a fixed 180 s gate gave up and left phase B untyped. When
+    `timeout_s` expires and `gate_extend` is set, keep polling the stamp every 1 s, asking
+    `gate_extend()` (True = the pane still explains the missing stamp: busy, or our /clear is
+    queued) only every `extend_probe_every_s`, up to `gate_cap_s` after entry (the verified Enter).
+    A False answer is NOT final on its own: a fresh session looks idle with an empty field a moment
+    BEFORE its SessionStart hook writes the stamp, so after a False the stamp is re-read, the probe
+    is repeated `extend_recheck_s` later, and only TWO consecutive False answers with the stamp still
+    not newer give up. `gate_cap_s` is required with `gate_extend` (fail fast, no implicit cap).
     """
-    deadline = clock() + timeout_s
-    while clock() < deadline:
+    if gate_extend is not None and gate_cap_s is None:
+        raise ValueError("gate_extend requires gate_cap_s")
+
+    def _stamp_is_newer() -> bool:
         try:
-            if int(stamp.read_text(encoding="utf-8").strip() or 0) > baseline:
-                return True
+            return int(stamp.read_text(encoding="utf-8").strip() or 0) > baseline
         except (OSError, ValueError):
-            pass  # absent or mid-write — that IS the "not yet" answer
+            return False  # absent or mid-write — that IS the "not yet" answer
+
+    # ONE clock() read here and one per loop test, as before: the pinned readback tests feed an
+    # exact-length tick iterator, so the gate_extend=None path must not read the clock any more often.
+    start = clock()
+    deadline = start + timeout_s
+    while clock() < deadline:
+        if _stamp_is_newer():
+            return True
         sleeper(1.0)
-    return False
+    if gate_extend is None or gate_cap_s is None:  # cap None with an extend is refused above
+        return False
+    cap_deadline = start + gate_cap_s
+    next_probe_at = clock()  # ask as soon as the base wait has expired
+    consecutive_false = 0
+    while clock() < cap_deadline:
+        if _stamp_is_newer():
+            return True
+        now = clock()
+        if now >= next_probe_at:
+            if gate_extend():
+                consecutive_false = 0
+                next_probe_at = now + extend_probe_every_s
+            else:
+                consecutive_false += 1
+                if consecutive_false >= 2:
+                    # Last stamp read AFTER the second False answer: the stamp may have landed
+                    # between the last tick and the probe.
+                    return _stamp_is_newer()
+                next_probe_at = now + extend_recheck_s
+        sleeper(1.0)
+    return _stamp_is_newer()
 
 
 def _run_send_payload(payload_b64: str) -> int:

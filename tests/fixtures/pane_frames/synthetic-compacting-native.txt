@@ -1,0 +1,7 @@
+⏺ Reading the transcript
+✻ Compacting conversation… (esc to interrupt)
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Sonnet 5 v2.1.300 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

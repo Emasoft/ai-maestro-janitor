@@ -543,7 +543,8 @@ def _startup_chain_clear_service(state, session_id: str) -> None:  # noqa: ANN00
     `source=startup` — indistinguishable, by the source string alone, from "the user opened a
     new pane". Until TRDD-C7M4RXQ2 that re-entry ran NONE of the clear service: no
     `clear-observed.ts` stamp (dispatch's `_phase_clear_resume` never armed, the chain's own
-    `_await_fresh_session` gate timed out), no session-id stamp, no handoff — the agent sat
+    `_await_fresh_session` gate gave up after its 180 s base wait), no session-id stamp, no
+    handoff — the agent sat
     idle until the owner typed "resume" by hand (restart #1, 2026-09-25).
 
     GATED ON EVIDENCE, not the source string: a FRESH `resume-after-clear.flag` (the same

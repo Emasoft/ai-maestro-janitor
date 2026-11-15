@@ -2738,8 +2738,10 @@ def _phase_clear_resume() -> bool:
         age = now - (written_at or state.file_mtime(flag))
         # A flag past the arming window is unarmable but deliberately kept until max_age:
         # on-session-start stamps clear-observed.ts only while the flag exists, and a queued
-        # clear chain may still be waiting on that stamp (gate clear-observed.ts, give-up
-        # _CLEAR_CHAIN_GIVEUP_S).
+        # clear chain may still be waiting on that stamp (gate clear-observed.ts: 180 s base wait,
+        # extended while the pane is busy or shows the /clear queued, TRDD-AIT2KNBU F2, bounded by
+        # the chain's own gate_cap_s). The default max_age (86400 s) exceeds that cap; a configured
+        # CLEAR_RESUME_MAX_AGE_S below it could delete the flag before the chain's wait ends.
         if max_age > 0 and age > max_age:
             for stale in (flag, since_file):
                 try:
