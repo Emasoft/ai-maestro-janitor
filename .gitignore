@@ -113,4 +113,8 @@ tests/agent_context_bench/out*/
 tests/agent_context_bench/reports/
 
 # janitor: reports_dev/ carries private data (paths, hostnames, pasted secrets).
-# reports/ is git-TRACKED (TRDD-KSUIEPTQ) — do NOT ignore it.
+# reports/ is git-TRACKED by owner rule (TRDD-KSUIEPTQ); files already tracked under it stay tracked.
+# TEMPORARY, owner decision 2026-11-15: /reports/ is ignored only because CPV --strict (5.16.2 and
+# 5.23.0) raises a MAJOR when reports/ is not ignored (Emasoft/claude-plugins-validation#275).
+# New final reports need `git add -f`. Remove this line once CPV drops that rule (TRDD-W5GXPT7T).
+/reports/
