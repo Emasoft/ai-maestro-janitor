@@ -3881,7 +3881,14 @@ def _phase_idle_clear_nudge() -> bool:
             # destroying the context the pending answer belongs to. Same class as TRDD-OO301H7D,
             # one path over: the flag was already computed here and thrown away by `_`.
             return False
-        transcript = cold_cache_compact.newest_transcript(root)
+        # WHY (TRDD-8ZY3JU2H): the size gate must read THIS session's OWN transcript, never
+        # `cold_cache_compact.newest_transcript(root)` -- that is the PROJECT's newest file, so a
+        # big sibling session (a second pane, an advisor/worker session) made a small idle
+        # session look 450k and got it cleared. `_session_transcript_path()` is keyed on
+        # CLAUDE_CODE_SESSION_ID; None (unknown session) -> ctx None -> `should_clear_when_long_idle`
+        # refuses (`context_tokens is None` never satisfies it). The gate, the print line and the
+        # chain payload below therefore all name the same file.
+        transcript = _session_transcript_path()
         ctx = cold_cache_compact.context_tokens_for(transcript)
         if not cold_cache_compact.should_clear_when_long_idle(
             idle_s,
@@ -3917,12 +3924,9 @@ def _phase_idle_clear_nudge() -> bool:
                 "in-flight task."
             ),
             # TRDD-RAEGS1D5 card 5: THIS SESSION'S OWN transcript (from its own
-            # CLAUDE_CODE_SESSION_ID), never "the project's newest" -- `transcript` above is
-            # still measured off `cold_cache_compact.newest_transcript` for the context-size
-            # print line, which is a fine proxy in the common single-pane case, but the chain
-            # payload must name THIS fire's own session or a second pane's clear could sidecar
-            # the wrong transcript.
-            transcript_path=str(_session_transcript_path() or "") or None,
+            # CLAUDE_CODE_SESSION_ID), never "the project's newest". Since TRDD-8ZY3JU2H the
+            # size gate above reads this same file, so gate, print line and payload agree.
+            transcript_path=str(transcript or "") or None,
             count_toward_cooldown=True,
         )
         if not spawned:

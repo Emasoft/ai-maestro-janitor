@@ -115,6 +115,15 @@ def test_idle_clear_nudge_refuses_a_real_transcript_ending_on_unanswered_tool_us
     monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: False)
     monkeypatch.setattr(dispatch, "_cadence_active_waiting", lambda sd, now: False)
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: 500_000)
+    # TRDD-8ZY3JU2H: the size gate now reads THIS sessions own transcript (CLAUDE_CODE_SESSION_ID),
+    # not the project newest. Without a resolvable own transcript the gate would refuse for the
+    # wrong reason (unknown context) and this test would pass even with the awaiting_user veto
+    # deleted -- so name the fixture transcript as the own session and assert it resolves.
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
+    assert dispatch._session_transcript_path() == tdir / "s1.jsonl", (
+        "fixture setup: the own-session transcript must resolve, or the size gate refuses on its "
+        "own and this test no longer isolates the awaiting_user veto"
+    )
     sent: list = []
     monkeypatch.setattr(
         terminal_trigger,

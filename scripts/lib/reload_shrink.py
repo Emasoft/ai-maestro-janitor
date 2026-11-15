@@ -82,17 +82,24 @@ def should_shrink(mode: str, *, context_tokens: int | None, threshold: int, hard
     return context_tokens is not None and context_tokens >= threshold
 
 
-def context_tokens() -> int | None:
-    """Live context size, or None when it cannot be read (never raises).
+def context_tokens(transcript_path: str | os.PathLike[str] | None) -> int | None:
+    """Context size of THIS session's own transcript, or None when it cannot be read (never raises).
 
     None is a REFUSAL to shrink in `auto` mode, not a zero — see `should_shrink`.
+
+    WHY THE PATH IS A PARAMETER (TRDD-8ZY3JU2H): this used to read
+    `cold_cache_compact.newest_transcript(project_root)`, the PROJECT's newest transcript, so a
+    big sibling session decided whether THIS session got `/clear`ed by a reload. The callers pass
+    `clear_trigger.session_transcript_path()` (keyed on CLAUDE_CODE_SESSION_ID); this lib module
+    must not import `clear_trigger` (it lives in `scripts/`), hence a parameter. An unknown session
+    (`None`) reads as unmeasurable, which `should_shrink` refuses.
     """
+    if transcript_path is None:
+        return None
     try:
         import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
 
-        return cold_cache_compact.context_tokens_for(
-            cold_cache_compact.newest_transcript(state.project_root())
-        )
+        return cold_cache_compact.context_tokens_for(transcript_path)
     except Exception as exc:  # noqa: BLE001 -- an unreadable context must never break the reload
         state.log_line("reload-shrink", f"context read failed, not shrinking: {exc}")
         return None

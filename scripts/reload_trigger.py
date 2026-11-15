@@ -137,7 +137,13 @@ def main() -> int:
     # above the same threshold on the assumption that "the context shrinks on its own" — which
     # is false for an unattended session, so the reload deferred FOREVER and the session ran
     # stale plugin code silently. Shrinking is what makes that deferral end.
-    ctx = reload_shrink.context_tokens() if args.shrink == "auto" else None
+    # WHY (TRDD-8ZY3JU2H): the shrink gate measures THIS session's OWN transcript (from its
+    # CLAUDE_CODE_SESSION_ID), never the project's newest -- a big sibling session must not
+    # decide that this one gets `/clear`ed. Unknown session -> None -> ctx None -> `should_shrink`
+    # refuses in `auto` (the reload itself still runs); `--shrink force` is unchanged. The same
+    # path feeds the chain payload below, so gate and payload name one file.
+    own_transcript = clear_trigger.session_transcript_path()
+    ctx = reload_shrink.context_tokens(own_transcript) if args.shrink == "auto" else None
     threshold = shrink_threshold()
     if should_shrink(args.shrink, context_tokens=ctx, threshold=threshold, hard=args.hard):
         then = [RELOAD_CMD, *clear_trigger.BOOTSTRAP_CMDS]
@@ -156,7 +162,7 @@ def main() -> int:
             # context exactly like a compaction, so the fresh session's post-clear-compact hook
             # needs THIS session's own transcript to Jev-compact -- None (no CLAUDE_CODE_SESSION_ID
             # resolvable, or no matching transcript on disk) writes no sidecar rather than guess.
-            transcript_path=str(clear_trigger.session_transcript_path() or "") or None,
+            transcript_path=str(own_transcript or "") or None,
         )
         if spawned:
             state.log_line(

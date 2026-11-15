@@ -220,3 +220,65 @@ def test_shrink_reload_passes_no_transcript_when_session_id_unresolvable(tmp_pat
     rc = mod.main()
     assert rc == 0
     assert captured["transcript_path"] is None
+
+
+def _write_usage_transcript(path: Path, tokens: int, *, mtime: float) -> None:
+    """A REAL one-record transcript whose last assistant usage totals `tokens` input tokens."""
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "type": "assistant",
+        "timestamp": "2026-11-15T06:00:00.000Z",
+        "message": {
+            "usage": {
+                "input_tokens": 10,
+                "cache_read_input_tokens": tokens - 10,
+                "cache_creation_input_tokens": 0,
+            }
+        },
+    }
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    os.utime(path, (mtime, mtime))
+
+
+def test_shrink_auto_measures_this_sessions_own_transcript_not_the_project_newest(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """TRDD-8ZY3JU2H: `--shrink auto` must decide on THIS sessions own transcript size. A
+    newer, bigger sibling transcript in the same project must NOT make a small session shrink;
+    an unknown session (no CLAUDE_CODE_SESSION_ID) or a missing own transcript must NOT shrink
+    either. Real transcript files; --dry-run so nothing is ever typed into a pane."""
+    import time
+
+    import memory_scopes
+
+    # (label, own tokens or None = no own file, sibling tokens, session id known, expect shrink)
+    cases = [
+        ("sibling 450k newer, own 100k", 100_000, 450_000, True, False),
+        ("own 450k, sibling 100k newer", 450_000, 100_000, True, True),
+        ("unknown session, big transcripts present", 450_000, 450_000, False, False),
+        ("own transcript absent on disk", None, 450_000, True, False),
+    ]
+    for i, (label, own, sibling, known, expect_shrink) in enumerate(cases):
+        home = tmp_path / f"home{i}"
+        project = tmp_path / f"project{i}"
+        project.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+        monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD", raising=False)
+        if known:
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "own-session")
+        else:
+            monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        tdir = home / ".claude" / "projects" / memory_scopes.project_slug(str(project))
+        now = time.time()
+        if own is not None:
+            _write_usage_transcript(tdir / "own-session.jsonl", own, mtime=now - 600)
+        _write_usage_transcript(tdir / "sibling-session.jsonl", sibling, mtime=now - 10)
+
+        mod = _import()
+        monkeypatch.setattr(sys, "argv", ["reload_skills_trigger.py", "--shrink", "auto", "--dry-run"])
+        assert mod.main() == 0
+        out = capsys.readouterr().out
+        assert ("would chain /clear" in out) is expect_shrink, f"{label}: {out!r}"

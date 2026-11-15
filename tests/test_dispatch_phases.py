@@ -4124,8 +4124,10 @@ def _arm_idle_clear(
     monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: present)
     monkeypatch.setattr(dispatch, "_cadence_active_waiting", lambda sd, now: active)
     monkeypatch.setattr(fleet_scan, "transcript_activity", lambda root, now: (idle_s, 0, False))
-    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
-    monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
+    monkeypatch.setattr(dispatch, "_session_transcript_path", lambda: Path("/tmp/x.jsonl"))
+    # TRDD-8ZY3JU2H: the phase now measures THIS sessions own transcript; an unknown session
+    # (None) is unmeasurable, so the stub mirrors the real reader instead of answering for None.
+    monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx if t else None)
 
     def _stub_spawn(**kw):
         sent.append(kw)
@@ -4200,6 +4202,73 @@ def test_idle_clear_names_THIS_sessions_own_transcript_not_the_project_newest(
     assert dispatch._phase_idle_clear_nudge() is True
     assert len(sent) == 1
     assert sent[0]["transcript_path"] == "/tmp/this-sessions-own.jsonl"
+
+
+def _write_usage_transcript(path: Path, tokens: int, *, mtime: float) -> None:
+    """A REAL one-record transcript whose last assistant usage totals `tokens` input tokens."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "type": "assistant",
+        "timestamp": "2026-11-15T06:00:00.000Z",
+        "message": {
+            "usage": {
+                "input_tokens": 10,
+                "cache_read_input_tokens": tokens - 10,
+                "cache_creation_input_tokens": 0,
+            }
+        },
+    }
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    os.utime(path, (mtime, mtime))
+
+
+def test_idle_clear_size_gate_reads_this_sessions_own_transcript_not_the_project_newest(
+    env_isolation: dict, monkeypatch
+) -> None:
+    """TRDD-8ZY3JU2H: the idle-clear size gate must measure THIS sessions own transcript. A
+    newer, bigger sibling transcript in the same project must NOT clear a small session; the
+    own transcript at 450k must clear even when the newest sibling is small; an unknown
+    session (no CLAUDE_CODE_SESSION_ID) or a missing own transcript must NOT clear. Real
+    transcript files and the real size reader -- only presence, idle age and the chain spawner
+    are stubbed."""
+    import clear_trigger
+    import fleet_scan
+    import memory_scopes
+    import user_intent
+
+    project = env_isolation["project"]
+    tdir = Path.home() / ".claude" / "projects" / memory_scopes.project_slug(str(project))
+
+    # (label, own tokens or None = no own file, sibling tokens, session id known, expect clear)
+    cases = [
+        ("sibling 450k newer, own 100k", 100_000, 450_000, True, False),
+        ("own 450k, sibling 100k newer", 450_000, 100_000, True, True),
+        ("unknown session, big transcripts present", 450_000, 450_000, False, False),
+        ("own transcript absent on disk", None, 450_000, True, False),
+    ]
+    for label, own, sibling, known, expect_clear in cases:
+        for stale in tdir.glob("*.jsonl") if tdir.is_dir() else []:
+            stale.unlink()
+        now = time.time()
+        if own is not None:
+            _write_usage_transcript(tdir / "own-session.jsonl", own, mtime=now - 600)
+        _write_usage_transcript(tdir / "sibling-session.jsonl", sibling, mtime=now - 10)
+        if known:
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "own-session")
+        else:
+            monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+        dispatch = _import_dispatch()
+        sent: list = []
+        monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: False)
+        monkeypatch.setattr(dispatch, "_cadence_active_waiting", lambda sd, now: False)
+        monkeypatch.setattr(fleet_scan, "transcript_activity", lambda root, now: (7200, 0, False))
+        monkeypatch.setattr(
+            clear_trigger, "spawn_shrink_chain", lambda **kw: sent.append(kw) or (True, "sent")
+        )
+
+        assert dispatch._phase_idle_clear_nudge() is expect_clear, label
+        assert len(sent) == (1 if expect_clear else 0), label
 
 
 def test_idle_clear_holds_off_a_tiny_context_card1_item3(env_isolation: dict, monkeypatch) -> None:
