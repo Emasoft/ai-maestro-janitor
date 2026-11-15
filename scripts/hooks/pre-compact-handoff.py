@@ -809,6 +809,12 @@ def _truncate_to_line_budget(names: list[str], line_max_bytes: int) -> list[str]
     return kept
 
 
+def _is_janitor_skill(name: str) -> bool:
+    """True for a janitor on-demand skill, bare (`janitor-arm`) or plugin-qualified
+    (`ai-maestro-janitor:janitor-write-handoff`, the form the Skill tool records, issue #356)."""
+    return name.rpartition(":")[2].startswith("janitor-")
+
+
 def _active_skills_from_transcript(
     transcript_path: str,
     chunk_bytes: int = _ACTIVE_SKILLS_CHUNK_BYTES,
@@ -922,7 +928,7 @@ def _active_skills_from_transcript(
                     # why: janitor-* skills are on-demand commands (arm/disarm/findings/
                     # memory chores) run by hooks or the user, never a mode to reload
                     # after compaction — never surface them as "active" to resume.
-                    if name and name not in seen and not name.startswith("janitor-"):
+                    if name and name not in seen and not _is_janitor_skill(name):
                         seen.add(name)
                         names.append(name)
             elif obj_type == "user":
@@ -937,7 +943,7 @@ def _active_skills_from_transcript(
                     token = m.group(1)
                     if (
                         token not in seen
-                        and not token.startswith("janitor-")
+                        and not _is_janitor_skill(token)
                         and (token in allowlist or token in tool_seen)
                     ):
                         seen.add(token)

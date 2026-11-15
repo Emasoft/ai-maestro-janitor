@@ -88,10 +88,22 @@ _HANDOFF_POINTER = (
 )
 
 
+# A handoff is THIS compaction's only when it is this young (same bound as
+# on-session-start-trdd-state._HANDOFF_FRESH_S): PostCompact fires seconds after PreCompact.
+_HANDOFF_FRESH_S = 900
+
+
 def _handoff_pointer(state_dir: Path) -> str:
-    """Pointer prefix to the ground-truth handoff, or "" if it wasn't written."""
+    """Pointer prefix to the ground-truth handoff, or "" when none was written FOR THIS compaction.
+
+    WHY the age gate (issue #356, live 2026-11-15 20:26): a harness auto-compaction writes only
+    `precompact-continuity.json`, never the prose handoff (owner ruling TRDD-7MGJYLY5), so the file
+    that exists is the one a MANUAL compaction left days earlier. Testing `is_file()` alone sent a
+    resumed session to a two-day-old state from another branch. Absent, stale or unreadable -> "".
+    """
     try:
-        if (state_dir / _HANDOFF_FILENAME).is_file():
+        path = state_dir / _HANDOFF_FILENAME
+        if path.is_file() and (time.time() - path.stat().st_mtime) <= _HANDOFF_FRESH_S:
             return _HANDOFF_POINTER
     except OSError:
         pass

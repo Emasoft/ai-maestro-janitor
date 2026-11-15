@@ -567,6 +567,34 @@ def test_resume_handoff_alone_yields_reground_directive(state_mod) -> None:
     assert "re-ground" in flag
 
 
+def test_resume_ignores_a_stale_handoff(state_mod) -> None:
+    """Issue #356: a handoff from an earlier (manual) compaction is not named by this compaction's cue."""
+    project, state = state_mod
+    post = _post_hook()
+    state.init_state()
+    handoff = state.state_dir() / post._HANDOFF_FILENAME
+    handoff.write_text("handoff body\n", encoding="utf-8")
+    two_days_ago = time.time() - 2 * 86400
+    os.utime(handoff, (two_days_ago, two_days_ago))
+    _write_trdd(project / "design" / "tasks", "31095269", "dev", "2026-06-02T05:00:00+0200", "Watchdog")
+    post._record_resume_directive(state)
+    flag = (state.state_dir() / "resume-after-compact.flag").read_text()
+    assert not flag.startswith("read .janitor/state/precompact-handoff.md FIRST")
+    assert "TRDD-31095269" in flag
+
+
+def test_resume_with_only_a_stale_handoff_writes_no_flag(state_mod) -> None:
+    """A stale handoff alone is no reason for a resume turn."""
+    _project, state = state_mod
+    post = _post_hook()
+    state.init_state()
+    handoff = state.state_dir() / post._HANDOFF_FILENAME
+    handoff.write_text("handoff body\n", encoding="utf-8")
+    two_days_ago = time.time() - 2 * 86400
+    os.utime(handoff, (two_days_ago, two_days_ago))
+    assert post._record_resume_directive(state) is False
+
+
 # ---------- recent conversation (transcript-derived) -----------------------
 
 def _umsg(text: str, **flags) -> dict:
@@ -1182,6 +1210,17 @@ def test_active_skills_from_transcript_no_count_cap(tmp_path: Path) -> None:
     assert len(names) == 9, "no count cap — all nine distinct names survive"
     assert len(", ".join(names).encode("utf-8")) <= hook._ACTIVE_SKILLS_LINE_MAX_BYTES
     assert not names[-1].startswith("…"), "well under budget — no truncation marker"
+
+
+def test_active_skills_drops_the_plugin_qualified_janitor_skill(tmp_path: Path) -> None:
+    """Issue #356: the Skill tool records `ai-maestro-janitor:janitor-write-handoff`; it is never a mode to re-invoke."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _tool_use_turn("Skill", command="ai-maestro-janitor:janitor-write-handoff"),
+        _tool_use_turn("Skill", command="ponytail"),
+    ])
+    assert hook._active_skills_from_transcript(str(tx)) == ["ponytail"]
 
 
 def test_active_skills_from_transcript_line_budget_truncates_with_marker(tmp_path: Path) -> None:
