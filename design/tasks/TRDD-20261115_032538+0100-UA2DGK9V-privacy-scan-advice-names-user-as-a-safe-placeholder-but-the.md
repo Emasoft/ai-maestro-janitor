@@ -4,7 +4,7 @@ title: Privacy scan advice names User as a safe placeholder but the ssh user-at-
 column: todo
 status: tasked
 created: 2026-11-15T03:25:38+0100
-updated: 2026-11-15T03:25:38+0100
+updated: 2026-11-15T04:52:49+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -23,6 +23,7 @@ approval-datetime: 2026-11-15T03:25:38+0100
 
 ## STATE
 NEXT ACTION: choose a fix and add a test: either exempt the literal placeholder user User in the ssh user-at-host rule, or reword the remedy text at scripts/lib/staged_privacy_scan.py:407.
+2026-11-15 04:40 second instance: commit 8c06b621 was blocked on tests/test_on_session_start_post_clear_compact.py:1887, the plugin id (plugin name, an at sign, the marketplace name, written as one string) read as an ssh user-at-host on a dotless host; worked around by splitting the string as tests/test_clear_injects_cleared_sessions_compaction_first.py:47 already does.
 ## Finding
 2026-11-15: committing hooks/secret-shield/tests/url-password-walk.test.ts was blocked twice at line 728 by private-path.ssh-user-host (scripts/lib/private_path_patterns.py:311): first for the input me at host, then for User at host, although the block message says to replace personal values with the github username or User. The rule has two suppression paths and neither covers it: its allow function _allow_ssh_host (private_path_patterns.py:173) suppresses only a hex git SHA host (7 to 40 chars) or a dotted non-LAN host (read as an email domain), and staged_privacy_scan.py:359 suppresses only governance author tokens (_is_governance_author_token, :184). A bare dotless host after User is therefore blocked. The test input was finally written as an at-sign after whitespace with no user part. Found while working TRDD-AGV84UGC.
 
