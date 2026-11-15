@@ -4,7 +4,7 @@ title: Raw rotator tick gaps over 120 s rose to 1.7 percent in the 2026-10-16 to
 column: blocked
 status: tasked
 created: 2026-10-18T03:17:02+0200
-updated: 2026-10-18T03:17:59+0200
+updated: 2026-11-15T20:02:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -19,6 +19,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-18T03:17:02+0200
 blocked-by: [JY0OBQZ4]
 pre-block-column: todo
+blocker-probe: trddgrep --porcelain show JY0OBQZ4 | cut -f3
+blocker-holds-if: not-match:^(complete|published|live)$
 ---
 
 # Raw rotator tick gaps over 120 s rose to 1.7 percent in the 2026-10-16 to 18 window

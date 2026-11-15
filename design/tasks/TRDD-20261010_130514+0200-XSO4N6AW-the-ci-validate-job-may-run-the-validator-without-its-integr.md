@@ -4,7 +4,7 @@ title: The CI Validate job may run the validator without its integrity check eve
 column: blocked
 status: tasked
 created: 2026-10-10T13:05:14+0200
-updated: 2026-10-18T03:31:30+0200
+updated: 2026-11-15T20:02:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -16,9 +16,12 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-10T13:05:14+0200
 unblock-when: [issue:Emasoft/claude-plugins-validation#243, decision:owner accepts or refuses the silent integrity skip]
-blocked-by: []
+blocked-by: [gh:Emasoft/claude-plugins-validation#243]
 review-after: 2026-11-18
 pre-block-column: verify_assumptions
+blocker-probe: gh issue view 243 --repo Emasoft/claude-plugins-validation --json state -q .state
+blocker-holds-if: match:^OPEN$
+blocker-probe-canary: match:^(OPEN|CLOSED)$
 ---
 
 # The CI Validate job may run the validator without its integrity check ever verifying anything

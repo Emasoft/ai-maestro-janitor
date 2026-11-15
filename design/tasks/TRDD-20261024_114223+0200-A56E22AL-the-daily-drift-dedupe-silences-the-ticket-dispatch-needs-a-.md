@@ -4,7 +4,7 @@ title: The daily drift dedupe silences the ticket-dispatch NEEDS A HUMAN line
 column: blocked
 status: tasked
 created: 2026-10-24T11:42:23+0200
-updated: 2026-10-24T11:48:02+0200
+updated: 2026-11-15T20:02:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -19,6 +19,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-24T11:42:23+0200
 blocked-by: [5CGPEK4V]
 pre-block-column: todo
+blocker-probe: trddgrep --porcelain show 5CGPEK4V | cut -f3
+blocker-holds-if: not-match:^(complete|published|live)$
 ---
 
 # The daily drift dedupe silences the ticket-dispatch NEEDS A HUMAN line
