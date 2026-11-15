@@ -4,7 +4,7 @@ title: Read the harness's own prompt_cache status object as the primary cache-st
 column: blocked
 pre-block-column: todo
 created: 2026-09-01T19:26:25+0200
-updated: 2026-10-08T19:47:41+0200
+updated: 2026-11-15T20:06:09+0100
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -40,6 +40,7 @@ from the live object, box 1), then step 2 of the design below — prefer the fre
 signal in `cache_certainly_expired`, tri-state preserved, fall through unchanged when stale
 or absent.
 2026-10-08 (probe caveat, review round on 3bc36585): this card's blocker-probe is a REASSESSMENT RECIPE, not an auto-clear — it probes this card's own show output for DECIDED, which appears only when the owner's decision is written into the card (the decision: unblock-when kind never auto-clears). 'Probe exists' does not mean 'probe decides'.
+2026-11-15 (main agent): blocked-by gh:AgentlensPro#19 is CLOSED (gh issue view, checked 2026-11-15); the technical blocker is gone. What holds the card is only unblock-when decision:owner-on-agentlenspro-integration, and no owner decision is recorded here (the 'Fork decided: (a), upstream' line has no attribution). The closed ref stays in blocked-by because a decision-only blocker has no legal spelling (Emasoft/ai-maestro#177); the validator's BLOCKER-RELEASED on it is #188. Owner question: decide the AgentlensPro integration, then this card returns to todo.
 
 ## Why
 

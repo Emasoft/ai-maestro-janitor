@@ -4,7 +4,7 @@ title: amp identity guard help text says cd to the agent directory resolves iden
 column: blocked
 status: tasked
 created: 2026-10-06T21:25:52+0200
-updated: 2026-11-15T20:01:49+0100
+updated: 2026-11-15T20:05:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,3 +31,4 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#318 (opened 2026-09-28). Part of
 - 2026-10-06T21:25:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T07:48:00+0200 — column → blocked by main-agent@ai-maestro-janitor. refusal text lives in ai-maestro#172; issue 318 closed with that pointer
 2026-10-07: moved to blocked (pre-block-column todo), blocked-by Emasoft/ai-maestro#172: the refusal text lives in ai-maestro; issue 318 closed with that pointer.
+- 2026-11-15T20:35+0100 — note (main agent): scripts/detectors/trdd-drift.py _evaluate_predicate returns False for an issue: predicate on a repo other than this project's ('Cross-repo issues ... never auto-clears'), so this card's issue predicate never releases it on its own; an agent must run the blocker-probe after the issue closes and move the card by hand. The 'closed' added in 6b3050e1 only made the predicate well-formed; that commit's message overclaims.
