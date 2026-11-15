@@ -4,7 +4,7 @@ title: The clear chain bootstrap types only the resume command because the cron 
 column: dev
 status: tasked
 created: 2026-10-18T04:39:02+0200
-updated: 2026-11-15T15:56:16+0100
+updated: 2026-11-15T15:59:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -19,6 +19,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-18T04:39:02+0200
 parent-trdd: K9AHY1ZB
 derived: true
+implementation-commits: [aeb41b33, 47cbcbc3]
 ---
 
 # The clear chain bootstrap types only the resume command because the cron survives a clear
