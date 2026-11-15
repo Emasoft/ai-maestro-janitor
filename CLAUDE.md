@@ -83,8 +83,7 @@ There is deliberately **no project map in this file**. One lived here until
 2026-08-14 and cost ~46,000 tokens on *every turn of every session* — re-read at
 the cache rate on each turn and re-written at 1.25× on each cache write — to
 answer questions `tldr` answers live in about two seconds, from source that
-cannot go stale. Do not reintroduce one. If you want it back the switch is
-`/janitor-auto-repomap-on`, and you are choosing to pay that again.
+cannot go stale. Do not reintroduce one.
 
 **So: locate first, then read only what you need.** Never open a file to find out
 what is in it.

@@ -4,7 +4,7 @@ title: repo_digest misses a second edit to an already dirty file so the drift de
 column: backburner
 status: tasked
 created: 2026-11-15T12:57:23+0100
-updated: 2026-11-15T13:00:11+0100
+updated: 2026-11-15T13:08:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,3 +34,4 @@ Reproduce first, as a failing test, before any fix. Candidate directions (decide
 
 - 2026-11-15T12:57:23+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-15T13:00:10+0100 — CAUSE ISOLATED (worker): on a throwaway repo, recorded digest cb3563151400; after a comment edit the digest was 5387f4ed0a39, the detector was silent and the stamp took 5387f4ed0a39; after a second structural edit to the same file the digest was STILL 5387f4ed0a39, the detector was silent and --check printed STALE; CONTROL: deleting the stamp file made the same detector print the STALE nudge. So the per-digest stamp is what suppresses it, and the digest not moving is what lets the stamp apply.
+- 2026-11-15T13:08:30+0100 — RELATED silent degradation in the same function (main agent read the code): repo_digest treats a failed `git status --porcelain` as empty (`or ""`) after HEAD succeeded, so the digest can equal an older clean-tree digest and the fresh stamp holds with nothing logged; a failed `git rev-parse HEAD` silently falls back to a source-mtime digest. Pre-existing; decide together with the dirty-file blind spot.
