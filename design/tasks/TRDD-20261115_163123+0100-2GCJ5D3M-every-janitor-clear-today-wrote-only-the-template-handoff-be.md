@@ -1,0 +1,33 @@
+---
+trdd-id: 2GCJ5D3M
+title: Every janitor clear today wrote only the template handoff because Jev failed and the llm-ext fallback then hit its 600 s limit
+column: todo
+status: tasked
+created: 2026-11-15T16:31:23+0100
+updated: 2026-11-15T16:48:58+0100
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: bugfix
+min-approval-requirement: none
+scope: project
+project-id: ai-maestro-janitor
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-11-15T16:31:23+0100
+---
+
+# Every janitor clear today wrote only the template handoff because Jev failed and the llm-ext fallback then hit its 600 s limit
+
+MEASURED 2026-11-15 (main agent, read from .janitor/logs/session-summary.log, not run): on all 6 logged clears today (03:34, 07:22, 08:42, 09:31, 10:15, 14:12; the 05:23 and 12:03 holds left no outcome line) the post-clear summary logged 'jev and the llm-ext fallback both failed (transient: timed out after 600s) — template handoff written (it ends the hold)'. So the fresh session only gets the template handoff, never the Jev-compacted context; this bears on the owner complaint that clears do not restore the goals (TRDD-8ZY3JU2H) and on TRDD-5ID9CQY8's summary-hold timing. TO DO FIRST: read why both paths reach 600 s (jev_compact.py, the llm-ext call, host load at those times), reproduce one run by hand with timing; then fix the cause, not the timeout. Acceptance: a clear on this host lands a Jev-compacted context, shown by a session-summary.log success line, and a test pinning the failure mode found.
+
+## Approval log
+
+- 2026-11-15T16:31:23+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Investigation
+
+2026-11-15T16:45+0100 READ-ONLY INVESTIGATION (sonnet worker; its report is local and gitignored; claims below are the worker's unless the MAIN-VERIFIED entry below confirms them). CORRECTS the title premise, likely: on all six clears the hold-to-'both failed' interval is 602-611 s while the llm-ext fallback has a 600 s limit computed once before Jev runs, so Jev itself most likely fails within ~2-11 s (? INFERRED, timing arithmetic; Jev logs nothing of its own) and only the llm-ext fallback reaches 600 s. Both paths depend on llm-externalizer (jev_compaction.py:1171 scores via 'llm-ext classify filter'), so they are not independent. Leads: (1) jev-probe.json at 16:29:56 (after the six clears) records 'llm-ext: Path traversal blocked: <per-user temp dir>/.../items.jsonl resolves outside allowed directories', i.e. Jev's temp file sits outside llm-ext's allowed roots; (2) jev-auth-finding-seen touched 14:12:40, 3 s after the 14:12:37 hold start (caveat: the worker reports this stamp is machine-wide, so another session may have written it); (3) from llm-externalizer's own history log (read outside the brief; machine-wide and unfiltered, so the durations below cover every project's llm-ext runs, not only this lane's): successful llm-ext session summaries took 236-588 s and 8 runs hit 600 s, so 600 s sits inside llm-ext's normal range. Host load: unassessable (host-load.log records only threshold crossings). NEXT CHECKS (no model call first): log Jev's exit code, stamp kind and stderr after each attempt; then re-run compact by hand with the temp dir inside llm-ext's allowed roots, and time one llm-ext session summary on the 14:12 transcript.
+2026-11-15T16:48+0100 MAIN-VERIFIED (main agent read the code, nothing run): the llm-ext fallback budget is fixed before Jev runs and never shortened. scripts/summarize_previous_session.py:275-284 sets jev_deadline = now + 300 s and llm_ext_timeout_s = min(hold expiry - now - 30 s, 600 s) in one step before run_compact_with_fallback starts; scripts/lib/jev_compaction_lane.py:1541-1543 passes it unchanged to _run_llm_ext_fallback. With the 900 s hold and the summarizer starting near the hold start, the fallback gets 600 s. So the 602-611 s hold-to-'both failed' intervals leave at most about 2-11 s for the Jev attempts plus the summarizer's own setup (an upper bound for Jev: the gap between hold start and the summarizer's start is not logged). The original title is superseded by this finding: Jev is not timing out at 600 s; the llm-ext fallback is. Side defect, its own card: TRDD-MVUJG3C4 (the fallback budget is not recomputed after Jev, so a slow Jev overruns the hold).
