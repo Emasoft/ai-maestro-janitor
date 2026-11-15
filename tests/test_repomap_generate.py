@@ -783,5 +783,38 @@ def test_atomic_replace_keeps_chosen_mode_and_heals_0600(tmp_path, start_mode, w
     assert target.read_text() == "new"
 
 
+def test_strip_legacy_fence_reports_stripped_and_keeps_the_narrative():
+    """A CLAUDE.md that carries the legacy REPO-MAP fence is rewritten without it: the call returns "stripped", no fence marker is left, and the human narrative survives."""
+    mod = _load_module()
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        claude_md = root / "CLAUDE.md"
+        claude_md.write_text(insert_map_block(_NARRATIVE, _legacy_block(root)))
+
+        outcome = mod.strip_legacy_fence(claude_md)
+
+        assert outcome == "stripped"
+        final = claude_md.read_text()
+        assert _FENCE_START not in final and _FENCE_END not in final, f"the fence survived the strip:\n{final!r}"
+        assert _NARRATIVE.strip().splitlines()[0] in final, f"the narrative was lost:\n{final!r}"
+
+
+def test_strip_legacy_fence_reports_busy_and_writes_nothing_when_no_attempt_is_left():
+    """With every attempt used up (attempts=0, the state after `attempts` collisions with an active editor), the call returns "busy" and leaves the fenced file byte-identical: an active editor wins and the strip retries later."""
+    mod = _load_module()
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        claude_md = root / "CLAUDE.md"
+        fenced = insert_map_block(_NARRATIVE, _legacy_block(root))
+        claude_md.write_text(fenced)
+
+        outcome = mod.strip_legacy_fence(claude_md, attempts=0)
+
+        assert outcome == "busy"
+        assert claude_md.read_text() == fenced, "a busy strip must not write"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
