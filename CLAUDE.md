@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=1caebb34ffbf generated=2026-11-11T13:27:10+0100
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=d1b19d50528b generated=2026-11-15T20:58:36+0100
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -169,6 +169,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **janitor-detector-and-hook-roster** — the janitor detector and hook roster split into parts
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
   - [janitor-detector-and-hook-roster-findings](.claude/project/memory/janitor-detector-and-hook-roster-findings.md) — how good are the scan_text rules
+  - [secret-shield](.claude/project/memory/secret-shield.md) — a secret token or API key showed up in tool output
 
 **janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (78 registered, marketplace-refresh retired 2026-09-17)
 - [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (78 registered, marketplace-refresh retired 2026-09-17)
