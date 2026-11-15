@@ -4,7 +4,7 @@ title: Wire secret-shield into hooks.json and disable jr-redact
 column: blocked
 status: tasked
 created: 2026-11-03T22:46:01+0100
-updated: 2026-11-15T19:59:25+0100
+updated: 2026-11-15T20:16:28+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -65,6 +65,7 @@ Split out of TRDD-M1218EMH.
 2026-11-15 added by TRDD-M1218EMH item 5 (3907ae2c, 913f1db0): wiring must also update README.md: the heading 'Secret shield (vendored, not active yet)', its anchor #secret-shield-vendored-not-active-yet in the Configuration table row for secret_shield_enabled, and the 'Not active yet' paragraph; plus the 'Not active yet.' text in the plugin.json userConfig descriptions and the PROJECT memory page secret-shield (its not-loaded atom).
 2026-11-15 blocker-probe fixed: it counted 3 ids (0Y3UW1NF, TEP6F3A3, 3GP0D06D) while blocked-by lists 5, so it read released with KADV0ZO6 and AGOEWF2E still open; it now counts all five (holds-if not-match:^5$). Also, from the advisor: the README and plugin.json say secrets are hidden before the session transcript sees them, but TRDD-5KLWOC0U leaves the stored structured toolUseResult record unverified and MCP error rows were never probed; the live probe of this card must settle both before that claim is made unconditionally.
 2026-11-15 scope of the blocker-probe: it counts the blocked-by ids only. The three decision: predicates in unblock-when hold the card on their own and never clear by themselves (see Owner decisions open), so a probe that reads 5 does not mean the card may move.
+2026-11-15 for the wiring rewrite of the secret_shield_enabled description (harness review): its storage clause 'before they are stored in the transcript' rests on TRDD-337UVA3J's Bash probe of the stored tool_result row, like the error clause; when this card removes 'Not active yet', scope both clauses to the probes it runs (Bash and MCP, normal and error) instead of only the error clause.
 
 ## Done when
 

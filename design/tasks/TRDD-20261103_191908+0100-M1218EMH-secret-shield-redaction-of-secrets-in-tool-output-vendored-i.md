@@ -4,7 +4,7 @@ title: secret-shield redaction of secrets in tool output, vendored into the jani
 column: blocked
 status: tasked
 created: 2026-11-03T19:19:08+0100
-updated: 2026-11-15T19:59:24+0100
+updated: 2026-11-15T20:16:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-03T19:19:08+0100
-implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b, 8b57bb1a, 842a8835, 5722ca3c, 4cc1c5c3, 50fa82cb, 913f1db0, 3907ae2c, d88743d5]
+implementation-commits: [03c05cbc, 136ab76b, 26f667c4, aaec9c68, 4a25880b, 2be1783d, 31f1f65c, 4de9deb8, 7fe9235b, 8b57bb1a, 842a8835, 5722ca3c, 4cc1c5c3, 50fa82cb, 913f1db0, 3907ae2c, d88743d5, 2a09d06d, 9772b2b1, c535ac63]
 eht: [0Y3UW1NF, 337UVA3J, TEP6F3A3, 2V7OAUPE]
 blocked-by: [0Y3UW1NF, TEP6F3A3, 2V7OAUPE]
 pre-block-column: dev
