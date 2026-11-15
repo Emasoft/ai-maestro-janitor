@@ -318,6 +318,20 @@ read directly by the daemon — set them in your project's
   share the resume flag (worktrees are already isolated); the per-session
   context snapshot is always session-keyed.
 
+### Secret shield (vendored, not active yet)
+
+A Claude Code mod in `hooks/secret-shield/` replaces API keys, tokens, private keys and passwords in known formats in tool output with `[JANITOR-REDACTED:<type>]` (for example `[JANITOR-REDACTED:github-token]`) before Claude or the session transcript sees them. Error results that reach Claude are covered too (TRDD-337UVA3J, probed for Bash on Claude Code 2.1.318).
+
+It is vendored from Singh-AP/awesome-claude-mods, folder `mods/safety/secret-shield`, version 1.0.0, MIT (see `hooks/secret-shield/LICENSE` and `hooks/secret-shield/NOTICE`), and extended with the rule catalog in `hooks/secret-shield/rules/`. Known gaps are in `hooks/secret-shield/KNOWN-MISSES.md`.
+
+**Not active yet.** `hooks/hooks.json` has no `"modules"` key, so the mod is not loaded and `/janitor-secret-shield` does not exist yet. Wiring is TRDD-2V7OAUPE, blocked until the write-back guard (TRDD-0Y3UW1NF) and the pre-wiring checks (TRDD-TEP6F3A3) are done; `tests/test_secret_shield_wiring_gate.py` fails if the key is added earlier.
+
+The guard comes first because, while the shield is on, Read shows the marker instead of the value. A later Write or Edit that restates that line would then write the marker over the real secret.
+
+Three options, set with `/plugin configure`, control it: `secret_shield_enabled` (default true), `secret_shield_block_files` (default false) and `secret_shield_redact_prompts` (default false). Each is described in the [Configuration](#configuration) table.
+
+Once wired, `/janitor-secret-shield` shows what was hidden, and `/janitor-secret-shield test <text>` dry-runs a string.
+
 ## Supply-chain defense stack
 
 After the 2026-05 `art-template` npm compromise (25k weekly downloads, ~5
@@ -917,6 +931,9 @@ scope) directly.
 | `context_hardstop_pct` | 85 | Context-window % at/above which the ENFORCEMENT tier queues a compaction on this pane and DENIES the tool call so the turn ends cleanly for `/compact` (then `post-compact-resume` continues at reduced context). 85 is high enough to be rare, low enough that `/compact` still succeeds. Gated by `context_autocompact_enabled`; fires at most once per episode (180s dedupe) and ONLY when a compaction can actually be queued (iTerm/tmux); otherwise it degrades to the advisory, never a stuck deny. Set 0 to disable enforcement by threshold. |
 | `context_autocompact_enabled` | true | When true (default), the ENFORCEMENT tier is active (auto-compact + deny at/above `context_hardstop_pct`). When false, the guard is advisory-only: it still nudges at `context_compact_suggest_pct` but NEVER denies a tool call. Set false to never let the guard interrupt a turn. |
 | `context_window_tokens` | 1000000 | The window size used to compute the usage % from the TRANSCRIPT fallback (no statusline snapshot). Default 1000000. Ignored when the statusline snapshot is present (it carries the real window). Set to your model's window if you run a non-1M context and rely on the transcript fallback. |
+| `secret_shield_enabled` | true | Hide API keys, tokens, private keys and passwords in known formats in tool output before Claude or the session transcript sees them. Not active yet: see [Secret shield](#secret-shield-vendored-not-active-yet). |
+| `secret_shield_block_files` | false | Also refuse Read, Edit, Write and NotebookEdit on files that usually hold secrets (`.env`, `*.pem`, `id_rsa`, `~/.aws/credentials`, `.npmrc`). `.env.example` and similar stay readable. Bash can still read these files, so this is not complete protection. |
+| `secret_shield_redact_prompts` | false | Also redact secrets pasted into your own prompts. Off by default, since a pasted key is usually meant for Claude. |
 
 ## Weekly fallback
 
