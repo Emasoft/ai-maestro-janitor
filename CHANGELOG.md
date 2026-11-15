@@ -17,6 +17,14 @@ All notable changes to this project will be documented in this file.
 
 - **bash-guard:** Deny commands that print a process environment (TRDD-G14LKPEC, #354) (a2e5807)
 - **env-secret-on-disk:** On-demand detector for live session secrets written in agent folders (TRDD-G14LKPEC, #354) (af9bedf)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.9.3 (21b17d3)
+
+### Testing
+
+- **host-pressure:** Compare the deferred stamp to the value written, not a re-read clock (fb4f359)
 ## [3.9.2] — 2026-11-15
 
 ### Bug Fixes
