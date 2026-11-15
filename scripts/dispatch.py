@@ -2414,14 +2414,27 @@ def _stamp_late_summary(sd: Path, clear_ts: int | None = None) -> None:
 
 
 def _phase_late_summary_drift() -> None:
-    """One drift line per cleared session when a real summary lands AFTER a resume that fired on
-    a template handoff.
+    """One `[janitor-resume]` cue per fire when a real summary lands AFTER a resume that fired on
+    a template handoff (issue #356, TRDD-XJI19HO7).
 
     The resume (`_phase_clear_resume`) ends the hold on ANY handoff, template included, so a real
-    Jev summary written later by the detached retry lane would otherwise never be shown. Emitted
-    once per path per key (each key's own stamp), reusing `_fresh_summary_note`'s glob logic.
+    Jev summary written later by the detached retry lane would otherwise never be shown. Each
+    key's own stamp keeps the note once per path per key.
+
+    WHY a decision and not a bare printed line: the bare line rode beside `[janitor-quiet]`, whose
+    protocol reply is "janitor heartbeat" with no model turn spent on it, so the resumed session
+    kept acting on the template for about 14 minutes (issue #356). `_emit_decision` marks the fire
+    non-quiet.
+    WHY the early return: a keep-going or idle-clear phase earlier in this fire may already have
+    emitted a `[janitor-resume]`, and two bare tokens in one fire are ambiguous. Returning BEFORE
+    any stamp is written keeps the note armed, so it fires on the next beat and is never lost.
+    One token carries the line of every pending key (two cleared sessions can both be pending).
     """
+    if _decision_fired:
+        return
     sd = state.state_dir()
+    lines: list[str] = []
+    pending: list[tuple[Path, str]] = []
     for stamp in sorted(sd.glob(f"{_LATE_SUMMARY_STAMP_PREFIX}*.txt")):
         key = stamp.stem[len(_LATE_SUMMARY_STAMP_PREFIX) :]
         real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
@@ -2430,8 +2443,18 @@ def _phase_late_summary_drift() -> None:
         path = str(_latest_handoff(real).resolve())
         if stamp.read_text(encoding="utf-8").strip() == path:
             continue
+        pending.append((stamp, path))
+        lines.append(
+            state.sanitize_for_drift_line(
+                f"a fuller summary of the cleared session is at {path} -- read it FIRST: it "
+                "supersedes the auto-composed template you resumed from, so reconcile your plan with it"
+            )
+        )
+    if not lines:
+        return
+    for stamp, path in pending:
         state.atomic_write(stamp, f"{path}\n")
-        print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
+    _emit_decision("[janitor-resume]", lines)
 
 
 # The cap on the per-project stamp of PRINTED kill signatures. The daemon's own

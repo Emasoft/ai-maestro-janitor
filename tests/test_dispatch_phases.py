@@ -1498,6 +1498,49 @@ def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict
     assert "fuller summary" not in _run_main(dispatch), "each announced once only"
 
 
+def test_a_late_summary_reaches_the_session_as_a_resume_cue_not_beside_quiet(env_isolation: dict) -> None:
+    """Issue #356: the fuller-summary note is a [janitor-resume] decision, so the fire is not quiet."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    _arm_summary_hold(sd, expires_in_s=900, key="k0k0k0k0", captured_ago_s=6)
+    now = int(time.time())
+    handoff_files.write(sd, "k0k0k0k0", f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template", now=now)
+    assert "[janitor-resume]" in _run_main(dispatch)
+    real = handoff_files.write(sd, "k0k0k0k0", "synthetic real summary", now=now + 5)
+    out = _run_main(dispatch)
+    assert out.splitlines()[0] == "[janitor-resume]", out
+    assert f"a fuller summary of the cleared session is at {real.resolve()}" in out, out
+    assert "[janitor-quiet]" not in out, out
+
+
+def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolation: dict) -> None:
+    """Issue #356: one fire never carries two [janitor-resume] tokens; the late note stays armed and
+    fires on the next beat."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    real = handoff_files.write(sd, "k0k0k0k0", "synthetic real summary", now=int(time.time()))
+    state.atomic_write(dispatch._late_summary_stamp(sd, "k0k0k0k0"), "\n")
+    _make_idle_and_stale(state)
+    setattr(dispatch, "_decision_fired", False)
+    out = _capture_stdout(lambda: (dispatch._phase_keep_going_nudge(), dispatch._phase_late_summary_drift()))
+    assert out.count("[janitor-resume]") == 1, out
+    assert "fuller summary" not in out, out
+    setattr(dispatch, "_decision_fired", False)
+    later = _capture_stdout(dispatch._phase_late_summary_drift)
+    assert later.splitlines()[0] == "[janitor-resume]", later
+    assert str(real.resolve()) in later, later
+
+
 def test_the_latest_handoff_of_a_key_orders_by_filename_timestamp_not_mtime(
     env_isolation: dict,
 ) -> None:
@@ -3809,6 +3852,7 @@ def test_track_detector_streak_announces_once_when_the_write_fails_after_the_app
     finally:
         os.chmod(sdir, mode)
     assert dispatch._fire_degraded == ["test-det=error:rc=1"]
+    assert not (sdir / "detector-fail-streak-test-det.ts").exists(), "the stamp write must have failed"
 
 
 def _seed_state_dir(dispatch):
