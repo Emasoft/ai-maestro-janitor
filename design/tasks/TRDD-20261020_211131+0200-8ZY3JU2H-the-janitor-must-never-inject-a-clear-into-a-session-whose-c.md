@@ -1,10 +1,10 @@
 ---
 trdd-id: 8ZY3JU2H
 title: The janitor must never inject a /clear into a session whose context is far below the cap
-column: dev
+column: testing
 status: tasked
 created: 2026-10-20T21:11:31+0200
-updated: 2026-11-15T10:07:38+0100
+updated: 2026-11-15T11:02:33+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,6 +30,10 @@ implementation-commits: [d88e10ff, 07c2d2bd, 2af3417e, 610a2afc, 16708ffe]
 - 2026-11-15T06:22:36+0100 — column → dev. root cause fixed in d88e10ff; wrong-session readings of paths 1, 3, 4, 5 still open
 - 2026-11-15T09:38:05+0100 — 207fb817 (test only): an autouse fixture re-pins cold_cache_compact, external_clear, global_state and state in sys.modules, so tests/test_cold_cache_clear_loop_guard.py survives xdist neighbours that delete those entries; the 09:23 publish attempt failed on 4 of its tests under xdist. It should fix them; only the release gate pytest run confirms it. Its commit body says 5 failures: that is the worker serial repro (test_global_state and test_dispatch_phases first); the gate showed 4. OPEN: one [write-guard] warning naming plugin-DATA paths (memory-maint-conflict-LOCAL-*.corpus, usage-probe/*.json) appeared in the worker three-file serial run; cause unproven (the guard named the live daemon and the ai-maestro server); check the gate pytest output for write-guard lines.
 - 2026-11-15T10:05:00+0100 — First run of the increment B, C and D tests and of the 207fb817 loop-guard tests: all passed in the full suite run without -x at 73c6da35 (reports_dev/release/20261115_095647+0100-pytest-full-no-x.log; its 2 failures are in other files). The mutation check named in the acceptance is still open.
+- 2026-11-15T11:00:25+0100 — SHIPPED in 3.9.0 (bump commit 69942978; increments A to D, d88e10ff 2af3417e 610a2afc 16708ffe, and the 207fb817 loop-guard test fix, are in the release). Column moved to testing. FIELD CHECK this card's own STATE implies: (1) the acceptance 'ACCEPTANCE NOT MET: none of their tests has run and none has had a mutation check' is still open for the mutation check of increments B, C and D (restore the buggy form, the test must fail on the rule); (2) the 09:35 STATE note: on the next real resume read the cold-cache-clear.log line (why= and transcript=) to see whether scoped probing stopped legitimate cold-resume shrinks. Still open and not shipped: paths 4 and 6, the landing re-check, the 3 unexplained drops.
+- 2026-11-15T11:00:25+0100 — FIELD EVIDENCE 2026-11-15: the janitor cleared the main session at 10:15 (jev-compaction, context ~400k) while that session's publish.py, started 10:14, was still running; the handoff did not record the running publish, the resumed session started a second publish at 10:19 and the two overlapped until the second was stopped by its own task id. A clear during a running background release step loses the in-flight state the owner's complaint is about.
+- 2026-11-15T11:01:33+0100 — VERIFICATION of the SHIPPED line above: git merge-base --is-ancestor against 69942978 returned 'in' for d88e10ff, 07c2d2bd, 2af3417e, 610a2afc, 16708ffe and 207fb817. The mapping of 2af3417e to increment B, 610a2afc to C and 16708ffe to D is from this card's own STATE lines (07:50, 08:30, 09:20); d88e10ff is the root-cause fix (06:22 line) and 07c2d2bd is also in implementation-commits and in the release. The column move to testing was briefed by the main agent although the acceptance (mutation check) and paths 4 and 6 stay open.
+- 2026-11-15T11:02:33+0100 — CORRECTION to the SHIPPED line: it called d88e10ff part of 'increments A to D'. The card's own STATE (07:10 line) says INCREMENT A DONE in 07c2d2bd; d88e10ff is the root-cause fix (token meter, 06:22 line), not an increment. Correct set shipped in 3.9.0, all ancestors of 69942978: d88e10ff (root cause), 07c2d2bd (A), 2af3417e (B), 610a2afc (C), 16708ffe (D), 207fb817 (test fix).
 
 ## The report
 

@@ -1,10 +1,10 @@
 ---
 trdd-id: XVJ30M61
 title: A session stuck behind a second-scale retry banner on a stale transcript is declined, never escaped
-column: dev
+column: testing
 status: tasked
 created: 2026-11-13T21:32:49+0100
-updated: 2026-11-14T14:59:27+0100
+updated: 2026-11-15T11:00:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -40,6 +40,7 @@ Child of TRDD-RJJGXPIK (EHT). Blocks RJJGXPIK reaching complete: the owner's rep
 
 - 2026-11-13T21:32:49+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-13T22:16:42+0100 — column → dev. decision taken: option 0
+- 2026-11-15T11:00:25+0100 — SHIPPED in 3.9.0 (bump commit 69942978): the countdown logging retry_wedge@<attempt>[<countdown>] (daemon.log line 'session-liveness: <project> retry_wedge@...') is in the release; the retry_stuck route is NOT built. FIELD CHECK this card's own STATE names: the COUNTING RULE, final (2026-11-14): a static-0s episode is two or more daemon.log lines for one project with read_age 0 s, '[0s]' and the same attempt, at beats with no differing attempt between them; the retry_stuck route stays DEFERRED until a real static 0s line appears on the running build. Unverified end to end per the card: read_age 0 s relies on task_session_liveness passing one now to gather_fleet and to the log helper; no test drives a real pane read through the daemon beat. Column moved to testing.
 
 ## Implementation notes
 
