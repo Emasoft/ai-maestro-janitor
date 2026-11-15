@@ -4,7 +4,7 @@ title: a fire with one failed detector exits 0 and prints bare janitor-quiet
 column: testing
 status: tasked
 created: 2026-11-10T15:18:21+0100
-updated: 2026-11-11T07:13:39+0100
+updated: 2026-11-15T20:58:34+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,3 +31,4 @@ From issue #342 (tier E of the 2026-11-10 reconciliation on FQVEILVK): when a de
 ## STATE
 
 2026-11-11: fix implemented in a1e0b8a3. _fire_degraded list appended in _track_detector_streak (single chokepoint), printed by _emit_quiet_if_idle after [janitor-quiet] and after _phase_background_worker_progress. 3 new tests in test_dispatch_phases.py pass; ruff+mypy clean; existing quiet/streak tests pass. Card in testing pending full suite run before publish.
+2026-11-15 FOLLOW-UP for #342: a1e0b8a3 printed the degraded: line on EVERY fire while a detector kept failing (ticket-dispatch runs every 300 s). DECIDED by the main agent under the owner's standing 'decide yourself' (TRDD-S6GX1DHN, 2026-10-09): KEEP the line, fed only when the failure state changes (the first failure of an episode, or a different outcome from the previous pass), with the suffix '(informational; not a task - do not investigate unless asked)'. Alternative weighed, DELETE (drop the line; the HIGH DETECTOR-FAIL ledger row at the 3rd pass stays the only signal): rejected because #342 item 2 asks that a partly failed fire stay distinguishable from a clean pass. UNTESTED until the pre-push suite: two new tests and one edited test in tests/test_dispatch_phases.py. Edge behaviours with no test: a stamp read error announces the failure on every pass; an error from state_dir() skips the announcement. Plan: reports_dev/fanout-research/20261115_204105+0100-heartbeat-noise-plan.md; apply report: reports_dev/fanout-apply/20261115_205511+0100-heartbeat-noise-apply.md (both local, gitignored).

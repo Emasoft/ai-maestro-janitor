@@ -3711,7 +3711,9 @@ def test_emit_quiet_if_idle_degraded_line_after_failed_detector(env_isolation: d
     setattr(dispatch, "_fire_degraded", ["fake-broken=error:rc=1"])
     out = _capture_stdout(dispatch._emit_quiet_if_idle)
     assert "[janitor-quiet]" in out, out
-    assert "degraded: fake-broken=error:rc=1" in out.splitlines(), out
+    assert any(
+        ln.startswith("degraded: fake-broken=error:rc=1 (") for ln in out.splitlines()
+    ), out
 
 
 def test_emit_quiet_if_idle_no_degraded_line_on_clean_fire(env_isolation: dict) -> None:
@@ -3735,6 +3737,35 @@ def test_track_detector_streak_appends_to_fire_degraded(env_isolation: dict) -> 
     before = list(dispatch._fire_degraded)
     dispatch._track_detector_streak("test-det", "ok")
     assert dispatch._fire_degraded == before
+
+
+def test_track_detector_streak_announces_an_unchanged_failure_once(env_isolation: dict) -> None:
+    """#342: a detector failing the same way pass after pass is added to the per-fire degraded
+    list once, at the start of the episode, not on every pass."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_fire_degraded", [])
+    dispatch._track_detector_streak("test-det", "error:rc=1")
+    dispatch._track_detector_streak("test-det", "error:rc=1")
+    assert dispatch._fire_degraded == ["test-det=error:rc=1"]
+
+
+def test_track_detector_streak_announces_a_changed_outcome_and_a_failure_after_recovery(
+    env_isolation: dict,
+) -> None:
+    """#342: a different failure outcome, or a failure after a recovery, is a state change and
+    is announced again."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_fire_degraded", [])
+    dispatch._track_detector_streak("test-det", "error:rc=1")
+    dispatch._track_detector_streak("test-det", "error:timeout")
+    assert dispatch._fire_degraded == ["test-det=error:rc=1", "test-det=error:timeout"]
+    dispatch._track_detector_streak("test-det", "ok")
+    dispatch._track_detector_streak("test-det", "error:timeout")
+    assert dispatch._fire_degraded == [
+        "test-det=error:rc=1",
+        "test-det=error:timeout",
+        "test-det=error:timeout",
+    ]
 
 
 def _seed_state_dir(dispatch):

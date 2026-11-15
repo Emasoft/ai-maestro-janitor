@@ -1454,7 +1454,14 @@ def _emit_quiet_if_idle() -> None:
         print("[janitor-quiet]")
         _phase_background_worker_progress()
         if _fire_degraded:
-            print(f"degraded: {', '.join(_fire_degraded)}")
+            # #342: the suffix names the non-action. An autonomous reader asks "should I fix this?"
+            # of a bare status line and escalates (project memory
+            # status-lines-to-autonomous-readers-cause-escalation); the entries themselves are
+            # already limited to failure-state changes by _track_detector_streak.
+            print(
+                f"degraded: {', '.join(_fire_degraded)} "
+                "(informational; not a task - do not investigate unless asked)"
+            )
 
 
 # TRDD-P64SR014: a detector the dispatcher kills or cannot start protects nothing, yet
@@ -1483,19 +1490,14 @@ def _track_detector_streak(name: str, outcome: str) -> None:
     Two concurrent sessions can race the read-modify-write (off-by-one or a duplicate row);
     accepted. Fail-open: it must never break the heartbeat.
     """
-    # TZBTDF56: per-fire degraded signal — a fire in which any detector failed must be
-    # distinguishable from a clean pass, so the collected failures are surfaced as one
-    # `degraded:` line by _emit_quiet_if_idle. This lives HERE, not at each call site,
-    # because _track_detector_streak is the single chokepoint every error outcome passes
-    # through: both _record_default_outcome and the guard-branch-protection direct path
-    # call it, so one insertion covers every detector.
     global _fire_degraded
-    if outcome.startswith("error:"):
-        _fire_degraded.append(f"{name}={outcome}")
     try:
         stamp = state.state_dir() / f"detector-fail-streak-{name}.ts"
+        prev_outcome = ""
         try:
-            count = int(stamp.read_text(encoding="utf-8").split(None, 1)[0])
+            parts = stamp.read_text(encoding="utf-8").split(None, 1)
+            count = int(parts[0])
+            prev_outcome = parts[1].strip() if len(parts) > 1 else ""
         except (OSError, ValueError, IndexError):
             count = 0  # missing or garbled stamp = no streak
         if not outcome.startswith("error:"):
@@ -1509,6 +1511,18 @@ def _track_detector_streak(name: str, outcome: str) -> None:
                 )
             return
         count += 1
+        # TZBTDF56 + #342: the per-fire degraded signal is fed HERE because this function is the
+        # single chokepoint every error outcome passes through (_record_default_outcome and the
+        # guard-branch-protection direct path both call it), so one insertion covers every
+        # detector. It is fed only when the failure STATE CHANGES: the first failure of an
+        # episode (count == 1, which also holds again after a recovery removed the stamp) or a
+        # different outcome than the previous pass. The previous form appended on every error, so
+        # a detector failing on each fire (ticket-dispatch runs every 300 s) repeated one
+        # unchanged `degraded:` line into the agent context per fire - the repeat #342 item 1
+        # reports. A persistent failure is still reported once more as the HIGH DETECTOR-FAIL
+        # finding at the Kth pass below, and every pass keeps writing the outcome stamp.
+        if count == 1 or outcome != prev_outcome:
+            _fire_degraded.append(f"{name}={outcome}")
         state.atomic_write(stamp, f"{count} {outcome}")
         if count == _DETECTOR_FAIL_STREAK:
             line = findings_ledger.record(
