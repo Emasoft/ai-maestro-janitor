@@ -1041,7 +1041,7 @@
     },
     "secret_shield_enabled": {
       "title": "Secret shield",
-      "description": "Hide API keys, tokens, private keys and passwords in known formats in tool output before Claude or the transcript sees them; error output that reaches Claude is covered too (probed for Bash; MCP errors not probed). Not active yet. Set with /plugin configure (pluginConfigs); a value in the settings env block is untested and may have no effect.",
+      "description": "Hide API keys, tokens, private keys and passwords in known formats in tool output before Claude sees them and before they are stored in the transcript (whether the transcript's structured toolUseResult copy keeps the raw text is unverified); error output that reaches Claude is covered too (probed for Bash; MCP errors not probed). Not active yet. Set with /plugin configure (pluginConfigs); a value in the settings env block is untested and may have no effect.",
       "type": "boolean",
       "default": true,
       "sensitive": false
