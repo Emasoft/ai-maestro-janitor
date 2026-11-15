@@ -20,7 +20,7 @@ from jevctx.openrouter import JevBlockedError  # noqa: E402
 from jevctx.pipeline import find_pointers, parse_pointer  # noqa: E402
 from jevctx.segments import detect_kind  # noqa: E402  -- card 6, TRDD-88DOI824
 from jevctx.testing import FakeJevClient  # noqa: E402
-from jevctx.types import JevUnavailableError, JevValidationError, NoulAnswer  # noqa: E402
+from jevctx.types import JevAuthError, JevError, JevUnavailableError, JevValidationError, NoulAnswer  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.jsonl"
 # TRDD-RAEGS1D5 (2026-09-23): a SEPARATE fixture, not an edit to the shared one above --
@@ -3525,3 +3525,45 @@ def test_scoring_temp_dir_is_placed_where_llm_ext_will_accept_it(
         assert recorded.resolve().is_relative_to(Path("/tmp").resolve())
     finally:
         shutil.rmtree(outside, ignore_errors=True)
+
+
+def _stand_in_llm_ext_exiting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, stderr_line: str) -> None:
+    """Put a stand-in llm-ext on PATH that writes `stderr_line` to stderr and exits `code`."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "llm-ext"
+    stand_in.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        f"sys.stderr.write({stderr_line!r} + \"\\n\")\n"
+        f"sys.exit({code})\n",
+        encoding="utf-8",
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_llm_ext_exit_1_raises_validation_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit 1 (a refusal that cannot change between attempts) raises JevValidationError (TRDD-7XDBJZCZ)."""
+    line = "llm-ext: Path traversal blocked: /x resolves outside allowed directories"
+    _stand_in_llm_ext_exiting(tmp_path, monkeypatch, 1, line)
+    with pytest.raises(JevValidationError, match="Path traversal blocked"):
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
+
+
+def test_llm_ext_exit_3_raises_auth_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit 3 (key/credits) raises JevAuthError (TRDD-7XDBJZCZ)."""
+    _stand_in_llm_ext_exiting(tmp_path, monkeypatch, 3, "llm-ext: API error 402: Insufficient credits")
+    with pytest.raises(JevAuthError, match="Insufficient credits"):
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
+
+
+@pytest.mark.parametrize("code", [4, 5])
+def test_llm_ext_exit_4_and_5_stay_plain_retryable_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """Exits 4 and 5 raise a plain JevError, neither validation nor auth, so the lane keeps retrying them."""
+    _stand_in_llm_ext_exiting(tmp_path, monkeypatch, code, "llm-ext: request failed")
+    with pytest.raises(JevError, match="request failed") as excinfo:
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
+    assert not isinstance(excinfo.value, (JevValidationError, JevAuthError))
