@@ -4,7 +4,7 @@ title: reports dir is git-tracked, the janitor stops gitignoring and purging it
 column: testing
 status: tasked
 created: 2026-11-01T02:44:18+0100
-updated: 2026-11-15T02:09:39+0100
+updated: 2026-11-15T09:10:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ Changes:
 2026-11-04 main-agent: the working-tree .gitignore again carries '/reports/' under the comment 'janitor: report dirs carry private data' (git diff, 2026-11-04). It is re-added by the installed 3.8.13 janitor, which predates 010be429. Restore .gitignore to HEAD right before publish.py runs (a dirty tree blocks it). After 3.8.14 is installed, check that the line does not come back.
 - 2026-11-11T14:22:00+0100 — column → testing by user. code complete (010be429+bb9dc94b), release pending — dev-cards assessment 2026-11-11
 2026-11-15 owner directive on the reports folder, verbatim, relayed by the llm-externalizer session: "reports folder is always git tracked and sanitized from secrets before committing. reports folder only contains final reports and complete/merged reports, or updated checklists with some progress tracking. while reports_dev is always gitignored and it contains intermediate artifacts, partial reports or temporary scratch files. In general the *_dev version of a folder is the gitignored one, the other without the _dev suffix is git tracked. Make sure to instruct the subagents to save their temporary or scratch files in the *_dev folders, and the final files in the other ones." This card is its home: 010be429 built the rules text and the agents report paths; no release tag contains it yet.
+- 2026-11-15T09:10:58+0100 — OWNER DECISION 2026-11-15: 'Ignore now, revert later' for the CPV --strict MAJOR '.gitignore missing coverage for reports/'; full verbatim question, answer and costs in TRDD-W5GXPT7T; upstream issue https://github.com/Emasoft/claude-plugins-validation/issues/275. CORRECTS the previous RELEASE PROGRESS item (c): PLUGIN_SKIP_GITHUB_INTEGRITY=1 is set on the CPV and publish.py command line only, never exported (publish.py:1697-1700, TRDD-CWKM5218; memory ATOM-N44N-KU9B, releases 3.7.1 to 3.8.11; the installed CPV 5.16.2 wheel's 152 shipped scripts/ files match the v5.16.2 tag manifest by sha256). With it, --strict on fdc5273d gave CRITICAL 0, MAJOR 1 (reports/), NIT 1 (MD011 in archived TRDD-1T0W2ZVW line 33, added by its closing commit 6f394297; trddgrep refuses edits to archived cards, TRDD-MQE5D28T D8), log reports_dev/release/20261115_085311+0100-cpv-strict-fdc5273d.log. The NIT is handled by design/archived/.markdownlint.json (extends the root config, MD011 off for the archive only), option (b) of TRDD-POWY0X9G: a config scope change for immutable history, not a suppression on live content; markdownlint-cli2 0.23.3 shows MD011 at line 33 on an out-of-tree copy and none under design/archived/; trddgrep validate output byte-identical before and after; the next CPV --strict run is the proof.
 
 ## Correction 2026-11-01
 
