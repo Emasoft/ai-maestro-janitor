@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .extractor import FileMap
@@ -40,6 +42,17 @@ MIN_FAMILY = 8
 MAX_FAMILY_NAMES = 10
 
 _SCHEMA = "v1"
+
+# PROJECT_MAP.md (the root file that replaces the CLAUDE.md fence, TRDD-FADYLSQB):
+# one single-line HTML-comment header, no fences. Schema v2 because the body
+# is names-only; v1 is the fenced CLAUDE.md block above.
+_FILE_SCHEMA = "v2"
+_HEADER_RE = re.compile(
+    r"<!-- project-map (?P<schema>v[0-9]+) sha=(?P<sha>[0-9a-f]{12}) "
+    r"digest=(?P<digest>\S+) generated=(?P<generated>\S+) -->"
+)
+_LEGACY_HEADING = "## Project map (auto-generated — do not edit between the fences)"
+_MAP_HEADING = "# Project map (generated, do not edit)\nPer file: path — role, then its public symbol names."
 
 
 @dataclass(frozen=True)
@@ -75,9 +88,12 @@ def _symbol_line(signature: str, doc: str) -> str:
     return f"  · {signature} — {doc}" if doc else f"  · {signature}"
 
 
+def _file_head(fm: FileMap) -> str:
+    return f"`{fm.path}` — {fm.role}" if fm.role else f"`{fm.path}`"
+
+
 def _file_block(fm: FileMap) -> list[str]:
-    head = f"`{fm.path}` — {fm.role}" if fm.role else f"`{fm.path}`"
-    return [head, *[_symbol_line(s.signature, s.doc) for s in fm.symbols]]
+    return [_file_head(fm), *[_symbol_line(s.signature, s.doc) for s in fm.symbols]]
 
 
 def _common_role(members: list[FileMap]) -> str:
@@ -99,7 +115,13 @@ def _common_role(members: list[FileMap]) -> str:
     return mode if counts[mode] * 2 > len(members) else ""
 
 
-def render_body(filemaps: list[FileMap], *, coverage_note: str | None = None) -> str:
+def _render(
+    filemaps: list[FileMap],
+    *,
+    heading: str,
+    file_block: Callable[[FileMap], list[str]],
+    coverage_note: str | None,
+) -> str:
     """Deterministic map body (no fences, no timestamp). Individual files first
     (sorted by path), then a '### Convention groups' section for collapsed
     families (sorted by pattern).
@@ -120,14 +142,14 @@ def render_body(filemaps: list[FileMap], *, coverage_note: str | None = None) ->
 
     collapsed = {k for k, members in groups.items() if len(members) >= MIN_FAMILY}
 
-    lines: list[str] = ["## Project map (auto-generated — do not edit between the fences)"]
+    lines: list[str] = [heading]
     if coverage_note:
         lines.append(coverage_note)
     for fm in by_path:
         key = _family_key(fm.path)
         if key in collapsed:
             continue
-        lines.extend(_file_block(fm))
+        lines.extend(file_block(fm))
 
     family_lines: list[str] = []
     for key in sorted(collapsed, key=lambda k: (k.directory, k.token)):
@@ -152,6 +174,11 @@ def render_body(filemaps: list[FileMap], *, coverage_note: str | None = None) ->
     return "\n".join(lines)
 
 
+def render_body(filemaps: list[FileMap], *, coverage_note: str | None = None) -> str:
+    """The legacy fenced-block body (signatures + docs). `coverage_note`: see _render."""
+    return _render(filemaps, heading=_LEGACY_HEADING, file_block=_file_block, coverage_note=coverage_note)
+
+
 def structure_hash(filemaps: list[FileMap], *, coverage_note: str | None = None) -> str:
     """12-hex sha256 over the rendered body. Identical structure → identical
     hash (the volatile generated= stamp is excluded), so the maintainer can
@@ -173,3 +200,60 @@ def render_block(filemaps: list[FileMap], *, generated_iso: str, digest: str, co
     sha = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
     start = f"{FENCE_START} {_SCHEMA} sha={sha} digest={digest} generated={generated_iso}"
     return f"{start}\n{body}\n{FENCE_END}\n"
+
+
+def _sha12(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+
+
+def _names_block(fm: FileMap, include_methods: bool) -> list[str]:
+    kinds = ("func", "class", "method") if include_methods else ("func", "class")
+    names = ", ".join(s.name for s in fm.symbols if s.kind in kinds)
+    return [_file_head(fm), f"  {names}"] if names else [_file_head(fm)]
+
+
+def render_map_body(filemaps: list[FileMap], *, include_methods: bool = False, coverage_note: str | None = None) -> str:
+    """The names-only PROJECT_MAP.md body: per file the path and role, then ONE
+    indented line of public symbol names (`include_methods` adds `Class.method`
+    names). Same family collapse as the legacy body. No fences, no timestamp."""
+    return _render(
+        filemaps,
+        heading=_MAP_HEADING,
+        file_block=lambda fm: _names_block(fm, include_methods),
+        coverage_note=coverage_note,
+    )
+
+
+def map_sha(filemaps: list[FileMap], *, include_methods: bool = False, coverage_note: str | None = None) -> str:
+    """12-hex sha256 of the names-only body: THE one hash helper, called by the
+    writer (via render_file) and by the drift detector. `coverage_note` is part
+    of the body and therefore of the hash — the detector must pass the same note
+    the writer rendered with, or it compares different bodies and reports a
+    phantom STALE forever (TRDD-6HFOB5S4: the old detector omitted it)."""
+    return _sha12(render_map_body(filemaps, include_methods=include_methods, coverage_note=coverage_note))
+
+
+def render_file(
+    filemaps: list[FileMap],
+    *,
+    generated_iso: str,
+    digest: str,
+    include_methods: bool = False,
+    coverage_note: str | None = None,
+) -> str:
+    """The whole PROJECT_MAP.md text: one header line (schema, body sha, digest,
+    generated time; none of the last two is hashed) then the names-only body."""
+    for label, value in (("digest", digest), ("generated_iso", generated_iso)):
+        if not value or re.search(r"\s", value):
+            # The header is whitespace-tokenised; a space would break read_header.
+            raise ValueError(f"{label} must be non-empty and contain no whitespace: {value!r}")
+    body = render_map_body(filemaps, include_methods=include_methods, coverage_note=coverage_note)
+    header = f"<!-- project-map {_FILE_SCHEMA} sha={_sha12(body)} digest={digest} generated={generated_iso} -->"
+    return f"{header}\n{body}\n"
+
+
+def read_header(text: str) -> dict[str, str] | None:
+    """Parse the first line of a PROJECT_MAP.md into schema/sha/digest/generated;
+    None when it is not a project-map header."""
+    match = _HEADER_RE.fullmatch(text.split("\n", 1)[0].strip())
+    return match.groupdict() if match else None

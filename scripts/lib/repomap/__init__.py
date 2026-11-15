@@ -10,6 +10,8 @@ Public surface:
   - `EXTRACTORS`         — language → extractor registry the renderer drives.
   - `render_block`, `render_body`, `structure_hash`, `FENCE_START`,
     `FENCE_END` — the renderer (FileMaps → the fenced CLAUDE.md block).
+  - `render_file`, `render_map_body`, `map_sha`, `read_header` — the names-only
+    PROJECT_MAP.md renderer, its one shared hash helper and its header parser.
 """
 
 from __future__ import annotations
@@ -26,8 +28,12 @@ from .markers import (
 from .renderer import (
     FENCE_END,
     FENCE_START,
+    map_sha,
+    read_header,
     render_block,
     render_body,
+    render_file,
+    render_map_body,
     structure_hash,
 )
 
@@ -41,10 +47,14 @@ __all__ = [
     "extract_python",
     "has_map_block",
     "insert_map_block",
+    "map_sha",
     "read_fence_header",
+    "read_header",
     "remove_map_block",
     "render_block",
     "render_body",
+    "render_file",
+    "render_map_body",
     "replace_map_block",
     "structure_hash",
 ]

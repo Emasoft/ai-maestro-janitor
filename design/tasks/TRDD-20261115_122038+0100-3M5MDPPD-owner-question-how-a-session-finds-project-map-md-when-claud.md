@@ -4,7 +4,7 @@ title: Owner question how a session finds PROJECT_MAP.md when CLAUDE.md never na
 column: backburner
 status: tasked
 created: 2026-11-15T12:20:38+0100
-updated: 2026-11-15T12:20:38+0100
+updated: 2026-11-15T12:27:23+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -34,7 +34,7 @@ Owner order 2026-11-15 (verbatim on TRDD-FADYLSQB): the map lives in a root PROJ
 
 ## Docs fact
 
-Per earlier research: a bare @path outside code spans imports a file; a plain mention does not load it.
+Per earlier research: a bare `@path` outside code spans imports a file; a plain mention does not load it.
 
 ## Status
 
@@ -43,3 +43,4 @@ Awaiting the owner's choice.
 ## Approval log
 
 - 2026-11-15T12:20:38+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T12:27:22+0100 — OWNER DECISION PENDING (main agent): this card is a question for the owner. Its approved and mandate marks are trddgrep new defaults and approve filing the question only; no agent may choose an option or close this card without the owner answer, which is recorded here verbatim when given. The cost claims of option 2 (resent every turn, no cache invalidation of CLAUDE.md) and the docs fact about bare @-imports are unverified (from earlier research, not re-checked). Question put to the owner in the main session on 2026-11-15.
