@@ -1244,7 +1244,7 @@ is unconditionally true on this verb: a whole-page rewrite mutates every survivi
 contract (the same per-call blast radius as `update-mem-topic`'s accepted ceiling). The
 one-sided-link removal ceiling applies: dropping the page's half of a reciprocal link pair, or
 dissolving an id other pages still `[[link]]`, creates edges no rule polices — `--retire-atom`
-declares the intent, the caller owns the holders. The link half of this ceiling is REPLACED by the WM-CLI-29 gate and its `--retire-link` once implemented (TRDD-F8EIVTSG increment 4); until then the ceiling stands.
+declares the intent, the caller owns the holders. The link half of this ceiling is REPLACED by the WM-CLI-29 gate and its --retire-link flag once implemented (TRDD-F8EIVTSG increment 4); until then the ceiling stands.
 
 `WM-CLI-13` **new-mem-atom-supersedes** — `new-mem-atom --supersedes <ID>` (was `add-atom
 --supersedes`) `MUST`, in one transaction: mark the target atom `status: superseded,
@@ -1415,9 +1415,9 @@ phrase"`, wildcards), `--only-notes` to search the LESSONS, `--use-index` for th
 and `--top N`. The DSL grammar lives in the Rust crate and is the search surface both the wiki and
 the private user-mem search build on.
 
-`WM-CLI-28` **link-mem-topics-and-unlink-mem-topics** — `MUST` (TRDD-F8EIVTSG D6): `memgrep
+`WM-CLI-28` **link-mem-topics-and-unlink-mem-topics** — `MUST` (TRDD-F8EIVTSG D6; not built yet, so its new flags are written unquoted until they exist): `memgrep
 link-mem-topics --page <PAGE> --to <PAGE> --rel see-also|applies-to` wires BOTH ends, typed, in one
-gated edit; `--rel` is required. `see-also` writes `- [[to]]` under `## See also` on each page;
+gated edit; --rel is required. `see-also` writes `- [[to]]` under `## See also` on each page;
 `applies-to` writes `- [[to]]` under `## Applies to` on `--page`, the radiating side, and
 `- [[page]]` under `## Governed by` on `--to` (WM-WIKI-07). A missing section is created at the
 layout boundary (WM-NOTE-07) by the single parser (WM-NOTE-10), and the verb is idempotent on an
@@ -1425,7 +1425,7 @@ existing typed edge — never on a `[[x]]` found elsewhere on the page, which is
 `reference-mem-topic` today (WM-NOTE-09). `memgrep unlink-mem-topics --page <PAGE> --to <PAGE> --rel
 see-also|applies-to` retires BOTH ends of one typed edge in one gated edit and never removes a
 section heading (an empty section is legal, WM-NOTE-10). Both carry `--dry-run` and the WM-CLI-11
-`--base-sha256` guard. `reference-mem-topic` becomes an alias of `link-mem-topics --rel see-also`
+`--base-sha256` guard. `reference-mem-topic` becomes an alias of `link-mem-topics` with --rel see-also
 (WM-CLI-22), and the WM-CLI-01 verb block gains the two verbs in the SAME change that implements
 them, so the block and the dispatcher never disagree. Not yet implemented: TRDD-F8EIVTSG
 increment 4; until then memgrep does not conform.
@@ -1437,8 +1437,8 @@ heading (WM-NOTE-10), a dropped section edge, or foreign content in a link secti
 defect passes (WM-LINT-04). Per verb:
 
 - `update-mem-topic`, `new-mem-topic` (content mode) and `new-mem-atom`: refuse, with no exception.
-- `replace-mem-topic`: the same, unless the dropped edge is named by `--retire-link <TARGET>`
-  (repeatable, like `--retire-atom`); `--retire-link` also retires the far end of that edge, on the
+- `replace-mem-topic`: the same, unless the dropped edge is named by --retire-link `<TARGET>`
+  (repeatable, like `--retire-atom`); --retire-link also retires the far end of that edge, on the
   other page, in the same batch.
 - `merge-mem-topic`: the typed edges of the source move to the destination, deduplicated, and each
   far end is re-pointed from the source to the destination in the same batch; the gate accepts a

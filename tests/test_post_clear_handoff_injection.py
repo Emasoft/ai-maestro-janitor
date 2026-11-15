@@ -158,8 +158,11 @@ def test_a_pane_sidecar_suppresses_this_hooks_own_injection(
     monkeypatch.setenv("TMUX_PANE", "%3")
     pane_key = real_state.terminal_pane_key({"TMUX_PANE": "%3"})
     assert pane_key
+    # WHY a current written_at (TRDD-AIT2KNBU F3, 8c06b621): the hook decides from the sidecar's
+    # line-2 written_at, not from file existence; 0 reads as a stale sidecar and correctly falls
+    # through to the pointer, which is not what this test is about.
     (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
-        "/tmp/cleared.jsonl\n0\n", encoding="utf-8",
+        f"/tmp/cleared.jsonl\n{int(time.time())}\n", encoding="utf-8",
     )
     _load_hook()._inject_post_clear_handoff(real_state)
     assert capsys.readouterr().out == ""
