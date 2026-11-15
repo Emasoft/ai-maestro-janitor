@@ -1,10 +1,10 @@
 ---
 trdd-id: 5ID9CQY8
 title: The clear chain bootstrap types only the resume command because the cron survives a clear
-column: todo
+column: dev
 status: tasked
 created: 2026-10-18T04:39:02+0200
-updated: 2026-11-15T15:02:58+0100
+updated: 2026-11-15T15:33:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -46,3 +46,7 @@ Item C5 of TRDD-K9AHY1ZB Release 2, never built and never carded until 2026-10-1
 ## Approval log
 
 - 2026-10-18T04:39:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Plan for boxes 2 and 3
+
+2026-11-15T15:34+0100 PROPOSAL (main agent, under the 2026-10-09 decide-yourself mandate; the harness review of the proposal turn never arrived, advisor consulted instead): clear_bootstrap() in scripts/clear_trigger.py returns [RESUME_CMD], or ['/goal <goal>'] for an unmet goal, never ARM_CMD first (error fallback included). BOOTSTRAP_CMDS stays (ARM_CMD, RESUME_CMD) for the reload chains (reload_trigger.py:149, reload_skills_trigger.py:133), because a plugin reload may drop the cron. All five clear callers already go through clear_bootstrap (dispatch.py:3919, external_handoff_clear.py:602, hooks/on-stop-token-meter.py:186, clear_trigger.py:136 and :1473). Comment at clear_trigger.py:79-81 and the plan_clear/clear_bootstrap docstrings restate the measured reason. Tests written, not run (pre-push only): every test naming clear_bootstrap, plan_clear, is_goal_bootstrap, BOOTSTRAP_CMDS or a literal /janitor-arm for a clear chain is updated (incl. test_dispatch_phases.py:4187, test_clear_preserves_live_subagent.py:206, test_token_meter_logs_every_turn.py:96-98); new keystroke-plan test: clear phase B is ['/janitor-resume'] (or ['/goal ...']) while both reload plans start with /janitor-arm. Backstop (box 2): the SessionStart heartbeat self-check reminder for source=clear and the armed.flag re-plumb need a test. Advisor items: (a) timing, the arm turn was a ~25 s buffer before the resume stub (crumbs 14:12:37 and 14:13:02; handoff stamped 14:12:36), so check nothing the resume phase reads is still being written when /janitor-resume lands first; (b) renewal, every clear re-created the cron and reset its 7-day expiry and armed-at stamp, so after this change [janitor-renew] is the only renewal and that path must be tested; (c) handoff_clear_verify.py loses its SURVIVED evidence (the re-arm's CronDelete); re-source it from a [janitor-heartbeat] prompt in the new session with no CronCreate before it, or delete the SURVIVED branch and its test for clears if the verifier snapshots too early. Strongest reason not to: a Claude Code build that drops crons on /clear would then depend on the model obeying the SessionStart reminder.
