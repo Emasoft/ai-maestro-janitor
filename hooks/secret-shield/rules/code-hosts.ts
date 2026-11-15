@@ -104,7 +104,7 @@ export const gitlabFeatureFlagClientToken: Rule = gitlab('gitlab-feature-flag-cl
 //   so a match never backtracks out of a run and the next search starts after it. In the value-first rule the value is followed by a mandatory quote, and it is preceded by a mandatory opening
 //   quote, and a value run holds no quote, so two runs never overlap; the key quote before the value may be absent only because the value's own opening quote is mandatory (with both optional,
 //   a text that repeats `value:` would start a run at every copy, each running to the end: quadratic). The 400-character span is a fixed bound, so each name or each value adds a constant
-//   amount of work. No group repeats (`(?:...)*`, `+` on a group): the URL_PASSWORD diagnosis found group-loop ceilings in the claude plugin test engine.
+//   amount of work. No group repeats (`(?:...)*`, `+` on a group): the URL-password diagnosis (the first WHY block in patterns.ts) found group-loop ceilings in the claude plugin test engine.
 // - No leading \b and no lookbehind: a name right after an escape such as a literal backslash-n must still be hidden (TRDD-5VZTPXBJ). The value-first rule starts at the literal `value` for the
 //   same reason, and not at a quote: a pattern that starts with a run of backslashes would try every position of a long run (quadratic).
 const QUOTE = String.raw`(?:\\*["']|%2[27])`

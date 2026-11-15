@@ -656,8 +656,8 @@ describe('a long run of scheme characters is redacted in linear time', () => {
 // KB, 75 ms at 128 KB, 188 ms at 256 KB and 615 ms at 512 KB (load about 67): a step between 96 KB and 128 KB. The cause is measured
 // (TRDD-HF7GNHNF): a greedy loop over a GROUP (the password loop and the query scan of the port-skip lookahead) runs about 35 times slower per
 // character once one run passes about 63.8K iterations, and returns no match at all from about 553K (TRDD-AGOEWF2E); a loop over a single character
-// class has neither ceiling. The loops are unrolled so a group iterates only at a colon, and a guard in redactUrlPasswords counts markers and colons
-// before the regex runs (see the WHY block above URL_PASSWORD in patterns.ts). A size pair that straddles 63.8K iterations (32 KB to 256 KB does:
+// class has neither ceiling. The password is no longer read by a regex at all: redactUrlPasswords walks it by character class (see the first WHY block in patterns.ts) and counts markers and colons
+// only for the port skip and the propagation. A size pair that straddles 63.8K iterations (32 KB to 256 KB does:
 // grown() holds size/2 characters in one run) fails the ratio rule on the old regex and passes it now. The 2 ms escape is applied at the larger size
 // of 256 KB, which is TRDD-Q6LPJTPO's. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came within 0.4 ms of
 // the 2 ms escape (1.6 ms).

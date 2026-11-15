@@ -12,6 +12,7 @@ import { type Hits, mark, redact, URL_PASSWORD_BOUND } from '../patterns'
 // same text). Cases with a copy also append a copy of the password after a newline: `redact` returns no `found` map, but a password recorded for propagation is hidden
 // in the copy and one that is not recorded stays visible. This is a proxy, weaker than pinning the map: a password that is recorded but that propagates() refuses looks the same as one never recorded, so for those the copy pins nothing.
 // Fake passwords are built at run time (PASS, PASS2) so no scanner mistakes this file for a leak; their values are named, never written, in the expectations.
+// One case, 'an @ only after whitespace' (the input ends ' mail @host'), was changed after the capture, so its expectation was not captured from the pre-change code like the rest; check it by running it.
 
 // SHA-256 of the UTF-8 bytes of a text, as lower-case hex. Written out so the test needs no node: import (the plugin test engine is not known to ship one).
 function sha256Hex(text: string): string {
