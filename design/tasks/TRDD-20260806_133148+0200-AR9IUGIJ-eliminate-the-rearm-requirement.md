@@ -104,7 +104,7 @@ So the card conflated two goals. Separated:
 |---|---|---|
 | **A** upstream durable crons | **PURSUE — the only true elimination** | `durable:true` is accepted-but-inert; the CronCreate tool's own docs say "Has no effect — durable persistence is not available… every scheduled job is session-only by platform design". Zero ongoing cost once landed. Timeline not ours. **Outward-facing → needs owner sign-off before filing.** |
 | **B** external trigger | **ALREADY SHIPPED — close it out, do not build** | Verified live (above). Cost unchanged: still one model turn per arm, because CronCreate is model-only. |
-| **C** cost-floor the arm | **VOID — moot, see the correction above** | `af499ee3` removed both `should_emit_renew` and `commit_tier`, the two hysteresis layers this option would have tuned; nothing is left to tune. |
+| **C** cost-floor the arm | **VOID — moot, see the correction above** | `af499ee3` removed both `should_emit_renew` and `commit_tier`, the two hysteresis layers this option would have tuned; nothing is left to tune. The other remaining item, cutting the arm's own round-trips, shipped under TRDD-DLI76AUC (complete). |
 
 ### Measured on THIS session today (first-hand, not modelled)
 
