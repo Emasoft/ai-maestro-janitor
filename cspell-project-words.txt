@@ -20,7 +20,9 @@ accélérer
 achtung
 acked
 acks
+acmr
 acsm
+actionpack
 actix
 acunetix
 adcadee
@@ -48,6 +50,7 @@ aesgcm
 aeval
 afinet
 afpfs
+afplay
 ageidx
 agenten
 agentlens
@@ -775,6 +778,7 @@ contactdb
 containerenv
 containerfile
 containerresources
+contentful
 contenu
 contextify
 contextlib
@@ -946,6 +950,7 @@ defanged
 defanging
 defangs
 defaultaccount
+defaultvalue
 defconfig
 defg
 defineplugin
@@ -996,6 +1001,7 @@ dgram
 dgroupab
 dgst
 diagnosability
+diceware
 dicom
 didierstevens
 diese
@@ -1220,6 +1226,7 @@ etypes
 euxo
 evalobjex
 eventbridge
+ewoi
 ewouldblock
 exampleabcdef
 exampleteam
@@ -1511,6 +1518,7 @@ gitdir
 gitea
 githu
 gitignoring
+gitlabhq
 gitlink
 gitoxide
 gitplus
@@ -1538,8 +1546,11 @@ globset
 glpat
 glptt
 glrt
+glrtr
+glsa
 glsl
 glsoat
+glwt
 gmqtt
 gmsa
 gmtime
@@ -1548,6 +1559,7 @@ gnueabihf
 gnutls
 gobacnet
 goburrow
+gocspx
 goenv
 goflags
 gofmt
@@ -1662,6 +1674,7 @@ highwatermark
 hikari
 hinnant
 hinnant's
+hiresume
 histfile
 histfmt
 hivemq
@@ -1717,9 +1730,11 @@ hsforms
 htfc
 htmlattr
 htmlcov
+htpasswd
 httpbasic
 httpbearer
 httpequiv
+httponly
 httpservice
 httpx
 huffcdic
@@ -1888,6 +1903,7 @@ jina
 jklmnopqrst
 jlbm
 jlcn
+jlist
 jndi
 joinpath
 jonb
@@ -1910,6 +1926,7 @@ jtag
 jthread
 judgeable
 jver
+jwtwide
 jährliches
 j𝐚nitor
 kadmin
@@ -1999,6 +2016,7 @@ kvuvv
 kwarg
 kwargs
 kwcanary
+kwdefaults
 kwonlyargs
 kxzjozbq
 kyru
@@ -2184,6 +2202,7 @@ mandrillapp
 manglecanary
 manpath
 manylinux
+mapbox
 marshalsec
 masterkey
 matchall
@@ -2291,6 +2310,7 @@ mkdn
 mkimage
 mknod
 mkstemp
+mktemp
 mktime
 mlinux
 mllp
@@ -2464,6 +2484,7 @@ newpage
 newr
 newtab
 newtcptransport
+neww
 nexmo
 nextjs
 nfencecanary
@@ -2537,6 +2558,7 @@ nonpositive
 nonprod
 nonroot
 nonsec
+nontext
 nonui
 nonutf
 noplugins
@@ -2558,6 +2580,7 @@ notanid
 notanumber
 notarealvalue
 notarytool
+notasecret
 notemasoft
 notf
 notificationitems
@@ -2635,6 +2658,7 @@ ohne
 oken
 okhttp
 olda
+oldd
 oldid
 oldr
 ollama
@@ -3095,6 +3119,7 @@ redoc
 redrive
 redteam
 reduxjs
+reemit
 reentrancy
 refcell
 referer
@@ -3382,6 +3407,7 @@ semijoin
 semijoins
 semverish
 semvers
+sendgrid
 sendmessage
 sentinelops
 sequelize
@@ -3409,6 +3435,7 @@ sethook
 setinterval
 setmetatable
 setobjectinputfilter
+setpgid
 setpoints
 setprototypeof
 setrlimit
@@ -3455,6 +3482,7 @@ sidepanel
 siem
 sigabrt
 sigchld
+sigkilled
 signaturpr
 signaturprüfung
 signedurlttl
@@ -3656,6 +3684,7 @@ suivantes
 sumdb
 summ
 suno
+supabase
 supcanary
 superagent
 supercoolpkg
@@ -3674,6 +3703,7 @@ surfaceable
 surrogateescape
 suterusu
 suudaxrt
+svcacct
 svchost
 svcs
 svenstaro
@@ -3724,6 +3754,7 @@ taskname
 taskpolicy
 taskrunner
 tauri
+tavily
 tbinary
 tbssd
 tcgb
@@ -3737,6 +3768,7 @@ teamid
 temd
 templatecontext
 templatedir
+terminalreporter
 termncolor
 testbot
 testkey
@@ -3860,10 +3892,12 @@ turbofish
 turbopack
 turnserver
 tuvqwljf
+tvly
 tweetnacl
 twiml
 twingate
 txns
+typable
 typebox
 typecodes
 typeflag
@@ -4320,6 +4354,7 @@ während
 wörld
 xabcd
 xaccel
+xapp
 xattr
 xattrs
 xauthpsk
@@ -4345,6 +4380,7 @@ xoitbriz
 xorshift
 xoxa
 xoxb
+xoxe
 xoxp
 xoxs
 xpack
