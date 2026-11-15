@@ -698,6 +698,16 @@ describe('URL passwords: scheme edges', () => {
     check(redact(first.text), {}, first.text)
     check(redact(probeInput), { 'url-password': 1 }, j('a1+b.c-d://user:', M, '@host/\ncopy ', M))
   })
+  // Not captured from the pre-change code: the expectation follows from the removed regex's case-insensitive flag, and hasScheme accepts A-Z the same way.
+  test('HTTPS:// is a scheme (upper case)', { timeoutMs: 60000 }, () => {
+    const input = j('HTTPS', '://user:', PASS, '@host/')
+    const copy = PASS
+    const probeInput = j(input, '\ncopy ', copy)
+    const first = redact(input)
+    check(first, { 'url-password': 1 }, j('HTTPS://user:', M, '@host/'))
+    check(redact(first.text), {}, first.text)
+    check(redact(probeInput), { 'url-password': 1 }, j('HTTPS://user:', M, '@host/\ncopy ', M))
+  })
 })
 
 describe('URL passwords: shapes', () => {
