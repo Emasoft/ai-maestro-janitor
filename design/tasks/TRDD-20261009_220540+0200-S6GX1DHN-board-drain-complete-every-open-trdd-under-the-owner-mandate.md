@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-15T09:26:32+0100
+updated: 2026-11-15T09:46:19+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -207,3 +207,4 @@ trddgrep lint reports ERROR TERMINAL-WITHOUT-CHECKLIST on complete cards that ha
 ## Owner decisions
 
 2026-11-14T20:21:35+0100 OWNER DECISION (2026-11-14, AskUserQuestion, verbatim answer "Publish each fix (Recommended)" to the question "Can I publish each fix through scripts/publish.py once it passes the full gate?"): each fix (issues 355-357, the /janitor-redact-secrets skill, the reports changes) is released through scripts/publish.py as soon as it passes the full gate, without waiting for the board to drain. This supersedes, for those fixes, the STATE clause "No publish until the board is drained".
+- 2026-11-15T09:45:53+0100 — OWNER DECISION (AskUserQuestion, two rounds): round 1 “Release 3.9.0 now, ahead of the board drain?” answered “Release now, one-off (Recommended)” (options offered: one-off; release now and adopt the TRDD-U0VLVJVT carve-out; drain first). That question overstated readiness (it said all checks green; pytest had not yet passed on any candidate) and scope (it said the release carries the fixes for the session-clearing complaint; TRDD-8ZY3JU2H paths 4 and 6 stay open). Round 2, with both corrected, answered “Yes, release now (Recommended)”. Effect: 3.9.0 may be published once ahead of the drain; for other releases the rule “No publish until the board is drained” stays as narrowed by the 2026-11-14 owner decision “Publish each fix” (S6GX1DHN Owner decisions), which neither question mentioned and which this decision does not change; round 2 cited 16 clear/resume fixes, the real count is about 12 (ced9f0db, f3a2313d, 841c7bb1, eacea9b6 matched by keyword only), corrected to the owner afterwards; the U0VLVJVT carve-out was offered and not adopted.
