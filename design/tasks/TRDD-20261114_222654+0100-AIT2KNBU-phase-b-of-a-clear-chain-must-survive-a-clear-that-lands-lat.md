@@ -1,10 +1,10 @@
 ---
 trdd-id: AIT2KNBU
 title: Phase B of a clear chain must survive a clear that lands late and the hooks must still hand over the handoff (issues 355 and 356 F2 and F3)
-column: dev
+column: testing
 status: tasked
 created: 2026-11-14T22:26:54+0100
-updated: 2026-11-15T04:50:44+0100
+updated: 2026-11-15T05:41:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,14 +17,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T22:26:54+0100
-implementation-commits: [8c06b621]
+implementation-commits: [8c06b621, 191c5bca]
 ---
 
 # Phase B of a clear chain must survive a clear that lands late and the hooks must still hand over the handoff (issues 355 and 356 F2 and F3)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-14
 
-- NEXT ACTION (2026-11-15 05:50): F2 DISPATCHED to one sonnet-worker (report reports_dev/sonnet-worker/*-ait2knbu-f2.md). Built-in advisor verdict 05:45: gate_extend probed every ~15 s, two consecutive idle-and-empty answers with no newer stamp before give-up (stamp race), cap measured from the verified Enter and tied to external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S with a drift test, stale 180 s comments fixed (clear_trigger ~383 and ~790-816, on-session-start ~546, dispatch ~2742). Real pane frames for a queued slash command and for native compacting do NOT exist in tests/fixtures/pane_frames (synthetic only): unverified. Do not send a second writer to terminal_trigger.py, clear_trigger.py or the T3 test before the report is read. Tests written, run only before the push.
+- NEXT ACTION (2026-11-15 05:45): F2 DONE in 191c5bca (worker report reports_dev/sonnet-worker/20261115_053701+0100-ait2knbu-f2.md; gate logic and probe diff reviewed by the main agent; 2 harness review rounds PASS). All four fixes are committed (F1+F4 in V8GWJVFN, F3 8c06b621, F2 191c5bca); card moved to testing. Tests written, NOT run: they run in the pre-push gate of the next release. Unverified: the QUEUED branch (pane frames for a queued slash command and native compacting are synthetic only; a miss falls back to the old give-up); a fresh session whose stamp lands more than 5 s after its pane looks idle is still abandoned (documented limit); the cap counts from the Enter, a fraction of a second after resume-after-clear.ts, so a landing in the cap's last second could fall just outside the arming window. Live check after the release: a late janitor clear logs 'chain: still waiting for the fresh session' and then 'chain: OK' in .janitor/logs/clear-trigger.log, and the fresh session gets phase B.
 - Status: F3 done (8c06b621); F2 in progress. Parent work: TRDD-V8GWJVFN (F1+F4, already committed); GitHub issues 355 and 356.
 2026-11-15 04:10 EVIDENCE (this repo, installed 3.8.13, .janitor/logs/clear-trigger.log, session-start.log, jev-post-clear-hook.log): (a) session 1603e47a: clear landing 2026-11-14 23:25:46 at 400517 tokens, chain FAILED 23:28:48 (no fresh session within 180s, resume state KEPT); the clear landed at 23:30:07 (SessionStart source=clear in c94c7168, about 261 s late), the template handoff was injected at 23:30:58 (inside the 300 s sidecar window), but the chain typed no phase B. (b) session c94c7168: clear landing 2026-11-15 01:31:17 at 431778 tokens, chain FAILED 01:34:19; at 01:34:48 SessionStart reports source=compact in the SAME session: the native auto-compact ran before the queued /clear landed, which the Corrections paragraph already calls harmless to state; the post-clear hook returns on any source other than clear or startup before it consumes the sidecar (scripts/hooks/on-session-start-post-clear-compact.py:255), so a compaction does not eat the sidecar and F3 stands. The queued /clear then landed at 01:42:28 (f40b3073, source=clear) and jev-post-clear-hook.log says "sidecar ... is 672s old — ignoring": a LIVE instance of the F3 bug (no handoff injected), real numbers for T4. Each landing line is followed within 9-150 s by 'another clear chain is already pending — skipping'. f40b3073: landing 03:32:14 at 441654, next session 909e5562 got the handoff at 03:34:39 and resumed.
 2026-11-15 04:25 ADVISOR VERDICT (built-in advisor, Fable headroom 44%): build F3 first as its own change, then F2 separately. F3 DISPATCHED 04:25 to one sonnet-worker: files scripts/hooks/on-session-start-post-clear-compact.py, scripts/hooks/on-session-start.py, tests/test_on_session_start_post_clear_compact.py (T4); report in reports_dev/sonnet-worker/*-ait2knbu-f3.md; do NOT send a second writer to these files before that report is read. Disclosed limit (main-agent decision): nothing tells the janitor's late /clear from one the user types within the hour after a give-up while the flag and the matching resume-after-clear.ts remain, so such a user /clear also receives the handoff. F2 later: read TRDD-N954KWUC STATE first (it owns the screen reader the probe uses); the probe must count a compacting pane as busy (case b) and T3 must cover it; check tldr impact run_chained_inject so callers without gate_extend keep 180 s.
@@ -53,3 +53,4 @@ Files: scripts/lib/terminal_trigger.py, scripts/clear_trigger.py, scripts/hooks/
 ## Approval log
 
 - 2026-11-14T22:26:54+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T05:41:54+0100 — column → testing. F1-F4 all committed (V8GWJVFN, 8c06b621, 191c5bca); tests written, run in the pre-push gate
