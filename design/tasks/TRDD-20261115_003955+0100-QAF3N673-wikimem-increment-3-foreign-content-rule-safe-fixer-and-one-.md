@@ -4,7 +4,7 @@ title: Wikimem increment 3 foreign-content rule safe fixer and one owner for ato
 column: dev
 status: tasked
 created: 2026-11-15T00:39:55+0100
-updated: 2026-11-15T01:26:33+0100
+updated: 2026-11-15T11:58:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -44,3 +44,4 @@ Rules: no new issue code without its emitter; every new lint rule passes WM-LINT
 ## Approval log
 
 - 2026-11-15T00:39:55+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T11:58:44+0100 — RESEARCH (read-only, worker): (c) row 1 re-checked, target has no raw back-link so un-code-spanning would be one-sided; (e) repair_defect has two production callers both passing saved text, memory_edit_verify has no footer logic; side-by-side counts and exemption sizes recorded as estimates; report reports_dev/sonnet-worker/20261115_115835+0100-qaf3n673-research.md (local, gitignored)
