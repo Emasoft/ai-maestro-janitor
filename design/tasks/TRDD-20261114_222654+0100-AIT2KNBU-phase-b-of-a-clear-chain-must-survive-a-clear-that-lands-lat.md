@@ -4,7 +4,7 @@ title: Phase B of a clear chain must survive a clear that lands late and the hoo
 column: todo
 status: tasked
 created: 2026-11-14T22:26:54+0100
-updated: 2026-11-14T22:26:54+0100
+updated: 2026-11-15T04:12:15+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ approval-datetime: 2026-11-14T22:26:54+0100
 
 - NEXT ACTION: CONSULT THE FABLE ADVISOR (fable-advisor:advisor; run agentlenspro model-headroom fable -q first) BEFORE building: this touches 3+ files and a hook-versus-chain ownership decision. Then build F3 first (or together with F2), one bounded change, tests written but run only before the push.
 - Status: not started. Parent work: TRDD-V8GWJVFN (F1+F4, already committed); GitHub issues 355 and 356.
+2026-11-15 04:10 EVIDENCE (this repo, installed 3.8.13, .janitor/logs/clear-trigger.log, session-start.log, jev-post-clear-hook.log): (a) session 1603e47a: clear landing 2026-11-14 23:25:46 at 400517 tokens, chain FAILED 23:28:48 (no fresh session within 180s, resume state KEPT); the clear landed at 23:30:07 (SessionStart source=clear in c94c7168, about 261 s late), the template handoff was injected at 23:30:58 (inside the 300 s sidecar window), but the chain typed no phase B. (b) session c94c7168: clear landing 2026-11-15 01:31:17 at 431778 tokens, chain FAILED 01:34:19; at 01:34:48 SessionStart reports source=compact in the SAME session: the native auto-compact ran before the queued /clear landed, a case F2/F3 do not name yet. Each landing line is followed within 9-150 s by 'another clear chain is already pending — skipping'. f40b3073: landing 03:32:14 at 441654, next session 909e5562 got the handoff at 03:34:39 and resumed.
 
 ## Problem
 
