@@ -147,12 +147,12 @@ def _names_fm() -> FileMap:
 
 
 def test_names_line_shape():
-    """Names-only body: path and role, then ONE indented comma line of func/class names; methods only on request."""
+    """Names-only body: path and role, then ONE indented comma line of names; methods are included by default and can be switched off."""
     body = R.render_map_body([_names_fm()])
-    assert body.splitlines()[2:] == ["`scripts/lib/state.py` — per-session state helpers", "  atomic_write, Store"]
+    assert body.splitlines()[2:] == ["`scripts/lib/state.py` — per-session state helpers", "  atomic_write, Store, Store.load"]
     assert "tmp+rename write" not in body and "->" not in body  # no signatures, no docs
-    with_methods = R.render_map_body([_names_fm()], include_methods=True)
-    assert "  atomic_write, Store, Store.load" in with_methods
+    without_methods = R.render_map_body([_names_fm()], include_methods=False)
+    assert without_methods.splitlines()[3] == "  atomic_write, Store"
     bare = R.render_map_body([FileMap(path="x.py", role="", symbols=[])])
     assert bare.splitlines()[2:] == ["`x.py`"]  # no symbols -> no names line
 
@@ -186,14 +186,14 @@ def test_names_body_keeps_every_symbol_kind_extract_python_emits(tmp_path):
     fm = extract_python(src)
     assert {s.kind for s in fm.symbols} == {"func", "class", "method"}
     fm.path = "mod.py"
-    assert R.render_map_body([fm]).splitlines()[2:] == ["`mod.py` — demo module", "  pub, apub, K"]
-    assert R.render_map_body([fm], include_methods=True).splitlines()[3] == "  pub, apub, K, K.meth"
+    assert R.render_map_body([fm], include_methods=False).splitlines()[2:] == ["`mod.py` — demo module", "  pub, apub, K"]
+    assert R.render_map_body([fm]).splitlines()[3] == "  pub, apub, K, K.meth"
 
 
 def test_header_round_trip():
     """render_file writes one header line that read_header parses back to schema/sha/digest/generated."""
     text = R.render_file([_names_fm()], generated_iso="2026-11-15T12:00:00+0100", digest="abc123def456")
-    assert text.splitlines()[0].startswith("<!-- project-map v2 sha=")
+    assert text.splitlines()[0].startswith("<!-- project-map v2 sha=") and " methods=1 " in text.splitlines()[0]
     assert R.FENCE_START not in text and R.FENCE_END not in text
     assert text.endswith("\n")
     header = R.read_header(text)
@@ -201,6 +201,7 @@ def test_header_round_trip():
     assert header == {
         "schema": "v2",
         "sha": R.map_sha([_names_fm()]),
+        "methods": "1",
         "digest": "abc123def456",
         "generated": "2026-11-15T12:00:00+0100",
     }
@@ -213,14 +214,16 @@ def test_read_header_rejects_non_header():
     """read_header returns None for text without a project-map header on its first line."""
     assert R.read_header("") is None
     assert R.read_header("# Project map\n") is None
-    assert R.read_header("<!-- project-map v2 sha=XYZ digest=d generated=g -->\n") is None
+    assert R.read_header("<!-- project-map v2 sha=XYZ methods=1 digest=d generated=g -->\n") is None
+    assert R.read_header("<!-- project-map v2 sha=0123456789ab digest=d generated=g -->\n") is None  # methods= is required
+    assert R.read_header("<!-- project-map v2 sha=0123456789ab methods=1 digest=d--> generated=g -->\n") is None
     legacy = R.render_block([_names_fm()], generated_iso="2026-01-01T00:00:00+0000", digest="d")
     assert R.read_header(legacy) is None
 
 
 def test_render_file_rejects_whitespace_in_header_fields():
-    """A digest or timestamp with whitespace would break read_header, so render_file refuses it."""
-    for generated_iso, digest in (("a b", "d"), ("g", "")):
+    """A digest outside [0-9A-Za-z._-]+ or a timestamp with whitespace would break read_header, so render_file refuses it."""
+    for generated_iso, digest in (("a b", "d"), ("g", ""), ("g", "d --> x"), ("g", "d\nx"), ("g", "d-->"), ("", "d")):
         try:
             R.render_file([_names_fm()], generated_iso=generated_iso, digest=digest)
         except ValueError:
@@ -234,7 +237,7 @@ def test_map_sha_stable_and_coverage_note_sensitive():
     base = R.map_sha([fm])
     assert base == R.map_sha([_names_fm()])
     assert R.map_sha([fm], coverage_note="> note") != base  # TRDD-6HFOB5S4: the note is hashed
-    assert R.map_sha([fm], include_methods=True) != base
+    assert R.map_sha([fm], include_methods=False) != base
     renamed = FileMap(path=fm.path, role=fm.role, symbols=[Symbol("other", "func", "other()", "")])
     assert R.map_sha([renamed]) != base
     one = R.render_file([fm], generated_iso="2026-01-01T00:00:00+0000", digest="d1", coverage_note="> note")
@@ -242,3 +245,5 @@ def test_map_sha_stable_and_coverage_note_sensitive():
     h1, h2 = R.read_header(one), R.read_header(two)
     assert h1 is not None and h2 is not None
     assert h1["sha"] == h2["sha"] == R.map_sha([fm], coverage_note="> note")
+    off = R.read_header(R.render_file([fm], generated_iso="g", digest="d", include_methods=False))
+    assert off is not None and off["methods"] == "0" and off["sha"] == R.map_sha([fm], include_methods=False)

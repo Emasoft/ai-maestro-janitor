@@ -47,9 +47,13 @@ _SCHEMA = "v1"
 # one single-line HTML-comment header, no fences. Schema v2 because the body
 # is names-only; v1 is the fenced CLAUDE.md block above.
 _FILE_SCHEMA = "v2"
+# The digest is hex (git) or `mtime-N` (non-git). Restricting it to this charset keeps the
+# header a single-line HTML comment: a `-->` or newline in a digest would end the comment early
+# or split the header, and read_header would then report a valid map as "not a map".
+_DIGEST_CHARS = r"[0-9A-Za-z._-]+"
 _HEADER_RE = re.compile(
-    r"<!-- project-map (?P<schema>v[0-9]+) sha=(?P<sha>[0-9a-f]{12}) "
-    r"digest=(?P<digest>\S+) generated=(?P<generated>\S+) -->"
+    r"<!-- project-map (?P<schema>v[0-9]+) sha=(?P<sha>[0-9a-f]{12}) methods=(?P<methods>[01]) "
+    rf"digest=(?P<digest>{_DIGEST_CHARS}) generated=(?P<generated>\S+) -->"
 )
 _LEGACY_HEADING = "## Project map (auto-generated — do not edit between the fences)"
 _MAP_HEADING = "# Project map (generated, do not edit)\nPer file: path — role, then its public symbol names."
@@ -212,7 +216,7 @@ def _names_block(fm: FileMap, include_methods: bool) -> list[str]:
     return [_file_head(fm), f"  {names}"] if names else [_file_head(fm)]
 
 
-def render_map_body(filemaps: list[FileMap], *, include_methods: bool = False, coverage_note: str | None = None) -> str:
+def render_map_body(filemaps: list[FileMap], *, include_methods: bool = True, coverage_note: str | None = None) -> str:
     """The names-only PROJECT_MAP.md body: per file the path and role, then ONE
     indented line of public symbol names (`include_methods` adds `Class.method`
     names). Same family collapse as the legacy body. No fences, no timestamp."""
@@ -224,7 +228,7 @@ def render_map_body(filemaps: list[FileMap], *, include_methods: bool = False, c
     )
 
 
-def map_sha(filemaps: list[FileMap], *, include_methods: bool = False, coverage_note: str | None = None) -> str:
+def map_sha(filemaps: list[FileMap], *, include_methods: bool = True, coverage_note: str | None = None) -> str:
     """12-hex sha256 of the names-only body: THE one hash helper, called by the
     writer (via render_file) and by the drift detector. `coverage_note` is part
     of the body and therefore of the hash — the detector must pass the same note
@@ -238,22 +242,29 @@ def render_file(
     *,
     generated_iso: str,
     digest: str,
-    include_methods: bool = False,
+    include_methods: bool = True,
     coverage_note: str | None = None,
 ) -> str:
-    """The whole PROJECT_MAP.md text: one header line (schema, body sha, digest,
+    """The whole PROJECT_MAP.md text: one header line (schema, body sha, methods flag, digest,
     generated time; none of the last two is hashed) then the names-only body."""
-    for label, value in (("digest", digest), ("generated_iso", generated_iso)):
-        if not value or re.search(r"\s", value):
-            # The header is whitespace-tokenised; a space would break read_header.
-            raise ValueError(f"{label} must be non-empty and contain no whitespace: {value!r}")
+    if not re.fullmatch(_DIGEST_CHARS, digest):
+        raise ValueError(f"digest must match {_DIGEST_CHARS}: {digest!r}")
+    if not generated_iso or re.search(r"\s", generated_iso):
+        # The header is whitespace-tokenised; a space would break read_header.
+        raise ValueError(f"generated_iso must be non-empty and contain no whitespace: {generated_iso!r}")
     body = render_map_body(filemaps, include_methods=include_methods, coverage_note=coverage_note)
-    header = f"<!-- project-map {_FILE_SCHEMA} sha={_sha12(body)} digest={digest} generated={generated_iso} -->"
+    # methods= records which include_methods value produced the sha, so a reader that hashes with
+    # a different value is diagnosable (and --check hashes with the value the header names)
+    # instead of reporting a phantom STALE forever.
+    header = (
+        f"<!-- project-map {_FILE_SCHEMA} sha={_sha12(body)} methods={int(include_methods)} "
+        f"digest={digest} generated={generated_iso} -->"
+    )
     return f"{header}\n{body}\n"
 
 
 def read_header(text: str) -> dict[str, str] | None:
-    """Parse the first line of a PROJECT_MAP.md into schema/sha/digest/generated;
+    """Parse the first line of a PROJECT_MAP.md into schema/sha/methods/digest/generated;
     None when it is not a project-map header."""
     match = _HEADER_RE.fullmatch(text.split("\n", 1)[0].strip())
     return match.groupdict() if match else None

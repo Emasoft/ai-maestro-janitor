@@ -1,9 +1,10 @@
-"""Tests for the project-map marker/splice surgery (TRDD-e247a349 P2, pure half).
+"""Tests for the marker/splice surgery on CLAUDE.md fences (TRDD-e247a349 P2, pure half).
 
-The maintainer detector + /janitor-auto-repomap-on|off commands all route
-through these functions, so the safety invariants are pinned here: touch ONLY
-the fenced region, preserve every human-narrative byte, and bail (not guess) on
-malformed fences. No I/O, no mocks — pure string fixtures.
+The project map itself now lives in the root PROJECT_MAP.md (TRDD-FADYLSQB); repomap_generate.py
+only STRIPS a leftover legacy REPO-MAP fence through remove_map_block, and the wikimem-index fence
+still uses insert/replace/read. The safety invariants are pinned here: touch ONLY the fenced region,
+preserve every human-narrative byte, and bail (not guess) on malformed fences. No I/O, no mocks —
+pure string fixtures.
 """
 
 from __future__ import annotations
@@ -111,3 +112,14 @@ def test_block_at_top_of_file_round_trips():
     assert has_map_block(top)
     restored = remove_map_block(top)
     assert restored == _HUMAN
+
+
+
+def test_remove_from_the_middle_keeps_every_byte_outside_the_fence():
+    """The legacy strip: a fence between two narrative parts is cut out; every non-newline byte around it survives and only seam newlines differ."""
+    before, after = "# Head\n\n    indented  line\n", "## Tail\n\n- keep  this\n"
+    text = before + "\n" + _block() + "\n" + after
+    stripped = remove_map_block(text)
+    assert not has_map_block(stripped)
+    assert stripped.replace("\n", "") == (before + after).replace("\n", "")
+    assert "    indented  line" in stripped

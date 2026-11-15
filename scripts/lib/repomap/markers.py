@@ -1,4 +1,4 @@
-# Marker-fence operations for the project-map block (TRDD-e247a349 §3, §4).
+# Marker-fence operations for janitor-owned CLAUDE.md regions (TRDD-e247a349 §3, §4).
 #
 # Pure string surgery on CLAUDE.md text: locate the fenced block, parse its
 # header, and replace / insert / remove it — touching ONLY the bytes between
@@ -21,6 +21,11 @@ class MalformedFences(ValueError):
     (one side missing, duplicated, or END appearing before START)."""
 
 
+# The default pair is the LEGACY repo-map fence: the project map now lives in the root
+# PROJECT_MAP.md (TRDD-FADYLSQB), and repomap_generate.py only STRIPS a leftover fence
+# with remove_map_block. insert/replace/read_fence_header stay because the wikimem-index
+# fence and the not-yet-migrated drift detector still use them.
+#
 # Every function below takes optional `start=` / `end=` fence strings, defaulting to the
 # repo-map pair — so the SAME surgery serves the wikimem-index fence (TRDD-H12K9JYX) and
 # any future janitor-owned region. One implementation, because two fence-splicers that

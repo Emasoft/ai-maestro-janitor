@@ -1,20 +1,20 @@
-"""repomap_generate end-to-end + the ANTI-CORRUPTION contract (TRDD-e247a349).
+"""repomap_generate end-to-end + the anti-corruption contract (TRDD-e247a349, TRDD-FADYLSQB).
 
 Real tests, no mocks: each case builds a throwaway git project with source
 files and a human-authored CLAUDE.md, runs the actual script (subprocess) or
-the imported splice function, and asserts on the real file system.
+the imported function, and asserts on the real file system and real git.
 
-The contract under test (the user's explicit worry — the janitor must never
-corrupt a CLAUDE.md co-owned by the human and the session's Claude):
-  - the human narrative outside the fences is preserved BYTE-FOR-BYTE across
-    insert / refresh / remove;
-  - malformed fences → safe bail, file untouched;
-  - a held generator lock → skip, file untouched;
-  - a concurrent editor never produces a torn/corrupted file, and the editor's
-    latest narrative always survives (lost-update guard);
-  - a rolling backup exists before any write;
-  - no-change reruns make ZERO writes (AC2), and --check exit codes encode
-    fresh/stale/no-block.
+The contract under test:
+  - the generator writes the generated, git-ignored root PROJECT_MAP.md and never
+    touches the human narrative of CLAUDE.md;
+  - the ignore rule lands in the file `git rev-parse --git-path info/exclude` names
+    (also in a linked worktree); a tracked PROJECT_MAP.md is refused;
+  - a LEGACY REPO-MAP fence in CLAUDE.md is stripped once, only AFTER the new file is
+    written and re-read with a matching header sha; a failed write leaves the fence;
+  - malformed fences -> safe bail, CLAUDE.md untouched; a held lock -> skip;
+  - the strip never loses a concurrent editor's text (lost-update guard) and keeps a
+    rolling backup;
+  - no-change reruns make ZERO writes, and --check exit codes encode fresh/stale/no-map.
 """
 
 from __future__ import annotations
@@ -28,17 +28,20 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "repomap_generate.py"
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+import pytest  # noqa: E402
+from repomap import insert_map_block, read_header, render_block  # noqa: E402
 
 _NARRATIVE = "# My project\n\nHuman-authored architecture notes the janitor must NEVER touch.\n- gotcha one\n- gotcha two\n"
+_FENCE_START = "<+-+-JANITOR-REPO-MAP-START-"
+_FENCE_END = "<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>"
 
 
 def _load_module():
-    """Import repomap_generate as a module (for the splice-level race tests)."""
-    sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+    """Import repomap_generate as a module (for the function-level tests)."""
     spec = importlib.util.spec_from_file_location("repomap_generate", _SCRIPT)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
@@ -46,9 +49,19 @@ def _load_module():
     return mod
 
 
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def _check_ignore_rc(root: Path) -> int:
+    return subprocess.run(["git", "check-ignore", "-q", "PROJECT_MAP.md"], cwd=root, capture_output=True).returncode
+
+
 def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
     (root / "pkg").mkdir(parents=True)
-    (root / "pkg" / "alpha.py").write_text('"""Alpha module — does alpha things."""\n\ndef alpha_fn(x: int) -> int:\n    """Return x doubled — never negative input."""\n    return x * 2\n')
+    (root / "pkg" / "alpha.py").write_text(
+        '"""Alpha module — does alpha things."""\n\ndef alpha_fn(x: int) -> int:\n    """Return x doubled — never negative input."""\n    return x * 2\n\n\nclass Alpha:\n    def run(self) -> int:\n        return 1\n'
+    )
     (root / "pkg" / "beta.py").write_text('"""Beta module — does beta things."""\n\ndef beta_fn() -> None:\n    """Fire the beta path exactly once."""\n')
     if with_claude_md:
         (root / "CLAUDE.md").write_text(_NARRATIVE)
@@ -57,6 +70,19 @@ def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
     subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+
+
+def _legacy_block(root: Path) -> str:
+    """A fenced REPO-MAP block exactly as the pre-PROJECT_MAP.md generator wrote it."""
+    maps = _load_module().extract_all(root, [])
+    return render_block(maps, generated_iso="2026-01-01T00:00:00+0000", digest="olddigest")
+
+
+def _with_legacy_fence(root: Path) -> str:
+    """Give CLAUDE.md the legacy fence after the narrative; returns the new text."""
+    text = insert_map_block(_NARRATIVE, _legacy_block(root))
+    (root / "CLAUDE.md").write_text(text)
+    return text
 
 
 def _run(root: Path, *args: str, env: dict[str, str] | None = None) -> tuple[int, str]:
@@ -71,56 +97,54 @@ def _run(root: Path, *args: str, env: dict[str, str] | None = None) -> tuple[int
 
 
 def _narrative_of(text: str) -> str:
-    """Everything outside the fenced block (mirrors the script's invariant)."""
-    start = text.find("<+-+-JANITOR-REPO-MAP-START-")
+    """Everything outside the legacy fenced block."""
+    start = text.find(_FENCE_START)
     if start < 0:
         return text
-    end_marker = "<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>"
-    end = text.find(end_marker) + len(end_marker)
+    end = text.find(_FENCE_END) + len(_FENCE_END)
     while end < len(text) and text[end] == "\n":
         end += 1
     return text[:start] + text[end:]
 
 
-def test_insert_preserves_narrative_and_check_is_fresh():
-    """First generate inserts the block; the human narrative survives
-    byte-for-byte and --check immediately reports fresh."""
+def test_generate_writes_the_map_file_and_leaves_claude_md_alone():
+    """First generate writes PROJECT_MAP.md (names, methods included, methods=1 header); CLAUDE.md is byte-identical; --check is fresh."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
-        rc, out = _run(
-            root,
-        )
+        rc, out = _run(root)
         assert rc == 0 and "wrote" in out, out
-        text = (root / "CLAUDE.md").read_text()
-        assert text.startswith(_NARRATIVE.rstrip("\n")), "narrative must lead, untouched"
-        assert text.count("<+-+-JANITOR-REPO-MAP-START-") == 1
-        assert "`pkg/alpha.py`" in text and "alpha_fn" in text
+        text = (root / "PROJECT_MAP.md").read_text()
+        header = read_header(text)
+        assert header is not None and header["methods"] == "1"
+        assert "`pkg/alpha.py`" in text and "alpha_fn" in text and "Alpha.run" in text
+        assert (root / "CLAUDE.md").read_text() == _NARRATIVE
+        assert not [p for p in root.iterdir() if p.name.startswith(".claudemd-tmp-")], "tmp file leaked"
         rc, out = _run(root, "--check")
         assert rc == 0 and "fresh" in out, out
 
 
 def test_rerun_without_change_makes_zero_writes():
-    """AC2: identical structure → 'already current', file untouched (mtime)."""
+    """AC2: identical structure -> 'already current', the map file is untouched (mtime)."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
         assert _run(root)[0] == 0
-        before = (root / "CLAUDE.md").stat().st_mtime_ns
+        before = (root / "PROJECT_MAP.md").stat().st_mtime_ns
         time.sleep(0.02)
         rc, out = _run(root)
         assert rc == 0 and "already current" in out, out
-        assert (root / "CLAUDE.md").stat().st_mtime_ns == before, "no-op must not rewrite"
+        assert (root / "PROJECT_MAP.md").stat().st_mtime_ns == before, "no-op must not rewrite"
 
 
-def test_check_codes_stale_and_noblock():
-    """--check: 2 = no block; 1 = structure changed; 0 again after refresh."""
+def test_check_codes_stale_and_nomap():
+    """--check: 2 = no map file; 1 = structure changed; 0 again after refresh."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
-        assert _run(root, "--check")[0] == 2  # no block yet
+        assert _run(root, "--check")[0] == 2  # no map yet
         assert _run(root)[0] == 0
-        # add a public symbol → structure changes
+        # add a public symbol -> structure changes
         with open(root / "pkg" / "alpha.py", "a") as f:
             f.write('\ndef gamma_fn() -> None:\n    """New public symbol."""\n')
         rc, out = _run(root, "--check")
@@ -130,8 +154,7 @@ def test_check_codes_stale_and_noblock():
 
 
 def test_comment_only_change_does_not_rewrite():
-    """A comment edit moves the digest but not the structure → check says
-    refresh optional (exit 0) and generate makes no write."""
+    """A comment edit moves the digest but not the structure -> check says refresh optional (exit 0) and generate makes no write."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
@@ -144,35 +167,223 @@ def test_comment_only_change_does_not_rewrite():
         assert rc == 0 and "already current" in out, out
 
 
-def test_remove_restores_narrative_exactly():
-    """--remove splices the block out; the narrative is byte-identical."""
+def test_check_hashes_with_the_methods_value_the_header_names():
+    """A map written with methods=0 is judged with methods=0: no phantom STALE when the writer default and the header differ."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        mod = _load_module()
+        maps = mod.extract_all(root, [])
+        assert mod.map_sha(maps) != mod.map_sha(maps, include_methods=False), "fixture needs a method to discriminate"
+        # digest "stale0" never equals the repo digest, forcing the extract-and-hash path
+        (root / "PROJECT_MAP.md").write_text(mod.render_file(maps, generated_iso="2026-01-01T00:00:00+0000", digest="stale0", include_methods=False))
+        rc, out = _run(root, "--check")
+        assert rc == 0 and "structure unchanged" in out, out
+
+
+def test_check_refuses_a_file_without_a_generated_header():
+    """--check on a hand-written PROJECT_MAP.md is an error (exit 3), not a freshness verdict."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        (root / "PROJECT_MAP.md").write_text("# my own notes\n")
+        assert _run(root, "--check")[0] == 3
+
+
+def test_remove_deletes_only_a_generated_map():
+    """--remove unlinks a file with a generated header, leaves CLAUDE.md alone, and refuses a header-less file."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
         assert _run(root)[0] == 0
         rc, out = _run(root, "--remove")
         assert rc == 0 and "removed" in out, out
-        after = (root / "CLAUDE.md").read_text()
-        assert "JANITOR-REPO-MAP" not in after
-        assert after.rstrip("\n") == _NARRATIVE.rstrip("\n")
+        assert not (root / "PROJECT_MAP.md").exists()
+        assert (root / "CLAUDE.md").read_text() == _NARRATIVE
+        assert _run(root, "--remove")[0] == 0  # nothing to remove is fine
+        (root / "PROJECT_MAP.md").write_text("# hand-written\n")
+        rc, out = _run(root, "--remove")
+        assert rc == 3 and "REFUSING" in out, out
+        assert (root / "PROJECT_MAP.md").read_text() == "# hand-written\n"
 
 
-def test_malformed_fence_bails_without_touching_file():
-    """A hand-broken fence pair → exit 3, CLAUDE.md byte-identical."""
+def test_stdout_prints_the_file_and_touches_nothing():
+    """--stdout prints the exact file text; no map, no lock dir, no exclude rule is created."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
+        exclude = root / ".git" / "info" / "exclude"
+        before = exclude.read_text() if exclude.is_file() else ""
+        rc, out = _run(root, "--stdout")
+        assert rc == 0 and read_header(out) is not None, out
+        assert not (root / "PROJECT_MAP.md").exists() and not (root / ".janitor").exists()
+        assert (exclude.read_text() if exclude.is_file() else "") == before
+
+
+def test_map_is_ignored_through_info_exclude_and_never_dirties_the_tree():
+    """The ignore rule goes to info/exclude (not .gitignore), once, even when that file lacks a final newline."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        exclude = root / ".git" / "info" / "exclude"
+        exclude.write_text("# local\n*.scratch")  # no trailing newline: the append must not glue onto it
+        assert _run(root)[0] == 0 and _run(root)[0] == 0
+        assert exclude.read_text().splitlines() == ["# local", "*.scratch", "/PROJECT_MAP.md"]
+        assert _check_ignore_rc(root) == 0
+        assert "PROJECT_MAP.md" not in _git(root, "status", "--porcelain")
+        assert not (root / ".gitignore").exists()
+
+
+def test_ignore_rule_lands_in_the_common_exclude_file_of_a_linked_worktree(tmp_path):
+    """Real linked worktree: `.git` there is a FILE, the rule goes to the common dir's info/exclude and covers both checkouts."""
+    main, wt = tmp_path / "main", tmp_path / "wt"
+    main.mkdir()
+    _make_project(main)
+    _git(main, "worktree", "add", "-q", "-b", "wt-branch", str(wt))
+    assert (wt / ".git").is_file()
+    rc, out = _run(wt)
+    assert rc == 0, out
+    assert (wt / "PROJECT_MAP.md").is_file()
+    common = (wt / _git(wt, "rev-parse", "--git-common-dir").strip()).resolve()
+    assert "/PROJECT_MAP.md" in (common / "info" / "exclude").read_text().splitlines()
+    assert _check_ignore_rc(wt) == 0
+    assert "PROJECT_MAP.md" not in _git(wt, "status", "--porcelain")
+    (main / "PROJECT_MAP.md").write_text("x\n")
+    assert _check_ignore_rc(main) == 0, "the common exclude file also covers the main checkout"
+
+
+def test_tracked_map_is_refused():
+    """A PROJECT_MAP.md already tracked by git is never overwritten: exit 3, content and exclude file untouched."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        (root / "PROJECT_MAP.md").write_text("committed by hand\n")
+        _git(root, "add", "-f", "PROJECT_MAP.md")
+        _git(root, "commit", "-qm", "track the map")
+        exclude = root / ".git" / "info" / "exclude"
+        before = exclude.read_text() if exclude.is_file() else ""
+        rc, out = _run(root)
+        assert rc == 3 and "tracked" in out, out
+        assert (root / "PROJECT_MAP.md").read_text() == "committed by hand\n"
+        assert (exclude.read_text() if exclude.is_file() else "") == before
+
+
+
+def test_a_git_failure_while_checking_tracked_status_is_an_error_not_untracked():
+    """A corrupt index makes `git ls-files` fail (rc 128): the run exits 3 naming the git failure instead of treating the map as untracked."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        (root / ".git" / "index").write_bytes(b"not an index")
+        rc, out = _run(root)
+        assert rc == 3 and "git ls-files failed" in out, out
+        assert not (root / "PROJECT_MAP.md").exists()
+
+
+
+def test_handwritten_map_file_is_never_overwritten():
+    """A PROJECT_MAP.md without a generated header is refused (exit 3) and kept byte-identical, same rule as --remove."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        fenced = _with_legacy_fence(root)
+        (root / "PROJECT_MAP.md").write_text("HANDWRITTEN\n")
+        rc, out = _run(root)
+        assert rc == 3 and "REFUSING" in out, out
+        assert (root / "PROJECT_MAP.md").read_text() == "HANDWRITTEN\n"
+        assert (root / "CLAUDE.md").read_text() == fenced, "no strip after a refused write"
+
+
+def test_non_git_root_writes_the_map_without_an_ignore_rule():
+    """Outside a git work tree there is nothing to ignore: the map is written and --check is fresh."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "pkg").mkdir()
+        (root / "pkg" / "alpha.py").write_text('"""Alpha."""\n\ndef alpha_fn() -> None:\n    pass\n')
+        rc, out = _run(root)
+        assert rc == 0 and "wrote" in out, out
+        assert "alpha_fn" in (root / "PROJECT_MAP.md").read_text()
+        assert _run(root, "--check")[0] == 0
+
+
+def test_untracked_unignored_map_does_not_move_the_digest():
+    """repo_digest excludes PROJECT_MAP.md like CLAUDE.md, so a map whose ignore rule failed cannot re-dirty the digest it records."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        mod = _load_module()
+        before = mod.repo_digest(root)
+        (root / "PROJECT_MAP.md").write_text("x\n")
+        assert "PROJECT_MAP.md" in _git(root, "status", "--porcelain")
+        assert mod.repo_digest(root) == before
+
+
+def test_legacy_fence_is_stripped_after_a_verified_write_and_backed_up():
+    """A legacy REPO-MAP fence is removed once PROJECT_MAP.md is written and verified; the narrative survives byte-for-byte and the backup holds the pre-strip text."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        fenced = _with_legacy_fence(root)
+        rc, out = _run(root)
+        assert rc == 0 and "legacy" in out, out
+        assert (root / "PROJECT_MAP.md").is_file()
+        after = (root / "CLAUDE.md").read_text()
+        assert _FENCE_START not in after
+        assert after.rstrip("\n") == _NARRATIVE.rstrip("\n")
+        bak = root / ".janitor" / "state" / "CLAUDE.md.pre-repomap.bak"
+        assert bak.read_text() == fenced, "backup must be the pre-strip CLAUDE.md"
+        mtime = (root / "CLAUDE.md").stat().st_mtime_ns
         assert _run(root)[0] == 0
+        assert (root / "CLAUDE.md").stat().st_mtime_ns == mtime, "a rerun must not touch CLAUDE.md again"
+
+
+def test_a_failed_write_never_strips_the_legacy_fence():
+    """If PROJECT_MAP.md cannot be written (a directory is in the way) the run fails and the fence, the only copy of the map, stays."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        fenced = _with_legacy_fence(root)
+        (root / "PROJECT_MAP.md").mkdir()
+        rc, out = _run(root)
+        assert rc == 3 and "could not write" in out, out
+        assert (root / "CLAUDE.md").read_text() == fenced
+
+
+def test_map_verification_checks_the_header_sha_read_back_from_disk():
+    """_map_verified is True only for a file whose re-read header carries the expected sha; a wrong sha, no header or no file is False."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        mod = _load_module()
+        maps = mod.extract_all(root, [])
+        sha = mod.map_sha(maps)
+        target = root / "PROJECT_MAP.md"
+        assert not mod._map_verified(target, sha)
+        good = mod.render_file(maps, generated_iso="2026-01-01T00:00:00+0000", digest="d")
+        target.write_text(good)
+        assert mod._map_verified(target, sha)
+        target.write_text(good.replace(sha, "0" * 12, 1))
+        assert not mod._map_verified(target, sha)
+        target.write_text("# no header\n")
+        assert not mod._map_verified(target, sha)
+
+
+def test_malformed_fence_bails_without_touching_claude_md():
+    """A hand-broken legacy fence pair -> exit 3, CLAUDE.md byte-identical (the map file itself was already written)."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
         path = root / "CLAUDE.md"
-        broken = path.read_text().replace("<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>", "<oops-the-end-fence-is-gone>")
+        _with_legacy_fence(root)
+        broken = path.read_text().replace(_FENCE_END, "<oops-the-end-fence-is-gone>")
         path.write_text(broken)
         rc, out = _run(root)
-        assert rc == 3 and "refusing" in out.lower() or "malformed" in out.lower(), out
+        assert rc == 3 and "refusing" in out.lower(), out
         assert path.read_text() == broken, "bail must not modify the file"
 
 
 def test_held_lock_skips_safely():
-    """A held generator flock → exit 3 skip, file untouched."""
+    """A held generator flock -> exit 3 skip; no map is written and CLAUDE.md is untouched."""
     import fcntl
 
     with TemporaryDirectory() as d:
@@ -186,17 +397,7 @@ def test_held_lock_skips_safely():
             rc, out = _run(root)
             assert rc == 3 and "lock" in out, out
             assert (root / "CLAUDE.md").read_text() == before
-
-
-def test_backup_written_before_write():
-    """The rolling pre-write backup carries the PRE-write content."""
-    with TemporaryDirectory() as d:
-        root = Path(d)
-        _make_project(root)
-        assert _run(root)[0] == 0
-        bak = root / ".janitor" / "state" / "CLAUDE.md.pre-repomap.bak"
-        assert bak.is_file()
-        assert bak.read_text() == _NARRATIVE, "backup must be the pre-write CLAUDE.md"
+            assert not (root / "PROJECT_MAP.md").exists()
 
 
 def test_excludes_are_persisted_and_honored():
@@ -209,13 +410,13 @@ def test_excludes_are_persisted_and_honored():
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         subprocess.run(["git", "commit", "-qm", "tests"], cwd=root, check=True)
         assert _run(root, "--exclude", "tests/*")[0] == 0
-        text = (root / "CLAUDE.md").read_text()
+        text = (root / "PROJECT_MAP.md").read_text()
         assert "test_alpha" not in text, "excluded tree must not appear in the map"
-        # TRACKED location: the map is committed and rides every turn's context, so what
-        # it contains must not depend on gitignored state (2026-07-26 balloon).
+        # TRACKED location: every clone must map the same file set, so it must not depend on
+        # gitignored state (2026-07-26 balloon).
         assert (root / ".repomapignore").read_text().endswith("tests/*\n")
         assert not (root / ".janitor" / "state" / "repomap-excludes.txt").exists()
-        # --check (no --exclude flag) must reuse the persisted set → fresh.
+        # --check (no --exclude flag) must reuse the persisted set -> fresh.
         assert _run(root, "--check")[0] == 0
 
 
@@ -232,16 +433,14 @@ def test_legacy_exclude_file_is_still_read():
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("tests/*\n")
         assert _run(root)[0] == 0  # no --exclude: must fall back to the legacy list
-        assert "test_alpha" not in (root / "CLAUDE.md").read_text()
+        assert "test_alpha" not in (root / "PROJECT_MAP.md").read_text()
 
 
 def test_oversized_map_is_refused_and_names_the_contributors():
-    """A map that would balloon CLAUDE.md is REFUSED, not written.
+    """A map that would balloon is REFUSED, not written; the message names what to exclude and does not claim the file rides every turn.
 
-    CLAUDE.md is committed AND injected into every turn of every session, so an
-    oversized map is a permanent per-turn tax that nothing else would catch: on
-    2026-07-26 a lost exclude list silently took it 1720 -> 6032 lines and no gate
-    complained. The cap is the cause-independent backstop.
+    On 2026-07-26 a lost exclude list silently took the old CLAUDE.md map 1720 -> 6032 lines and
+    no gate complained. The cap is the cause-independent backstop and still applies to the file.
     """
     with TemporaryDirectory() as d:
         root = Path(d)
@@ -251,15 +450,13 @@ def test_oversized_map_is_refused_and_names_the_contributors():
         assert rc == 3, out
         assert "REFUSING to write" in out, out
         assert "Top contributors" in out, "a refusal must name what to exclude, or it gets --forced"
-        assert (root / "CLAUDE.md").read_text() == before, "refused run must not touch CLAUDE.md"
+        assert "injected" not in out, "PROJECT_MAP.md is not injected into every turn"
+        assert not (root / "PROJECT_MAP.md").exists()
+        assert (root / "CLAUDE.md").read_text() == before
 
 
 def test_a_refused_run_does_not_mutate_the_persisted_excludes():
-    """The refusal must not corrupt the state it exists to protect.
-
-    Persisting the CLI excludes before the size check would leave the next run reading
-    the very globs that caused the refusal — so the guard would poison the recovery.
-    """
+    """The refusal must not corrupt the state it exists to protect: persisting the CLI excludes before the size check would poison the recovery."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
@@ -275,57 +472,45 @@ def test_a_refused_run_does_not_mutate_the_persisted_excludes():
         assert (root / ".repomapignore").read_text() == good, "refused run rewrote the exclude list"
 
 
-def test_splice_survives_a_writer_caught_between_truncate_and_write():
-    """The torn-read race that made the concurrency test flaky (and is real data loss).
+def test_strip_survives_a_writer_caught_between_truncate_and_write():
+    """The torn-read race: a read landing in a writer's truncate window sees 0 bytes. The strip must treat that as 'no fence' and write nothing, never persist a narrative-less file.
 
-    `Path.write_text` — what Claude's Edit tool and most editors do — truncates
-    first and writes after. A read landing in that window sees 0 bytes while the
-    stat signature stays STABLE (the writer has not written yet), so the collision
-    check cannot see it. Splicing that would persist a block-only CLAUDE.md,
-    destroying the human narrative the fences exist to protect — and the writer
-    would lose its own write too, because our atomic rename swaps the inode out
-    from under its open fd.
-
-    The window here (5 ms) is an order of magnitude under the settle delay, so the
-    assertion is about correctness, not about winning a timing race.
+    `Path.write_text` truncates first and writes after; the window here (5 ms) is an order of
+    magnitude under the settle delay, so the assertion is about correctness, not a timing race.
     """
     mod = _load_module()
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
         claude_md = root / "CLAUDE.md"
-        block = "<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=x digest=y generated=z\nbody\n<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>\n"
+        fenced = insert_map_block(_NARRATIVE, _legacy_block(root))
+        claude_md.write_text(fenced)
 
         def torn_writer() -> None:
-            # Truncate, hold the window open, THEN write — the exact shape of a
-            # read-modify-write save, slowed down enough to be landed on.
             with open(claude_md, "w", encoding="utf-8") as fh:
                 time.sleep(0.005)
-                fh.write(_NARRATIVE)
+                fh.write(fenced)
 
         t = threading.Thread(target=torn_writer)
         t.start()
         time.sleep(0.001)  # land INSIDE the truncate window
-        mod.splice_with_verify(claude_md, block, attempts=3)
+        mod.strip_legacy_fence(claude_md, attempts=3)
         t.join()
 
         final = claude_md.read_text()
-        assert _NARRATIVE.strip().splitlines()[0] in final, f"the human narrative was destroyed by a splice over a torn read:\n{final!r}"
-        assert final.count("<+-+-JANITOR-REPO-MAP-START-") <= 1, "torn/duplicated fences"
+        assert _NARRATIVE.strip().splitlines()[0] in final, f"the human narrative was destroyed by a strip over a torn read:\n{final!r}"
+        assert final.count(_FENCE_START) <= 1, "torn/duplicated fences"
 
 
 def test_concurrent_editor_never_corrupts_and_their_edit_survives():
-    """THE race test (the user's corruption worry): a hostile editor rewrites
-    the narrative in a tight loop while splice_with_verify runs repeatedly.
-    Invariants asserted on the final file: (a) never torn — at most one intact
-    fence pair; (b) the narrative is one of the editor's exact versions (no
-    interleaving, no loss to a half-spliced state)."""
+    """THE race test: a hostile editor rewrites the narrative in a tight loop while strip_legacy_fence runs repeatedly. The final file is never torn and its narrative is one of the editor's exact versions."""
     mod = _load_module()
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
         claude_md = root / "CLAUDE.md"
-        block = "<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=x digest=y generated=z\nbody\n<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>\n"
+        block = _legacy_block(root)
+        claude_md.write_text(insert_map_block(_NARRATIVE, block))
 
         versions = [f"# Narrative v{i}\n\nhuman text {i}\n" for i in range(40)]
         stop = threading.Event()
@@ -334,10 +519,9 @@ def test_concurrent_editor_never_corrupts_and_their_edit_survives():
             for v in versions:
                 if stop.is_set():
                     return
-                # the human/Claude path: read-modify-write of the narrative,
-                # PRESERVING an existing block (as Claude's Edit tool would)
+                # the human/Claude path: read-modify-write of the narrative, PRESERVING an existing block
                 current = claude_md.read_text()
-                start = current.find("<+-+-JANITOR-REPO-MAP-START-")
+                start = current.find(_FENCE_START)
                 tail = current[start:] if start >= 0 else ""
                 claude_md.write_text(v + ("\n" + tail if tail else ""))
                 time.sleep(0.001)
@@ -346,15 +530,18 @@ def test_concurrent_editor_never_corrupts_and_their_edit_survives():
         t.start()
         try:
             for _ in range(30):
-                mod.splice_with_verify(claude_md, block, attempts=3)
+                current = claude_md.read_text()
+                if _FENCE_START not in current:  # give the strip something to remove each round
+                    claude_md.write_text(current.rstrip("\n") + "\n\n" + block)
+                mod.strip_legacy_fence(claude_md, attempts=3)
                 time.sleep(0.001)
         finally:
             stop.set()
             t.join()
 
         final = claude_md.read_text()
-        assert final.count("<+-+-JANITOR-REPO-MAP-START-") <= 1, "torn/duplicated fences"
-        assert final.count("<+-+-JANITOR-REPO-MAP-END-") == final.count("<+-+-JANITOR-REPO-MAP-START-")
+        assert final.count(_FENCE_START) <= 1, "torn/duplicated fences"
+        assert final.count(_FENCE_END) == final.count(_FENCE_START)
         narrative = _narrative_of(final).rstrip("\n") + "\n"
         valid = {v.rstrip("\n") + "\n" for v in versions} | {_NARRATIVE.rstrip("\n") + "\n"}
         assert narrative in valid, f"narrative corrupted/interleaved:\n{narrative!r}"
@@ -377,50 +564,40 @@ def _make_ts_heavy_project(root: Path) -> None:
 
 
 def test_ts_heavy_repo_gets_an_honest_coverage_disclaimer():
-    """#175: a Python-only extractor on an overwhelmingly-TypeScript repo must
-    not present its partial map as if it were complete — the written block
-    carries an explicit disclaimer naming the gap."""
+    """#175: a Python-only extractor on an overwhelmingly-TypeScript repo must not present its partial map as complete — the written file carries an explicit disclaimer naming the gap."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_ts_heavy_project(root)
         rc, out = _run(root)
         assert rc == 0 and "wrote" in out, out
-        text = (root / "CLAUDE.md").read_text()
+        text = (root / "PROJECT_MAP.md").read_text()
         assert "Python-only extractor" in text
         assert "5 other tracked source file(s)" in text
         assert "janitor#175" in text
+        assert _run(root, "--check")[0] == 0, "the note is part of the hash on both sides"
 
 
 def test_ordinary_python_repo_gets_no_disclaimer():
-    """A couple of incidental non-Python files next to many Python modules
-    must NOT trip the honesty check — a false positive would be noise on
-    every ordinary Python repo."""
+    """A couple of incidental non-Python files next to many Python modules must NOT trip the honesty check."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)  # alpha.py + beta.py, no other-language files
         assert _run(root)[0] == 0
-        text = (root / "CLAUDE.md").read_text()
-        assert "Python-only extractor" not in text
+        assert "Python-only extractor" not in (root / "PROJECT_MAP.md").read_text()
 
 
 def test_excluded_tree_does_not_trip_the_disclaimer():
-    """--exclude applies to the coverage count too — an intentionally-excluded
-    tree (e.g. a vendored frontend) must not trigger the honesty note either,
-    mirroring how it already exempts that tree from the map itself."""
+    """--exclude applies to the coverage count too — an intentionally-excluded tree must not trigger the honesty note either."""
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_ts_heavy_project(root)
         rc, out = _run(root, "--exclude", "app/*")
         assert rc == 0, out
-        text = (root / "CLAUDE.md").read_text()
-        assert "Python-only extractor" not in text
+        assert "Python-only extractor" not in (root / "PROJECT_MAP.md").read_text()
 
 
 def test_discovery_follows_the_registry_not_a_hardcoded_extension():
-    """#175 option 1: discover_sources derives its extension set from
-    EXTRACTORS, so a newly-registered language extractor changes what gets
-    discovered with ZERO changes to discover_sources itself — no second
-    hardcoded glob to drift out of step with the registry."""
+    """#175 option 1: discover_sources derives its extension set from EXTRACTORS, so a newly-registered extractor changes discovery with ZERO changes to discover_sources."""
     mod = _load_module()
     with TemporaryDirectory() as d:
         root = Path(d)
@@ -439,8 +616,7 @@ def test_discovery_follows_the_registry_not_a_hardcoded_extension():
 
 
 def test_detector_nudges_only_when_opted_in_and_stale():
-    """project-map-drift: silent without the flag; silent when fresh; ONE
-    deduped nudge when the digest moved — and it NEVER modifies CLAUDE.md."""
+    """project-map-drift (still reading the legacy CLAUDE.md fence until its own rewrite): silent without the flag; silent when fresh; ONE deduped nudge when the digest moved — and it NEVER modifies CLAUDE.md."""
     detector = _PROJECT_ROOT / "scripts" / "detectors" / "project-map-drift.py"
 
     def run_detector(root: Path) -> str:
@@ -460,21 +636,23 @@ def test_detector_nudges_only_when_opted_in_and_stale():
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
-        assert _run(root)[0] == 0  # insert the map (digest = committed+clean)
-        assert run_detector(root) == ""  # no opt-in flag → silent
+        mod = _load_module()
+        # the generator no longer writes the fence, so plant the legacy one the detector reads
+        block = render_block(mod.extract_all(root, []), generated_iso="2026-01-01T00:00:00+0000", digest=mod.repo_digest(root))
+        (root / "CLAUDE.md").write_text(insert_map_block(_NARRATIVE, block))
+        assert run_detector(root) == ""  # no opt-in flag -> silent
 
         flag_dir = root / ".janitor" / "state"
         flag_dir.mkdir(parents=True, exist_ok=True)
         (flag_dir / "repomap-opt-in.flag").write_text("on")
-        assert run_detector(root) == ""  # fresh → silent
+        assert run_detector(root) == ""  # fresh -> silent
 
-        (root / "pkg" / "alpha.py").write_text("# changed\n")  # dirty → digest moves
+        (root / "pkg" / "alpha.py").write_text("# changed\n")  # dirty -> digest moves
         before = (root / "CLAUDE.md").read_text()
         out = run_detector(root)
         assert "[project-map-drift]" in out and "STALE" in out
         assert (root / "CLAUDE.md").read_text() == before, "detector must never write"
         assert run_detector(root) == ""  # deduped on repeat
-
 
 
 @pytest.mark.parametrize(
