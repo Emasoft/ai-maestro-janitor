@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-14T20:21:35+0100
+updated: 2026-11-15T09:26:32+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -132,6 +132,7 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 ## Approval log
 
 - 2026-10-09T22:05:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T09:26:31+0100 — RELEASE 3.9.0 board dispositions (main agent, under the owner order of 2026-11-15 'complete all pending tasks and publish.  use the advisor fable.'): the release goes ahead of the full drain, per TRDD-U0VLVJVT and TRDD-PWL9GD4E (an unreleased fix cannot fix this machine; the owner's live complaint, the janitor clearing sessions, is TRDD-8ZY3JU2H). After the release: AGV84UGC and XVJ30M61 move to testing, each with its field check named. 8ZY3JU2H ships its root-cause fix d88e10ff and increments B, C and D, and stays in dev (paths 4 and 6, the watcher half and its acceptance check are open). Stay in dev, not advanced by this release: 0TSG80CL, AGOEWF2E (owner decision pending on narrowing done-when 1), F3LVCQ39, F8EIVTSG, FADYLSQB (rule S27.1 waits on TRDD-4A4HXDIN), FQVEILVK, M1218EMH, Q6LPJTPO, QAF3N673, S6GX1DHN; OD5Z90YL stays in plan. Not addressed by this release: 46 blocked, 17 human_review (owner), about 78 testing cards awaiting field checks.
 
 ## Rules added by the review of 4de85716
 

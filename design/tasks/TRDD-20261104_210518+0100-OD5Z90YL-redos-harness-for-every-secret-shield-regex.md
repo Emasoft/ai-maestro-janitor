@@ -4,7 +4,7 @@ title: ReDoS harness for every secret-shield regex
 column: plan
 status: tasked
 created: 2026-11-04T21:05:18+0100
-updated: 2026-11-15T09:22:51+0100
+updated: 2026-11-15T09:26:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -54,6 +54,7 @@ Split from TRDD-KADV0ZO6 Done-when item 3 after its review on 2026-11-04: build 
 - 2026-11-04T21:05:18+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-14T04:52:06+0100 — column → plan by main-agent@ai-maestro-janitor. plan recorded; increment 1a next
 - 2026-11-15T09:22:51+0100 — LOAD HARNESS run on the release candidate (one attempt per the checklist): tests/harness/redos_load_harness.py exit 2, aborted, 0 probes judged, reason 'load over 60.0 during the settle', ambient estimate 5.69, peak 60.22, 35 workers on 14 cores (reports_dev/redos-load-harness/20261115_092119+0100-campaign.jsonl). The 2026-11-15 03:31 attempt aborted the same way (ambient 7.40, peak 61.17). FINDING: with ambient near 6 the harness's own default worker count (2.5 per core) drives the 1-min load past its own 60 abort cap during the settle, so on this 14-core host it aborts before any probe; it is not host noise. Per the release checklist an abort for load does not block; no probe judged a failure, and run_secret_shield_tests secret-shield passed 952/952 on this code.
+- 2026-11-15T09:26:31+0100 — CORRECTION to the LOAD HARNESS line above. (1) Its cause, 'the harness's own workers drive the load past 60, not host noise', is INFERRED, not shown: 35 CPU-bound workers plus an ambient near 6 predicts a steady 1-min load near 41; the rest of the peak (60.22 now, 61.17 at 03:31) may come from other sessions or process startup. (2) The spec's precondition for a campaign (design/specs/redos-load-harness-d8.md step 5: an idle assembly immediately before it shows 13 rows, the 6 linear rows linear, the 7 mutant rows superlinear, both TRDD-Z41A13XV tests pass) was NOT run before either campaign, so no row has been judged and the speed test has never judged this code. (3) The 09:23 publish attempt stopped at pytest (4 failures only under xdist in tests/test_cold_cache_clear_loop_guard.py; the file passes alone, 11/11), before any bump, tag or push; the idle assembly runs before the next attempt.
 
 ## Notes
 
