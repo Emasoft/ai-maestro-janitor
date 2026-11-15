@@ -178,7 +178,11 @@ def main() -> int:
                 # costs a bounded ~20 s worst case, which is why it must not run on the
                 # `compact` path above, and now also skipped whenever the harness already
                 # answered.
-                else ec.cache_certainly_expired(root),
+                # TRDD-8ZY3JU2H: scoped to THIS session. Unscoped, agentlenspro answers for the
+                # project's most recently active session, so a sibling's cold cache could clear
+                # this resumed session whose own cache is warm. When the scoped probe abstains,
+                # resolve_cache_expired falls back on this session's own transcript age.
+                else ec.cache_certainly_expired(root, session_id=session_id or None),
                 last_turn_age_s=cold_cache_compact.transcript_age_s(own, now=now),
                 ttl_minutes=ec.read_ttl_minutes(sd),
             )

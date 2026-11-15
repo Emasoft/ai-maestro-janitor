@@ -1244,7 +1244,9 @@ def should_clear_on_resume(
     return verdict
 
 
-def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | None:
+def cache_certainly_expired(
+    project_dir: str | Path | None = None, *, session_id: str | None = None
+) -> bool | None:
     """The REACTIVE trigger's input: is this project's prompt cache ALREADY cold?
 
     Tri-state, straight through from `agentlens_probe.probe_cache_expired` — `None` means
@@ -1258,9 +1260,15 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
     happened at all and the cache died unobserved. Conversely this one cannot pre-empt the
     restart case, because by the time it says "expired" the miss is already unavoidable on the
     next turn. Each covers the other's blind spot; either alone is a partial feature.
+
+    `session_id` scopes the probe to that one session (TRDD-8ZY3JU2H): unscoped it answers for
+    the project's most recently active session, so a sibling's cold cache could clear a warm
+    one. Scoped, the CLI abstains (None) when it cannot answer for that session.
     """
     command = os.environ.get(CACHE_EXPIRED_COMMAND_ENV, alp.DEFAULT_CACHE_EXPIRED_COMMAND)
-    return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
+    return alp.probe_cache_expired(
+        command, project=str(project_dir) if project_dir else None, session=session_id
+    )
 
 
 # An UNARMED resume-after-clear.flag (no SessionStart source=clear stamped clear-observed.ts

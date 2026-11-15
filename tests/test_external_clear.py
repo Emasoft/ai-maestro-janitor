@@ -500,6 +500,48 @@ def test_probe_never_raises_on_a_broken_cli():
     assert alp.probe_cache_expired("x", runner=lambda *a, **k: (_ for _ in ()).throw(OSError())) is None
 
 
+def test_probe_appends_session_only_when_given():
+    """TRDD-8ZY3JU2H: `session="abc"` puts `--session abc` at the END of argv; without it no
+    `--session` is passed, so the unscoped call keeps its old argv."""
+    import agentlens_probe as alp
+
+    seen: list[list[str]] = []
+
+    def _runner(argv, **_k):
+        seen.append(list(argv))
+        return _P(0, "false\n")
+
+    alp.probe_cache_expired("agentlenspro cache-expired", project="/p", session="abc", runner=_runner)
+    alp.probe_cache_expired("agentlenspro cache-expired", project="/p", runner=_runner)
+    assert seen[0][-2:] == ["--session", "abc"]
+    assert "--session" not in seen[1]
+
+
+def test_probe_reads_exit_64_unknown_flag_as_None():
+    """TRDD-8ZY3JU2H: an agentlenspro too old to know `--session` exits 64 with empty stdout;
+    that must read as no signal (None), never as a verdict."""
+    import agentlens_probe as alp
+
+    assert alp.probe_cache_expired("x", session="abc", runner=lambda *a, **k: _P(64, "")) is None
+
+
+def test_cache_certainly_expired_forwards_session_id(monkeypatch, tmp_path):
+    """TRDD-8ZY3JU2H: `cache_certainly_expired(root, session_id="abc")` hands `session="abc"` to
+    the probe, so the answer is about that session and not the project's newest one."""
+    import agentlens_probe as alp
+
+    captured: dict = {}
+
+    def _fake_probe(command, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(alp, "probe_cache_expired", _fake_probe)
+    ec.cache_certainly_expired(tmp_path, session_id="abc")
+    assert captured["session"] == "abc"
+    assert captured["project"] == str(tmp_path)
+
+
 # --- the regression that was live in HEAD ---------------------------------------
 
 

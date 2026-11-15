@@ -105,6 +105,7 @@ def probe_cache_expired(
     command: str,
     *,
     project: str | None = None,
+    session: str | None = None,
     timeout: float = _CACHE_EXPIRED_TIMEOUT_S,
     runner: Any = _default_runner,
 ) -> bool | None:
@@ -127,6 +128,11 @@ def probe_cache_expired(
     is the stdout word and the exit code is only a did-it-answer gate. Cannot-answer is exit 2
     with stdout EMPTY — the CLI never prints ``false`` for a question it could not resolve,
     which is what makes the empty case safe to read as ``None``.
+
+    ``session`` scopes the answer to that one session id (TRDD-8ZY3JU2H): unscoped, the CLI
+    answers for the project's most recently active session, which may be a sibling's. With
+    it the CLI answers for that session or abstains (exit 2 -> ``None``); an unknown flag
+    exits 64, also ``None``.
     """
     command = (command or "").strip()
     if not command:
@@ -137,6 +143,10 @@ def probe_cache_expired(
         return None
     if project:
         argv += ["--project", project]
+    if session:
+        # TRDD-8ZY3JU2H: without --session the CLI answers for the project's most recently
+        # active session, whoever asks, so a sibling's cold cache read as this session's.
+        argv += ["--session", session]
     # The default lives in the SIGNATURE now. The old `run = runner if callable(runner) else
     # subprocess.run` bound subprocess.run to a local, which CPV's skillaudit reads as dynamic
     # command dispatch (SHELL_EXEC) and blocks the publish on at MINOR. The callable() guard

@@ -167,6 +167,25 @@ def test_resume_source_routes_through_the_shared_recovery_helper_and_the_widened
     assert captured["context_tokens"] == 424_242
 
 
+def test_resume_probe_is_scoped_to_the_payload_session_id(monkeypatch, tmp_path):
+    """TRDD-8ZY3JU2H: the hook passes its SessionStart payload `session_id` to the cache probe,
+    so a sibling session's cold cache cannot make it clear a resumed session that is warm."""
+    captured: dict = {}
+
+    def _fake_probe(*_a, **kw):
+        captured.update(kw)
+        return None
+
+    monkeypatch.setattr(ec, "cache_certainly_expired", _fake_probe)
+    monkeypatch.setattr(ec, "recovery_pending", lambda sd: False)
+    monkeypatch.setattr(ccc, "context_tokens_for_resume", lambda *a, **kw: 1)
+    monkeypatch.setattr(
+        ec, "should_clear_on_resume", lambda **kw: ec.ClearVerdict(False, why="test-stub")
+    )
+    assert _run_main_with_source(monkeypatch, "resume", tmp_path) == 0
+    assert captured["session_id"] == "s1"
+
+
 def test_a_failed_attempt_records_evaluated_never_fired(tmp_path):
     """Item 6 part 2. `mark_evaluated` (spacing) and `mark_fired`/`mark_clear_fired` (cooldown)
     are DIFFERENT stamps — recording only the former must leave the cooldown/`in_cooldown` gate
