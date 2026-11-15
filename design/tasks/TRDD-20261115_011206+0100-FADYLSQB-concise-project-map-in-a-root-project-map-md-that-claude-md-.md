@@ -1,10 +1,10 @@
 ---
 trdd-id: FADYLSQB
-title: Concise project map back in CLAUDE.md under the G7.1 and G10.1 fence
+title: Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
 column: todo
 status: tasked
 created: 2026-11-15T01:12:06+0100
-updated: 2026-11-15T01:12:06+0100
+updated: 2026-11-15T01:15:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,12 +19,13 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-15T01:12:06+0100
 ---
 
-# Concise project map back in CLAUDE.md under the G7.1 and G10.1 fence
+# Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
 
 ## STATE
 
 NEXT ACTION: measure first: the token size of the old map (removed 2026-08-14, about 46,000 tokens per turn; generator scripts/lib/repomap/, switch /janitor-auto-repomap-on, archived TRDD-E247A349), then design a concise map with a measured token budget, then propose (PROPOSAL FOR ACTION marker), build, and only if the concise map meets the budget, put it in the project-map fence golden rules G7.1 and G10.1 require and amend the CLAUDE.md section "Navigating this codebase — use tldr, never a static map".
 Queued 2026-11-15 behind TRDD-F8EIVTSG increment 3 (TRDD-QAF3N673), whose research worker is running.
+2026-11-15 SUPERSEDES the NEXT ACTION above (map back in CLAUDE.md): the owner corrected the target, verbatim: "no, wait. there was another decision.. to move the map into a file called PROJECT_MAP.md, in the project root. because editing and updating the CLAUDE.md will invalidate the cache each time the project create or rename a file. we cannot do that. so move the map from CLAUDE.md to a dedicated file, called PROJECT_MAP.md (but do not reference it in the CLAUDE.md, otherwise it will be loaded in the context anyway along with CLAUDE.md at every turn, invalidating the cache.)" No earlier record of this decision was found (grep for PROJECT_MAP over design/, scripts/, skills/, PROJECT and LOCAL memory: only an env var name in scripts/dispatch.py:406). NEW NEXT ACTION: measure the old map's size; design the generator to write PROJECT_MAP.md at the project root, never touching CLAUDE.md and never named in it; decide in the proposal whether PROJECT_MAP.md is tracked or gitignored (a tracked generated file goes dirty on every file add or rename, the #328 problem) and how a session discovers it without a CLAUDE.md reference; draft amended text for golden rules G7.1 (five CLAUDE.md elements) and G10.1 (project-map fence in CLAUDE.md) for the owner to approve, since golden rules are the owner's alone; the CLAUDE.md section 'Navigating this codebase' must then drop its mention of the map switch without naming PROJECT_MAP.md. Still queued behind increment 3 (TRDD-QAF3N673).
 
 ## Owner directive (verbatim, 2026-11-15)
 
