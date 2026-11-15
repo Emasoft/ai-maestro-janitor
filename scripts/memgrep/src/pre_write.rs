@@ -1030,8 +1030,8 @@ mod tests {
     /// even though the id was not minted by this batch (the filter compares against the old page
     /// count with a floor of one). Also pins the message shape: the id is named and the count
     /// phrased as "… pages of this batch", the landing-review obligation 2 wording. (The
-    /// inherited-dup old=2→3 growth and its preserve-passes twin are the filter's same max-floor
-    /// arithmetic, still unpinned by a test — named on the card.)
+    /// inherited-dup old=2→3 growth and its preserve-passes twin are pinned by
+    /// `spread_from_two_pages_to_three_refuses` and `inherited_two_page_dup_kept_at_two_passes`.)
     #[test]
     fn spread_from_one_page_to_two_refuses() {
         let dir = std::env::temp_dir()
@@ -1060,6 +1060,67 @@ mod tests {
             msg.contains("of this batch"),
             "the refusal must use the batch-internal qualifier phrase: {msg}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TRDD-XI10BA5D / GD24IL7O: an id ALREADY on two pages on disk (old count TWO) that the batch
+    /// spreads to a THIRD page must REFUSE — the max-floor arithmetic compares against the old
+    /// count (2), so 3 > 2 is growth even though the id was inherited as a duplicate.
+    #[test]
+    fn spread_from_two_pages_to_three_refuses() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gd24il7o_spread23-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("spread23-a.md");
+        let b = dir.join("spread23-b.md");
+        let c = dir.join("spread23-c.md");
+        let atom = "^ATOM-SPREAD-23 [ocd: 2026-01-01, keywords: spread23key]\nspread body\n";
+        std::fs::write(&a, format!("---\nname: p\n---\n{atom}")).unwrap();
+        std::fs::write(&b, format!("---\nname: p\n---\n{atom}")).unwrap();
+        std::fs::write(&c, "---\nname: p\n---\nplain body\n").unwrap();
+        let a_new = format!("---\nname: p\n---\n{atom}");
+        let b_new = format!("---\nname: p\n---\n{atom}");
+        let c_new = format!("---\nname: p\n---\n{atom}\n## Notes and lessons learned\n");
+        let err = prepare_batch_gated(
+            &[(&a, &a_new), (&b, &b_new), (&c, &c_new)],
+            &GatePolicy::default(),
+        )
+        .expect_err("spreading an id already on TWO pages to a THIRD must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("duplicate-id rule") && msg.contains("nothing was written"),
+            "the refusal must be the zero-write DUPLICATE arm: {msg}"
+        );
+        assert!(
+            msg.contains("ATOM-SPREAD-23"),
+            "the spread id must be named: {msg}"
+        );
+        assert!(
+            msg.contains("of this batch"),
+            "the refusal must use the batch-internal qualifier phrase: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TRDD-XI10BA5D / GD24IL7O: an id ALREADY on two pages on disk (old count TWO) that the batch
+    /// keeps on exactly TWO pages (page A rewritten, page B untouched) must PASS — the inherited
+    /// duplicate stays repairable, never frozen by the duplicate-id arm.
+    #[test]
+    fn inherited_two_page_dup_kept_at_two_passes() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gd24il7o_keep22-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("keep22-a.md");
+        let b = dir.join("keep22-b.md");
+        let atom = "^ATOM-KEEP-22 [ocd: 2026-01-01, keywords: keep22key]\nkeep body\n";
+        std::fs::write(&a, format!("---\nname: p\n---\n{atom}")).unwrap();
+        std::fs::write(&b, format!("---\nname: p\n---\n{atom}")).unwrap();
+        let a_new = format!("---\nname: p\n---\n{atom}\n## Notes and lessons learned\n");
+        let b_new = format!("---\nname: p\n---\n{atom}");
+        prepare_batch_gated(&[(&a, &a_new), (&b, &b_new)], &GatePolicy::default())
+            .expect("an inherited 2-page dup kept on exactly TWO pages must pass");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
