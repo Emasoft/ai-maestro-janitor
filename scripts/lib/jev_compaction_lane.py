@@ -1186,9 +1186,17 @@ _MIN_JEV_ATTEMPT_S = 30.0
 # thing again). Arbitrary but harmless (advisor §5).
 _TRANSIENT_RETRY_SLEEP_S = 15.0
 # The outer bound added around the llm-ext fallback subprocess (advisor §4 "minor"): its own
-# internal timeout is `llm_ext_timeout_s`, but a `uv`/launcher hang BEFORE that timer even
-# starts could otherwise outlive the 15-minute hold entirely.
+# internal timeout is the `timeout_s` derived from `hold_expires`, but a `uv`/launcher hang
+# BEFORE that timer even starts could otherwise outlive the 15-minute hold entirely.
 _LLM_EXT_OUTER_SLACK_S = 15.0
+# The fallback budget's own ceiling (advisor §4 arithmetic): `ec.LLM_EXT_TIMEOUT_S` (600) is the
+# module's own per-attempt ceiling llm-ext's retry machinery was designed around -- the fallback budget never
+# needs to exceed it even when most of the 15-minute hold is still free (Jev failed fast).
+_LLM_EXT_T_MAX_S = 600.0
+# The seconds subtracted off the raw hold-remaining figure before handing the rest to llm-ext,
+# so the caller's own post-fallback bookkeeping (reading stdout, composing/writing the
+# handoff, releasing the hold) has room to run before the hold's own TTL could expire under it.
+_LLM_EXT_T_SAFETY_MARGIN_S = 30.0
 
 # Sources `run_compact_with_fallback` can report success from.
 SOURCE_JEV = "jev"
@@ -1396,14 +1404,16 @@ def _run_llm_ext_fallback(
 
 def run_compact_with_fallback(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
-    heads_args: list[str], sd: Path, deadline: float, llm_ext_timeout_s: float,
+    heads_args: list[str], sd: Path, deadline: float, hold_expires: float,
     budget_tokens: int | None = None, digest_tokens: int | None = None,
     inject_out_path: Path | None = None, inject_max_bytes: int | None = None,
     max_elided_pointers: int | None = None,
     now_fn: Callable[[], float] = time.time, sleep_fn: Callable[[float], None] = time.sleep,
 ) -> tuple[str, str | None, str]:
     """Retry `jev_compact.py compact` (with `--no-decline`) until `deadline`, then fall back to
-    `llm_ext_compact.py` once. Returns `(source, text, detail)`:
+    `llm_ext_compact.py` once, with a budget of `hold_expires` (epoch seconds, same unit as
+    `now_fn`) minus the clock reading when the fallback STARTS, minus `_LLM_EXT_T_SAFETY_MARGIN_S`,
+    capped at `_LLM_EXT_T_MAX_S` (TRDD-MVUJG3C4). Returns `(source, text, detail)`:
       * `(SOURCE_JEV, <compacted text>, "")` — a real Jev compose succeeded; `out_path` is
         already written (by `run_compact`/`jev_compact.py` itself). `text` is read from
         `inject_out_path` instead, when given and readable -- the size-bounded, priority-aware
@@ -1538,9 +1548,16 @@ def run_compact_with_fallback(
     if last_proc is not None and last_proc.returncode == EXIT_DECLINED_NO_DIGEST:
         return SOURCE_FAILED, None, "no digest material -- nothing for llm-ext to summarize either"
 
-    ok, payload = _run_llm_ext_fallback(
-        plugin_root, transcript=transcript, timeout_s=llm_ext_timeout_s,
+    # TRDD-MVUJG3C4: the fallback budget MUST be measured HERE, after Jev spent its time -- not
+    # before the loop above. Computed up front, a Jev run that used its whole 300s budget still
+    # handed llm-ext the full 600s, so the fallback could outlive the 900s hold (300 + 600 + 15s
+    # outer slack). Measured now, the worst case is hold_expires - elapsed - margin, always
+    # inside the hold (the 15s outer slack in `_run_llm_ext_fallback` is covered by the 30s
+    # margin); and 600s (`_LLM_EXT_T_MAX_S`) only applies when Jev failed fast.
+    timeout_s = max(
+        0.0, min(hold_expires - float(now_fn()) - _LLM_EXT_T_SAFETY_MARGIN_S, _LLM_EXT_T_MAX_S),
     )
+    ok, payload = _run_llm_ext_fallback(plugin_root, transcript=transcript, timeout_s=timeout_s)
     if ok:
         return SOURCE_LLM_EXT, payload, ""
 

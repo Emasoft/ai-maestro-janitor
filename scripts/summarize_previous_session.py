@@ -72,14 +72,6 @@ PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_SCRIPTS.parent))
 # operator is meant to configure.
 _JEV_RETRY_BUDGET_ENV = "JANITOR_JEV_RETRY_BUDGET_S"
 _DEFAULT_JEV_RETRY_BUDGET_S = 300
-# T's own ceiling (advisor §4 arithmetic): `ec.LLM_EXT_TIMEOUT_S` (600) is the module's own
-# per-attempt ceiling llm-ext's retry machinery was designed around -- `T` never needs to
-# exceed it even when most of the 15-minute hold is still free (Jev failed fast).
-_LLM_EXT_T_MAX_S = 600.0
-# The seconds subtracted off the raw hold-remaining figure before handing the rest to llm-ext,
-# so this script's own post-fallback bookkeeping (reading stdout, composing/writing the
-# handoff, releasing the hold) has room to run before the hold's own TTL could expire under it.
-_LLM_EXT_T_SAFETY_MARGIN_S = 30.0
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -275,18 +267,13 @@ def _main(
     jev_deadline = now_fn() + state.coerce_int(
         os.environ.get(_JEV_RETRY_BUDGET_ENV), _DEFAULT_JEV_RETRY_BUDGET_S
     )
-    # T = hold_expiry - now - safety_margin, capped at `_LLM_EXT_T_MAX_S` (advisor §4
-    # arithmetic: 570s worst case when Jev used its whole budget, capped at 600 when Jev
-    # failed fast and most of the 15-minute hold is still free).
-    llm_ext_timeout_s = max(
-        0.0, min(float(pending["expires"]) - now_fn() - _LLM_EXT_T_SAFETY_MARGIN_S,
-                  _LLM_EXT_T_MAX_S),
-    )
-
+    # The llm-ext fallback budget is NOT computed here (TRDD-MVUJG3C4): it must be measured when
+    # the fallback STARTS, after Jev has spent up to `jev_deadline`, so the lane gets the hold's
+    # expiry and derives hold_expires - now - safety margin (capped at 600s) itself.
     source, compacted_text, detail = jcl.run_compact_with_fallback(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
         heads_args=heads_args, sd=sd, deadline=jev_deadline,
-        llm_ext_timeout_s=llm_ext_timeout_s, now_fn=now_fn, sleep_fn=sleep_fn,
+        hold_expires=float(pending["expires"]), now_fn=now_fn, sleep_fn=sleep_fn,
         inject_out_path=inject_path, inject_max_bytes=inject_max_bytes,
         max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
     )

@@ -178,17 +178,29 @@ def _stub_jev_compact_appending(plugin_root: Path, argv_log: Path, *, exit_code:
 
 _STUB_LLM_EXT_COMPACT = """#!/usr/bin/env python3
 import sys
+from pathlib import Path
+
+argv_log = {argv_log!r}
+if argv_log:
+    Path(argv_log).write_text(" ".join(sys.argv[1:]), encoding="utf-8")
 sys.stdout.write({text!r})
 sys.exit({exit_code})
 """
 
 
-def _stub_llm_ext_compact(plugin_root: Path, *, exit_code: int = 0, text: str = "llm-ext summary text") -> None:
+def _stub_llm_ext_compact(plugin_root: Path, *, exit_code: int = 0, text: str = "llm-ext summary text",
+                          argv_log: Path | None = None) -> None:
     """A fake `scripts/llm_ext_compact.py` -- standing in for the real (llm-ext-binary-
-    touching) fallback CLI, the same way `_stub_jev_compact` stands in for `jev_compact.py`."""
+    touching) fallback CLI, the same way `_stub_jev_compact` stands in for `jev_compact.py`.
+    `argv_log`, when given, receives the stub's own argv (space-joined, no program name)."""
     script = plugin_root / "scripts" / "llm_ext_compact.py"
     script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(_STUB_LLM_EXT_COMPACT.format(text=text, exit_code=exit_code), encoding="utf-8")
+    script.write_text(
+        _STUB_LLM_EXT_COMPACT.format(
+            text=text, exit_code=exit_code, argv_log=str(argv_log) if argv_log else "",
+        ),
+        encoding="utf-8",
+    )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
 
@@ -1007,6 +1019,32 @@ def test_jev_timeout_is_never_retried_falls_straight_to_llm_ext(tmp_path, monkey
     sd = state.state_dir()
     text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
     assert "llm-ext fallback summary" in text
+
+
+def test_llm_ext_fallback_budget_is_measured_after_jev_spent_its_time(tmp_path, _isolated_env):
+    """TRDD-MVUJG3C4: with the hold expiring at 900 and Jev having used its whole 300s, llm-ext
+    gets `--timeout-s 570` (900 - 300 - 30), not the 600 a budget computed before Jev ran gave."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    plugin_root = tmp_path / "plugin"
+    llm_ext_argv = tmp_path / "llm-ext-argv.txt"
+    _stub_jev_compact_appending(plugin_root, tmp_path / "argv.jsonl", exit_code=jcl.EXIT_JEV_ERROR)
+    _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary", argv_log=llm_ext_argv)
+    _write_probe_stamp(kind="unreachable", reason="DNS resolution failed")
+    clock = _FakeClock(start=0.0)
+
+    def _sleep_past_the_jev_budget(seconds: float) -> None:
+        clock.now = 300.0  # the retry backoff runs out the whole Jev budget
+
+    source, text, _detail = jcl.run_compact_with_fallback(
+        plugin_root, transcript=str(prev), out_path=tmp_path / "compacted.md",
+        session_key="k", heads_args=[], sd=state.state_dir(), deadline=300.0,
+        hold_expires=900.0, now_fn=clock.time, sleep_fn=_sleep_past_the_jev_budget,
+    )
+
+    assert source == jcl.SOURCE_LLM_EXT, (source, text)
+    argv = llm_ext_argv.read_text(encoding="utf-8").split()
+    assert argv[argv.index("--timeout-s") + 1] == "570", argv
 
 
 # --- STATE heads: a stub trddgrep on PATH, and its absence ---------------------------------
