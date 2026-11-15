@@ -4,7 +4,7 @@ title: Wikimem increment 3 foreign-content rule safe fixer and one owner for ato
 column: dev
 status: tasked
 created: 2026-11-15T00:39:55+0100
-updated: 2026-11-15T01:20:56+0100
+updated: 2026-11-15T01:26:33+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -29,6 +29,7 @@ NEXT ACTION: research worker first (read-only): (1) explain D12's 16 PROJECT pla
 2026-11-15 DECIDED by the main agent (owner standing 'decide yourself'): no cargo install of increment 3; build it and dry-run target/release/memgrep on the three stores, and install increments 3 and 4 together once increment 4's write gate refuses a link-heading deletion. Reason: installing alone puts a new WARN on an estimated 89 pages machine-wide while the installed skills are old and nothing refuses a heading deletion, the conditions of #358. CAVEAT on the research line above: the Q1 class breakdown and the Q4 pipeline details (fixers/mod.rs arm, ARM_NAMES, the == 47 count) are the worker's report, not checked by the main agent; the proposal re-checks what it relies on.
 2026-11-15 pre-proposal reads done (reports_dev/sonnet-worker/20261115_010835+0100-qaf3n673-reads.md; worker report, NOT reviewed by the harness, re-check what the proposal relies on): (a) both in-link-section atoms are empty markers beside orphan sections, so moving the marker alone moves nothing; the fixer must use memgrep's atom extent (resolve_atoms_from_text) and move only the marker block. (b) safe content fixers run only under lint --apply-fixes or --diff, reached only by the repair and enrich skills (chore-claimed pages); plain lint writes only the publish-globally and symlink normalization (memory.rs 7150-7235; main agent read the same in lint --help), unattended callers post-edit-wikimem-lint.py:144, wikimem-syntax.py:123 and 460, memory_content_precheck.py:178. (c) of the 9 code-spanned same-scope link bullets, 7 hide a one-sided link (the target does not link back), 2 are one mutual pair (memory-system L76, wikimem-retrieval-engine L80): legalising code-spanned bullets would break WM-LINT-13, so they stay foreign and are REPORTED; per the advisor no fixer relocates a bullet. (e) repair_defect callers and memgrep resolution: see the report. NEXT ACTION: re-check (c) row 1 and (e), then write the increment-3 proposal: grammar = committed WM-NOTE-10 for verdicts, fixer moves only non-bullet foreign content (atom marker blocks, paragraphs, footnote definitions; unbulleted [[ lines become bullets in place), foreign bullets reported only.
 2026-11-15 PAUSED at its proposal step: the owner's absolute mandate for TRDD-FADYLSQB (root PROJECT_MAP.md) is taken first; resume here afterwards.
+2026-11-15 REOPENS the grammar choice in the 'pre-proposal reads done' NEXT ACTION (harness review): the proposal decides from side-by-side counts under the committed WM-NOTE-10 and the candidate grammar, and considers exempting cross-scope pointer, file and TRDD-reference bullets or reporting them under a separate code; the 7-of-9 one-sided figure is the worker's unverified estimate (it depends on whether a code-spanned back-mention counts as a link).
 
 ## Scope (parent TRDD-F8EIVTSG, design D5 and D9; spec WM-LINT-11, WM-LINT-12, WM-NOTE-06, WM-NOTE-08)
 
