@@ -4,7 +4,7 @@ title: Secret shield URL password user part and its query and password loops are
 column: dev
 status: tasked
 created: 2026-11-14T22:28:32+0100
-updated: 2026-11-15T03:54:02+0100
+updated: 2026-11-15T03:56:23+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,6 +30,7 @@ implementation-commits: [fa7294e2, a498ee6d, 004e23fb]
 2026-11-15 NEXT ACTION addendum: the step 2 worker also removes the stale 'Status: not started' bullet above, and adds one header line to tests/url-password-walk.test.ts saying the case 'an @ only after whitespace' was changed after capture and re-checked with Bun. The ReDoS load harness (TRDD-OD5Z90YL) runs in the pre-push gate on the rewritten code; its 2026-11-15 03:31 attempt on the old code aborted on load and judged nothing.
 2026-11-15 03:42 STEP 2 DISPATCHED: one sonnet-worker is applying the design to patterns.ts, the comments in rules/code-hosts.ts and tests/patterns.test.ts, and one header line in tests/url-password-walk.test.ts; its report lands in reports_dev/sonnet-worker/*-agv84ugc-step2.md. Do NOT send a second writer to those files before that report is read. Correction to the addendum above: the main agent, not the step 2 worker, removes the stale 'Status: not started' bullet, after it accepts the diff. Coverage gap: url-password-walk.test.ts pins _a:// and .:// but no 1http://, a.b:// or uppercase-scheme case; that hasScheme accepts exactly what the removed lookbehind accepted rests on a code trace (ASCII), so add pinned cases for those three shapes before the pre-push run.
 2026-11-15 03:48 STEP 2 DONE in a498ee6d: NOT_PASSWORD, QUERY and URL_PASSWORD are gone; redactUrlPasswords reads the password up to PASSWORD_END and the port skip with PORT_START and QUERY_STOP. Evidence on the applied code: parse (bun build --no-bundle) and the CPV scan (0 REGEX_DOS, 0 non-test findings; one minor CONTEXT_STUFFING finding in tests/url-password-walk.test.ts at the b://u:1? timing input, from step 1); the 0-diff differential belongs to the design and was not re-run on the applied code; the pinning tests first run in the pre-push gate. Correction to the 03:42 line: digit-first (1://, 9a://), plus, dot and hyphen schemes (a1+b.c-d://, -a://) were already pinned; only an upper-case scheme was not, and 'HTTPS:// is a scheme (upper case)' adds a case for it (not yet run; its expectation follows from the removed regex's i flag, a498ee6d^ patterns.ts:68). NEXT ACTION: the release path (fast-forward main, owner confirms the in-flight commits, publish.py on main), with the ReDoS load campaign run by hand first (TRDD-OD5Z90YL).
+2026-11-15 04:00 CPV re-scan on the committed tree (cb04ca27, after the step 2 worker's last comment edit): 20 files, 29 findings, 0 REGEX_DOS, 0 outside tests (reports_dev/sonnet-worker/agv84ugc-skillaudit-head-cb04ca27.txt). Nothing else has run on the new code.
 
 ## Finding
 
