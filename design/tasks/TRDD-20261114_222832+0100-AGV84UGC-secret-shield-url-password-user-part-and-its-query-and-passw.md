@@ -4,7 +4,7 @@ title: Secret shield URL password user part and its query and password loops are
 column: testing
 status: tasked
 created: 2026-11-14T22:28:32+0100
-updated: 2026-11-15T11:16:13+0100
+updated: 2026-11-15T11:18:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -65,3 +65,4 @@ Alternatives (not applied): the CPV audit-consent sentinel comment (turns the fi
 - 2026-11-15T11:01:33+0100 — CORRECTION to the RELEASED 3.9.0 line above: its 'about 11:05' was a briefed approximation and is wrong. Measured: publish attempt 4 log started 10:43:51 (file name), bump commit 69942978 committed 10:49:55+0100, GitHub release v3.9.0 publishedAt 2026-11-15T09:59:08Z = 10:59:08+0100, log last written 10:59:17+0100. Also, the NEXT ACTION wording 'run the secret shield on a URL-password input and confirm the redaction and no slowdown' and 'it closes when both are recorded' is the worker's own proposal for the field check, not an owner or card requirement; the card's own named leftovers are the installed-3.9.0 check and TRDD-OD5Z90YL.
 - 2026-11-15T11:02:33+0100 — CHECKED: 004e23fb ('test(secret-shield): pin an upper-case URL scheme; record step 2 on the cards') is an ancestor of 69942978, so it ships in 3.9.0 with fa7294e2 and a498ee6d (ancestry of those two was not run here; both precede 004e23fb on main).
 - 2026-11-15T11:16:13+0100 — CI FAILED on 3.9.0 (janitor ci-status): main CI run 43701851552 Tests job (sanitize-reports CLI absent on the runner, tests/test_redact_staged_reports.py:44) and v3.9.0 memgrep release binaries run 43701838188 (runner label macos-14 rejected; v3.9.0 has no memgrep binaries attached). No local plugin update for 3.9.0. Fix prepared for 3.9.1 (ci.yml pinned sanitize-reports install, memgrep-release.yml runner label). A 3.9.1 publish.py run may be in progress: a resumed session checks the process table and the newest reports_dev/release/*publish*.log first.
+- 2026-11-15T11:18:58+0100 — OWNER DECISION (AskUserQuestion, 2026-11-15): asked 'Can I publish 3.9.1 with this repair through publish.py once it passes the full gate?' (the CI repair ac79c460: pinned sanitize-reports install for the Tests job, memgrep darwin-arm64 on macos-15; the question stated that 3.9.0 was a one-off and that neither the 3.9.0 decision nor 'Publish each fix' names a CI-repair release). Verbatim answer: 'Publish 3.9.1 (Recommended)'. Option text: run publish.py --patch after the CI-prediction check passes; local plugin update only after CI is green. Not chosen: hold until the board is drained; publish 3.9.1 then backfill 3.9.0's binaries.
