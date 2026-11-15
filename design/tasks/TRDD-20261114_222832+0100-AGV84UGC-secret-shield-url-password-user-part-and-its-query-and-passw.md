@@ -4,7 +4,7 @@ title: Secret shield URL password user part and its query and password loops are
 column: testing
 status: tasked
 created: 2026-11-14T22:28:32+0100
-updated: 2026-11-15T11:18:58+0100
+updated: 2026-11-15T11:52:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -66,3 +66,5 @@ Alternatives (not applied): the CPV audit-consent sentinel comment (turns the fi
 - 2026-11-15T11:02:33+0100 — CHECKED: 004e23fb ('test(secret-shield): pin an upper-case URL scheme; record step 2 on the cards') is an ancestor of 69942978, so it ships in 3.9.0 with fa7294e2 and a498ee6d (ancestry of those two was not run here; both precede 004e23fb on main).
 - 2026-11-15T11:16:13+0100 — CI FAILED on 3.9.0 (janitor ci-status): main CI run 43701851552 Tests job (sanitize-reports CLI absent on the runner, tests/test_redact_staged_reports.py:44) and v3.9.0 memgrep release binaries run 43701838188 (runner label macos-14 rejected; v3.9.0 has no memgrep binaries attached). No local plugin update for 3.9.0. Fix prepared for 3.9.1 (ci.yml pinned sanitize-reports install, memgrep-release.yml runner label). A 3.9.1 publish.py run may be in progress: a resumed session checks the process table and the newest reports_dev/release/*publish*.log first.
 - 2026-11-15T11:18:58+0100 — OWNER DECISION (AskUserQuestion, 2026-11-15): asked 'Can I publish 3.9.1 with this repair through publish.py once it passes the full gate?' (the CI repair ac79c460: pinned sanitize-reports install for the Tests job, memgrep darwin-arm64 on macos-15; the question stated that 3.9.0 was a one-off and that neither the 3.9.0 decision nor 'Publish each fix' names a CI-repair release). Verbatim answer: 'Publish 3.9.1 (Recommended)'. Option text: run publish.py --patch after the CI-prediction check passes; local plugin update only after CI is green. Not chosen: hold until the board is drained; publish 3.9.1 then backfill 3.9.0's binaries.
+- 2026-11-15T11:50:52+0100 — RELEASED 3.9.1 by PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run scripts/publish.py --patch (exit 0) on 200aed7f; bump commit b20e3618; tags v3.9.1 and ai-maestro-janitor--v3.9.1 pushed atomically; release https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v3.9.1; post-release install smoke test passed; CI not watched; local plugin update waits for the janitor's CI-pass report; open CI risks: the new pinned sanitize-reports install step never ran on Linux, and the serial daemon-integration step (skipped on 3.9.0) never ran this cycle.
+- 2026-11-15T11:52:14+0100 — Attribution for the RELEASED 3.9.1 line above: its facts (publish exit 0, tags, release URL, smoke test passed) were relayed by the main agent from reports_dev/release/*-publish-3.9.1.log; the worker that wrote the line did not read the log.
