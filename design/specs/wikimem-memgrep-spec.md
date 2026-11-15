@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 3.0.0
+spec-version: 4.0.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-11-14T23:57:19+0100
+updated: 2026-11-15T20:38:58+0100
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -318,12 +318,20 @@ footer although `new-mem-atom`, the lint and the repair gate all key on it.
 page BODY and memgrep owns their shape; the frontmatter is NOT an edge source (deferred, the owner
 may veto). A link section is a heading whose text is exactly `Applies to`, `Governed by` or
 `See also` (case-insensitive, any level, outside fenced code, as WM-NOTE-08), running to the next
-heading of any level or the end of the page. Its content is bullets only — each bullet holds one or
-more `[[target]]` and optionally an annotation, and may wrap onto indented continuation lines — or
-the single placeholder bullet `- (none yet)`; an empty section is legal. ONE Rust parser owns the
+heading of any level or the end of the page. Its content is blank lines, HTML comments (ignored) and bullets; a bullet is a line that starts with `- ` at the section's left margin, plus its indented continuation lines. A code span names a page only when it holds `[[x]]`, or when its text `x` or `x.md` resolves to a `.md` file in the page's own scope root; any other code span is plain text. A page is OWN-SCOPE when it is a regular file in that root; a symlinked `.md` file there is a published page of another scope. Each bullet takes the first class that matches, in this order:
+
+1. HIDDEN LINK: a code span names an own-scope page x, and the bullet holds no raw `[[x]]` to that same x, even when it holds a raw link to another page. Foreign (WM-LINT-12).
+2. EDGE: a raw (not code-spanned) `[[target]]` anywhere in the bullet, continuation lines included; the rest is its annotation. Legal.
+3. PLACEHOLDER: exactly `- (none yet)`. Legal.
+4. POINTER: a code span names a page that is not own-scope: a code-spanned `[[x]]` whose x resolves to another scope, to a symlinked page or to nothing, or a stem or `x.md` that resolves to a symlinked page. Legal, because a back link from that page would land in another scope's file.
+5. SCOPE POINTER: the bullet text matches `(LOCAL|USER|PROJECT)[ -]scope`, case-insensitive. Legal.
+6. Anything else is foreign (WM-LINT-12): a file or glob reference, a `TRDD-<id8>` reference, a bootstrap placeholder, other link-less text.
+
+A line that is not a bullet is foreign too: an unbulleted line that holds a raw `[[target]]`, a prose paragraph, an atom marker block, a `[^N]:` footnote definition. An empty section is legal.
+ONE Rust parser owns the
 footer boundaries (WM-NOTE-08) and the link sections; the Python boundary copy and the second
-See-also implementation (WM-NOTE-09) are removed. Anything else inside a link section is foreign
-content (WM-LINT-12). Increment 2 (TRDD-8MVESX28, memgrep 0.3.0) moved the footer boundary scanners into page_layout.rs. Not yet implemented: removal of the Python boundary copy (TRDD-F8EIVTSG increment 3), the second See-also implementation (increment 4, link-mem-topics replaces both), the bullet grammar and WM-LINT-12; until then memgrep does not
+See-also implementation (WM-NOTE-09) are removed.
+Increment 2 (TRDD-8MVESX28, memgrep 0.3.0) moved the footer boundary scanners into page_layout.rs. Not yet implemented: removal of the Python boundary copy (TRDD-F8EIVTSG increment 3), the second See-also implementation (increment 4, link-mem-topics replaces both), the bullet grammar and WM-LINT-12; until then memgrep does not
 conform.
 
 ## WM-ATOM — the atom model
@@ -1432,7 +1440,7 @@ increment 4; until then memgrep does not conform.
 
 `WM-CLI-29` **link-section-edge-gate** — `MUST` (TRDD-F8EIVTSG D7): the write gate of every write
 verb (WM-CLI-11; pre_write.rs) refuses an edit that INTRODUCES any of: the removal of a link-section
-heading (WM-NOTE-10), a dropped section edge, or foreign content in a link section (WM-LINT-12).
+heading (WM-NOTE-10), a dropped section edge, foreign content in a link section (WM-LINT-12), or the removal of any other link-section line that the same write does not relocate elsewhere on the page, unless that line is named by --retire-text LINE (repeatable, accepted by every write verb, and echoed in the verb's output so the removal is recorded; TRDD-QAF3N673).
 "Introduced" is a before-versus-after comparison of the proposed page bytes, so a pre-existing
 defect passes (WM-LINT-04). Per verb:
 
@@ -1759,19 +1767,18 @@ not a footer heading and the trailing run is then the Notes heading alone. The P
 (memory_content_precheck.py:877-886). The message names no remedy beyond "move it back above the
 footer", and the repair skill (skills/janitor-memory-repair) never mentions the rule.
 
-`WM-LINT-12` **foreign-content-in-a-link-section** — `MUST` (TRDD-F8EIVTSG D5): a link section
-(WM-NOTE-10) holds only grammar bullets, their indented continuation lines and blank lines. Anything
-else is FOREIGN CONTENT — an atom marker and its body, a prose block, a `[^N]:` footnote definition,
-a bullet that has no `[[target]]` and is not `- (none yet)` — and `memgrep lint` reports it under a
-new rule (WARN, with a SAFE fixer: `lint --apply-fixes` applies it with no `lmd` bump, WM-NOTE-04,
-WM-LINT-09). The fixer keeps the EDGE SET of the section unchanged, so typed reciprocity
-(WM-WIKI-07) reports nothing new after it runs:
+`WM-LINT-12` **foreign-content-in-a-link-section** — `MUST` (TRDD-F8EIVTSG D5, revised by TRDD-QAF3N673): `memgrep lint` reports, as WARN, every line of a link section that the WM-NOTE-10 grammar makes foreign, except an atom marker that the atom-after-footer rule (WM-LINT-11) already reports, so one defect gives one finding. A page that is a symlink is skipped: its file belongs to another scope and is linted there. The SAFE fixer (`lint --apply-fixes`, no `lmd` bump, WM-NOTE-04, WM-LINT-09) handles only the shapes it can fix without changing what any atom says. It keeps the section's EDGE SET unchanged, so typed reciprocity (WM-WIKI-07) reports nothing new, and every line it removes reappears on the same page, except an exact frontmatter duplicate:
 
-- an atom or prose block moves above the layout boundary (WM-NOTE-07), and every `[[target]]` it
-  held stays in the section as a bare `- [[target]]` bullet;
-- a `[^N]:` definition moves to the Notes pool (WM-NOTE-06);
-- a bullet that is a known bootstrap placeholder becomes `- (none yet)`; any other placeholder text
-  moves above the layout boundary.
+- an unbulleted line that holds a raw `[[target]]` becomes a bullet in place; the non-blank lines after it that hold no raw `[[target]]` and are neither bullets nor headings are its continuation, and are indented under it;
+- a `[^N]:` footnote definition moves to the Notes pool (WM-NOTE-06);
+- a known bootstrap placeholder bullet becomes `- (none yet)`;
+- a bullet that is only a path equal to an entry of the page's own `globs:` frontmatter is deleted, because the frontmatter holds it.
+
+Every other foreign shape is REPORT ONLY: a HIDDEN LINK, an atom marker block, a prose paragraph, any other placeholder text, and a file, glob, `TRDD-<id8>` or other link-less bullet. Moving such text above the layout boundary would add it to the body of the last atom, because an atom runs from its marker to the next heading (memory.rs `resolve_atoms_from_text`), and that is a content change no SAFE fixer may make. Each message names its remedy, and no remedy is a deletion:
+
+- HIDDEN LINK: remove the code span in place, keeping the annotation, then add the reciprocal typed link on the target. For a `## See also` edge that is `reference-mem-topic`, which finds the forward link already on the page and writes only the back link; for an `## Applies to` edge it is a `## Governed by` entry on the target, and for a `## Governed by` edge an `## Applies to` entry.
+- atom marker block: the WM-LINT-11 remedy below.
+- prose, a placeholder or a link-less bullet: move it, through a write verb, into the atom or the lesson it belongs to.
 
 The atom-after-footer message (WM-LINT-11) `MUST` also state the exact remedy: move the atom block,
 marker line and body, above line N, the earliest footer heading, keeping every `[[link]]` it sat
@@ -1793,6 +1800,9 @@ issue 358 edit — delete the three headings and keep the bullets. (a) Through t
 (`update-mem-topic`, `replace-mem-topic`, `new-mem-atom`) the gate refuses the edit and names the
 dropped headings (WM-CLI-29). (b) Written out of band, `memgrep lint` reports strictly MORE findings
 than before the edit: at least one typed one-sided link per far end (WM-WIKI-07).
+
+Content that carries no edge and no heading, the link-less foreign shapes of WM-LINT-12, has no structural witness: once it is deleted out of band, no stateless lint can tell that it existed. For such content this clause binds through the write gate alone: a write verb that removes link-section text `MUST` relocate it in the same write or name it for retirement (WM-CLI-29), and an out-of-band deletion of link-less text is a known limit that no lint reports. Edge- and heading-bearing structure keeps both halves above. Narrowed in 4.0.0 (TRDD-QAF3N673).
+
 Today neither half holds: the section-blind lint reports nothing new (WM-NOTE-09). Not yet
 implemented: TRDD-F8EIVTSG increment 4; until then memgrep does not conform.
 
