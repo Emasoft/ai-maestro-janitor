@@ -1449,6 +1449,14 @@ def inject_until_sent(
         # and will type the command again"*.)
         last = f"field did not settle to {command!r} (saw {extract_prompt_field(after or '')!r})"
 
+        # Issue #343: only the give-up line ever carried the field text, so the log could not say what
+        # each retry saw or how wide the box was (the wrap hypothesis). One line per malformed read-back.
+        state.log_line(
+            "terminal_trigger",
+            f"inject malformed read-back: saw {extract_prompt_field(after or '')!r} "
+            f"(box width {_box_width(after or '')}, command {len(command)} chars)",
+        )
+
         # DID THE USER TYPE BETWEEN OUR INJECTION AND THIS READ-BACK? If so the field is
         # malformed BECAUSE IT NOW CONTAINS THEIR KEYSTROKES, and clearing it would delete
         # what they just wrote — turning a cosmetic retry into data loss. Back off the full
