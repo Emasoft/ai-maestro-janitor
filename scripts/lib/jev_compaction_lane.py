@@ -1189,7 +1189,7 @@ _TRANSIENT_RETRY_SLEEP_S = 15.0
 # internal timeout is the `timeout_s` derived from `hold_expires`, but a `uv`/launcher hang
 # BEFORE that timer even starts could otherwise outlive the 15-minute hold entirely.
 _LLM_EXT_OUTER_SLACK_S = 15.0
-# The fallback budget's own ceiling (advisor §4 arithmetic): `ec.LLM_EXT_TIMEOUT_S` (600) is the
+# The fallback budget's own ceiling (advisor §4 arithmetic): `external_clear.LLM_EXT_TIMEOUT_S` (600) is the
 # module's own per-attempt ceiling llm-ext's retry machinery was designed around -- the fallback budget never
 # needs to exceed it even when most of the 15-minute hold is still free (Jev failed fast).
 _LLM_EXT_T_MAX_S = 600.0
