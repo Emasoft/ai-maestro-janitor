@@ -51,6 +51,27 @@ def _hook():
     return mod
 
 
+@pytest.fixture(autouse=True)
+def _pin_module_identity(monkeypatch):
+    """Make `sys.modules` hand the hook the SAME module objects this file imported and patches.
+
+    WHY: ~22 other test files isolate themselves with `del sys.modules["state"]` (or pop
+    `global_state`, ...). This file binds `ccc`/`ec`/`gs`/`state` once, at collection; under
+    xdist (or any run where such a test precedes these) the entries are gone by the time the
+    hook runs, so the hook's lazy `import external_clear` / `import state` loads FRESH copies.
+    Every `monkeypatch.setattr(ec, ...)`, `state.log_line` capture and `gs.automation_python_path`
+    patch here then lands on an orphan the hook never calls: the real decision runs, no log line
+    is captured and no watcher is spawned. Run alone the entries survive, which is why the file
+    passed by itself. Re-registering the objects under test is the minimal fix."""
+    for name, mod in (
+        ("cold_cache_compact", ccc),
+        ("external_clear", ec),
+        ("global_state", gs),
+        ("state", state),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+
 def _run_main_with_source(
     monkeypatch, source: str, tmp_path: Path, extra: dict | None = None
 ) -> int:
