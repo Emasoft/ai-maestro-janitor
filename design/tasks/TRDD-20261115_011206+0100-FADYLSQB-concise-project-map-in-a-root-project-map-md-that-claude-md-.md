@@ -4,7 +4,7 @@ title: Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
 column: dev
 status: tasked
 created: 2026-11-15T01:12:06+0100
-updated: 2026-11-15T02:01:49+0100
+updated: 2026-11-15T08:36:36+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -43,3 +43,4 @@ Golden rules G7.1 and G10.1 require a project-map fence in CLAUDE.md; CLAUDE.md 
 
 - 2026-11-15T01:12:06+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-11-15 owner mandate, verbatim: "consider it a new directive and do it. change both golden rule and specs, and rewrite the generator script accordingly. its my mandate, and it is absolute." — approves amending golden rules G7.1 and G10.1, the specs and the generator for the root PROJECT_MAP.md that CLAUDE.md never names.
+- 2026-11-15T08:36:35+0100 — OWNER AUTHORIZATION (verbatim, this session): 'complete all pending tasks and publish.  use the advisor fable.' Read by the main agent as yes to the three standing questions: write PRRD G7.3, G10.3 and S27.1 exactly as shown to the owner at 2026-11-15 01:12; settle the untracked benchmark reports (decision: move them to reports_dev, the janitor's gitignore-coverage finding classes that folder as private); and release. Release checklist (Fable advisor, this session): (1) PRRD increment 1 via the path 3df7132f used; (2) move the benchmark reports; (3) run the test files changed since main, then publish.py --gate in the background, fixes through one worker, one suite run at a time; (4) the shield speed test after the gate is green, never overlapping it: an idle-assembly failure or a probe judged a failure blocks, a campaign aborted for host load does not (one attempt, reported); (5) git fetch, origin/main has nothing main lacks, git status and .gitignore checked, fast-forward main --ff-only, publish.py --dry-run commit list saved to a report, publish.py with its own bump choice, CI not watched; then the local plugin update when CI passes. AGV84UGC, XVJ30M61 and 8ZY3JU2H go to testing after the release, each with its field check named.
