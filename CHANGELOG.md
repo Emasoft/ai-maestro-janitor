@@ -2,6 +2,117 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.2] — 2026-11-15
+
+### Bug Fixes
+
+- **repomap:** Drift detector degrades a map-computation failure to zero findings, logged once (TRDD-FADYLSQB) (65cb4fb)
+- **repomap:** Gitignore PROJECT_MAP.md for tools that skip info/exclude; correct two docstrings (TRDD-FADYLSQB) (d24989d)
+- **memory:** Give retro-lesson a strict candidate answer so the drain can expire an aged record with no work (TRDD-S41TV0I7) (299392a)
+- **jev:** Put the llm-ext scoring temp dir where llm-ext will read it (TRDD-2GCJ5D3M) (db4db2d)
+- **jev:** Measure the llm-ext fallback budget when the fallback starts (TRDD-MVUJG3C4) (e9ebc70)
+- **jev:** Stop retrying llm-ext refusals and key/credit failures at once (TRDD-7XDBJZCZ) (84ad09b)
+- **secret-shield:** Option text no longer says error output is uncovered (TRDD-M1218EMH) (913f1db)
+- **secret-shield:** Option text says error coverage was probed for Bash only (TRDD-M1218EMH) (9772b2b)
+- **secret-shield:** Option text matches the README on what the transcript keeps (TRDD-M1218EMH) (c535ac6)
+- **heartbeat:** A failing detector is announced when its failure changes, not on every fire (TRDD-TZBTDF56, #342) (cd1c5d3)
+- **resume:** The post-compact cue names only a fresh handoff, and the janitor skill is never re-invoked (TRDD-SBUAGE9F, #356) (7b17474)
+- **heartbeat:** A state error no longer hides a detector failure (TRDD-TZBTDF56, #342) (112cf17)
+- **resume:** A late fuller summary arrives as a [janitor-resume] cue, not beside [janitor-quiet] (TRDD-XJI19HO7, #356) (726f2c7)
+- **continuity:** The post-clear NEXT ACTION names the newest assistant message, open launches and the compaction intent (TRDD-Q4T4PQ4J, #356) (040421c)
+- **release-gate:** Clear the CI-parity cspell and bandit B108 failures (TRDD-2GCJ5D3M) (0cc9172)
+
+### Documentation
+
+- 3.9.1 released; new card for generated CHANGELOG entries failing the next cspell preflight (TRDD-AGV84UGC, TRDD-BDRXOZ6N) (01c76e3)
+- QAF3N673 read-only research on (c) row 1, (e) and the grammar counts (TRDD-QAF3N673) (64e6d86)
+- Record CI pass on 3.9.1 and the user-scope plugin update (TRDD-AGV84UGC) (150df22)
+- FADYLSQB increment 0 — three derived cards and review corrections (TRDD-FADYLSQB) (a2a1f5b)
+- FADYLSQB 2a measurement, method-names decision and a commit-message correction (TRDD-FADYLSQB) (3dad85f)
+- **repomap:** Skills, README, memory and planner text follow the map to PROJECT_MAP.md (TRDD-FADYLSQB) (ef5b90d)
+- **claude-md:** Drop the sentence naming the repomap switch; map generated (TRDD-FADYLSQB) (8f60d98)
+- **trdd:** FADYLSQB current NEXT ACTION, implementation-commits and the info/exclude-only limitation (TRDD-FADYLSQB) (9907421)
+- **trdd:** FADYLSQB limitation line names what d24989d9 changed (TRDD-FADYLSQB) (af16183)
+- **trdd:** XI10BA5D test-debt box discharged by fd8e989d (TRDD-XI10BA5D) (d38c6a4)
+- **trdd:** XI10BA5D duplicate recovery-path box ticked; open finding narrowed to migrate (TRDD-XI10BA5D) (d904fc8)
+- **trdd:** S41TV0I7 proposal for a strict retro-lesson candidate answer, with read-only checks (TRDD-S41TV0I7) (fc5bfe9)
+- **trdd:** 14:12 clear fired by stale 3.8.13 hooks, so the d88e10ff fix is not loaded in pre-11:02 sessions (TRDD-8ZY3JU2H) (8ecdc5f)
+- **trdd:** Correct the field-evidence timestamp to 14:17 (TRDD-8ZY3JU2H) (b95486c)
+- **trdd:** S41TV0I7 to testing after re-measuring the orphan and re-emit figures (TRDD-S41TV0I7) (e0c926a)
+- **trdd:** 5ID9CQY8 box 1 ticked — the heartbeat cron survived a third /clear, on Claude Code 2.1.325 (TRDD-5ID9CQY8) (f1a760b)
+- **trdd:** 5ID9CQY8 plan for boxes 2 and 3 recorded, card to dev (TRDD-5ID9CQY8) (debbcf0)
+- **trdd:** 0TSG80CL step 2 measured on one resumed session — nudges reach it and it acts (TRDD-0TSG80CL) (f5b3baa)
+- **trdd:** 5ID9CQY8 records implementation commit 47cbcbc3 (TRDD-5ID9CQY8) (9691a6a)
+- **trdd:** 5ID9CQY8 known-limit line corrected — arm_prepare removes the cron-id file at arm start (TRDD-5ID9CQY8) (c9dd62e)
+- **trdd:** Resume position on S6GX1DHN; summary-hold timing and a jev timeout on 5ID9CQY8 (TRDD-S6GX1DHN, TRDD-5ID9CQY8) (6f6fb45)
+- Add card for jev_compact timing out after 600 s on every clear today (31d5108)
+- **trdd:** 2GCJ5D3M investigation — Jev likely fails in seconds, only the llm-ext fallback hits 600 s (TRDD-2GCJ5D3M) (5f6a0d2)
+- **trdd:** 2GCJ5D3M budget placement main-verified; new card MVUJG3C4 for the hold overrun (TRDD-2GCJ5D3M, TRDD-MVUJG3C4) (8b67b40)
+- **trdd:** 2GCJ5D3M path-traversal lead verified but refuted for today's clears (TRDD-2GCJ5D3M) (7364b7d)
+- **trdd:** 2GCJ5D3M root cause — 3.9.x Jev scoring temp dir is outside llm-ext's allowed roots on macOS (TRDD-2GCJ5D3M) (99409ae)
+- **trdd:** 2GCJ5D3M — the 16:51 refusal was the 16:46 clear; fix revised to mkdtemp under /tmp (TRDD-2GCJ5D3M) (cb160d0)
+- **trdd:** 2GCJ5D3M — scope of the temp-dir fix and its departures from the proposal (TRDD-2GCJ5D3M) (ee1a5ae)
+- **trdd:** 2GCJ5D3M implemented in db4db2d5, wiring test proven to fail unfixed; to testing (TRDD-2GCJ5D3M) (8f0a4c6)
+- **trdd:** 2GCJ5D3M — the rotate_to.py mypy error was an absolute-path artefact; gate form is clean (TRDD-2GCJ5D3M) (ee02e54)
+- **trdd:** MVUJG3C4 implemented in e9ebc702; to testing pending the pre-push run (TRDD-MVUJG3C4) (a3ce400)
+- Add card for deterministic llm-ext refusals being retried for the whole Jev budget (cc52fe0)
+- **trdd:** MVUJG3C4 review follow-ups main-verified; 7XDBJZCZ cites the retry branch by text (TRDD-MVUJG3C4, TRDD-7XDBJZCZ) (8f2b451)
+- **jev:** Lane comment names external_clear.LLM_EXT_TIMEOUT_S, not an unimported ec alias (TRDD-MVUJG3C4) (13d0093)
+- **trdd:** 7XDBJZCZ to verify_assumptions with research started; pick-order note on S6GX1DHN (TRDD-7XDBJZCZ, TRDD-S6GX1DHN) (06ab902)
+- **trdd:** 7XDBJZCZ implemented in 84ad09ba, chain main-verified, acceptance narrowed; to testing (TRDD-7XDBJZCZ) (730b833)
+- **trdd:** S6GX1DHN position and open review items before auto-compact (TRDD-S6GX1DHN) (da811cd)
+- Add card for the Jev auth finding naming the wrong remedy on the llm-ext route (5a1412c)
+- **trdd:** F8EIVTSG position, increment 2 is 8MVESX28 and increment 3 resumes (TRDD-F8EIVTSG) (9b765b6)
+- **readme:** Secret shield section and its three options (TRDD-M1218EMH) (3907ae2)
+- **trdd:** 2V7OAUPE lists the docs its wiring must update (TRDD-2V7OAUPE) (042702c)
+- **memory:** Secret-shield component page under the hook roster hub (TRDD-M1218EMH) (d88743d)
+- **trdd:** M1218EMH own items done, parked on its EHTs; 2V7OAUPE probe counts all blockers (TRDD-M1218EMH) (47fc6cf)
+- **trdd:** QAF3N673 resumes at its proposal step with the advisor's grammar split (TRDD-QAF3N673) (1591261)
+- **readme:** Shield section states what is verified about the transcript and drops a blocker count (TRDD-M1218EMH) (2a09d06)
+- **trdd:** Correct item-4 evidence, probe scope and FADYLSQB status on four cards (TRDD-M1218EMH) (f26ce8f)
+- **trdd:** Park RSSN9A0P and 6054NY8H in backburner under the rotator code freeze (TRDD-S6GX1DHN) (ea00cc2)
+- **trdd:** Archive 3BSPFS7R, fix two unblock-when predicates that could never fire (TRDD-S6GX1DHN) (6b3050e)
+- **trdd:** Blocker probes for F1NZMDWF, A56E22AL and XSO4N6AW (TRDD-S6GX1DHN) (acec2d6)
+- **trdd:** S6GX1DHN drain progress, validate triage and next step (TRDD-S6GX1DHN) (7fc11fe)
+- **trdd:** S6GX1DHN error count measured, 19 not 21 (TRDD-S6GX1DHN) (b4ed2bb)
+- **trdd:** Cross-repo issue predicates never auto-clear; POA0157J held by decision only (TRDD-S6GX1DHN) (bf6541f)
+- **trdd:** M1218EMH records its last three commits; 2V7OAUPE notes the probe scope for the option text (TRDD-M1218EMH) (1628d29)
+- **trdd:** QAF3N673 measured grammar counts and the proposal step (TRDD-QAF3N673) (a02340a)
+- **trdd:** QAF3N673 A reading is a candidate; attribute the spot-check to the worker (TRDD-QAF3N673) (8c3c1d9)
+- **trdd:** QAF3N673 records the reviewed build decisions (TRDD-QAF3N673) (0d6b0ca)
+- **trdd:** F8EIVTSG records the increment-3 revision of D5 (TRDD-F8EIVTSG) (73b309d)
+- **trdd:** QAF3N673 supersedes its stale build decisions (TRDD-QAF3N673) (a56889b)
+- **spec:** Wikimem 4.0.0 link-section grammar, report-only foreign content (TRDD-QAF3N673) (db3cd7f)
+- **trdd:** AR9IUGIJ row C marked void so DEAD-SYMBOL stops re-reporting (TRDD-AR9IUGIJ) (30f0049)
+- **trdd:** AR9IUGIJ row C keeps its round-trip item (TRDD-AR9IUGIJ) (eb3f39a)
+- **trdd:** 6ESS2MGE records the weekly-audit fix and its two limits (TRDD-6ESS2MGE, #353, #332) (45e50a1)
+- **trdd:** 6ESS2MGE corrects the crash limit, stderr reaches the job log (TRDD-6ESS2MGE, #353) (6cc84cf)
+- **trdd:** SW9AIFK2 holds clear-chain Steps 5, 6 and 7b; corrects the 87ff6f8a full-disk note (TRDD-SW9AIFK2) (dec08f0)
+- **trdd:** 2GCJ5D3M names temp folders in words, not absolute paths (TRDD-2GCJ5D3M) (a98afde)
+
+### Features
+
+- **repomap:** Names-only PROJECT_MAP.md renderer beside the legacy block (TRDD-FADYLSQB) (b52fe35)
+- **repomap:** Generator writes a git-excluded root PROJECT_MAP.md and strips the CLAUDE.md fence once (TRDD-FADYLSQB) (24b550d)
+- **repomap:** Drift detector and slim readers move to PROJECT_MAP.md (TRDD-FADYLSQB, TRDD-6HFOB5S4) (4511cb2)
+- **clear:** The clear chain types only /janitor-resume, no /janitor-arm, because the cron survives /clear (TRDD-5ID9CQY8) (47cbcbc)
+- **claudemd-slim:** The wikimem index lists root topics only (TRDD-F8EIVTSG, TRDD-Q9MU9CWK, janitor#328) (a91d6f4)
+- **memgrep:** Report-only WM-LINT-12 foreign content in a link section, WMATOM-009 names its remedy (TRDD-QAF3N673, #358) (34f1cd2)
+
+### Miscellaneous Tasks
+
+- **weekly-audit:** Drop runner-only noise from the audit issue (TRDD-6ESS2MGE, #353, #332) (56b1f90)
+- **terminal:** Log each malformed read-back with the field text and box width ([#343](https://github.com/Emasoft/ai-maestro-janitor/issues/343)) (87ff6f8)
+- **claude-md:** Refresh the wikimem index block (new secret-shield page) (e0c5639)
+
+### Refactor
+
+- **jev:** Test name matches its assertion; comment cites llm-ext by symbol, not line (TRDD-7XDBJZCZ) (f30bed5)
+
+### Testing
+
+- **memgrep:** Pin the inherited old=2 duplicate-id cases of refuse_cross_page_duplicate_ids (TRDD-XI10BA5D) (fd8e989)
+- **repomap:** Assert the stripped and busy outcomes of strip_legacy_fence (TRDD-FADYLSQB) (47cc820)
 ## [3.9.1] — 2026-11-15
 
 ### Documentation
@@ -12,6 +123,7 @@ All notable changes to this project will be documented in this file.
 
 - Install the pinned sanitize-reports CLI for the Tests job and build darwin-arm64 memgrep on macos-15 (TRDD-AGV84UGC, TRDD-KSUIEPTQ) (ac79c46)
 - **spell:** Accept 5 words from the CHANGELOG regenerated by 3.9.0; owner approves 3.9.1 (TRDD-AGV84UGC) (200aed7)
+- Bump version to 3.9.1 (b20e361)
 ## [3.9.0] — 2026-11-15
 
 ### Bug Fixes
