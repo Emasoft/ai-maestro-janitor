@@ -131,6 +131,34 @@ def _consume_sidecar(sd: Path, pane_key: str, now: int) -> tuple[str, int] | Non
         return None
     return transcript_path, written_at
 
+def _late_landing_allowed(sd: Path, written_at: int, now: int) -> bool:
+    """True when a sidecar past `_SIDECAR_FRESH_MAX_AGE_S` must STILL be used (TRDD-AIT2KNBU F3).
+
+    WHY: a janitor /clear that the harness runs late (it was queued behind a busy turn) lands
+    after the 300 s window. Live instance 2026-11-15 01:42:28: the log said "sidecar for pane
+    ... is 672s old -- ignoring" and the cleared session got NO handoff, because the chain had
+    already given up at 180 s and nothing else injects. The chain keeps `resume-after-clear.flag`
+    and `.ts` on a give-up, so those two are the evidence that THIS sidecar belongs to a clear
+    the janitor still expects: flag present, `.ts` EQUAL to the sidecar's `written_at` (both
+    written by the same `_write_clear_marker` call; a newer chain rewrites both), and the age
+    within `external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S` (3600 s, the window after which the
+    flag stops vetoing and cannot be re-armed). Deliberately NOT `clear-observed.ts`: two
+    parallel SessionStart hooks race on that stamp, so reading it here is order-dependent.
+
+    DISCLOSED LIMIT: nothing tells the janitor's late /clear from a /clear the user types within
+    the hour after a chain give-up while the flag and the matching `.ts` remain; that user
+    /clear also receives the handoff. Accepted: the handoff is benign to a user who cleared to
+    free context, and a wrong silence costs the whole goal.
+    """
+    import external_clear as ec  # noqa: PLC0415
+    import state  # noqa: PLC0415
+
+    if written_at <= 0 or not (sd / "resume-after-clear.flag").is_file():
+        return False
+    if state.read_int_state(sd / "resume-after-clear.ts", 0) != written_at:
+        return False
+    return now - written_at <= ec._UNARMED_CLEAR_FLAG_MAX_AGE_S  # noqa: SLF001 -- one shared window
+
 
 def _recent_model_handoff(sd: Path, key: str, transcript_path: str) -> Path | None:
     """A model-authored handoff for THIS session's key, written close to the clear -- or None.
@@ -294,7 +322,12 @@ def _main() -> int:
         return 0
     transcript_path, written_at = consumed
     age = now - written_at if written_at else _SIDECAR_FRESH_MAX_AGE_S + 1
-    if age > _SIDECAR_FRESH_MAX_AGE_S:
+    # TRDD-AIT2KNBU F3: a sidecar past the 300 s window is still used when the chain's own
+    # leftover flag + matching `.ts` prove it is the janitor's late-landing /clear (the
+    # 2026-11-15 01:42:28 instance: 672 s late, ignored, no handoff). Anything else keeps the
+    # old behaviour: ignored here, and `on-session-start.py` then emits the pointer. The
+    # sidecar was already renamed above, so a stale one can never be replayed either way.
+    if age > _SIDECAR_FRESH_MAX_AGE_S and not _late_landing_allowed(sd, written_at, now):
         state.log_line(
             "jev-post-clear-hook", f"sidecar for pane {pane_key} is {age}s old — ignoring"
         )

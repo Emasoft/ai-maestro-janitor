@@ -1825,6 +1825,215 @@ def test_task_dir_not_copied_when_old_dir_has_no_json(tmp_path, monkeypatch, cap
     assert not new_dir.exists()
 
 
+# --- TRDD-AIT2KNBU F3: a /clear that lands far past the 300 s window ---------------------------
+# Live instance 2026-11-15 01:42:28: the janitor's /clear was queued behind a busy turn, the
+# chain gave up at 180 s (flag + ts KEPT), the harness ran the /clear 672 s later, and
+# "sidecar for pane ... is 672s old -- ignoring" left the cleared session with no handoff at
+# all (on-session-start.py's unbounded `transcript*` glob matched the `.consumed-*` the
+# ignored sidecar was renamed to, so it stayed silent too). Real files and real hook code; the
+# only fakes are the file-wide conventions (`_payload`, stub `jev_compact.py`).
+
+_LATE_AGE_S = 1200  # past the 300 s window, inside the 3600 s late-landing window
+_HANDOFF_POINTER = "[janitor-handoff] A handoff from a prior session exists"
+
+
+def _late_clear_setup(tmp_path, monkeypatch, *, pane: str, age_s: int, flag: bool, ts_offset):
+    """Seed a sidecar written `age_s` ago, plus (optionally) the chain's leftover
+    `resume-after-clear.flag` and `.ts` (= the sidecar's `written_at` + `ts_offset`; None
+    writes no `.ts`), and a legacy `agent-handoff.md` for the pointer to name. Returns
+    (project_dir, state dir, hook module, stub argv log, sidecar written_at)."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", pane)
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    sidecar = _write_sidecar(sd, {"TMUX_PANE": pane}, transcript=str(transcript), age_s=age_s)
+    written_at = int(sidecar.read_text(encoding="utf-8").splitlines()[1])
+    if flag:
+        (sd / "resume-after-clear.flag").write_text("resume your prior task", encoding="utf-8")
+    if ts_offset is not None:
+        (sd / "resume-after-clear.ts").write_text(str(written_at + ts_offset), encoding="utf-8")
+    (sd / "agent-handoff.md").write_text("# Handoff\n\nNEXT ACTION: finish it.", encoding="utf-8")
+    argv_log = tmp_path / "argv.txt"
+    _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=_COMPACTED_DOC)
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+    return project_dir, sd, mod, argv_log, written_at
+
+
+def _run_post_clear_hook(mod) -> str:
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert mod.main() == 0
+    return buf.getvalue()
+
+
+def _run_session_start_hook(tmp_path, project_dir, pane: str) -> str:
+    """Run `on-session-start.py` for source=clear as a subprocess (the way Claude Code runs
+    it), against the same state dir the post-clear hook just used. Returns its stdout."""
+    import os
+    import subprocess
+
+    home = tmp_path / "fake-home"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"ai-maestro-janitor" + "@ai-maestro-plugins": True}}),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project_dir),
+        "TMUX_PANE": pane,
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "global-state"),
+        "CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED": "false",
+        "CLAUDE_PLUGIN_OPTION_OS_KEEPALIVE_ENABLED": "false",
+    }
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(_PROJECT_ROOT / "scripts" / "hooks" / "on-session-start.py")],
+        input=json.dumps({"source": "clear", "session_id": "sid-late", "transcript_path": ""}),
+        capture_output=True, text=True, timeout=120, env=env, cwd=str(project_dir),
+    )
+    assert "Traceback" not in proc.stderr, proc.stderr[:2000]
+    return proc.stdout
+
+
+def test_late_clear_with_chain_leftovers_still_gets_the_handoff(tmp_path, monkeypatch):
+    """T4 positive: a sidecar 1200 s old (past the 300 s window) is STILL composed and injected
+    when the chain's leftover flag is present, `resume-after-clear.ts` equals the sidecar's
+    `written_at` and the age is within 3600 s; and `on-session-start.py`, run afterwards on the
+    consumed sidecar, stays silent (the body is owned by the dedicated hook, no pointer)."""
+    project_dir, sd, mod, argv_log, _w = _late_clear_setup(
+        tmp_path, monkeypatch, pane="%4", age_s=_LATE_AGE_S, flag=True, ts_offset=0,
+    )
+    out = _run_post_clear_hook(mod)
+    assert "[janitor-handoff] Post-clear handoff, ALREADY IN CONTEXT below" in out
+    assert "pointers expand with:" in out
+    assert argv_log.is_file(), "a late-but-evidenced sidecar must reach the real compose"
+    assert list(sd.glob("resume-after-clear.*.transcript.consumed-*"))
+    assert _HANDOFF_POINTER not in _run_session_start_hook(tmp_path, project_dir, "%4")
+
+
+def test_late_clear_without_the_flag_is_ignored_and_gets_the_pointer(tmp_path, monkeypatch):
+    """T4 negative: the same 1200 s old sidecar with NO resume-after-clear.flag (a user-typed
+    /clear, nothing the janitor still expects) is ignored by the post-clear hook, and
+    `on-session-start.py` emits the pointer instead of staying silent."""
+    project_dir, _sd, mod, argv_log, _w = _late_clear_setup(
+        tmp_path, monkeypatch, pane="%4", age_s=_LATE_AGE_S, flag=False, ts_offset=0,
+    )
+    assert _run_post_clear_hook(mod) == ""
+    assert not argv_log.is_file(), "jev_compact.py must never run for an unevidenced late sidecar"
+    pointer = _run_session_start_hook(tmp_path, project_dir, "%4")
+    assert _HANDOFF_POINTER in pointer and "NOT injected because" in pointer
+
+
+def test_late_clear_with_a_mismatching_ts_is_ignored_and_the_stale_consumed_file_does_not_silence_the_pointer(
+    tmp_path, monkeypatch,
+):
+    """T4 negative, the on-session-start.py half of F3: flag present but `resume-after-clear.ts`
+    differs from the sidecar's `written_at` (a newer chain rewrote the pair, so this sidecar is
+    not the pending clear's). The post-clear hook ignores it and renames it to `.consumed-<now>`;
+    that file must NOT make `on-session-start.py` return silently (the unbounded glob did) --
+    the pointer must appear. Fails before the F3 change: the cleared session got nothing."""
+    project_dir, sd, mod, argv_log, _w = _late_clear_setup(
+        tmp_path, monkeypatch, pane="%4", age_s=_LATE_AGE_S, flag=True, ts_offset=7,
+    )
+    assert _run_post_clear_hook(mod) == ""
+    assert not argv_log.is_file()
+    assert list(sd.glob("resume-after-clear.*.transcript.consumed-*")), (
+        "the ignored sidecar is still consumed, so it can never be replayed"
+    )
+    pointer = _run_session_start_hook(tmp_path, project_dir, "%4")
+    assert _HANDOFF_POINTER in pointer and "NOT injected because" in pointer
+
+
+def test_sidecar_older_than_the_unarmed_clear_window_is_ignored_even_with_matching_leftovers(
+    tmp_path, monkeypatch,
+):
+    """T4 negative: flag present and `.ts` equal to `written_at`, but the sidecar is 4000 s old,
+    past `external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S` (3600 s): ignored, no compose, and the
+    pointer (not silence) reaches the cleared session."""
+    assert ec._UNARMED_CLEAR_FLAG_MAX_AGE_S < 4000
+    project_dir, _sd, mod, argv_log, _w = _late_clear_setup(
+        tmp_path, monkeypatch, pane="%4", age_s=4000, flag=True, ts_offset=0,
+    )
+    assert _run_post_clear_hook(mod) == ""
+    assert not argv_log.is_file()
+    pointer = _run_session_start_hook(tmp_path, project_dir, "%4")
+    assert _HANDOFF_POINTER in pointer and "NOT injected because" in pointer
+
+
+def test_both_hooks_apply_the_same_late_landing_rule(tmp_path, monkeypatch):
+    """T4 drift guard: the post-clear hook decides "use this sidecar?" and `on-session-start.py`
+    decides "is the body handled there?" with two copies of one rule (the hyphenated filenames
+    are not importable from each other). Over a matrix of sidecar age x flag presence x `.ts`
+    offset, the two copies must agree; a change to one that forgets the other fails here."""
+    spec = _u.spec_from_file_location(
+        "session_start_hook_under_test", str(_PROJECT_ROOT / "scripts" / "hooks" / "on-session-start.py"),
+    )
+    assert spec is not None and spec.loader is not None
+    ss = _u.module_from_spec(spec)
+    spec.loader.exec_module(ss)
+    post = _import()
+    now = int(time.time())
+    for age in (10, 299, 301, 1200, 3599, 3601, 4000):
+        for flag in (True, False):
+            for ts_offset in (0, 7, None):
+                sd = tmp_path / f"sd-{age}-{flag}-{ts_offset}"
+                sd.mkdir()
+                written_at = now - age
+                sidecar = sd / "resume-after-clear.tmux-9.transcript"
+                sidecar.write_text(f"/x.jsonl\n{written_at}\n", encoding="utf-8")
+                if flag:
+                    (sd / "resume-after-clear.flag").write_text("r", encoding="utf-8")
+                if ts_offset is not None:
+                    (sd / "resume-after-clear.ts").write_text(str(written_at + ts_offset), encoding="utf-8")
+                used_by_post_clear = age <= post._SIDECAR_FRESH_MAX_AGE_S or post._late_landing_allowed(
+                    sd, written_at, now,
+                )
+                assert ss._sidecar_handled_by_post_clear_hook(state, sd, sidecar, now) == used_by_post_clear, (
+                    f"hooks disagree at age={age} flag={flag} ts_offset={ts_offset}"
+                )
+
+
+def test_a_malformed_sidecar_is_ignored_by_the_post_clear_hook_and_not_treated_as_handled(tmp_path):
+    """T4: a sidecar with no transcript line, or no integer `written_at`, injects nothing from
+    the post-clear hook (`_consume_sidecar` returns None, or a `written_at` of 0 that the late
+    guard rejects). `on-session-start.py` must then NOT call it handled, or the cleared session
+    gets neither the body nor the pointer -- the silence F3 removes."""
+    spec = _u.spec_from_file_location(
+        "session_start_hook_under_test_malformed",
+        str(_PROJECT_ROOT / "scripts" / "hooks" / "on-session-start.py"),
+    )
+    assert spec is not None and spec.loader is not None
+    ss = _u.module_from_spec(spec)
+    spec.loader.exec_module(ss)
+    post = _import()
+    now = int(time.time())
+    for n, content in enumerate(("", "\n", "/x.jsonl\n", "/x.jsonl\nnot-an-int\n", "\n123\n")):
+        sd = tmp_path / f"sd-{n}"
+        sd.mkdir()
+        (sd / "resume-after-clear.flag").write_text("r", encoding="utf-8")
+        sidecar = sd / "resume-after-clear.tmux-9.transcript"
+        sidecar.write_text(content, encoding="utf-8")
+        handled = ss._sidecar_handled_by_post_clear_hook(state, sd, sidecar, now)
+        consumed = post._consume_sidecar(sd, "tmux-9", now)
+        post_clear_uses_it = consumed is not None and (
+            now - consumed[1] <= post._SIDECAR_FRESH_MAX_AGE_S
+            or post._late_landing_allowed(sd, consumed[1], now)
+        )
+        assert not post_clear_uses_it, f"fixture {content!r} must be unusable for the post-clear hook"
+        assert handled is False, f"malformed sidecar {content!r} must not silence the pointer"
+
+
 if __name__ == "__main__":
     import pytest
 

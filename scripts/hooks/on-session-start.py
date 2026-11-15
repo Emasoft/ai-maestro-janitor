@@ -378,7 +378,14 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
     import terminal_trigger  # noqa: PLC0415
 
     pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
-    if pane_key and any(sd.glob(f"resume-after-clear.{pane_key}.transcript*")):
+    # TRDD-AIT2KNBU F3: bounded by the dedicated hook's own decision (see
+    # `_sidecar_handled_by_post_clear_hook`), not by mere file existence -- a stale `.consumed-*`
+    # left by an IGNORED sidecar must fall through to the pointer below, never silence.
+    now = int(time.time())
+    if pane_key and any(
+        _sidecar_handled_by_post_clear_hook(state, sd, path, now)
+        for path in sd.glob(f"resume-after-clear.{pane_key}.transcript*")
+    ):
         return
 
     max_age = state.coerce_int(
@@ -445,6 +452,53 @@ def _sidecar_fresh(state, path: Path, now: int, max_age_s: int) -> bool:  # noqa
             return now - ts <= max_age_s
     mtime = state.file_mtime(path)
     return mtime > 0 and now - mtime <= max_age_s
+
+
+def _sidecar_handled_by_post_clear_hook(state, sd: Path, path: Path, now: int) -> bool:  # noqa: ANN001 - local module type
+    """True when `on-session-start-post-clear-compact.py` injects (or already injected) the
+    body for this per-pane sidecar file, so `_inject_post_clear_handoff` must stay silent.
+
+    TRDD-AIT2KNBU F3. WHY content, not mere existence: the old check was "any file matching
+    `transcript*` exists", UNBOUNDED. The dedicated hook renames every sidecar it reads to
+    `.consumed-<its own now>` even when it then IGNORES it as stale, so a stale-ignored sidecar
+    still matched and this hook returned silently too: the cleared session got nothing (live
+    instance 2026-11-15 01:42:28, a 672 s late /clear: "sidecar ... is 672s old -- ignoring" and
+    no pointer). The decision is therefore recomputed from the sidecar's own `written_at` (line
+    2, preserved by the rename) with the SAME rule the dedicated hook applies: within
+    `_SIDECAR_FRESH_MAX_AGE_S`, or the late-landing evidence (flag present, `resume-after-
+    clear.ts` equal to `written_at`, age within `external_clear._UNARMED_CLEAR_FLAG_MAX_AGE_S`).
+    The two hooks race, so this must not depend on whether the rename already happened.
+    DISCLOSED LIMIT (same as the dedicated hook): a user-typed /clear within the hour after a
+    chain give-up, while the flag and the matching `.ts` remain, is also treated as handled
+    there and receives the handoff body from that hook.
+
+    A malformed sidecar (no transcript line, or no integer `written_at`) is NOT handled: the
+    dedicated hook ignores it, so the pointer must appear -- never silence. A file that vanishes
+    between the glob and the read is mid-rename in the other hook and counts as handled.
+    """
+    import external_clear as ec  # noqa: PLC0415 - scripts/lib is on sys.path only inside main()
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return True  # vanished mid-rename: the dedicated hook is handling it right now
+    # Mirror `_consume_sidecar`: no transcript path on line 1 means that hook injects nothing,
+    # and a missing or non-integer `written_at` makes it treat the age as stale (guard needs
+    # written_at > 0). Either way it is NOT handled there, so fall through to the pointer.
+    if not lines or not lines[0].strip():
+        return False
+    try:
+        written_at = int(lines[1].strip())
+    except (IndexError, ValueError):
+        written_at = 0
+    if written_at > 0 and now - written_at <= _SIDECAR_FRESH_MAX_AGE_S:
+        return True
+    return (
+        written_at > 0
+        and (sd / "resume-after-clear.flag").is_file()
+        and state.read_int_state(sd / "resume-after-clear.ts", 0) == written_at
+        and now - written_at <= ec._UNARMED_CLEAR_FLAG_MAX_AGE_S  # noqa: SLF001 - one shared window
+    )
 
 
 def _stamp_clear_observation(state, session_id: str) -> None:  # noqa: ANN001 - local module type
