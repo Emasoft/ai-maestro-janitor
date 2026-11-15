@@ -33,6 +33,16 @@ jobs:
       - name: Make detector scripts executable
         run: chmod +x scripts/dispatch.py scripts/detectors/*.py scripts/hooks/*.py
 
+      - name: Point origin/HEAD at the default branch
+        # repo-state resolves the release line from origin/HEAD and has no fallback;
+        # actions/checkout leaves it unset, which made the detector report "release line
+        # could not be resolved" in every weekly issue.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DEFAULT_BRANCH=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq .defaultBranchRef.name)
+          git remote set-head origin "$DEFAULT_BRANCH"
+
       - name: Run drift detectors (one-shot)
         id: audit
         env:
@@ -43,13 +53,20 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p .janitor/state .janitor/logs
-          REPORT=$(
+          RAW=$(
             for d in ./scripts/detectors/*.py; do
+              # memgrep-binary-stale compares a machine's PATH binary with the installed
+              # plugin; an ephemeral runner has neither, so it only ever says "cannot tell".
+              case "$d" in ./scripts/detectors/memgrep-binary-stale.py) continue ;; esac
               "$d" || true
             done
           )
-          printf '%s\n' "$REPORT" | tee audit-report.txt
-          if [ -s audit-report.txt ]; then
+          # A bare [janitor-<name>] line is dispatch plumbing (a chore marker), never a finding:
+          # on a runner nothing consumes it, so it only pollutes the issue body.
+          printf '%s\n' "$RAW" | grep -Ev '^\[janitor-[a-z-]+\]$' > audit-report.txt || true
+          cat audit-report.txt
+          # `printf '%s\n' ""` writes one newline, so test for non-blank content, not for size.
+          if grep -q '[^[:space:]]' audit-report.txt; then
             echo "has_findings=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_findings=false" >> "$GITHUB_OUTPUT"
