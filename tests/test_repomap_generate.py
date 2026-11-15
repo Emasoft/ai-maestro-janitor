@@ -735,6 +735,38 @@ def test_detector_flags_a_claude_md_that_names_the_map_only_when_opted_in():
         assert "CLAUDE.md names PROJECT_MAP" in _run_detector(root)
 
 
+def test_detector_degrades_to_zero_findings_and_logs_once_when_the_map_computation_fails():
+    """PRRD S6.1: an undecodable .repomapignore makes the structure probe raise; the detector still exits 0 with no nudge and logs that error once, not once per fire."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        assert _run(root)[0] == 0
+        _opt_in(root)
+        # Untracked, so the digest moves and the structure probe runs; invalid UTF-8 makes load_excludes raise UnicodeDecodeError.
+        (root / ".repomapignore").write_bytes(b"\xff\xfe\x00not utf-8\n")
+        detector = _PROJECT_ROOT / "scripts" / "detectors" / "project-map-drift.py"
+        log = root / ".janitor" / "logs" / "project-map-drift.log"
+
+        def fire() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(detector)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)},
+                cwd=root,
+            )
+
+        first = fire()
+        assert first.returncode == 0, first.stderr
+        assert first.stdout == "", "a failed probe must degrade to zero findings"
+        entries = log.read_text().splitlines()
+        assert len(entries) == 1 and "UnicodeDecodeError" in entries[0], entries
+        second = fire()
+        assert second.returncode == 0 and second.stdout == "", second.stderr
+        assert log.read_text().splitlines() == entries, "the same error must not be logged twice"
+
+
 @pytest.mark.parametrize(
     ("start_mode", "want"),
     [(None, 0o644), (0o644, 0o644), (0o600, 0o644), (0o640, 0o640), (0o444, 0o444)],

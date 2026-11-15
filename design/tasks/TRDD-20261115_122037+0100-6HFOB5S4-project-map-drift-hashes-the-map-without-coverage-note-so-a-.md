@@ -1,10 +1,10 @@
 ---
 trdd-id: 6HFOB5S4
 title: project-map-drift hashes the map without coverage_note so a repo with a coverage note may nudge stale forever
-column: backburner
+column: testing
 status: tasked
 created: 2026-11-15T12:20:37+0100
-updated: 2026-11-15T12:20:37+0100
+updated: 2026-11-15T12:57:30+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,4 @@ Reproduce FIRST on the current code with a failing test. TRDD-FADYLSQB increment
 ## Approval log
 
 - 2026-11-15T12:20:37+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-15T12:58:35+0100 — FIXED by TRDD-FADYLSQB increment 3 (4511cb20): the detector now hashes through current_map_sha with the header methods flag and the generator coverage note; a test reproduced the mismatch on the old detector (legacy-fence form) before the rewrite; the kept test runs on PROJECT_MAP.md and its sensitivity was shown by a mutation check (dropping coverage_note makes it fail). Field check after the release that ships 2b and 3.

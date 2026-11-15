@@ -53,6 +53,7 @@ Opt-in: `$PROJECT/.janitor/state/repomap-opt-in.flag` — project-scoped
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -83,6 +84,27 @@ def _emit(key: str, message: str) -> None:
     line = dedupe.emit_once(_seen_file(), key, message)
     if line is not None:
         print(line)
+
+
+def _log_failure_once(exc: Exception) -> None:
+    """PRRD S6.1 "logs once": record a map-computation failure in the detector log the first
+    time this error is seen, then stay quiet. Keyed on the error type plus its message with
+    digit runs collapsed (so a pid, line number or timestamp in the text does not defeat the
+    dedupe), through the same dedupe file the nudges use.
+
+    WHY it is written this way: the key is never forgotten, so an error that is fixed and
+    returns later is NOT logged again (this is "once per distinct error", not once per
+    episode); and `emit_once` fails open (None) when its lock or seen-file is unusable, which
+    drops the log line. Logging must itself never raise, or the detector would exit non-zero
+    again and break the very rule (S6.1) this function serves; a logging failure goes to stderr."""
+    detail = f"{type(exc).__name__}: {exc}"
+    shape = f"{type(exc).__name__}: {re.sub(r'[0-9]+', 'N', str(exc))}"
+    key = "error@" + hashlib.sha256(shape.encode("utf-8")).hexdigest()[:12]
+    try:
+        if dedupe.emit_once(_seen_file(), key, detail) is not None:
+            state.log_line("project-map-drift", f"map computation failed, degrading to zero findings: {detail}")
+    except OSError as log_exc:
+        print(f"[project-map-drift] could not log map computation failure ({detail}): {log_exc}", file=sys.stderr)
 
 
 def _slim_contract_nudge(root: Path, text: str) -> None:
@@ -189,7 +211,17 @@ def _map_nudges(root: Path, claude_md_text: str | None) -> None:
             return  # this exact digest already verified structure-fresh
     except OSError:
         pass
-    if header["sha"] == current_map_sha(root, header):
+    # PRRD S6.1: a detector is fail-soft. The probe shares `current_map_sha` with `--check`,
+    # which must keep failing fast, so the catch lives HERE at the detector call site and not
+    # inside it. Without it any error the probe raises (extraction, decoding such as a non-UTF-8
+    # .repomapignore) escapes as a non-zero exit on every heartbeat fire instead of degrading to
+    # zero findings. Git failures are NOT covered by this: `_git` already turns them into None.
+    try:
+        structure_fresh = header["sha"] == current_map_sha(root, header)
+    except Exception as exc:
+        _log_failure_once(exc)
+        return
+    if structure_fresh:
         state.atomic_write(fresh_stamp, current)
         return  # structure unchanged — the map is NOT stale; stay silent
     _emit(
