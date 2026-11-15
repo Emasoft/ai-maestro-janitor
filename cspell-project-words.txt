@@ -2318,6 +2318,7 @@ miсrоsоft
 mkdirp
 mkdirs
 mkdn
+mkfifo
 mkimage
 mknod
 mkstemp

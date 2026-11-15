@@ -172,7 +172,9 @@ def env_dump_names(data: bytes) -> list[str]:
     return sorted(names)
 
 
-def agent_writable_roots(project_root: Path, uid: int, tmp_base: str = "/tmp") -> list[str]:
+# "/tmp" is where Claude Code keeps each session's scratch folder (/tmp/claude-<uid>/<project>); the sweep only READS it,
+# it creates no temp file there, so bandit B108 (insecure temp file) does not apply.
+def agent_writable_roots(project_root: Path, uid: int, tmp_base: str = "/tmp") -> list[str]:  # nosec B108
     """The folders agents write to: reports, reports_dev, every *_dev folder, .janitor, .trashcan of the project,
     and the session scratch folder of Claude Code for this project (/tmp/claude-<uid>/<project path with / as ->),
     which also holds the output files of sub-agents (links to their transcripts)."""

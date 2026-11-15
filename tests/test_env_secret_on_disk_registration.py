@@ -19,7 +19,7 @@ def test_it_is_not_scheduled_until_its_walk_is_bounded() -> None:
     """On demand only, by decision (TRDD-G14LKPEC). Measured 2026-11-15 on a project whose agent folders hold 1.2
     million files: one pass took 49 s and 55 s, because sweep() lists and stats every file BEFORE its time budget
     starts, and it reads the oldest change first, so a fresh leak waits behind the whole backlog. On the hourly
-    roster that is about a minute of every heartbeat fire that runs it, in every armed project, for a finding that
+    roster that is about a minute of every heartbeat fire that runs it, on a project whose agent folders are that large, for a finding that
     arrives days late. Add the roster row back, and change this test, only once both are fixed."""
     sys.path.insert(0, str(_ROOT / "scripts"))
     import dispatch  # noqa: PLC0415
