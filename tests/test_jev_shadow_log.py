@@ -26,7 +26,15 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import jev_shadow_log as jsl  # noqa: E402
 import state  # noqa: E402
+from _fake_secrets import b62  # noqa: E402
 from jevctx.shadow import ShadowLog  # noqa: E402
+
+# Fake secret shapes built at run time (fixture hygiene, owner order 2026-11-16 "devitalize"):
+# no contiguous real-format token sits in this file; each keeps the shape its redaction test needs.
+_FAKE_AWS_KEY = "AK" + "IA" + b62("jsl-aws-key", 16).upper()
+_FAKE_BEARER = b62("jsl-bearer-head", 12) + "." + b62("jsl-bearer-tail", 20)
+_FAKE_JWT_SIG = b62("jsl-jwt-sig", 20)
+_FAKE_JWT = "eyJ" + b62("jsl-jwt-hdr", 17) + "." + "eyJ" + b62("jsl-jwt-pay", 26) + "." + _FAKE_JWT_SIG
 
 
 def _clear_state_caches() -> None:
@@ -279,7 +287,7 @@ def test_log_decisions_redacts_a_literal_secret_in_the_preview_and_locks_file_mo
     written redacted, and the log file must be created 0600 (owner-only) -- not the previous
     default-permissions file carrying raw transcript/tool-output text verbatim."""
     fake_openai_key = "sk-proj-" + "A1b2C3d4E5f6G7h8I9j0K1l2"
-    fake_aws_key = "AKIAIOSFODNN7EXAMPLE"
+    fake_aws_key = _FAKE_AWS_KEY
     text = f"tool output leaked a key {fake_openai_key} and also {fake_aws_key} in the env dump"
     items = [_item("u-1:0", kind="assistant", text=text)]
     # relevance == threshold -> |score - threshold| == 0, well within the far-from-threshold
@@ -302,9 +310,9 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
     surviving prefix, which no longer completes the "known prefix + minimum length" shape any
     pattern requires, so the fragment leaked unredacted. Places a full 20-char AWS-shaped key
     starting at index 190 (so a naive truncate-then-redact keeps only its first 10 characters,
-    "AKIAIOSFOD" -- ten characters alone never match `AKIA[0-9A-Z]{16}`) -- the fix redacts the
+    "AKIA" plus six more -- ten characters alone never match `AKIA[0-9A-Z]{16}`) -- the fix redacts the
     FULL text first, so no raw fragment of the key can survive truncation."""
-    aws_key = "AKIAIOSFODNN7EXAMPLE"
+    aws_key = _FAKE_AWS_KEY
     text = "x" * 190 + aws_key + "y" * 50
     items = [_item("u-1:0", kind="assistant", text=text)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}  # close to threshold -> preview kept
@@ -331,7 +339,7 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
             'password: "hi there! 9x"', "hi there! 9x", id="password-quoted-with-space-and-punct",
         ),
         pytest.param(
-            "Authorization: Bearer abcDEF123456.ghiJKL7890tokenvalue", "abcDEF123456", id="bearer",
+            "Authorization: Bearer " + _FAKE_BEARER, _FAKE_BEARER[:12], id="bearer",
         ),
         pytest.param(
             # Fragmented per tests/README.md (fixture-hygiene gate): the BEGIN
@@ -346,8 +354,8 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
         ),
         # Coordinator, fourth follow-up: four more shapes.
         pytest.param(
-            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fw",
-            "SflKxwRJSMeKKF2QT4fw",
+            _FAKE_JWT,
+            _FAKE_JWT_SIG,
             id="jwt",
         ),
         pytest.param(

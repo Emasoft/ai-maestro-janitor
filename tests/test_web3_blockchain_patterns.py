@@ -16,6 +16,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import web3_blockchain_patterns as wbp  # type: ignore[import-not-found]  # noqa: E402
+from _fake_secrets import hexs  # noqa: E402
+
+# A private-key-shaped value built at run time (fixture hygiene, owner order 2026-11-16
+# "devitalize"): the old literal was a widely published test account key.
+_FAKE_PK = hexs("web3-test-pk", 64)
 
 # ---------- Data-model sanity --------------------------------------------
 
@@ -100,7 +105,7 @@ def test_r1_private_key_identifier_assignment_flags() -> None:
     """PRIVATE_KEY = '0x<64-hex>' → CRITICAL hit."""
     src = (
         "const PRIVATE_KEY = "
-        "\"0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\";\n"
+        "\"0x" + _FAKE_PK + "\";\n"
     )
     hits = _hits("web3.client.private-key-hex-literal", src)
     assert hits
@@ -111,7 +116,7 @@ def test_r1_wallet_constructor_positional_flags() -> None:
     """new ethers.Wallet('0x<64-hex>', provider) → CRITICAL hit."""
     src = (
         "const signer = new ethers.Wallet("
-        "\"0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\", "
+        "\"0x" + _FAKE_PK + "\", "
         "provider);\n"
     )
     hits = _hits("web3.client.private-key-hex-literal", src)

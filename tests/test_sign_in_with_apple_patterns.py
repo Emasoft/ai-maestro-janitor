@@ -15,6 +15,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import sign_in_with_apple_patterns as siwa  # type: ignore[import-not-found]  # noqa: E402
+from _fake_secrets import b62  # noqa: E402
 
 # ---------- Synthetic secret-shaped fixtures -----------------------------
 # PEM markers are split at module level so no contiguous real-format PEM
@@ -23,6 +24,11 @@ import sign_in_with_apple_patterns as siwa  # type: ignore[import-not-found]  # 
 # unchanged.
 _PEM_EC_BEGIN = "-----BEGIN EC " + "PRIVATE KEY-----"
 _PEM_EC_END = "-----END EC " + "PRIVATE KEY-----"
+
+# EC key body built at run time (fixture hygiene, owner order 2026-11-16 "devitalize"):
+# same line lengths as a real PEM body, no contiguous key material in source.
+_FAKE_EC_LINE1 = "MHQC" + b62("siwa-ec-1", 60)
+_FAKE_EC_LINE2 = b62("siwa-ec-2", 54)
 
 # ---------- Data-model sanity --------------------------------------------
 
@@ -323,8 +329,8 @@ def test_s6_fires_on_apple_pem_block_with_apple_context() -> None:
         "APPLE_KEY_ID = 'XYZ9876543'\n"
         "APPLE_PRIVATE_KEY = '''\n"
         f"{_PEM_EC_BEGIN}\n"
-        "MHQCAQEEIOaFMxdkEhAoNMRpGPSrPqBWn4WXtJFzFHmDpNxyzABCoAoGCCqGSM49\n"
-        "AwEHoWQDYgAEabcdefghijklmnopqrstuvwxyz0123456789ABCDEF\n"
+        f"{_FAKE_EC_LINE1}\n"
+        f"{_FAKE_EC_LINE2}\n"
         f"{_PEM_EC_END}\n"
         "'''\n"
     )
@@ -353,8 +359,8 @@ def test_s6_does_not_fire_on_pem_block_without_apple_context() -> None:
     src = (
         "# Generic RSA key for internal service\n"
         f"{_PEM_EC_BEGIN}\n"
-        "MHQCAQEEIOaFMxdkEhAoNMRpGPSrPqBWn4WXtJFzFHmDpNxyzABCoAoGCCqGSM49\n"
-        "AwEHoWQDYgAEabcdefghijklmnopqrstuvwxyz0123456789ABCDEF\n"
+        f"{_FAKE_EC_LINE1}\n"
+        f"{_FAKE_EC_LINE2}\n"
         f"{_PEM_EC_END}\n"
     )
     assert not _hits("siwa-apple-private-key-in-bundle", src)
