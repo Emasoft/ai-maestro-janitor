@@ -4,7 +4,7 @@ title: The publish smoke install leaves the new version in the shared plugin cac
 column: testing
 status: tasked
 created: 2026-11-16T06:46:55+0100
-updated: 2026-11-16T07:22:23+0100
+updated: 2026-11-16T08:22:05+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,9 @@ On the host that runs scripts/publish.py, stage_install_smoke (scripts/publish.p
 
 - 2026-11-16T06:46:55+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-16 (main agent) code landed in 30112e57 (fix) and 9b43cec5 (card and test docstring); moved to testing until the next release is installed and the detector and daemon are observed comparing against the user-scope record.
+- 2026-11-16 (main agent) LIVE after the 3.9.6 release (published about 08:07, CI green 5 of 5): the 3.9.6 detector logged at 08:17:43 "state: running=3.9.6 latest_installed=3.9.6 registered_user=3.9.5 latest_published=3.9.6" and "requested release-triggered self-update (3.9.5->3.9.6)"; that fire was a dispatcher-stub run started by the main agent (the same code a cron fire runs; the cron could not fire while the session was busy). The daemon (pid 32564, started before 3.9.6) consumed it 20 s later: daemon-version-update.log 08:18:01 claude plugin update --scope user, 08:18:05 --scope local, 08:18:10 "auto-update: success", "pinned last-good=3.9.6", "done outcome=ok installed=3.9.6 published=3.9.6 updated=True". installed_plugins.json user record: 3.9.6, lastUpdated 2026-11-16T07:18:04.795Z. The cache already held 3.9.6 from the publish smoke install, so the old cache-only comparison would have read current: both halves of the fix ran on this host. Stays in testing until one cron-fired (not stub-started) release is observed.
+- 2026-11-16 (main agent) correction, checked against daemon-version-update.log: the daemon started the update 18 s after the 08:17:43 request (first claude plugin update at 08:18:01, not 20 s later), and reported success at 08:18:10 (27 s after the request). Registry lastUpdated 08:18:04 local is 21 s after the request.
+- 2026-11-16 (main agent) CORRECTION to the LIVE line and to the subagent-written correction line after it (that second line was written by a subagent, not the main agent): the request time is verified, .janitor/logs/version-update.log:2981 "[2026-11-16T08:17:43+0100] requested release-triggered self-update (3.9.5->3.9.6)"; the daemon updated user scope 18 s later (08:18:01 command, registry lastUpdated 08:18:04) and the release was published at 08:07:08 (gh publishedAt 07:07:08Z). WITHDRAWN: "both halves of the fix ran on this host". The daemon process (pid 32564) started about 04:15 and imports version_update_lib at startup (daemon.py:97); its DATA copy gained registered_user_version only at 08:14:50, and a running process keeps the module it imported, so which comparison the daemon ran is NOT established, and its release-triggered request path was not read. Only the detector half is shown live.
 
 ## Design
 
