@@ -26,33 +26,15 @@ Why this detector NEVER touches .gitkeep / README.txt / unrecognised files:
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import state  # noqa: E402
-
-# Folder/manifest patterns. Either `+HHMM` or `-HHMM` offset. Manifest
-# variants carry a trailing `.txt`. Anything else is left alone — that's
-# how .gitkeep, README.txt, and any human-added file or folder stay safe.
-_TS_FOLDER_RE = re.compile(r"^(\d{8}_\d{6}[+-]\d{4})$")
-_TS_MANIFEST_RE = re.compile(r"^(\d{8}_\d{6}[+-]\d{4})\.txt$")
-
-
-def _parse_ts_to_epoch(ts: str) -> Optional[int]:
-    """Parse YYYYMMDD_HHMMSS±HHMM into epoch seconds. None on parse failure."""
-    try:
-        # `%z` accepts ±HHMM since Python 3.7.
-        dt = datetime.strptime(ts, "%Y%m%d_%H%M%S%z")
-    except ValueError:
-        return None
-    return int(dt.timestamp())
+import trashcan_names  # noqa: E402
 
 
 def main() -> int:
@@ -77,13 +59,13 @@ def main() -> int:
     # siblings on the same loop iteration so we work on a snapshot list.
     for entry in sorted(trash_dir.iterdir()):
         name = entry.name
-        m_folder = _TS_FOLDER_RE.match(name)
-        m_manifest = _TS_MANIFEST_RE.match(name)
+        m_folder = trashcan_names.TS_FOLDER_RE.match(name)
+        m_manifest = trashcan_names.TS_MANIFEST_RE.match(name)
         if not (m_folder or m_manifest):
             continue
         ts = (m_folder or m_manifest).group(1)  # type: ignore[union-attr]
 
-        entry_epoch = _parse_ts_to_epoch(ts)
+        entry_epoch = trashcan_names.parse_ts_to_epoch(ts)
         if entry_epoch is None:
             state.log_line("trashcan-purge", f"could not parse timestamp from '{name}' — skipping")
             continue

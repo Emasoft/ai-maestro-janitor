@@ -16,8 +16,11 @@ the human's decision.
 
 Limits, stated in every finding: an overwritten file can survive in snapshots and backups; a value that was
 already printed into a conversation has already been sent; a secret that was transformed (compressed, split,
-encrypted) is not found; the sweep reads files changed since the last pass, a few at a time, so a file moved
-in with an old modification time is not seen until the cursor is reset.
+encrypted) is not found; the sweep reads files changed since the last pass, a few at a time, so a file moved in
+with an old modification time is not seen until the cursor is reset (the timestamp batches of .trashcan are the
+exception: env_secrets.sweep_trash reads them by batch name from a saved per-batch position, so a file moved into
+the trash is seen; a file moved by hand into a batch that was already read is not, nor one moved into another
+.trashcan child such as migrate-memory-scope/).
 
 It does NOT use state.is_self_scan_target(): that guard exists because pattern scanners flag the janitor's own
 fixtures, and an exact-value matcher has no fixtures to match. Skipping the janitor's own repo would blind the
@@ -34,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import zlib
 from pathlib import Path
 
@@ -123,7 +127,7 @@ def _display(project: Path, path: str) -> str:
 
 
 def _read_cursor(file: Path) -> dict:
-    fresh: dict = {"cursor": [0.0, ""], "retries": {}, "flagged": []}
+    fresh: dict = {"cursor": [0.0, ""], "retries": {}, "flagged": [], "trash": {"positions": {}, "done": []}}
     if not file.exists():
         return fresh
     try:
@@ -131,6 +135,13 @@ def _read_cursor(file: Path) -> dict:
         data["cursor"] = [float(data["cursor"][0]), str(data["cursor"][1])]
         data["retries"] = {str(k): int(v) for k, v in data["retries"].items()}
         data["flagged"] = [str(p) for p in data["flagged"]]
+        # An ABSENT "trash" key (a state file from before the trash tier) starts the trash state empty; falling back to fresh
+        # would lose "flagged", so open CRED-002 issues would never be withdrawn, and restart the cursor and the retries.
+        trash = data.get("trash", fresh["trash"])
+        data["trash"] = {
+            "positions": {str(batch): tuple(str(part) for part in position) for batch, position in trash["positions"].items()},
+            "done": [str(batch) for batch in trash["done"]],
+        }
     except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
         state.log_line(_NAME, f"cursor file unreadable ({type(exc).__name__}): starting a fresh pass from the oldest file")
         return fresh
@@ -157,12 +168,40 @@ def main() -> int:
     hold_for_git = git_exit is not None and git_retries < env_secrets.MAX_FAIL_RETRIES  # bounded: git failing for good must not stall the sweep for good
     roots = env_secrets.agent_writable_roots(project, os.getuid()) + untracked
     report = env_secrets.sweep(roots, matcher, salt, since=since, give_up=give_up)
+    trash_root = str(project / ".trashcan")
+    trash_positions: dict[str, env_secrets.TrashPos] = saved["trash"]["positions"]
+    trash_done = frozenset(saved["trash"]["done"])
+    trash = env_secrets.sweep_trash(trash_root, matcher, salt, trash_positions, trash_done, int(time.time()), give_up=give_up)
+    report.absorb_findings(trash)  # its hits, secret-named paths and coverage gaps go through the loops below like any other
 
     holds: list[env_secrets.Key] = list(report.failed)
+    trash_holds: dict[str, list[env_secrets.TrashPos]] = {batch: list(failed) for batch, failed in trash.failed_by_batch.items()}  # held per batch, not by (mtime, path)
     retries = {key[1]: saved["retries"].get(key[1], 0) + 1 for key in report.failed}
+    for batch, failed in trash.failed_by_batch.items():
+        for position in failed:
+            failed_path = env_secrets.trash_path(trash_root, batch, position)
+            retries[failed_path] = saved["retries"].get(failed_path, 0) + 1
     if git_exit is not None:
         retries[_GIT_RETRY_KEY] = git_retries + 1
     keys = {path: (mtime, path) for mtime, path in [*report.processed, *report.failed]}
+    # Read and clean only: a trash file whose read FAILED was not rescanned, so it must not withdraw its finding.
+    trash_seen = {
+        env_secrets.trash_path(trash_root, batch, position)
+        for batch, positions in trash.processed_by_batch.items()
+        for position in positions
+    }
+
+    def hold(path: str) -> None:
+        """Keep the cursor, or the batch position, in front of `path`, so it is read again next pass."""
+        if path in keys:
+            holds.append(keys[path])
+        else:  # not a file of the modification-time sweep, so a trash file: its key is its place inside its batch
+            relative = os.path.relpath(path, trash_root).split(os.sep)
+            trash_holds.setdefault(relative[0], []).append(tuple(relative[1:]))
+
+    def order(path: str) -> tuple[int, float, str]:
+        """Oldest change first for the sweep files, then the trash files in path order."""
+        return (0, keys[path][0], path) if path in keys else (1, 0.0, path)
 
     by_path: dict[str, list[env_secrets.Hit]] = {}
     for hit in report.hits:
@@ -170,9 +209,9 @@ def main() -> int:
     raised = 0
     # Oldest change first, the order the cursor moves in: sorted by path, the same files won the per-fire cap on every
     # pass while the cursor sat in front of the others, and those were never raised.
-    for path, hits in sorted(by_path.items(), key=lambda item: keys[item[0]]):
+    for path, hits in sorted(by_path.items(), key=lambda item: order(item[0])):
         if raised >= issue_catalog.MAX_RAISES_PER_FIRE:  # checked before the three git calls of _file_status
-            holds.append(keys[path])  # over the per-fire cap, not a failure: retried next pass without counting a retry
+            hold(path)  # over the per-fire cap, not a failure: retried next pass without counting a retry
             continue
         names = sorted({h.name for h in hits})
         first = min(hits, key=lambda h: h.line)
@@ -193,7 +232,7 @@ def main() -> int:
             print(r.line)
         elif not r.ok:
             state.log_line(_NAME, f"could not raise CRED-002: {r.why}")
-            holds.append(keys[path])
+            hold(path)
             retries[path] = saved["retries"].get(path, 0) + 1
         line = (
             f"[{_NAME}] URGENT: the value of {shown_names} (a secret of this session's environment) is written in {display}, line {first.line} "
@@ -232,7 +271,7 @@ def main() -> int:
             print(out)
     flagged = set(saved["flagged"]) | set(by_path)
     for path in sorted(flagged - set(by_path)):
-        if path in keys:  # rescanned and clean now: withdraw the finding
+        if path in keys or path in trash_seen:  # rescanned and clean now: withdraw the finding
             issue_catalog.clear_issue("CRED-002", where=f"file:{_portable(project, path)}")
             flagged.discard(path)
 
@@ -278,11 +317,25 @@ def main() -> int:
         state.log_line(_NAME, "not fully covered: " + "; ".join(uncovered[:20]))
 
     new_cursor = since if hold_for_git else env_secrets.advance_cursor(since, report.processed, holds)
-    state.atomic_write(cursor_file, json.dumps({"cursor": list(new_cursor), "retries": retries, "flagged": sorted(flagged)}))
+    # The trash tier moves even while git holds the main cursor: hold_for_git means `git ls-files` failed, which only leaves
+    # the UNTRACKED roots unread, and .trashcan is gitignored, so no trash file ever depended on that listing.
+    new_positions = env_secrets.advance_trash(trash_positions, trash.processed_by_batch, trash_holds)
+    present = set(trash.present)
+    # A batch is done only when it was walked to the end AND nothing in it is held (a file over the per-fire cap, or whose
+    # raise failed, is read again next pass). A purged batch (its name is gone from disk) leaves both the positions and done.
+    new_done = {batch for batch in (trash_done | set(trash.exhausted)) if batch in present and batch not in trash_holds}
+    new_positions = {batch: position for batch, position in new_positions.items() if batch in present and batch not in new_done}
+    # ONE dict, ONE atomic write: the state file is rewritten whole by every pass, so a trash key written anywhere else
+    # would be erased by the next write of this dict (and the cursor by the next write of the trash key).
+    state.atomic_write(cursor_file, json.dumps({
+        "cursor": list(new_cursor), "retries": retries, "flagged": sorted(flagged),
+        "trash": {"positions": {batch: list(position) for batch, position in new_positions.items()}, "done": sorted(new_done)},
+    }))
     state.log_line(
         _NAME,
         f"pass: {report.scanned} file(s) read ({report.bytes_read // 1024} KiB), {report.left_for_next_pass} left for the next pass, "
-        f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped",
+        f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped; "
+        f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done",
     )
     state.rotate_log_if_big(_NAME)
     return 0
