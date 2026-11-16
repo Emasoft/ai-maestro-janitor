@@ -3552,10 +3552,14 @@ def test_llm_ext_exit_1_raises_validation_error(tmp_path: Path, monkeypatch: pyt
 
 
 def test_llm_ext_exit_3_raises_auth_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exit 3 (key/credits) raises JevAuthError (TRDD-7XDBJZCZ)."""
+    """Exit 3 (key/credits) raises JevAuthError (TRDD-7XDBJZCZ), whose message starts with the
+    prefix `jev_compaction_lane.record_once_per_reason` keys its llm-ext remedy on (TRDD-M0LAC49Q)."""
     _stand_in_llm_ext_exiting(tmp_path, monkeypatch, 3, "llm-ext: API error 402: Insufficient credits")
-    with pytest.raises(JevAuthError, match="Insufficient credits"):
+    with pytest.raises(JevAuthError, match="Insufficient credits") as excinfo:
         jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
+    # Literal on purpose: the lane may not be imported from here; the lane-side constant is tied
+    # to this text end to end by tests/test_jev_compact_cli.py::test_llm_ext_exit_3_stamp_reaches_the_lane_remedy.
+    assert str(excinfo.value).startswith("llm-ext classify filter failed:")
 
 
 @pytest.mark.parametrize("code", [4, 5])

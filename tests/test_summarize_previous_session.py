@@ -682,7 +682,40 @@ def test_auth_402_credits_headline_and_dedupe_keyed_on_status(tmp_path, monkeypa
     assert "key rejected" not in auth_hits[0]["msg"]
 
 
+def test_auth_llm_ext_exit3_names_the_llm_ext_credential(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-M0LAC49Q: an llm-ext exit-3 auth failure (no HTTP status) names the llm-ext classifier
+    profile credential, not the in-process provider variable, and is deduped apart from the
+    status-None in-process finding."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
+    _write_probe_stamp(kind="auth", reason=f"{jcl.LLM_EXT_AUTH_REASON_PREFIX} API error 401: No auth credentials found")
+    assert sps.main() == 0
+    _write_probe_stamp(kind="auth", reason="unknown JEV_PROVIDER='x', must be one of ('openrouter',)")
+    assert sps.main() == 0
+
+    auth_hits = [e for e in _ledger_entries() if e["code"] == "JEV-AUTH-REJECTED"]
+    assert len(auth_hits) == 2, auth_hits
+    # The ledger keeps only the first 120 chars (findings_ledger.MAX_MSG_CHARS), so the remedy
+    # must sit at the head of the message -- asserting on the stored text pins that too.
+    llm_ext_msg = next(e["msg"] for e in auth_hits if "llm-ext key/credits:" in e["msg"])
+    assert "or-jev" in llm_ext_msg and "OPENROUTER_API_KEY" in llm_ext_msg
+    assert "settings.yaml" in llm_ext_msg
+    assert "key rejected" not in llm_ext_msg
+    in_process_msg = next(e["msg"] for e in auth_hits if "llm-ext key/credits:" not in e["msg"])
+    assert "provider key rejected" in in_process_msg
+
+    # The profile named in the remedy follows JEV_EXT_CLASSIFY_PROFILE, as the llm-ext call does,
+    # and the dedupe key includes it: switching profile surfaces a new finding with no manual reset.
+    monkeypatch.setenv("JEV_EXT_CLASSIFY_PROFILE", "my-classifier")
+    _write_probe_stamp(kind="auth", reason=f"{jcl.LLM_EXT_AUTH_REASON_PREFIX} API error 401: again")
+    assert sps.main() == 0
+    assert any("set api_key of my-classifier" in e["msg"] for e in _ledger_entries())
 def test_auth_finding_refires_after_a_successful_compaction(tmp_path, monkeypatch, _isolated_env):
     """TRDD-JIYBKY27: fail(401) -> recorded; a successful compaction clears the dedupe key;
     fail(401) again -> recorded again. Driven through `sps.main` (the production entry point),

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util as _u
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -33,6 +34,7 @@ _FIXTURE = _PROJECT_ROOT / "tests" / "fixtures" / "jev_transcript_small.jsonl"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import jev_compaction as jc  # noqa: E402
+import jev_compaction_lane as jcl  # noqa: E402  -- TRDD-M0LAC49Q: reads the stamp `compact` writes
 import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7
 import state  # noqa: E402
 from jevctx.shadow import ShadowLog  # noqa: E402  -- needs the sys.path line above
@@ -936,6 +938,40 @@ def test_compact_scorer_error_writes_failure_stamp(
     assert stamp["ok"] is False
     assert "simulated 503" in stamp["reason"]
     assert stamp["kind"] == "unavailable"
+
+def test_llm_ext_exit_3_stamp_reaches_the_lane_remedy(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-M0LAC49Q end to end: a REAL `score_items_via_llm_ext` run against a stand-in llm-ext
+    that exits 3 makes `compact` stamp `kind=auth`, and the lane turns that stamp (read back from
+    disk, not hand-written) into the llm-ext remedy -- so a reworded or wrapped reason would fail
+    here instead of silently restoring the in-process OPENROUTER_API_KEY / JEV_PROVIDER advice."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "llm-ext"
+    stand_in.write_text(
+        f"#!{sys.executable}\nimport sys\n"
+        "sys.stderr.write(\"llm-ext: API error 402: Insufficient credits\\n\")\nsys.exit(3)\n",
+        encoding="utf-8",
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.delenv("JEV_EXT_CLASSIFY_PROFILE", raising=False)
+    transcript = _write_transcript(tmp_path)
+
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(tmp_path / "c.md")])
+
+    assert code == 7
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "auth"
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    msg = jcl.record_once_per_reason(sd, stamp.get("status"), stamp["reason"])
+    assert msg is not None
+    assert msg.startswith("[jev-compaction] llm-ext key/credits: set api_key of or-jev ($OPENROUTER_API_KEY")
+    assert "settings.yaml" in msg
+    assert "Insufficient credits" in msg
+    assert "provider key rejected" not in msg
 
 
 def test_compact_scorer_429_writes_rate_limited_stamp(

@@ -107,6 +107,12 @@ LANE = os.environ.get("JANITOR_JEV_LANE") or "session-start"
 # until it's fixed. One seen-file, keyed by a hash of the reason text (unbounded length).
 AUTH_SEEN_FILE = "jev-auth-finding-seen"
 
+# Leading text of the message `jev_compaction.score_items_via_llm_ext` raises as a JevAuthError when
+# `llm-ext classify filter` exits 3. This lane may not import jev_compaction (see the module
+# docstring), so the llm-ext auth case is recognized by this prefix in the stamp `reason`;
+# `tests/test_jev_compact_cli.py::test_llm_ext_exit_3_stamp_reaches_the_lane_remedy` pins it end to end.
+LLM_EXT_AUTH_REASON_PREFIX = "llm-ext classify filter failed:"
+
 # Every `trddgrep` subprocess call is capped at 10s (TRDD-RAEGS1D5 card 3 C2, amended down from
 # C1's 15-20s): a SQLite index locked by a concurrent `trddgrep move` must not stall the
 # composer -- TimeoutExpired or a non-zero exit both degrade to "no heads", never a hang.
@@ -1045,8 +1051,31 @@ def record_once_per_reason(sd: Path, status: int | None, reason: str) -> str | N
     TRDD-JIYBKY27: JevAuthError covers 401 (bad key), 402 (out of credits) and 403 (forbidden),
     so the headline is chosen from the status, and the dedupe key is the status, not the raw
     reason — a 402 body carries a changing balance figure that would re-fire the finding every
-    run. `status is None` (a stamp from before the field existed) keeps the original wording."""
-    if status == 402:
+    run. `status is None` (a stamp from before the field existed) keeps the original wording.
+
+    TRDD-M0LAC49Q: a reason carrying `LLM_EXT_AUTH_REASON_PREFIX` came from `llm-ext classify
+    filter` (exit 3), which has no HTTP status; it gets its own wording and dedupe key."""
+    from_llm_ext = reason.startswith(LLM_EXT_AUTH_REASON_PREFIX)
+    # The profile `jev_compaction.score_items_via_llm_ext` passes to llm-ext (same env var, same
+    # default). This lane spawns jev_compact.py, which inherits this environment, so it is the
+    # profile the failed call used.
+    profile = os.environ.get("JEV_EXT_CLASSIFY_PROFILE", "or-jev")
+    if from_llm_ext:
+        # WHY a separate branch (TRDD-M0LAC49Q): since 84ad09ba (TRDD-7XDBJZCZ) the same
+        # JevAuthError also comes from llm-ext, which does NOT read CLAUDE_PLUGIN_OPTION_JEV_PROVIDER
+        # and takes its key from the classifier profile (default `or-jev`, `api_key:
+        # $OPENROUTER_API_KEY`) in the environment llm-ext itself runs in, or from that profile
+        # in ~/.llm-externalizer/settings.yaml. The in-process remedy below would send the user to
+        # a variable that has no effect on this route.
+        # Remedy first, reason last: findings_ledger.MAX_MSG_CHARS (120) cuts the tail of the stored
+        # finding (the reason, which tells 401 from 402, survives only in the probe stamp), and the
+        # remedy is what the reader needs. "key/credits" because exit 3 covers both a bad key and
+        # a 402. CLAUDE_PLUGIN_OPTION_JEV_PROVIDER is deliberately not named: no effect on llm-ext.
+        msg = (
+            f"[jev-compaction] llm-ext key/credits: set api_key of {profile} ($OPENROUTER_API_KEY / "
+            f"~/.llm-externalizer/settings.yaml) — {reason}"
+        )
+    elif status == 402:
         msg = (
             f"[jev-compaction] provider account out of credits (HTTP 402): {reason} — top up "
             "the OpenRouter credits"
@@ -1061,7 +1090,12 @@ def record_once_per_reason(sd: Path, status: int | None, reason: str) -> str | N
             f"[jev-compaction] provider key rejected: {reason} — set OPENROUTER_API_KEY / "
             "CLAUDE_PLUGIN_OPTION_JEV_PROVIDER"
         )
-    key = hashlib.sha256(f"auth-status:{status}".encode()).hexdigest()[:16]
+    # llm-ext failures carry status None, which would share the in-process `status is None` key
+    # and let one finding suppress the other despite different remedies: key them apart, and per
+    # profile so switching JEV_EXT_CLASSIFY_PROFILE surfaces a finding naming the new profile.
+    key = hashlib.sha256(
+        (f"auth-llm-ext:{profile}" if from_llm_ext else f"auth-status:{status}").encode()
+    ).hexdigest()[:16]
     seen_file = sd / AUTH_SEEN_FILE
     return dedupe.emit_once(seen_file, key, msg)
 
