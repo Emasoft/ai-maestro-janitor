@@ -147,16 +147,8 @@ def _gather_cpu_times(pids: list[int]) -> dict[int, float]:
     NLHVLGEP: the differenced burn needs `time`, which the main snapshot does not carry
     (adding a column there would reshape every captured snapshot the parser is tested on).
     A pid that already exited is simply absent from ps's output, so it gets no figure.
-    Under the JANITOR_PS_SNAPSHOT test seam it returns {} without running ps.
     """
     if not pids:
-        return {}
-    # Test seam: an injected JANITOR_PS_SNAPSHOT carries SYNTHETIC pids (see _pid_alive),
-    # and asking the real `ps` about them reads whichever host process holds that pid at
-    # that moment. On 2026-11-16 a publish gate run met a real idle pid 74805 and reported
-    # "CPU 0% (measured over the last 0s ...)", failing
-    # test_cpu_runaway_needs_two_fires_end_to_end. Synthetic pids have no CPU time.
-    if os.environ.get("JANITOR_PS_SNAPSHOT") is not None:
         return {}
     proc = state.run_subprocess(
         ["ps", "-p", ",".join(str(p) for p in pids), "-o", "pid=,time="],

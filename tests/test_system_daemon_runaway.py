@@ -13,8 +13,6 @@ Two layers, both real (no mocking of the code under test):
 
 from __future__ import annotations
 
-import importlib.util
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -382,20 +380,6 @@ def test_cpu_runaway_needs_two_fires_end_to_end(tmp_path: Path) -> None:
     assert line.startswith("[system-daemon-runaway] HOST-002 node ")
     assert "~1-minute decaying average" in line
     assert "over the bar on 2 consecutive checks" in line
-
-
-def test_cpu_time_lookup_skips_the_host_under_the_snapshot_seam(monkeypatch) -> None:
-    """Under JANITOR_PS_SNAPSHOT the CPU-time lookup returns {} even for a pid that
-    really exists (this test's own), so a synthetic pid can never pick up a host
-    process's CPU time (the 2026-11-16 publish gate failure)."""
-    spec = importlib.util.spec_from_file_location("system_daemon_runaway_under_test", DETECTOR)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    monkeypatch.setenv("JANITOR_PS_SNAPSHOT", "")
-    assert module._gather_cpu_times([os.getpid()]) == {}
-    monkeypatch.delenv("JANITOR_PS_SNAPSHOT")
-    assert os.getpid() in module._gather_cpu_times([os.getpid()])
 
 
 def test_cpu_burst_that_ends_never_alarms_end_to_end(tmp_path: Path) -> None:
