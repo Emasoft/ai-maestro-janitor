@@ -1377,6 +1377,49 @@ def test_apply_stays_SILENT_when_the_project_is_not_a_github_repo(project_env: P
     assert "BRPROT-003" not in blob, "a non-GitHub project must not be nagged every pass"
 
 
+def test_apply_reports_one_stderr_line_when_git_fails_resolving_the_design_root(
+    project_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """TRDD-EJKB265W. raise_issue reaches trdd_common.trdd_files, which raises GitRootError when
+    `git worktree list` fails. Gate 3 used to swallow it, so BRPROT-003 silently never reached the
+    human. It must now decline with no-repo-slug and print ONE scrubbed stderr line."""
+    import importlib.util as _u
+
+    import trdd_common  # type: ignore[import-not-found]
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", "true")
+    spec = _u.spec_from_file_location("janitor_branch_protection_apply_test", str(_APPLY_SCRIPT))
+    assert spec is not None and spec.loader is not None
+    apply_mod = _u.module_from_spec(spec)
+    spec.loader.exec_module(apply_mod)
+
+    def _git_fails(*_args: object, **_kwargs: object) -> None:
+        raise trdd_common.GitRootError(
+            "git worktree list --porcelain failed (exit 128) inside known git repo "
+            "\x27/tmp/fake-repo-y/sub\x27: fatal: boom"
+        )
+
+    monkeypatch.setattr(apply_mod.bpl, "detect_repo_slug", lambda _root: None)
+    monkeypatch.setattr(apply_mod, "_project_has_github_remote", lambda _root: True)
+    # Only the git-root resolver fails; the real raise_issue -> propose -> trdd_files chain runs.
+    monkeypatch.setattr(trdd_common, "_main_checkout_root", _git_fails)
+    declined: list[str] = []
+
+    def _record_decline(reason: str) -> int:
+        declined.append(reason)
+        return 0
+
+    monkeypatch.setattr(apply_mod, "_decline", _record_decline)
+
+    assert apply_mod.main() == 0
+    assert declined == ["no-repo-slug"]
+    err_lines = capsys.readouterr().err.splitlines()
+    assert len(err_lines) == 1, err_lines
+    assert err_lines[0].startswith("[branch-protection] git failed resolving the design root (")
+    assert "<path>" in err_lines[0]
+    assert "/tmp/fake-repo-y" not in err_lines[0]
+
+
 def test_prrd_local_match_is_case_insensitive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """issue 327: slug and checkout dirname differing only by case still read the local PRRD;
     genuinely different names do not."""

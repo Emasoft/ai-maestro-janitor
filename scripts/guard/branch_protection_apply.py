@@ -197,10 +197,31 @@ def main() -> int:
         if _project_has_github_remote(project_root):
             try:
                 import issue_catalog  # noqa: PLC0415 - lazy: a missing lib must not kill the guard
+                import trdd_common  # noqa: PLC0415 - lazy for the same reason, and the same bare-name module object ticket_proposal imports
 
-                issue_catalog.raise_issue(
-                    "BRPROT-003", where=str(project_root), slug=str(project_root),
-                )
+                try:
+                    issue_catalog.raise_issue(
+                        "BRPROT-003", where=str(project_root), slug=str(project_root),
+                    )
+                except trdd_common.GitRootError as exc:
+                    # WHY (TRDD-EJKB265W): raise_issue -> ticket_proposal.propose -> trdd_common.trdd_files
+                    # raises GitRootError when `git worktree list` fails inside a known repo. The broad
+                    # except below swallowed it with no word, so BRPROT-003 silently never reached the
+                    # human. Report ONE scrubbed stderr line (dispatch._reemit_stderr re-emits it) and a
+                    # log line. Same-module class identity: `trdd_common` here is the bare-name module
+                    # ticket_proposal imports too (scripts/lib is on sys.path), so this matches the very
+                    # class trdd_files raises; a `lib.trdd_common` import would be a different class and
+                    # never match.
+                    reason = trdd_common.git_root_error_reason(exc)
+                    print(
+                        f"[branch-protection] git failed resolving the design root ({reason}); "
+                        "BRPROT-003 not raised this pass",
+                        file=sys.stderr,
+                    )
+                    state.log_line(
+                        "branch-protection-apply",
+                        f"BRPROT-003 not raised: git failed resolving the design root ({reason})",
+                    )
             except Exception:  # noqa: BLE001 - reporting must never break the caller
                 pass
         return _decline("no-repo-slug")
