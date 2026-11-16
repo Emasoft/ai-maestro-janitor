@@ -514,25 +514,36 @@ def test_concurrent_editor_never_corrupts_and_their_edit_survives():
 
         versions = [f"# Narrative v{i}\n\nhuman text {i}\n" for i in range(40)]
         stop = threading.Event()
+        # The editor thread and the re-insert in the loop below are BOTH non-atomic
+        # read-modify-writes of CLAUDE.md. Unserialized, they tore the file in CI run
+        # 43833293713 ("found 0 START / 1 END"): the re-insert read an empty file in the
+        # editor's truncate window and wrote "\n\n" + block, the editor's 31-byte
+        # "# Narrative v36" text then landed over its head, and the file kept the block
+        # only from byte 29 of the START fence on. The lock serializes only these two
+        # harness writers; strip_legacy_fence still races the editor unlocked, which is
+        # what this test is about.
+        harness_writes = threading.Lock()
 
         def editor():
             for v in versions:
                 if stop.is_set():
                     return
                 # the human/Claude path: read-modify-write of the narrative, PRESERVING an existing block
-                current = claude_md.read_text()
-                start = current.find(_FENCE_START)
-                tail = current[start:] if start >= 0 else ""
-                claude_md.write_text(v + ("\n" + tail if tail else ""))
+                with harness_writes:
+                    current = claude_md.read_text()
+                    start = current.find(_FENCE_START)
+                    tail = current[start:] if start >= 0 else ""
+                    claude_md.write_text(v + ("\n" + tail if tail else ""))
                 time.sleep(0.001)
 
         t = threading.Thread(target=editor)
         t.start()
         try:
             for _ in range(30):
-                current = claude_md.read_text()
-                if _FENCE_START not in current:  # give the strip something to remove each round
-                    claude_md.write_text(current.rstrip("\n") + "\n\n" + block)
+                with harness_writes:
+                    current = claude_md.read_text()
+                    if _FENCE_START not in current:  # give the strip something to remove each round
+                        claude_md.write_text(current.rstrip("\n") + "\n\n" + block)
                 mod.strip_legacy_fence(claude_md, attempts=3)
                 time.sleep(0.001)
         finally:
