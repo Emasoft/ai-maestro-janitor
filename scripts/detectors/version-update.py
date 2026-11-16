@@ -9,6 +9,9 @@ Keeps three versions in sync:
   * running           — version of dispatch that's actually firing on the
                         cron prompt (extracted from the script's own path)
   * latest_installed  — highest version present in the plugin cache dir
+  * registered_user   — version of the user-scope install record in installed_plugins.json
+                        (TRDD-ADFIO49Q); Branch A compares GitHub against it, falling back
+                        to latest_installed when no user record exists
   * latest_published  — latest GitHub release for the repo declared in
                         the manifest's `repository` field
 
@@ -70,9 +73,15 @@ def main() -> int:
         )
 
     latest_installed = ""
+    registered_user = ""
     if is_cache_install:
         installed = vu.list_installed_versions(cache_parent)
         latest_installed = installed[-1] if installed else ""
+        # TRDD-ADFIO49Q: the cache is not proof of an install — a publish smoke install
+        # put 3.9.5 in the cache while user scope stayed 3.9.4, and a cache-only check
+        # read "current" forever. Compare GitHub against the user-scope registry version.
+        registered_user = vu.registered_user_version(vu.registry_install_records())
+    ref = vu.update_reference(latest_installed, registered_user)
 
     plugin_root_for_lookup = Path(
         os.environ.get("CLAUDE_PLUGIN_ROOT", "") or plugin_root,
@@ -82,7 +91,7 @@ def main() -> int:
     state.log_line(
         "version-update",
         f"state: running={running_version} latest_installed={latest_installed} "
-        f"latest_published={latest_published}",
+        f"registered_user={registered_user} latest_published={latest_published}",
     )
 
     auto_enabled = state.is_truthy_env(
@@ -91,12 +100,12 @@ def main() -> int:
 
     line = None
 
-    # Branch A: cache behind GitHub.
+    # Branch A: installed (user-scope registry, else cache) behind GitHub.
     if (
         latest_published
-        and latest_installed
-        and latest_published != latest_installed
-        and vu._semver_tuple(latest_installed) < vu._semver_tuple(latest_published)
+        and ref
+        and latest_published != ref
+        and vu._semver_tuple(ref) < vu._semver_tuple(latest_published)
     ):
         if auto_enabled:
             # The daemon owns the auto-update (single global writer, issue #7 /
@@ -111,13 +120,13 @@ def main() -> int:
                 "CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER", True,
             )
             if vu.should_request_prompt_update(
-                latest_installed, latest_published, auto_enabled, trigger_enabled,
+                ref, latest_published, auto_enabled, trigger_enabled,
             ):
-                gs.request_version_update(f"{latest_installed}->{latest_published}")
+                gs.request_version_update(f"{ref}->{latest_published}")
                 state.log_line(
                     "version-update",
                     f"requested release-triggered self-update "
-                    f"({latest_installed}->{latest_published}); daemon consumes on next loop",
+                    f"({ref}->{latest_published}); daemon consumes on next loop",
                 )
             else:
                 state.log_line(
@@ -129,7 +138,7 @@ def main() -> int:
             line = dedupe.emit_once(
                 seen,
                 f"version-update@manual@{latest_published}",
-                f"[version-update] {vu.PLUGIN_NAME} {latest_installed} → "
+                f"[version-update] {vu.PLUGIN_NAME} {ref} → "
                 f"{latest_published} — auto_update_on_new_release is off; "
                 f"run /plugin update {vu.PLUGIN_NAME} + /janitor-arm.",
             )
@@ -152,7 +161,7 @@ def main() -> int:
             line = dedupe.emit_once(
                 seen,
                 f"version-update@floor@{latest_installed}->{latest_published}",
-                f"version-update: {latest_installed} -> {latest_published} detected; "
+                f"version-update: {ref} -> {latest_published} detected; "
                 "the ai-maestro server owns this chore and no flag is raised on this "
                 "host, so the update rides the 4 h cadence floor (not the <=15 min "
                 "flag path)",

@@ -172,6 +172,46 @@ def registry_install_records() -> list[dict]:
     return [r for r in recs if isinstance(r, dict)] if isinstance(recs, list) else []
 
 
+def registered_user_version(records: list[dict]) -> str:
+    """The `version` of the USER-scope install record, or "" when there is none.
+
+    TRDD-ADFIO49Q: the plugin CACHE is not proof of an install. publish.py's smoke install
+    (and any project-local install) can put the newest release into the shared cache while
+    the user-scope install stays on the old version, so "highest cache dir" read as
+    "installed" and the update never ran. The registry record is what
+    `claude plugin update --scope user` actually obeys.
+
+    User scope ONLY: arm_prepare refuses to arm the janitor at any other scope, and a min
+    over every scope would include dead or pinned local entries and keep the check "behind"
+    forever (an update request on every heartbeat). Non-semver -> "": `_semver_tuple` maps
+    bad input to (-1,), which would read as behind forever. Pure — no I/O."""
+    for rec in records:
+        if rec.get("scope") == "user":
+            version = rec.get("version")
+            return version if isinstance(version, str) and _SEMVER_RE.match(version) else ""
+    return ""
+
+
+def update_reference(cache_latest: str, registered_user: str) -> str:
+    """The version the update check compares against GitHub: the user-scope registry
+    version when known, else the cache's highest version (TRDD-ADFIO49Q). Pure."""
+    return registered_user or cache_latest
+
+
+def update_succeeded(
+    *, user_before: str, user_after: str, cache_before: str, cache_after: str,
+) -> bool:
+    """True iff an `attempt_auto_update` that reported success really advanced something.
+
+    With a user-scope record (`user_before` set) only the registry advancing counts: the
+    cache may already hold the newest release before the update (TRDD-ADFIO49Q), so a
+    cache that did not move proves nothing. Without a user record the cache advancing is
+    the only signal (the pre-ADFIO49Q rule). Pure — no I/O."""
+    if user_before:
+        return bool(user_after) and _semver_tuple(user_after) > _semver_tuple(user_before)
+    return cache_after != cache_before
+
+
 def detect_install_scopes() -> list[str]:
     """Return every scope where the plugin is actually INSTALLED.
 
@@ -518,26 +558,37 @@ def do_auto_update_if_needed(plugin_root: Path,
     ) or ""
     if not latest_published or not latest_installed:
         return (False, latest_installed, latest_published)
-    if latest_published == latest_installed:
+    # TRDD-ADFIO49Q: compare GitHub against the USER-scope registry version, not the cache's
+    # highest dir — a publish smoke install put 3.9.5 in the cache while user scope stayed
+    # 3.9.4, so the cache-only check read "current" and the update never ran. Falls back to
+    # the cache when there is no user record (nothing else to compare against).
+    user_before = registered_user_version(registry_install_records())
+    ref = update_reference(latest_installed, user_before)
+    if latest_published == ref:
         return (False, latest_installed, latest_published)
-    if _semver_tuple(latest_installed) >= _semver_tuple(latest_published):
-        # Cache is at or ahead of GitHub — pre-release / dev cache. Silent.
+    if _semver_tuple(ref) >= _semver_tuple(latest_published):
+        # Installed is at or ahead of GitHub — pre-release / dev install. Silent.
         return (False, latest_installed, latest_published)
 
     if not attempt_auto_update(log_writer, update_log_path):
         return (False, latest_installed, latest_published)
 
-    # Re-list to confirm the cache actually advanced; if not, treat as
-    # failure (the `claude` CLI may have reported success without
-    # downloading the new dir).
+    # Re-check that something really advanced; if not, treat as failure (the `claude` CLI
+    # may have reported success without installing). With a user record the registry must
+    # advance — the cache may already have held the newest release (TRDD-ADFIO49Q).
     refreshed = list_installed_versions(cache_parent)
     new_latest = refreshed[-1] if refreshed else latest_installed
-    if new_latest == latest_installed:
+    user_after = registered_user_version(registry_install_records())
+    if not update_succeeded(
+        user_before=user_before, user_after=user_after,
+        cache_before=latest_installed, cache_after=new_latest,
+    ):
         log_writer(
-            "auto-update reported success but cache version did not advance — "
-            "treating as failure",
+            "auto-update reported success but the user-scope registry and the cache "
+            "version did not advance — treating as failure",
         )
         return (False, latest_installed, latest_published)
+    # Returned version stays the highest CACHE dir: the C3 pin path needs a real directory.
     return (True, new_latest, latest_published)
 
 
