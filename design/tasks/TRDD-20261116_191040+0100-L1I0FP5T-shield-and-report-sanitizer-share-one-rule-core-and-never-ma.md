@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T21:13:51+0100
+updated: 2026-11-16T21:54:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,6 +35,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-16T19:58:23+0100 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-11-16T19:58:28+0100 main-agent: step 1 done: ssh-public-key rule in the shield core (no leading word boundary, so a key after an escape is hidden; it also hides xssh-rsa AAAA..., which hides more, never less). cookie as a secret name is deferred: adding it broke 11 pinned tests because the assignment pass swallows the gitlab-session-cookie kind; it needs a cookie-aware assignment pass and a false-match measurement first.
 - 2026-11-16T21:13:51+0100 main-agent: step 2 done, shield floors widened to the report-sanitizer floors (owner order: same secret types in both tools): GitHub classic body 30 to 20, Hugging Face 34 to 30 with no trailing word boundary, and a new bare Bearer rule (8+ characters holding a digit, any case, no leading word boundary so a token after an escape is hidden, TRDD-5VZTPXBJ). Candidates of the new floors, counted before the change in 95,006 plugin-cache and 4,891,492 code-tree files: GitHub 14 / 293, Hugging Face 0 / 2, bare Bearer 27 / 208, short Authorization values 15 / 1,043, other Bearer forms 0 / 137; mostly placeholders and test tokens, judged by file location and masked shape (94 of 208 bare and 87 of 137 other-form hits look random). Differential through redact(), HEAD against the new core on the plugin cache: 0 spans no longer hidden, 0 kind changes, 56 new spans plus 25 repeats; shield gate 1001 pass. Accepted over-hide: placeholders in docs and tests, a value after a word ending in bearer, a sentence-final period after a Bearer value; a short-segment JWT after Bearer is now labelled bearer-token. Cost once the shield is wired: an agent can write a marker over a test token; TRDD-0Y3UW1NF (write-back guard) blocks the wiring card TRDD-2V7OAUPE, so the guard lands first.
+- 2026-11-16T21:53:59+0100 main-agent: report-sanitizer now masks only the home prefix (8039916); the janitor caller stopped passing --project-root (c611d3e7). A local measurement (not in git) of the current home rule found these misses: about 12,600 Windows backslash paths and about 4,200 paths after a literal backslash-n or backslash-t in the code tree, Git Bash and WSL drive paths, and about 1,000 C:/Users/<name> paths rewritten to C:~. Its false-rewrite counts come from an unvalidated context heuristic and are not a rate. The core home rule (next step) handles the drive forms, the escape boundary and the C:~ mangling.
 
 ## Design
 
@@ -52,7 +53,8 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 
 ## Acceptance checklist
 
-- [ ] report-sanitizer rewrites no path except the home prefix, with tests
+- [x] report-sanitizer rewrites no path except the home prefix, with tests (evidence: report-sanitizer commit 8039916 removes every path mask except the home prefix and the -Users-<name>- slug; its tests pin that project-root, plugin-cache, /Volumes, temp and uid paths stay as written; janitor commit c611d3e7 stops passing --project-root)
+- [ ] report-sanitizer drops the ignored --project-root flag (code, README, spec, test) once a janitor release without it is installed (released janitor versions 3.9.0 to 3.9.8 pass it, and the sanitizer is live on PATH)
 - [ ] the secret gaps and the card rule changes are in the shield core, each with a KNOWN-MISSES entry, and the 800-test floor holds
 - [ ] report-sanitizer is re-pinned to the new core and both tools give byte-identical output on one shared fixture set covering all 54 types
 - [x] the path-floor CPV check ran on the pinned CPV v5.16.2 against a sample plugin, with PLUGIN_SKIP_GITHUB_INTEGRITY=1 (the variable the standing publish command exports and publish.py lets through): tilde, /Volumes/ and /private/tmp/ paths are not flagged in reports/ or design/, and a path holding the current account name under the macOS Users folder is CRITICAL there; whether an ancestor .gitignore changes this was not tested (evidence: a local report, path-floor-check of 2026-11-16, not in git: this repo still ignores reports/, issue 348)
