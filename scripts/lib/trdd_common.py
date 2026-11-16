@@ -117,6 +117,27 @@ class GitRootError(RuntimeError):
     """git could not resolve the main checkout root inside a known repo."""
 
 
+def git_root_error_reason(exc: BaseException) -> str:
+    """One scrubbed line (machine paths -> <path>, 200-character cap) naming why git failed.
+
+    TRDD-56FOY1U1: the single source of this fold/scrub/cap, shared by `exit_on_git_root_error`
+    and the two TRDD hooks that report the same failure, so there is no second regex copy to
+    drift. Machine paths must not reach an agent-visible line (janitor#342 item 2). A quoted path
+    (spaces allowed) becomes "<path>" inside its quotes, one pass per quote kind, so an
+    apostrophe in a double-quoted repr does not end the match. An unquoted absolute or ~ path
+    becomes "<path>" after a bracket or "=", not when glued to a word, "." "-" or "/" (so
+    "and/or" stays); it ends at whitespace, a quote, a bracket, "," or ";", and ":" stays in it
+    when a path character follows. REMAINING limits: an unquoted path with a space is cut at the
+    space (our messages quote their paths, git quotes its own); a quoted path ends at the next
+    quote of its kind, so a path holding both kinds leaks its tail; Windows drive paths are not
+    scrubbed; the "//host" part of a URL becomes "<path>"; the 200-character cut may split a
+    "<path>" marker."""
+    one_line = " ".join(str(exc).split())
+    reason = re.sub(r"\x27(?:~[\w.-]*)?/[^\x27]*\x27", "\x27<path>\x27", one_line)
+    reason = re.sub(r"\x22(?:~[\w.-]*)?/[^\x22]*\x22", "\x22<path>\x22", reason)
+    return re.sub(r"(?<![\w/.~-])(?:~[\w.-]*)?/(?:[^\s\x27\x22`()\[\]{}<>,;:]|:(?=[^\s\x27\x22`()\[\]{}<>,;:]))+", "<path>", reason)[:200]
+
+
 def exit_on_git_root_error(main_fn: Callable[[], int], name: str) -> int:
     """Run a detector `main_fn`; turn a GitRootError into ONE stderr line + exit code 1.
 
@@ -126,27 +147,14 @@ def exit_on_git_root_error(main_fn: Callable[[], int], name: str) -> int:
     DETECTOR-FAIL) — never a traceback, and NEVER a fallback root: `_main_checkout_root` is
     lru_cached, so a returned fallback path would be memoised for the whole process lifetime
     and silently point a linked worktree at the wrong LOCAL design root. Any other exception
-    propagates unchanged (fail fast). The cause is kept on the one line, machine paths replaced
-    by <path> and capped at 200 characters (janitor#342 item 2: concise, no machine paths); the
-    dispatcher records only the exit code."""
+    propagates unchanged (fail fast). The cause is kept on the one line via
+    `git_root_error_reason` (machine paths replaced by <path>, capped at 200 characters;
+    janitor#342 item 2); the dispatcher records only the exit code."""
     try:
         return main_fn()
     except GitRootError as exc:
-        # Machine paths must not reach the agent-visible line (janitor#342 item 2). A quoted path
-        # (spaces allowed) becomes "<path>" inside its quotes, one pass per quote kind, so an
-        # apostrophe in a double-quoted repr does not end the match. An unquoted absolute or ~ path
-        # becomes "<path>" after a bracket or "=", not when glued to a word, "." "-" or "/" (so
-        # "and/or" stays); it ends at whitespace, a quote, a bracket, "," or ";", and ":" stays in it
-        # when a path character follows. REMAINING limits: an unquoted path with a space is cut at the
-        # space (our messages quote their paths, git quotes its own); a quoted path ends at the next
-        # quote of its kind, so a path holding both kinds leaks its tail; Windows drive paths are not
-        # scrubbed; the 200-character cut may split a "<path>" marker.
-        one_line = " ".join(str(exc).split())
-        reason = re.sub(r"\x27(?:~[\w.-]*)?/[^\x27]*\x27", "\x27<path>\x27", one_line)
-        reason = re.sub(r"\x22(?:~[\w.-]*)?/[^\x22]*\x22", "\x22<path>\x22", reason)
-        reason = re.sub(r"(?<![\w/.~-])(?:~[\w.-]*)?/(?:[^\s\x27\x22`()\[\]{}<>,;:]|:(?=[^\s\x27\x22`()\[\]{}<>,;:]))+", "<path>", reason)[:200]
         print(
-            f"{name}: git failed resolving the design root ({reason}); skipped this pass",
+            f"{name}: git failed resolving the design root ({git_root_error_reason(exc)}); skipped this pass",
             file=sys.stderr,
         )
         return 1

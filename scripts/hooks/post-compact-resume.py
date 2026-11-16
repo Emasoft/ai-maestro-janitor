@@ -144,6 +144,10 @@ def _trdd_paths(project_root: Path) -> list[Path]:
     """
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if plugin_root:
+        # TRDD-56FOY1U1: the import and the call sit in SEPARATE try blocks. A `except
+        # trdd_common.GitRootError` on a try that also holds the import raises NameError when the
+        # import itself failed, and that NameError would escape the hook. The `else` clause runs
+        # only after a successful import, so `trdd_common` is always bound in it.
         try:
             scripts = Path(plugin_root) / "scripts"
             # BOTH entries: `from lib import …` needs scripts/ on the path, and a lib module's
@@ -153,10 +157,25 @@ def _trdd_paths(project_root: Path) -> list[Path]:
                 if entry not in sys.path:
                     sys.path.insert(0, entry)
             from lib import trdd_common  # noqa: E402 - local package, not PyPI
-
-            return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_root))]
         except Exception:  # noqa: BLE001 -- degrade to the project board; never break resume
             pass
+        else:
+            try:
+                return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_root))]
+            except Exception as exc:  # noqa: BLE001 -- degrade to the project board; never break resume
+                # TRDD-56FOY1U1: a failed `git worktree list` used to vanish here, and LOCAL-scope
+                # cards silently dropped out of the resume directive. Say so on stderr. The reason
+                # formatting and the print have their own guard so this hook cannot die here.
+                if isinstance(exc, trdd_common.GitRootError):
+                    try:
+                        print(
+                            "[post-compact-resume] git failed resolving the design root "
+                            f"({trdd_common.git_root_error_reason(exc)}); "
+                            "the resume directive uses PROJECT-scope cards only",
+                            file=sys.stderr,
+                        )
+                    except Exception:  # noqa: BLE001, S110 -- a notice failure must not break resume
+                        pass
     tasks_dir = project_root / "design" / "tasks"
     if not tasks_dir.is_dir():
         return []
