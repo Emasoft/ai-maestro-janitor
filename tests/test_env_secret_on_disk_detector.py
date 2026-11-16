@@ -7,6 +7,7 @@ path are reported, the value never appears in any output, log, state file or pro
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -444,3 +445,27 @@ def test_the_pass_line_prints_the_sweep_phase_seconds_when_the_listing_was_not_c
     assert result.returncode == 0, result.stderr
     log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
     assert "listing cut after" not in log and "; seconds: listing 4.2, fresh 1.1, backlog 2.3, trash " in log
+
+
+def test_a_second_pass_while_one_holds_the_lock_changes_nothing(tmp_path: Path) -> None:
+    """A pass that finds the project lock held prints nothing, leaves the state file byte-identical and logs that it was skipped (TRDD-ZANQ1QW0)."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    (project / "notes.txt").write_text("nothing to find\n")
+    assert _run(tmp_path, project, value).returncode == 0
+    state_dir = project / ".janitor" / "state"
+    cursor = state_dir / "env-secret-on-disk.cursor.json"
+    before = cursor.read_bytes()
+    # A file that an unlocked pass WOULD report and record in the state file.
+    (project / "reports_dev" / "dump.txt").write_text(f"leak {value}\n")
+    lock_fd = os.open(state_dir / "env-secret-on-disk.lock", os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        second = _run(tmp_path, project, value)
+    finally:
+        os.close(lock_fd)  # closing the descriptor releases the lock
+    assert second.returncode == 0, second.stderr
+    assert second.stdout == ""
+    assert cursor.read_bytes() == before
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
+    assert "another pass of this project holds the lock: this pass was skipped" in log

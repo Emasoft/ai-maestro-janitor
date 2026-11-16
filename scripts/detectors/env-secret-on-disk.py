@@ -35,6 +35,7 @@ still reads at most one budget of files, so repeat it until the log line says 0 
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -157,10 +158,29 @@ def _read_cursor(file: Path) -> dict:
 
 
 def main() -> int:
-    main_started = time.monotonic()  # TRDD-ZANQ1QW0: the pass line reports per-phase seconds and the whole of main() as its total
     state.init_state()
-    project = state.project_root()
     sdir = state.state_dir()
+    # TRDD-ZANQ1QW0: one pass at a time per project. dispatch.py stamps last-run-<detector>.ts only AFTER this process returns, and no lock covers a
+    # heartbeat fire, so two sessions of one project (same cron minute, same .janitor/state) can both start here. Each pass rewrites the one cursor file
+    # whole at the end, so the later write would drop what the other recorded (flagged list, retries, covered range, trash positions), and both would
+    # raise and clear CRED-002 issues and write the same -seen.txt. The lock is a SEPARATE file that is never written, renamed or deleted, so it always
+    # guards the same inode: locking the cursor file would not work, atomic_write replaces it by rename. Non-blocking: a pass that finds it held is
+    # skipped, the next heartbeat runs again. Held (descriptor open) from before the cursor read to after the cursor write and the pass line.
+    lock_fd = os.open(sdir / f"{_NAME}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            state.log_line(_NAME, "another pass of this project holds the lock: this pass was skipped")
+            return 0
+        return _pass(sdir)
+    finally:
+        os.close(lock_fd)
+
+
+def _pass(sdir: Path) -> int:
+    main_started = time.monotonic()  # TRDD-ZANQ1QW0: the pass line reports per-phase seconds and the whole of this pass as its total
+    project = state.project_root()
     cursor_file = sdir / f"{_NAME}.cursor.json"
     seen = sdir / f"{_NAME}-seen.txt"
     saved = _read_cursor(cursor_file)
