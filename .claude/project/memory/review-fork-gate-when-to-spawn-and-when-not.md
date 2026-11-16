@@ -1,8 +1,8 @@
 ---
 name: review-fork-gate-when-to-spawn-and-when-not
-description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork / the parent applies the closing verdict without another round / an independent read instead of another round / 43 rounds on one card where every round found a defect in the previous rounds own fix / the closing verdict closes the chain not the artefact / the rule as first written was unsafe and is corrected / what question do I give the fresh reviewer / is the fresh reader asking the same question I asked / re-reading the grounds is how the findings were checked not trusted / what does the independent reader's verdict do / the re-read obligation is prose and gets skipped / a re-wording review chain does not run out / re-wording an absolute into a narrower absolute is a treadmill / cut the clause instead of running another review round / bounded by patience only as long as each round re-words / a cut ends the treadmill not necessarily the chain / each round's fix carried a fresh claim the next round caught / my review chain keeps finding defects in its own fixes"
+description: "the adversarial review loop is eating the session / forks keep finding smaller and smaller things / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / the parent applies the closing verdict without another round / an independent read instead of another round / 43 rounds on one card where every round found a defect in the previous rounds own fix / the closing verdict closes the chain not the artefact / what question do I give the fresh reviewer / is the fresh reader asking the same question I asked / re-reading the grounds is how the findings were checked not trusted / what does the independent reader's verdict do / the re-read obligation is prose and gets skipped / a re-wording review chain does not run out / re-wording an absolute into a narrower absolute is a treadmill / cut the clause instead of running another review round / bounded by patience only as long as each round re-words / a cut ends the treadmill not necessarily the chain / each round's fix carried a fresh claim the next round caught / my review chain keeps finding defects in its own fixes"
 ocd: 2026-09-05
-lmd: 2026-10-20
+lmd: 2026-11-16
 publish-globally: true
 metadata:
   node_type: memory
@@ -13,73 +13,12 @@ metadata:
 # review-fork-gate-when-to-spawn-and-when-not
 
 
-^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — clause (c) is load-bearing; the first version omitted it and the rule was unsound.", keywords: should_I_spawn_a_fork_for_a_docs-only_commit when_is_a_review_fork_worth_it prose-only_turn_triggered_the_gate review-fork_gate_fires_on_every_turn is_a_card_closure_worth_a_fork how_to_decline_the_review_gate_honestly what_counts_as_executable_behaviour what_counts_as_a_verdict what_counts_as_evidence_characterisation clause_c_load_bearing_evidence_claims spawn_criterion_three_clauses review_fork_spawn_rule, ocd: 2026-09-05, lmd: 2026-09-28]
-**SPAWN a review fork when the turn (a) changed EXECUTABLE BEHAVIOUR — code, a test, a script, a
-config the machine reads; (b) asserted a VERDICT — closing a card, claiming a fix works, a rules
-interpretation, a memory write; or (c) CHARACTERISED WHAT EVIDENCE ESTABLISHES — "this shows X",
-"this bounds Y", "this was measured", a withdrawal, a restatement of what a result means.**
-Only a turn that is none of those gets a re-read instead.
-
-**⚠ CLAUSE (c) IS LOAD-BEARING AND THE FIRST VERSION OF THIS ATOM OMITTED IT — the rule was
-unsound, and its own session refutes it.** Written with (a)+(b) only, it would have suppressed the
-two forks that caught the worst late errors of the session that produced it. Both commits changed
-no code, closed no card and interpreted no rule; both were things I had re-read and was satisfied
-with:
-- a "negative result" from 30 green runs that **tested nothing** — the hypothesis predicts
-  leftover state from a FAILING run, and every run passed;
-- a **polarity inversion** (leakage confounds a RED result, not a green one) plus the wrong
-  statistical assumption named (independence, when the failure is identical-distribution).
-A third caught a memory atom citing **another agent's measurement of a different operation** as
-evidence for mine. **A claim about what evidence shows is not a "verdict" by the (b) definition,
-and it is exactly where the errors were.** The rule caught decisions and missed inferences.
 
 
-^ATOM-J2L0-SMXK [desc: "Operating the spawn rule in practice: findings shrink in scope not materiality; the gate fires even on exempt turns — decline in one line; a fork's STOP is scoped; commit first, fork last.", keywords: stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review gate_blocks_the_turn_with_nothing_to_review review-supervisor_says_changes_unreviewed review_gate_fires_again_after_commit commit_then_review_order gate_fires_on_genuinely_exempt_turns fork_says_stop_is_a_finding rescope_after_a_stop_finding git_diff_check_for_executable_changes, ocd: 2026-09-28, lmd: 2026-09-28]
-
-**The honest cost curve:** findings shrank in SCOPE but not reliably in MATERIALITY, and the ones
-that stayed material were about evidence claims. That is the shape to prune by — not "early forks
-good, late forks prose".
-
-**The gate keeps firing on turns that are genuinely none of (a)-(c);** it is a Stop hook and
-cannot tell. Say so in one line and do not spawn. Checkable start:
-`git diff --name-only HEAD~1 HEAD | grep -v '\.md$'` — non-empty ⇒ (a). It does not decide (b)
-or (c); read the diff for those.
-
-**A fork that says STOP is a finding — act on it, SCOPED TO WHAT THAT FORK WAS REVIEWING.** "Stop
-reviewing this card's prose" is not "stop reviewing". Do the fixes it names, then stop on that
-subject regardless of what a further review would say; rescoping to a different subject is
-legitimate and is not defiance.
-
-**A commit after the review fork re-arms the gate — commit first, then spawn the fork last.** [^1] (overstated; corrected by [^2]) [^2]
 
 
-^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — the exemption is small by construction; an earlier 'four forks suppressed' claim was struck as uncounted", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress the_exemption_is_small_by_construction how_many_forks_were_correctly_suppressed why_was_the_four_forks_suppressed_claim_struck a_number_that_reads_as_counted_and_was_not trdd_and_memory_prose_is_mostly_evidence_characterisation clause_c_in_place_what_does_the_rule_reduce_to, ocd: 2026-09-05, lmd: 2026-10-17]
-**BE HONEST ABOUT HOW MUCH THIS EXEMPTS: not much.** With clause (c) in place the rule reduces
-to **"fork unless the turn is MECHANICAL or purely SUBTRACTIVE"** — because TRDD and memory prose
-is *mostly* evidence characterisation. **The exemption is small by construction.**
-
-*(An earlier version claimed "roughly FOUR forks correctly suppressed" on the originating
-session. STRUCK — never enumerated, and the count would have conflated three different reasons
-for not spawning: the criterion firing, a RESCOPE rather than a decline, and one decline driven
-by context pressure. Only the first is the rule's yield. A number that reads as counted and was
-not, inside the page that warns against exactly that.)*
 
 
-^ATOM-F1CG-2AFB [desc: "Which turns genuinely get no review fork (timestamp/frontmatter bump, pure formatting or link repair, correcting a false commit-message sentence); the rule's value is a checkable reason to decline", keywords: what_turn_correctly_gets_no_fork examples_of_turns_needing_no_review can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires the_value_is_a_checkable_reason_to_decline declining_the_fork_out_of_fatigue timestamp_or_frontmatter_bump_needs_no_fork formatting_or_link_repair_needs_no_fork relaying_another_agents_report_without_endorsing correcting_a_false_commit_message_removes_a_claim spawn_when_unsure_which_clause_fires, ocd: 2026-10-17, lmd: 2026-10-17]
-
-**What genuinely gets no fork** — turns making no claim about evidence at all: a timestamp or
-frontmatter bump; a pure formatting or link repair; correcting a false sentence in an earlier
-commit message (that REMOVES a claim rather than making one). *Untested, listed for completeness:
-relaying another agent's report without endorsing it — every relay on the originating session
-carried the relayer's own assessment, so this case was never exercised.*
-
-**The value is not the exemption — it is having a CHECKABLE REASON to decline**, so declining is
-a judgment you can defend rather than fatigue wearing a rule as a costume. That distinction is
-the whole point, given this rule was first written by the agent it exempts, at the end of a long
-session, and had to be corrected for exactly that bias.
-
-**⇒ IF YOU CANNOT NAME WHICH OF (a), (b) OR (c) FIRES, THAT IS THE ANSWER: SPAWN.** A rule you
-have to squint at is being used as a rationalisation.
 
 
 ^ATOM-04A3-Y4N5 [desc: "measured across one review chain 2026-09-05: every fork that had a prior remediation to review (4 of 4) found its sharpest defect in that remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-10-10]
@@ -161,12 +100,11 @@ DO NOT run a multi-round review loop as a fresh fork per round, BECAUSE later ro
 
 ## See also
 
+- [[review-fork-gate-which-turns-need-a-fork]]
 - [[yamllint-header-review-cycle-2026-09-29]]
 
 ## Notes and lessons learned
 
-[^1]: [id: ATOM-4YHQ-4RO2, status: valid, keywords: "review_gate_fires_again_after_commit second_review_fork_for_the_same_change NO_REVIEW_POSSIBLE_exit_rejected commit_after_review_re-arms_the_gate positional_exit_review_gate write_after_the_last_review review_fork_costs_500k_tokens commit_then_review_order Stop_hook_review-gate_loop agentlenspro_review-gate", ocd: 2026-09-23, lmd: 2026-09-23] DO NOT commit (or run any write-shaped command) AFTER spawning the review fork for that same change, BECAUSE the Stop-hook gate is positional: a write after the last review re-arms it, and the `REVIEW-GATE: NO REVIEW POSSIBLE` exit is rejected whenever a spawn was possible, so a verified one-line edit costs a second ~500k-token review (measured 2026-09-24, commits 3bcea8ac and 0e5d02a1). DO commit first, then spawn the review fork as the last tool call of the turn.
-[^2]: [id: ATOM-D4IP-N3SM, status: valid, keywords: "review_gate_fires_again_after_commit second_review_fork_for_the_same_change NO_REVIEW_POSSIBLE_exit_rejected commit_after_review_re-arms_the_gate positional_exit_review_gate write_after_the_last_review review_fork_costs_500k_tokens commit_then_review_order Stop_hook_review-gate_loop agentlenspro_review-gate", ocd: 2026-09-23, lmd: 2026-09-23] DO NOT commit (or run any write-shaped command) AFTER spawning the review fork for that same change, BECAUSE the Stop-hook gate is positional: a write after the last review re-arms it, and the `REVIEW-GATE: NO REVIEW POSSIBLE` exit was rejected three times out of five on 2026-09-24 (acceptance rule unknown), so a verified edit can cost a second ~500k-token review. DO commit first, then spawn the review fork as the last tool call of the turn.
 [^3]: [id: ATOM-V7HK-BC3W, status: valid, keywords: "3_of_4_or_4_of_4_forks how_many_forks_found_a_defect_in_the_remediation fork_count_mismatch_description_vs_body review_chain_2026-09-05_count is_the_fork_count_verified description_aligned_to_body_without_source the_atom_description_contradicts_its_body 4-fork_chain_or_five_forks memory_fact_edited_without_reading_the_source which_count_is_right_3_or_4 remediation_defect_rate_number", ocd: 2026-10-10, lmd: 2026-10-10] DO NOT quote the fork count of this atom as verified, BECAUSE until 2026-10-11 its description said '4-fork chain, 3 of 4' while its body says '4 of 4' and lists four members; on 2026-10-11 the description was aligned to the body WITHOUT the 2026-09-05 review chain being re-read, so the true count may be 3. DO re-read that session's chain before relying on the number; the qualitative finding (remediation is the least reviewed work) does not depend on it.
 [^4]: [id: ATOM-DA5X-I061, status: valid, desc: "a review loop has one owner: the round that names no remaining load-bearing layer closes it; the parent applies that verdict without spawning another round", keywords: "43_rounds_one_card_~4.5M_tokens_measured_once_n=1_became_43_rounds per_round_fork_spawned_for_every_commit the_loop_was_closed_by_the_review_round_that_named_no_remaining_layer spawn_one_fork_per_new_change_not_per_round the_parent_applies_the_closing_verdict_without_another_round review_chain_that_never_declares_closure when_to_stop_spawning_review_forks how_many_review_rounds_is_too_many my_review_chain_keeps_finding_new_defects_in_its_own_fixes should_I_spawn_another_review_fork_for_this_change independent_read_instead_of_another_round", ocd: 2026-10-20, lmd: 2026-10-20] DO NOT spawn a fresh review fork for every commit inside one review loop, BECAUSE the lesson ATOM-LS2E-OQ8N records is the rule and this is its second measurement, on a bigger case: 43 rounds on ONE TRDD card (TRDD-IYL8GCAR, 2026-10-20), each round a fresh fork spawned because the Stop-hook gate re-armed on every commit, where the 2026-10-08 measurement was 12 rounds. The rounds did keep finding real defects -- but every round after the tenth found a defect in the PREVIOUS round's own fix, and the round that names no remaining load-bearing layer had already appeared (the thirty-second round) while the loop continued for eleven more rounds. DO treat the first round that says "the card is finished as far as this review can find" as the loop's CLOSING VERDICT: apply its findings, and do NOT spawn another round to confirm it -- a confirming round is new work only if it is checking a NEW change, not if it is adjudicating whether the previous loop may stop. DO add the independent read as the loop's real terminator, not another round of the same chain: a reader with NO history of the chain found, in the same case, a non-discriminating observation presented as independent proof and a missing reassurance for the real audience -- neither of which forty rounds of the same chain had found. That is the cheapest and highest-yield check to run when a chain starts finding defects in its own output.
 [^5]: [id: ATOM-KB2J-2T40, status: valid, desc: "the remedy for a buggy remediation is not another review fork: re-read, mark numbers MEASURED or ESTIMATED, list the members of every count", keywords: "the_remedy_is_not_another_fork_second_measurement_2026_10_20 43_rounds_on_one_card_where_40_found_defects_in_the_previous_rounds_own_fix re_read_catches_what_another_fork_does_not_mark_each_number_MEASURED_or_ESTIMATED review_does_not_converge_on_remediation_measured_again when_a_fork_finds_a_defect_in_the_last_forks_defect_stop_and_re_read a_count_without_its_members_is_an_estimate_wearing_a_number the_chain_kept_running_for_eleven_rounds_after_it_had_converged my_review_loop_is_not_converging_what_now is_the_fix_correct_now_spawn_another_fork should_I_spawn_another_review_fork_for_my_fix", ocd: 2026-10-20, lmd: 2026-10-20] THIS LESSON WAS MEASURED A SECOND TIME, larger, on 2026-10-20, and the rule held. 43 review rounds ran against ONE TRDD card (TRDD-IYL8GCAR), each a fresh fork; every round after the tenth found a defect in the PREVIOUS round's own fix -- exactly the pattern this atom names -- and the loop CONTINUED for eleven rounds after a round had already said the card was finished as far as it could find. What actually caught the defects the chain missed was NOT another fork of the same kind: it was (a) a re-read of the SOURCE for every ground a claim rested on, which is the "one re-read" this atom already prescribes, and (b) ONE independent read by a reviewer with no history of the chain, which found a non-discriminating observation presented as independent proof and a missing reassurance for the real audience -- neither of which forty rounds of the same chain had found. DO treat the first round that names no remaining load-bearing layer as the loop's CLOSING VERDICT, and DO reach for the independent reader rather than the next fork in the chain when a chain starts finding defects in its own output. The OTHER half of that remedy -- what to do to the FIX rather than to the chain -- is the sibling lesson [^12]: when each round's re-wording carries a fresh claim, CUT instead of re-wording.
