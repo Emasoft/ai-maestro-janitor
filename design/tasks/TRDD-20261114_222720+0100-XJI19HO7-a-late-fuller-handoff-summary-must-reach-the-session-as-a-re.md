@@ -22,11 +22,11 @@ implementation-commits: [726f2c74]
 
 # A late fuller handoff summary must reach the session as a resume cue instead of a bare drift line (issue 356)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-14
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-16
 
-- NEXT ACTION: write the failing test (both phases forced in one fire), then change _phase_late_summary_drift to emit a [janitor-resume] cue guarded by _decision_fired. One bounded change in scripts/dispatch.py; tests only run before the push.
-- Status: not started. Parent work: TRDD-V8GWJVFN; GitHub issue 356.
-- 2026-11-16: 726f2c74 (in v3.9.2 and v3.9.3) implements the design: _phase_late_summary_drift now emits one [janitor-resume] via _emit_decision carrying every pending key's line, and returns before any stamp when _decision_fired; tests added for the resume cue and the keep-going collision. Supersedes 'Status: not started' above. Still open: live check; _stamp_resume to mute keep-going was not added (unverified whether wanted).
+- NEXT ACTION (2026-11-16): live check only — when a fuller handoff summary lands after the template one, confirm the session receives exactly one [janitor-resume] carrying it (726f2c74).
+- Status: implemented in 726f2c74 (v3.9.2, v3.9.3); live check pending. Parent work: TRDD-V8GWJVFN; GitHub issue 356.
+- 2026-11-16: 726f2c74 (in v3.9.2 and v3.9.3) implements the design: _phase_late_summary_drift now emits one [janitor-resume] via _emit_decision carrying every pending key's line, and returns before any stamp when _decision_fired; tests added for the resume cue and the keep-going collision. Supersedes the earlier 'Status: not started' line. Still open: live check; _stamp_resume to mute keep-going was not added (unverified whether wanted).
 
 ## Problem
 

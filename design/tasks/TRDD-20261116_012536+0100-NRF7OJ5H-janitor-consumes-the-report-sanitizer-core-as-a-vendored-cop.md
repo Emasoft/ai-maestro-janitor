@@ -22,7 +22,7 @@ approval-datetime: 2026-11-16T01:25:36+0100
 # Janitor consumes the report-sanitizer core as a vendored copy
 
 ## STATE — 2026-11-16
-- NEXT ACTION: none until report-sanitizer finishes its merge (its card: Merge the janitor secret shield into report-sanitizer, increment 6 = swap). This tree's hooks/secret-shield/ stays upstream until then.
+- NEXT ACTION: none until report-sanitizer finishes its merge (its card ZADXHV6W in the report-sanitizer repo: Merge the janitor secret shield into report-sanitizer, increment 6 = swap). This tree's hooks/secret-shield/ stays upstream until then.
 ## Scope
 1. hooks/secret-shield/{patterns.ts,rules/} become a vendored copy of report-sanitizer core/, pinned by hash, with a test.
 2. CI install: .github/workflows/ci.yml:108-123 fetches sanitize_reports.py as one raw file pinned by SHA; after the swap the tool needs its core/ folder and bun, so CI installs bun and checks out the repo at a pinned commit.

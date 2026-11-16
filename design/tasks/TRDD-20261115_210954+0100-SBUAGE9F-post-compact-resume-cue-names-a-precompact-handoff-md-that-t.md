@@ -4,7 +4,7 @@ title: post-compact resume cue names a precompact-handoff.md that this compactio
 column: testing
 status: tasked
 created: 2026-11-15T21:09:54+0100
-updated: 2026-11-16T01:31:56+0100
+updated: 2026-11-16T01:36:21+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,7 @@ Issue 356 live evidence 2026-11-15 20:26:42: post-compact-resume.py::_handoff_po
 
 - 2026-11-15T21:09:54+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-16 — 7b174748 (in v3.9.2 and v3.9.3) implements the fix: post-compact-resume.py _handoff_pointer requires mtime within 900 s; pre-compact-handoff.py _is_janitor_skill strips the plugin prefix. Column stays testing; live check pending.
+
+## STATE
+
+- 2026-11-16: implemented in 7b174748 (v3.9.2, v3.9.3): post-compact-resume.py _handoff_pointer requires the handoff file to be at most 900 s old; pre-compact-handoff.py _is_janitor_skill strips the plugin prefix. NEXT ACTION: live check after the next compaction (the cue must not name a stale precompact-handoff.md). Evidence line also in the Approval log.
