@@ -1,10 +1,10 @@
 ---
 trdd-id: XNZFKX0L
 title: A CRED-002 finding is withdrawn for a file the env-secret sweep did not read
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-11-16T10:28:03+0100
-updated: 2026-11-16T11:37:56+0100
+updated: 2026-11-16T11:50:38+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,12 +17,13 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-16T10:28:03+0100
+implementation-commits: [9f9e7f5d]
 ---
 
 # A CRED-002 finding is withdrawn for a file the env-secret sweep did not read
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-16
-- NEXT ACTION: a worker is implementing the brief in reports_dev/xnzfkx0l/brief.md; read its report there, check that each new test names the tier that forces the re-read (a fixed mtime of 100.0 with covered [[1.0, ""], [1.0, ""]] is the FRESH tier), then commit the four files by name.
+- 2026-11-16 DONE: landed in 9f9e7f5d. Checks: the five test files (detector 16, trash tier 14, env_secrets 31, registration 3, walk invariants 3 passed) and ruff, mypy (549 files) and pyright ran clean just before the last test-only edit (the given-up retries assertion); after that edit the detector test file (16 passed) and ruff on it were rerun. Mutation in a scratch copy: with the old withdrawal test (path in keys or path in trash_seen) all five new tests fail; with the give-up branch returning False the given-up test fails on its retries check while the failed-read test passes. Kept as before, not changed here: a flagged file that is deleted is never withdrawn, because it is never read again (recorded on TRDD-ZFD3KBM3).
 - 2026-11-16 design (advisor-reviewed): a CRED-002 finding is withdrawn only for a path whose CONTENT was scanned for the live secret values this pass. env_secrets._read_one records the path in a new SweepReport field (read) only in its success branch and only when the exact matcher ran (matcher is not None and matcher.table): the scanned counter also rises on a dump-shape-only read with no matcher, so it is the wrong signal, and a pass with no usable secret must not clear a finding. The detector changes only its withdrawal test (path in keys or path in trash_seen becomes path in the read set of either tier); keys stays, because hold() and raise_order need the failed keys. The trash tier shares _read_one, so its read list replaces trash_seen.
 - 2026-11-16 tests must force the re-read: a flagged file inside the covered range is never listed, so a stays-flagged test would pass on the old code too; each test sets mtimes or writes a covered range that excludes the file, and each is shown to fail with the old test put back. Cases: a failed read (chmod 0), a file over MAX_FILE_BYTES (patched through the runpy wrapper), a given-up file (retries at MAX_FAIL_RETRIES), and a pass with no secret in the environment.
 - 2026-11-16 open follow-up, not in this card: flagged holds paths only, so a pass whose secret set lacks the secret behind a finding (another session, or after a rotation) reads the file clean and withdraws it. Fixing that needs the secret name or fingerprint kept with each flagged path, a state-shape change.
@@ -33,3 +34,10 @@ In scripts/detectors/env-secret-on-disk.py, main() withdraws a CRED-002 finding 
 ## Approval log
 
 - 2026-11-16T10:28:03+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T11:50:38+0100 — COMPLETE by main-agent@ai-maestro-janitor. fix landed in 9f9e7f5d with tests and mutation proof; acceptance met.
+
+## Acceptance
+
+- [x] A flagged file whose read fails, that is over MAX_FILE_BYTES, or that is given up on keeps its CRED-002 finding, in both tiers (tests in tests/test_env_secret_on_disk_detector.py and tests/test_env_secrets_trash_tier.py, landed in 9f9e7f5d).
+- [x] A pass with no secret in its environment withdraws no finding (test_a_pass_with_no_secret_in_the_environment_withdraws_nothing).
+- [x] Each new test fails with the old withdrawal test put back (mutation in a scratch copy, 5 failed), and the given-up test fails when the give-up branch is mutated while the failed-read test passes.
