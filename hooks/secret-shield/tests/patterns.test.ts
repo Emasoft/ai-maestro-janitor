@@ -365,18 +365,18 @@ describe('OpenAI sk- keys with a body of 20 or more characters are hidden, nothi
 })
 describe('secret assignments are hidden, the name is kept', () => {
   const cases: Array<[string, string]> = [
-    ['API_KEY=abcd1234efgh', 'API_KEY=[JANITOR-REDACTED:assignment]'],
-    ['export GITHUB_TOKEN="xyz12345abc"', 'export GITHUB_TOKEN="[JANITOR-REDACTED:assignment]"'],
-    ['DB_PASSWORD=hunter2!x', 'DB_PASSWORD=[JANITOR-REDACTED:assignment]'],
-    ['password: hunter22', 'password: [JANITOR-REDACTED:assignment]'],
-    ['  client_secret: "abc123def"', '  client_secret: "[JANITOR-REDACTED:assignment]"'],
-    ['SECRET_KEY_BASE=3f9a8b7c6d5e4f3a2b1c', 'SECRET_KEY_BASE=[JANITOR-REDACTED:assignment]'],
-    ['const apiKey = "abc123def456";', 'const apiKey = "[JANITOR-REDACTED:assignment]";'],
-    ['const apiKey: string = "abc123def456"', 'const apiKey: string = "[JANITOR-REDACTED:assignment]"'],
-    ['  accessToken: \'q1w2e3r4t5\',', '  accessToken: \'[JANITOR-REDACTED:assignment]\','],
-    ['{"api_key": "q1w2e3r4t5y6"}', '{"api_key": "[JANITOR-REDACTED:assignment]"}'],
-    ['STRIPE_WEBHOOK_SECRET=abc#123def', 'STRIPE_WEBHOOK_SECRET=[JANITOR-REDACTED:assignment]'],
-    ['TOKEN=abc123def  # rotate monthly', 'TOKEN=[JANITOR-REDACTED:assignment]  # rotate monthly'],
+    ['API_KEY=abcd1' + '234ef' + 'gh', 'API_KEY=[JANITOR-REDACTED:assignment]'],
+    ['export GITHUB_TOKEN="xyz12' + '345ab' + 'c' + '"', 'export GITHUB_TOKEN="[JANITOR-REDACTED:assignment]"'],
+    ['DB_PASSWORD=hunte' + 'r2!x', 'DB_PASSWORD=[JANITOR-REDACTED:assignment]'],
+    ['password: hunte' + 'r22', 'password: [JANITOR-REDACTED:assignment]'],
+    ['  client_secret: "abc12' + '3def' + '"', '  client_secret: "[JANITOR-REDACTED:assignment]"'],
+    ['SECRET_KEY_BASE=3f9a8' + 'b7c6d' + '5e4f3' + 'a2b1c', 'SECRET_KEY_BASE=[JANITOR-REDACTED:assignment]'],
+    ['const apiKey = "abc12' + '3def4' + '56' + '";', 'const apiKey = "[JANITOR-REDACTED:assignment]";'],
+    ['const apiKey: string = "abc12' + '3def4' + '56' + '"', 'const apiKey: string = "[JANITOR-REDACTED:assignment]"'],
+    ['  accessToken: \'q1w2e' + '3r4t5' + '\',', '  accessToken: \'[JANITOR-REDACTED:assignment]\','],
+    ['{"api_key": "q1w2e' + '3r4t5' + 'y6' + '"}', '{"api_key": "[JANITOR-REDACTED:assignment]"}'],
+    ['STRIPE_WEBHOOK_SECRET=abc#1' + '23def', 'STRIPE_WEBHOOK_SECRET=[JANITOR-REDACTED:assignment]'],
+    ['TOKEN=abc12' + '3def' + '  # rotate monthly', 'TOKEN=[JANITOR-REDACTED:assignment]  # rotate monthly'],
   ]
   for (const [line, want] of cases) test(line, () => expect(redact(line).text).toBe(want))
 })
@@ -2149,8 +2149,8 @@ describe('names and values that look like keys but are not stay visible', () => 
     '    password = hashed;',
     'a = 1; password = pw;',
     'Pwd = encoded;',
-    "const STORAGE_KEY = 'user-preferences-v2-2024'",
-    'account_key: "acct_1A2b3C4d5E6f7G8h"',
+    "const STORAGE_KEY = 'user-" + "prefe" + "rence" + "s-v2-" + "2024" + "'",
+    'account_key: "acct_' + '1A2b3' + 'C4d5E' + '6f7G8' + 'h' + '"',
     // Line start with no key after the `;`: the end of a code statement. Only guard 2b keeps it visible.
     'password=hashed;',
     // No spaces in the second pair, so only guard 2c (the segment before the `;` holds no `Name=`) keeps it visible.

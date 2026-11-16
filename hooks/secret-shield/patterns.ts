@@ -146,7 +146,7 @@ function isStrongName(name: string): boolean {
 
 /**
  * A value key-shaped enough for a STRONG_NAME: a base64 run of 40 or more characters with an upper-case letter, a lower-case letter and a digit (an Azure key is 88).
- * WHY no shorter branch: a "20 or more characters with a letter and a digit" rule hid `STORAGE_KEY = 'user-preferences-v2-2024'`, `account_key: "acct_1A2b3C4d5E6f7G8h"` and a lowercase hex SHA, which are slugs, ids and digests, not keys (TRDD-Q6LPJTPO).
+ * WHY no shorter branch: a "20 or more characters with a letter and a digit" rule hid a `STORAGE_KEY` slug, an `account_key` id and a lowercase hex SHA, which are slugs, ids and digests, not keys (TRDD-Q6LPJTPO).
  */
 function strongValue(value: string): boolean {
   return /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value) && /[A-Z]/.test(value) && /[a-z]/.test(value) && /\d/.test(value)
