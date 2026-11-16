@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T22:12:14+0100
+updated: 2026-11-16T22:34:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -55,7 +55,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 ## Acceptance checklist
 
 - [x] report-sanitizer rewrites no path except the home prefix, with tests (evidence: report-sanitizer commit 8039916 removes every path mask except the home prefix and the -Users-<name>- slug; its tests pin that project-root, plugin-cache, /Volumes, temp and uid paths stay as written; janitor commit c611d3e7 stops passing --project-root)
-- [x] report-sanitizer has no --project-root flag (evidence: report-sanitizer commit 8d7b2a6 removes it from the code, README and spec, and a test pins exit 2; a scan of every hook folder in the code tree and of the global git hooks folder found only the janitor's own pre-commit calling sanitize-reports, which stopped passing the flag in c611d3e7; cached janitor copies contain the old call but no hook runs them)
+- [x] report-sanitizer has no --project-root flag (evidence: report-sanitizer commit 8d7b2a6 removes it from the code, README and spec, and a test pins exit 2; a bounded scan (pre-commit and pre-push files of every hook folder up to depth 5 in the code tree, skipping _dev, worktree, node_modules and .venv folders, plus the global git hooks folder) found only the janitor's own pre-commit calling sanitize-reports, which stopped passing the flag in c611d3e7; cached janitor copies contain the old call but no hook runs them)
 - [ ] the secret gaps and the card rule changes are in the shield core, each with a KNOWN-MISSES entry, and the 800-test floor holds
 - [ ] report-sanitizer is re-pinned to the new core and both tools give byte-identical output on one shared fixture set covering all 54 types
 - [x] the path-floor CPV check ran on the pinned CPV v5.16.2 against a sample plugin, with PLUGIN_SKIP_GITHUB_INTEGRITY=1 (the variable the standing publish command exports and publish.py lets through): tilde, /Volumes/ and /private/tmp/ paths are not flagged in reports/ or design/, and a path holding the current account name under the macOS Users folder is CRITICAL there; whether an ancestor .gitignore changes this was not tested (evidence: a local report, path-floor-check of 2026-11-16, not in git: this repo still ignores reports/, issue 348)
