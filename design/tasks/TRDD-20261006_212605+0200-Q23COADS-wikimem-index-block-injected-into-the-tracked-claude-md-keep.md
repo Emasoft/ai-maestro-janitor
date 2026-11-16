@@ -4,7 +4,7 @@ title: Wikimem index block injected into the tracked CLAUDE.md keeps the file pe
 column: testing
 status: tasked
 created: 2026-10-06T21:26:05+0200
-updated: 2026-10-10T03:38:47+0200
+updated: 2026-11-16T02:37:03+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ Issue left open for the owner's decision on whether a generated index block belo
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#328 (opened 2026-10-03). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: The session start hook writes an auto-generated index block with a fresh timestamp into the tracked CLAUDE.md, so it always shows as modified and a by-name add sweeps the block into a commit. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 2026-10-07: the owner decision on #328 now lives on proposal TRDD-Q9MU9CWK (three options); this card waits on it.
+2026-11-16: janitor#328 step 1 done in 52a90b81: the CLAUDE.md wikimem index lists root topics only (9 lines), written by the installed 3.9.3 index script; a second run reported it already current and the check reported it conforming and fresh. Step 2 still open: add a page under an existing topic, rerun the index, and confirm CLAUDE.md stays clean in a fresh session.
 
 ## Approval log
 
