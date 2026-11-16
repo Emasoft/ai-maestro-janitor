@@ -1047,6 +1047,31 @@ def test_llm_ext_fallback_budget_is_measured_after_jev_spent_its_time(tmp_path, 
     assert argv[argv.index("--timeout-s") + 1] == "570", argv
 
 
+def test_llm_ext_fallback_budget_is_capped_at_600s_when_hold_outlasts_jev(tmp_path, _isolated_env):
+    """TRDD-MVUJG3C4: with the hold expiring at 2000 and Jev having used its whole 300s, hold-remaining - 30 is 1670, so llm-ext gets `--timeout-s 600` (the `_LLM_EXT_T_MAX_S` cap)."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    plugin_root = tmp_path / "plugin"
+    llm_ext_argv = tmp_path / "llm-ext-argv.txt"
+    _stub_jev_compact_appending(plugin_root, tmp_path / "argv.jsonl", exit_code=jcl.EXIT_JEV_ERROR)
+    _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary", argv_log=llm_ext_argv)
+    _write_probe_stamp(kind="unreachable", reason="DNS resolution failed")
+    clock = _FakeClock(start=0.0)
+
+    def _sleep_past_the_jev_budget(seconds: float) -> None:
+        clock.now = 300.0  # the retry backoff runs out the whole Jev budget
+
+    source, text, _detail = jcl.run_compact_with_fallback(
+        plugin_root, transcript=str(prev), out_path=tmp_path / "compacted.md",
+        session_key="k", heads_args=[], sd=state.state_dir(), deadline=300.0,
+        hold_expires=2000.0, now_fn=clock.time, sleep_fn=_sleep_past_the_jev_budget,
+    )
+
+    assert source == jcl.SOURCE_LLM_EXT, (source, text)
+    argv = llm_ext_argv.read_text(encoding="utf-8").split()
+    assert argv[argv.index("--timeout-s") + 1] == "600", argv
+
+
 # --- STATE heads: a stub trddgrep on PATH, and its absence ---------------------------------
 
 _TRDDGREP_STUB = """#!/usr/bin/env python3
