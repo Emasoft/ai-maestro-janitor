@@ -3,7 +3,7 @@ not the highest plugin-cache dir. A publish smoke install put 3.9.5 in the cache
 user-scope install stayed on 3.9.4, so the cache-only check read "current" and never updated.
 
 The registry is a real `installed_plugins.json` under a tmp HOME (registry_path() reads
-Path.home()). Stubbed at the network and CLI boundary only: resolve_latest_published (GitHub),
+Path.home()). Stubbed: resolve_latest_published (GitHub),
 attempt_auto_update (`claude plugin update`), and for the detector tests the cache listing, the
 ai-maestro server probe, and _SEMVER_RE widened so the repo checkout counts as a cache install."""
 
