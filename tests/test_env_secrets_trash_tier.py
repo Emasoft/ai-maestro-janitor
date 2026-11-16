@@ -237,6 +237,37 @@ def test_a_flagged_trash_file_that_cannot_be_read_is_not_withdrawn(tmp_path: Pat
     assert _state(project)["retries"][str(leak)] == 2  # a file that fails again keeps its saved count plus one, so give-up counting survives
 
 
+def test_a_flagged_trash_file_over_the_read_limit_is_not_withdrawn(tmp_path: Path) -> None:
+    """A trash file larger than MAX_FILE_BYTES is counted in processed_by_batch but was not read, so its CRED-002 finding stays in the flagged list (TRDD-XNZFKX0L)."""
+    # MAX_FILE_BYTES is lowered inside the detector process through runpy: the real limit is 256 MiB. The state file puts the file in a
+    # batch that is not done and has no saved position, so the trash walk reaches it on this pass whatever its mtime.
+    runner = (
+        "import runpy, sys\n"
+        "sys.path.insert(0, sys.argv[2])\n"
+        "import env_secrets\n"
+        "env_secrets.MAX_FILE_BYTES = int(sys.argv[3])\n"
+        "detector = sys.argv[1]\n"
+        "sys.argv = [detector, \"--one-shot\"]\n"
+        "runpy.run_path(detector, run_name=\"__main__\")\n"
+    )
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    leak = _batch(project / ".trashcan", OLD, {"dump.txt": f"leak {value}\n".encode()}) / "dump.txt"
+    _write_state(project, {"covered": None, "retries": {}, "flagged": [str(leak)], "trash": {"positions": {}, "done": []}})
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env = {
+        "PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), "FAKE_API_TOKEN_0000": value,
+    }
+    argv = [sys.executable, "-c", runner, str(_DETECTOR), str(_ROOT / "scripts" / "lib"), str(leak.stat().st_size - 1)]
+    out = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert out.returncode == 0, out.stderr
+    # Every file is over the lowered limit, so the count says nothing about this one: the log names the paths not read.
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text().splitlines()
+    assert any("not fully covered" in line and str(leak) in line for line in log)  # the coverage line names the trash file: it was walked and skipped as too big
+    assert str(leak) in _state(project)["flagged"]
+
+
 def test_a_link_to_a_folder_in_trashcan_is_not_a_sweep_root(tmp_path: Path) -> None:
     """A link to a folder, batch-shaped or not, is no root: os.walk would descend it, and it lists a link without descending."""
     project = tmp_path / "proj"

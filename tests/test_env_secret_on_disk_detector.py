@@ -17,9 +17,14 @@ import time
 import urllib.parse
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _ROOT / "scripts" / "detectors" / "env-secret-on-disk.py"
 _NAME = "FAKE_API_TOKEN_0000"
+
+sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
+import env_secrets  # noqa: E402
 
 
 def _project(tmp_path: Path) -> Path:
@@ -286,3 +291,109 @@ def test_an_old_state_file_keeps_flagged_and_drops_the_cursor(tmp_path: Path) ->
     assert "cursor" not in state
     assert len(state["covered"]) == 2 and all(len(edge) == 2 for edge in state["covered"])
     assert state["flagged"] == []  # the flagged file was read again and is clean now: its finding is withdrawn
+
+
+# TRDD-XNZFKX0L: a finding is withdrawn only for a file that was READ and scanned this pass. Each test below flags a file with a first
+# pass, then makes the file unreadable in a different way and runs a second pass that must reach the file. The second pass is forced
+# to read it by the state file, not by luck: the file gets an mtime of 100.0 and the saved covered range is [[1.0, ""], [1.0, ""]],
+# so its key (100.0, path) lies ABOVE hi: it is in the FRESH tier (the backlog is keys below lo), which reads it. (An mtime of now + 10 would
+# also force a read, but it sits above the live edge for only about 12 s, so the test would depend on wall-clock timing.)
+_PATCHED_RUNNER = (
+    "import runpy, sys\n"
+    "sys.path.insert(0, sys.argv[2])\n"
+    "import env_secrets\n"
+    "env_secrets.MAX_FILE_BYTES = int(sys.argv[3])\n"
+    "detector = sys.argv[1]\n"
+    "sys.argv = [detector, \"--one-shot\"]\n"
+    "runpy.run_path(detector, run_name=\"__main__\")\n"
+)
+
+
+def _flag_then_force_a_reread(tmp_path: Path, project: Path, value: str, retries: int | None = None) -> Path:
+    """First pass flags reports_dev/dump.txt; then the state is rewritten so the next pass must read the file again, with `retries`
+    failed reads already saved against it when given."""
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {value}\n")
+    assert "CRED-002" in _run(tmp_path, project, value).stdout
+    state = _cursor(project)
+    assert state["flagged"] == [str(target)]
+    os.utime(target, (100.0, 100.0))
+    state["covered"] = [[1.0, ""], [1.0, ""]]
+    if retries is not None:
+        state["retries"] = {str(target): retries}
+    (project / ".janitor" / "state" / "env-secret-on-disk.cursor.json").write_text(json.dumps(state))
+    return target
+
+
+def _second_run(tmp_path: Path, project: Path, value: str | None, max_file_bytes: int | None = None) -> subprocess.CompletedProcess[str]:
+    """A pass with the secret optionally absent from the environment and MAX_FILE_BYTES optionally lowered (through runpy, so the
+    detector sees the patched module)."""
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate")}
+    if value is not None:
+        env[_NAME] = value
+    argv = [sys.executable, str(_DETECTOR), "--one-shot"]
+    if max_file_bytes is not None:
+        argv = [sys.executable, "-c", _PATCHED_RUNNER, str(_DETECTOR), str(_DETECTOR.parent.parent / "lib"), str(max_file_bytes)]
+    done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-0 file")
+def test_a_flagged_file_whose_read_fails_keeps_its_finding(tmp_path: Path) -> None:
+    """A flagged file the next pass could not read was not rescanned, so it stays in flagged (it used to be withdrawn)."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = _flag_then_force_a_reread(tmp_path, project, value)
+    target.chmod(0)
+    try:
+        out = _second_run(tmp_path, project, value)
+    finally:
+        target.chmod(0o600)
+    assert "1 unreadable" in out.stdout  # the read was attempted and failed: the test reached the file
+    state = _cursor(project)
+    assert str(target) in state["flagged"] and state["retries"] == {str(target): 1}
+
+
+def test_a_flagged_file_over_the_read_limit_keeps_its_finding(tmp_path: Path) -> None:
+    """A flagged file larger than MAX_FILE_BYTES is counted, not read, so it stays in flagged (it used to be withdrawn)."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = _flag_then_force_a_reread(tmp_path, project, value)
+    _second_run(tmp_path, project, value, max_file_bytes=len(target.read_bytes()) - 1)
+    # Every file of the project is over the lowered limit, so the count says nothing about this one: the log names the paths not read.
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text().splitlines()
+    # The first pass also logs, so assert on the coverage line of the second one, which names the paths not read.
+    assert any("not fully covered" in line and str(target) in line for line in log)  # this file was reached and skipped as too big
+    assert str(target) in _cursor(project)["flagged"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-0 file")
+def test_a_flagged_file_given_up_keeps_its_finding(tmp_path: Path) -> None:
+    """A flagged file whose reads already failed MAX_FAIL_RETRIES times is given up on: the sweep still tries it, the read fails again, and
+    the file counts as done (processed) all the same. It was not scanned, so it stays in flagged."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = _flag_then_force_a_reread(tmp_path, project, value, retries=env_secrets.MAX_FAIL_RETRIES)
+    target.chmod(0)
+    try:
+        out = _second_run(tmp_path, project, value)
+    finally:
+        target.chmod(0o600)
+    assert "1 unreadable" in out.stdout  # the read was attempted and failed again; give_up made _read_one return True, so the key is in processed, not failed
+    state = _cursor(project)
+    # Only the give-up branch drops the retries entry (retries are rebuilt from the failed keys); a plain failed read counts it up,
+    # as the failed-read test above sees ({target: 1}). Without this the test could not tell a give-up from an ordinary failure.
+    assert str(target) not in state["retries"]
+    assert str(target) in state["flagged"]
+
+
+def test_a_pass_with_no_secret_in_the_environment_withdraws_nothing(tmp_path: Path) -> None:
+    """With no secret-named variable in the environment the exact matcher is off and nothing is scanned for a value: no finding is withdrawn."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = _flag_then_force_a_reread(tmp_path, project, value)
+    target.write_text("cleaned\n")
+    os.utime(target, (100.0, 100.0))  # the rewrite moved the mtime: put it back below the live edge, above hi
+    _second_run(tmp_path, project, None)
+    assert str(target) in _cursor(project)["flagged"]

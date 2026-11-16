@@ -249,6 +249,10 @@ class SweepReport:
     left_for_next_pass: int = 0
     processed: list[Key] = field(default_factory=list)  # keys read this pass, in order
     failed: list[Key] = field(default_factory=list)  # keys that raised OSError
+    # TRDD-XNZFKX0L: the paths whose content was scanned for the live secret values this pass (the exact matcher ran and the read
+    # succeeded). `processed`/`failed` cannot say this: `processed` also holds a file over MAX_FILE_BYTES and a file given up on,
+    # neither of which was read. Only a path in `read` may withdraw its CRED-002 finding.
+    read: list[str] = field(default_factory=list)
     # Seconds the listing had run when LISTING_BUDGET_S stopped it; None = the listing completed. A cut pass read nothing.
     listing_cut_after_s: float | None = None
     # The (lo, hi) range this pass read around, resolved from the argument (None became the live edge on both sides), and the
@@ -258,7 +262,8 @@ class SweepReport:
 
     def absorb_findings(self, other: SweepReport) -> None:
         """Add what `other` found and could not cover, so one report feeds the detector's loops. NOT processed, failed,
-        the counters or left_for_next_pass: those are keyed per tier (a covered-range key here, a batch position there)."""
+        the counters or left_for_next_pass: those are keyed per tier (a covered-range key here, a batch position there). Nor `read`:
+        each tier keeps its own list, and the detector unions them (TRDD-XNZFKX0L)."""
         self.hits += other.hits
         self.dump_shaped += other.dump_shaped
         self.unreadable += other.unreadable
@@ -314,6 +319,8 @@ def _read_one(report: SweepReport, matcher: Matcher | None, salt: bytes, path: s
         else:
             report.shape_not_checked.append(path)
         report.scanned += 1
+        if matcher is not None and matcher.table:
+            report.read.append(path)  # same string as Hit.path; success branch only, and only when the value scan ran (TRDD-XNZFKX0L)
         report.bytes_read += size
         return True
     except OSError:

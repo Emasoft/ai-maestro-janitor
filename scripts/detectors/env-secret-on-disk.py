@@ -195,12 +195,11 @@ def main() -> int:
     if git_exit is not None:
         retries[_GIT_RETRY_KEY] = git_retries + 1
     keys = {path: (mtime, path) for mtime, path in [*report.processed, *report.failed]}
-    # Read and clean only: a trash file whose read FAILED was not rescanned, so it must not withdraw its finding.
-    trash_seen = {
-        env_secrets.trash_path(trash_root, batch, position)
-        for batch, positions in trash.processed_by_batch.items()
-        for position in positions
-    }
+    # TRDD-XNZFKX0L: the paths whose content was actually scanned for the live secret values this pass, in both tiers. A finding is withdrawn
+    # only for such a path. `keys` and the trash `processed_by_batch` also hold a file whose read FAILED, a file over MAX_FILE_BYTES and
+    # a file given up on (none of them rescanned), and a pass with no secret in the environment scans nothing: withdrawing for any of
+    # those would clear a CRED-002 issue about a file that was never checked.
+    read_now = set(report.read) | set(trash.read)
 
     def hold(path: str) -> None:
         """Keep the covered range, or the batch position, short of `path`, so it is read again next pass."""
@@ -280,7 +279,8 @@ def main() -> int:
             print(out)
     flagged = set(saved["flagged"]) | set(by_path)
     for path in sorted(flagged - set(by_path)):
-        if path in keys or path in trash_seen:  # rescanned and clean now: withdraw the finding
+        # Only a path read and scanned this pass is "clean now"; a failed, too-big, given-up or unscanned file keeps its finding (TRDD-XNZFKX0L).
+        if path in read_now:  # rescanned and clean now: withdraw the finding
             issue_catalog.clear_issue("CRED-002", where=f"file:{_portable(project, path)}")
             flagged.discard(path)
 
