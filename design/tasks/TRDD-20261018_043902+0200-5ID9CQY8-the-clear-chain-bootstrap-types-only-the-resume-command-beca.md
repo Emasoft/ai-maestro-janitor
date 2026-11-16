@@ -1,10 +1,10 @@
 ---
 trdd-id: 5ID9CQY8
 title: The clear chain bootstrap types only the resume command because the cron survives a clear
-column: dev
+column: todo
 status: tasked
 created: 2026-10-18T04:39:02+0200
-updated: 2026-11-15T16:05:41+0100
+updated: 2026-11-16T02:56:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -47,6 +47,7 @@ Item C5 of TRDD-K9AHY1ZB Release 2, never built and never carded until 2026-10-1
 ## Approval log
 
 - 2026-10-18T04:39:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T02:56:17+0100 — column → todo by main-agent@ai-maestro-janitor. not worked in this session; queued so the dev column is true before the publish
 
 ## Plan for boxes 2 and 3
 

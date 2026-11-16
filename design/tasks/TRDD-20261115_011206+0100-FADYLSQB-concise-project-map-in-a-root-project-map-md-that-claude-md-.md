@@ -1,10 +1,10 @@
 ---
 trdd-id: FADYLSQB
 title: Concise project map in a root PROJECT_MAP.md that CLAUDE.md never names
-column: dev
+column: testing
 status: tasked
 created: 2026-11-15T01:12:06+0100
-updated: 2026-11-16T02:37:03+0100
+updated: 2026-11-16T02:56:15+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -66,3 +66,4 @@ Golden rules G7.1 and G10.1 require a project-map fence in CLAUDE.md; CLAUDE.md 
 - 2026-11-15T12:44:58+0100 — RELEASE COUPLING (main agent): increment 2b is committed (24b550d8, worker-reported 63 tests pass in the three repomap files; ruff, mypy, pyright clean, checked by the main agent). The generator now writes PROJECT_MAP.md and strips the CLAUDE.md fence, while the drift detector and the slim/queue readers still read the fence until increment 3. DO NOT PUBLISH between 2b and 3: both ship in the same release, and .janitor/state/repomap-opt-in.flag stays off until a session runs that release. Increment 3 design change (proposal reviewed PASS 2026-11-15): Departure B is also withdrawn, because claudemd_queue queues a CLAUDE.md write on any slim violation and its drain only rewrites the wikimem index, so a map-related violation would owe a write after every compaction; require_map leaves slim_violations; the drift detector nudges (never writes) on a missing or stale map, a leftover legacy fence (checked even without the opt-in flag) and a CLAUDE.md that names PROJECT_MAP.
 - 2026-11-15T12:58:35+0100 — INCREMENT 3 DONE in 4511cb20 (main agent checked ruff, mypy, pyright; entry written by the worker). Follow-ups: S6.1 fail-soft for the drift detector (this worker), digest blind-spot card TRDD-8VNDKCEG, README.md:189 still links a CLAUDE.md project map (increment 4). Next: increment 4 (docs and skills), then 5 (generate and prove, flag stays off until the release ships). CORRECTION to the 4511cb20 commit message: the reproduction ran against the old detector in legacy-fence form; the kept test runs on PROJECT_MAP.md and was not seen failing in that form; a mutation check (dropping coverage_note) shows its sensitivity. The do-not-publish coupling extends to the S6.1 fail-soft fix: 2b, 3 and that fix ship in one release.
 - 2026-11-15T13:08:30+0100 — INCREMENTS 4, 5, 7 (main agent): 4 committed in ef5b90dd (skills, README, .repomapignore, planner text, two PROJECT memory pages via memgrep); 5 = this repo's PROJECT_MAP.md generated without the opt-in flag, 72120 B, git status clean, check-ignore via info/exclude, --check exit 0, CLAUDE.md untouched by the generator; 7 = CLAUDE.md lost only the sentence naming the repomap switch, never names the map, claudemd_slim check 0. OPEN: increment 1 (S27.1, blocked on TRDD-4A4HXDIN and an owner question), increment 6 (spec, blocked on TRDD-DXBJMT1K), owner question TRDD-3M5MDPPD (how a session finds the map), the release that ships 2b, 3 and the S6.1 fix together, then the opt-in flag.
+- 2026-11-16T02:56:15+0100 — column → testing by main-agent@ai-maestro-janitor. code shipped in 3.9.3; only field checks in a session that loads the 3.9.3 hooks remain (STATE)

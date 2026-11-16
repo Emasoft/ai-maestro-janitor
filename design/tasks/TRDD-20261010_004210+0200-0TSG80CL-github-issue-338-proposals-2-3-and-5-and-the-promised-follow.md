@@ -1,10 +1,10 @@
 ---
 trdd-id: 0TSG80CL
 title: GitHub issue 338 — proposals 2, 3 and 5 and the promised follow-up link
-column: dev
+column: todo
 status: tasked
 created: 2026-10-10T00:42:10+0200
-updated: 2026-11-15T15:35:23+0100
+updated: 2026-11-16T02:56:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -50,6 +50,7 @@ Follow-up of TRDD-IN4493LC (closed 2026-10-10). Issue 338 on this repo stays ope
 
 - 2026-10-10T00:42:10+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-14T22:29:04+0100 — column → dev. blocker release shipped: tag v3.8.12 contains 9b2b1299 (git tag --list v* --contains 9b2b1299 prints v3.8.12 and v3.8.13); the card's own STATE says only a release containing 9b2b1299 clears the block Cleared blocked-by (--clear-blocker override).
+- 2026-11-16T02:56:17+0100 — column → todo by main-agent@ai-maestro-janitor. not worked in this session; queued so the dev column is true before the publish
 
 ## Superseded next actions (2026-10-16)
 

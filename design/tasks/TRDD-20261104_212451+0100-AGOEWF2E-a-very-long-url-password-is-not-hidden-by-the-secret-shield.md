@@ -1,10 +1,10 @@
 ---
 trdd-id: AGOEWF2E
 title: A very long URL password is not hidden by the secret shield
-column: dev
+column: todo
 status: tasked
 created: 2026-11-04T21:24:51+0100
-updated: 2026-11-14T04:12:00+0100
+updated: 2026-11-16T02:56:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -43,6 +43,7 @@ f1a26c0b (2026-11-14): jsonPair change 2 landed. JSON_PLAIN's escape loop is bou
 ## Approval log
 
 - 2026-11-04T21:24:51+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T02:56:18+0100 — column → todo by main-agent@ai-maestro-janitor. waits on the owner decision named in its STATE NEXT ACTION (decision agoewf2e-narrow-dw1); not worked in this session
 
 ## Notes
 

@@ -1,10 +1,10 @@
 ---
 trdd-id: F3LVCQ39
 title: Census of the drift conditions that can reach a model turn
-column: dev
+column: todo
 status: tasked
 created: 2026-10-20T01:39:57+0200
-updated: 2026-10-24T13:22:26+0200
+updated: 2026-11-16T02:56:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: audit
@@ -158,3 +158,4 @@ NEXT ACTION: classify the 47 agent-visible detectors' conditions one at a time, 
 - 2026-10-20T01:39:57+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-24T10:44:03+0200 — column → dev by main-agent@ai-maestro-janitor. census measured; merging and channels B and C in progress
 - 2026-10-24T10:44:03+0200 — moved todo -> dev by main-agent@ai-maestro-janitor: census measured; merging and channels B and C in progress.
+- 2026-11-16T02:56:16+0100 — column → todo by main-agent@ai-maestro-janitor. not worked in this session; queued so the dev column is true before the publish

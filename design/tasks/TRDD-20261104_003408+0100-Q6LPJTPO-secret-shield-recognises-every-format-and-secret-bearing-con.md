@@ -1,10 +1,10 @@
 ---
 trdd-id: Q6LPJTPO
 title: secret-shield recognises every format and secret-bearing context in its catalog
-column: dev
+column: todo
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-16T01:25:44+0100
+updated: 2026-11-16T02:56:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -145,6 +145,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - 2026-11-04T02:25+0100 — main-agent@ai-maestro-janitor: 133 repositories cloned read-only into the gitignored corpus folder; one suspected malware-lure repo (Archducal-woodthrush229/envleaks, a README plus an unexplained zip) quarantined and not mined; nested agent instruction files renamed inert; mining feeds the provider-catalog step.
 - 2026-11-04 — owner (verbatim), asked 1. the license policy for adopting catalog rules (proposed: copy rules word for word only from MIT, Apache or BSD sources, credited in a NOTICE file; rewrite everything else in our own words): "1. ok"; asked 2. whether the secret shield's target should be the full mined catalog or only the list written from memory: "2. just collect all patterns, masks, regexes, heuristic, etc. from all projects to ensure to catch all secrets".
 - 2026-11-04 — owner (verbatim), asked 4. whether to leave or remove the archived catalog card's line naming a GitHub account as a suspected malware lure: "4. delete any suspicious repo. no exceptions." Read by the main agent as: remove every corpus clone the audit marks suspicious. The archived line itself stays until the owner gives an exact history-rewrite command.
+- 2026-11-16T02:56:18+0100 — column → todo by main-agent@ai-maestro-janitor. not worked in this session; queued so the dev column is true before the publish
 
 ## Notes
 
