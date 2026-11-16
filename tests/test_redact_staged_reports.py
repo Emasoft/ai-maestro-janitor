@@ -60,7 +60,7 @@ def _stage(repo: Path, name: str, text: str) -> None:
     _git(repo, "add", name)
 
 
-@pytest.mark.real_subprocess("sanitize-reports", "scutil")  # sanitize-reports reads the host name via scutil
+@pytest.mark.real_subprocess("sanitize-reports", "scutil", "bun")  # sanitize-reports reads the host name via scutil; since report-sanitizer merged the secret shield it runs the shield core in bun (TRDD-NRF7OJ5H)
 def test_staged_reports_file_is_redacted_in_the_index(repo: Path) -> None:
     """A home path in a staged reports/ file is gone from the staged blob afterwards."""
     _stage(repo, "reports/x.md", f"see {_HOME_PATH} here\n")
@@ -104,7 +104,7 @@ def test_no_reports_files_staged_is_silent_success(repo: Path) -> None:
     assert _HOME_PATH in _git(repo, "show", ":docs/a.md")
 
 
-@pytest.mark.real_subprocess("sanitize-reports", "scutil")  # sanitize-reports reads the host name via scutil
+@pytest.mark.real_subprocess("sanitize-reports", "scutil", "bun")  # sanitize-reports reads the host name via scutil; since report-sanitizer merged the secret shield it runs the shield core in bun (TRDD-NRF7OJ5H)
 def test_reports_dev_file_is_never_touched(repo: Path) -> None:
     """A staged reports_dev/ file keeps its content while reports/ is redacted."""
     _stage(repo, "reports_dev/y.md", f"see {_HOME_PATH} here\n")

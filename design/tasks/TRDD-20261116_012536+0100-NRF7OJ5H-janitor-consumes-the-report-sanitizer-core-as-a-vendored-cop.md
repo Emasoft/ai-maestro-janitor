@@ -4,7 +4,7 @@ title: Janitor consumes the report-sanitizer core as a vendored copy
 column: backburner
 status: tasked
 created: 2026-11-16T01:25:36+0100
-updated: 2026-11-16T01:25:36+0100
+updated: 2026-11-16T04:25:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -23,6 +23,7 @@ approval-datetime: 2026-11-16T01:25:36+0100
 
 ## STATE — 2026-11-16
 - NEXT ACTION: none until report-sanitizer finishes its merge (its card ZADXHV6W in the report-sanitizer repo: Merge the janitor secret shield into report-sanitizer, increment 6 = swap). This tree's hooks/secret-shield/ stays upstream until then.
+- 2026-11-16 (main agent): report-sanitizer feat/shield-core (TRDD-ZADXHV6W there) is ready to merge; it now spawns bun for every redaction. Janitor consequences: (1) tests/test_redact_staged_reports.py needed `bun` in its real_subprocess markers, or the sandbox guard (tests/sandbox_guard.py:703) blocks the spawn and 2 of 5 tests fail; added in the same commit as this line. (2) The CI step "Install sanitize-reports (pinned)" (ci.yml, SANITIZER_SHA 16c9a12) fetches ONE raw file; a pin bump past the merge must fetch the whole tree (core/, shield_bridge.ts) and install bun, or every real run exits 4. (3) Upstream to hooks/secret-shield: dckr_pat_/dckr_oat_ tokens, Maven <password>/<passphrase> literals and letters-only npmrc :_authToken literals, which report-sanitizer now closes in its Python layer (its commit 54ce571).
 ## Scope
 1. hooks/secret-shield/{patterns.ts,rules/} become a vendored copy of report-sanitizer core/, pinned by hash, with a test.
 2. CI install: .github/workflows/ci.yml:108-123 fetches sanitize_reports.py as one raw file pinned by SHA; after the swap the tool needs its core/ folder and bun, so CI installs bun and checks out the repo at a pinned commit.
