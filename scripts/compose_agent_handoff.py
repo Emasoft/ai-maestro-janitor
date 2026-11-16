@@ -122,10 +122,16 @@ def main() -> int:
         if hold:
             stamp.unlink(missing_ok=True)
 
-    # Same one-line pointer the model-authored path writes (janitor-write-handoff SKILL.md
-    # step 3) — the PostCompact hook and the heartbeat's resume nudge only know to look here.
+    # WHY the absolute own path (TRDD-W6DZPXLG): "the newest agent-handoff-*.md" can be ANOTHER
+    # session's handoff when sessions share a project, so the resumed agent would read a stranger's
+    # account. `path` is the file THIS run wrote (or the identical existing one). The directive FILE
+    # itself is still ONE per project and one-shot (post-compact-resume.py unlinks it on first
+    # consumption), so a second session's compose overwrites it — this change does not fix that.
+    # One-line pointer in the same file the model-authored path writes (janitor-write-handoff
+    # SKILL.md step 3), but deliberately naming this run's file where that skill says "newest" — the
+    # PostCompact hook and the heartbeat's resume nudge only know to look at the file.
     directive = (
-        "read the newest .janitor/state/agent-handoff-*.md FIRST (rich agent handoff), "
+        f"read \"{path}\" FIRST (rich agent handoff), "
         "then continue the in-flight work"
     )
     state.atomic_write(sd / "resume-directive.txt", directive + "\n")
