@@ -12,6 +12,13 @@ import type { Rule } from './rule'
 // Measured in the plugin engine: this header class, unit 'A ', observed with no miss up to 6,291,456 iterations (a header of
 // 12,582,923 characters, the header alone).
 export const privateKey: Rule = { kind: 'private-key', pattern: /-----BEGIN ((?! )(?![A-Z0-9 ]*  )[A-Z0-9 ]*(?<= )PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g }
+
+// WHY ssh-public-key (TRDD-L1I0FP5T): report-sanitizer hides `ssh-rsa AAAA...` blobs and the shield did not, so a row that passed the shield could still be hidden by the sanitizer. The blob is group 1; the algorithm name stays visible, like every
+// other rule keeps its context. WHY linear: the algorithm is a fixed literal list, one `\s+` run and one class loop follow it, and nothing after the loop can fail, so there is no backtracking past the whitespace run.
+// Prose such as "the ssh-rsa algorithm" has no AAAA blob after the name and stays visible. Runs right after privateKey: nothing inside a key blob should be matched by another rule first.
+// WHY no leading \b or lookbehind: a rule that starts with one misses a key right after a backslash-n in a JSON string, after %22 or after a backslash-t (KNOWN-MISSES.md escape-boundary, TRDD-5VZTPXBJ, pinned by the rule count in tests/known-misses.test.ts); the unanchored literal hides it there, and a prefix glued to the name only hides more.
+export const sshPublicKey: Rule = { kind: 'ssh-public-key', pattern: /(?:ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-nistp\d+)\s+(AAAA[A-Za-z0-9+/=]+)/g, group: 1 }
+
 // WHY the jwt rule is anchored at the start of a run of token characters, tests the tail once, and only then looks for the
 // token start (TRDD-A7RII4DN): the old rule, /\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ.../g, tried every eyJ inside a run, and `-` is both a token
 // character and a \b boundary, so a run of `eyJ-` repeated had n/4 starts and each one scanned to the end of the run: n * n / 4

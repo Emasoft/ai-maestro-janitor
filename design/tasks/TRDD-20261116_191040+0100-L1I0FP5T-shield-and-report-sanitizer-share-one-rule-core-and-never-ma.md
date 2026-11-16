@@ -1,10 +1,10 @@
 ---
 trdd-id: L1I0FP5T
 title: Shield and report-sanitizer share one rule core and never mask a path except the home prefix
-column: backburner
+column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T19:25:05+0100
+updated: 2026-11-16T19:58:28+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -31,6 +31,9 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 ## Approval log
 
 - 2026-11-16T19:10:40+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T19:52:56+0100 main-agent: owner asked "what are you waiting for?"; proceeding on the recommended defaults: (e) card rule on in report-sanitizer; (a) and the live half of (e) wait for mod wiring, the home rule gets a caller-side switch.
+- 2026-11-16T19:58:23+0100 — column → dev by main-agent@ai-maestro-janitor.
+- 2026-11-16T19:58:28+0100 main-agent: step 1 done: ssh-public-key rule in the shield core (no leading word boundary, so a key after an escape is hidden; it also hides xssh-rsa AAAA..., which hides more, never less). cookie as a secret name is deferred: adding it broke 11 pinned tests because the assignment pass swallows the gitlab-session-cookie kind; it needs a cookie-aware assignment pass and a false-match measurement first.
 
 ## Design
 

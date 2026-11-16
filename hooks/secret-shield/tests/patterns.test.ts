@@ -381,6 +381,83 @@ describe('secret assignments are hidden, the name is kept', () => {
   for (const [line, want] of cases) test(line, () => expect(redact(line).text).toBe(want))
 })
 
+// WHY these tests (TRDD-L1I0FP5T): the shield now hides the blob of an ssh public key, the shape report-sanitizer hides; the algorithm name and the trailing comment stay visible.
+describe('ssh public keys are hidden, the algorithm name and the comment are kept', () => {
+  // The blobs are assembled at run time from fragments, so no scanner reads this file as a leak. Every blob starts with AAAA, as a real key does.
+  const blob = j('AAAA', 'B3NzaC1yc2EAAAADAQABAAABAQDq8vR2mK3vT9xLw2RbN5yHc', '+/', 'Zq8vR2mK3vT9xLw2RbN5yHc=')
+  const marker = mark('ssh-public-key')
+  const algorithms = ['ssh-rsa', 'ssh-ed25519', 'ssh-dss', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521']
+  for (const algorithm of algorithms) {
+    test(`${algorithm}: the blob is hidden, the name and the comment stay`, () => {
+      const done = redact(`${algorithm} ${blob} ci-key`)
+      expect(done.text).toBe(`${algorithm} ${marker} ci-key`)
+      expect(done.hits).toEqual({ 'ssh-public-key': 1 })
+    })
+  }
+  test('a tab or a line break between the name and the blob, and an authorized_keys line with options', () => {
+    // The whitespace between the name and the blob may hold line breaks (report-sanitizer reads it as \s+ too), so a key wrapped after its name is hidden.
+    expect(redact(`ssh-rsa\n\n${blob}`).text).toBe(`ssh-rsa\n\n${marker}`)
+    expect(redact(`ssh-rsa\t${blob}`).text).toBe(`ssh-rsa\t${marker}`)
+    expect(redact(`command="/bin/true",no-pty ssh-ed25519 ${blob} ci`).text).toBe(`command="/bin/true",no-pty ssh-ed25519 ${marker} ci`)
+  })
+  test('two keys on two lines are two hits', () => {
+    const done = redact(`ssh-rsa ${blob} ci-a\nssh-ed25519 ${blob}Q ci-b`)
+    expect(done.hits).toEqual({ 'ssh-public-key': 2 })
+    expect(done.text).toBe(`ssh-rsa ${marker} ci-a\nssh-ed25519 ${marker} ci-b`)
+  })
+  test('a key held in an assignment keeps the ssh-public-key kind', () => {
+    expect(redact(`public_key: ssh-rsa ${blob} ci-key`).hits['ssh-public-key']).toBe(1)
+  })
+  // The short blob the false-positive corpus of the Slack tests used to list as left visible: it is an ssh public key, now hidden (TRDD-L1I0FP5T).
+  test('a short blob of 34 characters is hidden', () => {
+    expect(redact(j('ssh-rsa ', 'AAAAB3NzaC1yc2EAAAADAQABAAABAQC7')).text).toBe(`ssh-rsa ${marker}`)
+  })
+  test('a key right after a backslash-n, %22 or a backslash-t is still hidden (the rule has no leading word boundary)', () => {
+    for (const frame of [`{"m":"line\\nssh-rsa ${blob}"}`, `q=%22ssh-rsa ${blob}%22`, `a\\tssh-ed25519 ${blob}`]) {
+      expect(redact(frame).text.includes(blob)).toBe(false)
+    }
+  })
+  test('redacting twice changes nothing', () => {
+    const once = redact(`ssh-rsa ${blob} ci-key`)
+    expect(redact(once.text)).toEqual({ text: once.text, hits: {} })
+  })
+  const stayVisible = [
+    'the ssh-rsa algorithm is deprecated',
+    'ssh-ed25519 is supported since OpenSSH 6.5',
+    'ssh-rsa AAAA',
+    'ssh-rsa BBBBB3NzaC1yc2EAAAADAQABAAABAQDq8vR2mK3vT9x',
+    'ssh-rsa-cert AAAAB3NzaC1yc2EAAAADAQABAAABAQDq8vR2mK3vT9x',
+    'ssh-ecdsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDq8vR2mK3vT9x',
+    'AAAAB3NzaC1yc2EAAAADAQABAAABAQDq8vR2mK3vT9x without an algorithm name',
+  ]
+  for (const line of stayVisible) test(`stays visible: ${line}`, () => expect(redact(line).text).toBe(line))
+
+  // Linear: the best of 5 runs after one warm-up run, as in the other timing tests of this file; 8 times the text must take under 12 times as long (or under 2 ms).
+  const SMALL = 32 * 1024
+  const bestOf = (text: string) => {
+    redact(text)
+    return Math.min(...[0, 1, 2, 3, 4].map(() => {
+      const started = performance.now()
+      redact(text)
+      return performance.now() - started
+    }))
+  }
+  const linear = (small: number, big: number) => big < 2 || big / small < 12
+  const grow = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size)
+  const shapes: Array<[string, (size: number) => string]> = [
+    ['algorithm names with no blob', grow('ssh-rsa ')],
+    ['an ecdsa name followed by a long digit run', grow('ecdsa-sha2-nistp' + '1'.repeat(64))],
+    ['an algorithm name then a long run of whitespace, repeated', grow(`ssh-rsa${' '.repeat(64)}`)],
+    ['an algorithm name then a long run of A that is not AAAA', grow('ssh-ed25519 AAA ')],
+    ['one key then a very long blob', (size: number) => `ssh-rsa AAAA${'B3Nz'.repeat(Math.ceil(size / 4))}`.slice(0, size)],
+    ['many whole keys', grow(`ssh-rsa ${blob} ci-key\n`)],
+  ]
+  for (const [description, build] of shapes) {
+    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 60000 }, () => {
+      expect(linear(bestOf(build(SMALL)), bestOf(build(8 * SMALL)))).toBe(true)
+    })
+  }
+})
 describe('leaves lookalikes alone', () => {
   const cases = [
     'MAX_TOKENS=1024',
@@ -1012,7 +1089,6 @@ describe('Slack app-level and configuration tokens are hidden with no name befor
       'id 123e4567-e89b-12d3-a456-426614174000',
       j('integrity sha512', '-', 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFy'),
       j('data:image/png;base64,', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk'),
-      j('ssh-rsa ', 'AAAAB3NzaC1yc2EAAAADAQABAAABAQC7'),
       j('pk', '_live_', 'aB3dE5fG7hJ9kL1mN3pQ5rS7'),
     ]
     let changed = 0
@@ -1721,6 +1797,7 @@ describe('token rule order', () => {
   test('the rules run in this exact order', () => {
     expect(TOKEN_ORDER).toEqual([
       id('private-key', /-----BEGIN ((?! )(?![A-Z0-9 ]*  )[A-Z0-9 ]*(?<= )PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g),
+      id('ssh-public-key', /(?:ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-nistp\d+)\s+(AAAA[A-Za-z0-9+/=]+)/g),
       id('google-oauth-client-secret', /\bGOCSPX-[A-Za-z0-9_-]{20,}/g),
       id('google-oauth-access-token', /\bya29\.[\w-]{20,2048}(?:\.[\w-]{1,512}){0,4}/g),
       id('google-oauth-refresh-token', /(?<![\w/+])1\/\/0[\w-]{40,512}/g),

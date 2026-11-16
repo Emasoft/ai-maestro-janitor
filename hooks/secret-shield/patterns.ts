@@ -4,7 +4,7 @@ import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiPro
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { dockerPat, npmrcAuthToken, npmToken, pypiToken, sendgridKey, xmlPassword } from './rules/dev-services'
-import { bearerToken, jwt, jwtWide, privateKey } from './rules/key-material'
+import { bearerToken, jwt, jwtWide, privateKey, sshPublicKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeApiKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
 
@@ -62,6 +62,8 @@ const PASSWORD_END = /[\s@'"`]|:\/\//g
 // Never run these patterns directly: see rules/rule.ts.
 const TOKENS: readonly Rule[] = [
   privateKey,
+  // Right after the private key: the blob of an ssh public key is base64 that no other rule should match a piece of first (TRDD-L1I0FP5T).
+  sshPublicKey,
   // The Google OAuth rules run before every family except privateKey: an earlier \b-led rule (sk-, ghp_, AKIA, ...) firing inside a ya29. or 1//0
   // body after a dash would leave the rest of the Google token visible, the reason the Slack rules run before slackToken.
   googleOAuthClientSecret,
