@@ -17,9 +17,10 @@ the human's decision.
 Limits, stated in every finding: an overwritten file can survive in snapshots and backups; a value that was
 already printed into a conversation has already been sent; a secret that was transformed (compressed, split,
 encrypted) is not found; a listing of the agent folders over env_secrets.LISTING_BUDGET_S is cut (no agent-folder
-file is read, the cursor stays, a coverage line is printed once a day); the sweep reads files changed since the
-last pass, a few at a time, so a file moved in with an old modification time is not seen until the cursor is
-reset (the timestamp batches of .trashcan are the exception: env_secrets.sweep_trash reads them by batch name
+file is read, the covered range stays, a coverage line is printed once a day); the sweep reads the changes since the
+last pass first, then the older files newest first, a few at a time, so a file moved in with an old modification time INSIDE the
+range already read is not seen until the state file is deleted (one below the range is read in its turn; the timestamp batches
+of .trashcan are the exception: env_secrets.sweep_trash reads them by batch name
 from a saved per-batch position, so a file moved into the trash is seen; a file moved by hand into a batch that
 was already read is not, nor one moved into another .trashcan child such as migrate-memory-scope/).
 
@@ -28,7 +29,7 @@ fixtures, and an exact-value matcher has no fixtures to match. Skipping the jani
 sweep exactly where agents write the most scratch.
 
 ON DEMAND, right after a slip: run this file directly (`uv run <plugin>/scripts/detectors/env-secret-on-disk.py`). For a full pass
-from the oldest file, delete `.janitor/state/env-secret-on-disk.cursor.json` first (regenerated state); each run
+from the newest file, delete `.janitor/state/env-secret-on-disk.cursor.json` first (regenerated state); each run
 still reads at most one budget of files, so repeat it until the log line says 0 left for the next pass.
 """
 
@@ -90,7 +91,7 @@ def _git(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _untracked_files(project: Path) -> tuple[list[str], int | None]:
     """The untracked files, and the exit code of a `git ls-files` that failed in a project that HAS a .git.
 
-    A failure used to read as "no untracked files", and the cursor moved past a leaking file that was never read.
+    A failure used to read as "no untracked files", and the covered range moved past a leaking file that was never read.
     A folder with no .git has no untracked files to list, so that case is no failure."""
     proc = _git(project, "ls-files", "--others", "--exclude-standard", "-z")
     if proc.returncode != 0:
@@ -128,23 +129,29 @@ def _display(project: Path, path: str) -> str:
 
 
 def _read_cursor(file: Path) -> dict:
-    fresh: dict = {"cursor": [0.0, ""], "retries": {}, "flagged": [], "trash": {"positions": {}, "done": []}}
+    fresh: dict = {"covered": None, "retries": {}, "flagged": [], "trash": {"positions": {}, "done": []}}
     if not file.exists():
         return fresh
     try:
         data = json.loads(file.read_text(encoding="utf-8"))
-        data["cursor"] = [float(data["cursor"][0]), str(data["cursor"][1])]
+        # An ABSENT "covered" key (a state file from before increment 3, which held a single "cursor") starts newest first and
+        # keeps flagged, retries and trash. The old cursor is dropped, not migrated: migrating it as the
+        # covered range [(0, empty path), cursor] would make every file above it the fresh tier, read oldest first: the order this
+        # increment replaces (TRDD-ZANQ1QW0).
+        covered = data.get("covered")
+        data["covered"] = None if covered is None else ((float(covered[0][0]), str(covered[0][1])), (float(covered[1][0]), str(covered[1][1])))
+        data.pop("cursor", None)
         data["retries"] = {str(k): int(v) for k, v in data["retries"].items()}
         data["flagged"] = [str(p) for p in data["flagged"]]
         # An ABSENT "trash" key (a state file from before the trash tier) starts the trash state empty; falling back to fresh
-        # would lose "flagged", so open CRED-002 issues would never be withdrawn, and restart the cursor and the retries.
+        # would lose "flagged", so open CRED-002 issues would never be withdrawn, and restart the covered range and the retries.
         trash = data.get("trash", fresh["trash"])
         data["trash"] = {
             "positions": {str(batch): tuple(str(part) for part in position) for batch, position in trash["positions"].items()},
             "done": [str(batch) for batch in trash["done"]],
         }
     except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
-        state.log_line(_NAME, f"cursor file unreadable ({type(exc).__name__}): starting a fresh pass from the oldest file")
+        state.log_line(_NAME, f"state file unreadable ({type(exc).__name__}): starting a fresh pass from the newest file")
         return fresh
     return data
 
@@ -156,7 +163,6 @@ def main() -> int:
     cursor_file = sdir / f"{_NAME}.cursor.json"
     seen = sdir / f"{_NAME}-seen.txt"
     saved = _read_cursor(cursor_file)
-    since: env_secrets.Key = (saved["cursor"][0], saved["cursor"][1])
     give_up = frozenset(p for p, n in saved["retries"].items() if n >= env_secrets.MAX_FAIL_RETRIES)
 
     secrets = env_secrets.live_secrets(os.environ)
@@ -168,7 +174,8 @@ def main() -> int:
     git_retries = saved["retries"].get(_GIT_RETRY_KEY, 0)
     hold_for_git = git_exit is not None and git_retries < env_secrets.MAX_FAIL_RETRIES  # bounded: git failing for good must not stall the sweep for good
     roots = env_secrets.agent_writable_roots(project, os.getuid()) + untracked
-    report = env_secrets.sweep(roots, matcher, salt, since=since, give_up=give_up)
+    report = env_secrets.sweep(roots, matcher, salt, covered=saved["covered"], give_up=give_up)
+    hi = report.covered[1]
     trash_root = str(project / ".trashcan")
     trash_positions: dict[str, env_secrets.TrashPos] = saved["trash"]["positions"]
     trash_done = frozenset(saved["trash"]["done"])
@@ -177,7 +184,7 @@ def main() -> int:
 
     holds: list[env_secrets.Key] = list(report.failed)
     trash_holds: dict[str, list[env_secrets.TrashPos]] = {batch: list(failed) for batch, failed in trash.failed_by_batch.items()}  # held per batch, not by (mtime, path)
-    cut = report.listing_cut_after_s is not None  # an incomplete listing: a file not listed yet may hold any mtime above the cursor
+    cut = report.listing_cut_after_s is not None  # an incomplete listing: a file not listed yet may lie anywhere outside the covered range
     # A cut pass read nothing, so it proves nothing about the files that failed before: the saved retry counts are kept, or a
     # persistently cut listing would reset every count and a failing file would never reach MAX_FAIL_RETRIES.
     retries = dict(saved["retries"]) if cut else {key[1]: saved["retries"].get(key[1], 0) + 1 for key in report.failed}
@@ -196,24 +203,22 @@ def main() -> int:
     }
 
     def hold(path: str) -> None:
-        """Keep the cursor, or the batch position, in front of `path`, so it is read again next pass."""
+        """Keep the covered range, or the batch position, short of `path`, so it is read again next pass."""
         if path in keys:
             holds.append(keys[path])
         else:  # not a file of the modification-time sweep, so a trash file: its key is its place inside its batch
             relative = os.path.relpath(path, trash_root).split(os.sep)
             trash_holds.setdefault(relative[0], []).append(tuple(relative[1:]))
 
-    def order(path: str) -> tuple[int, float, str]:
-        """Oldest change first for the sweep files, then the trash files in path order."""
-        return (0, keys[path][0], path) if path in keys else (1, 0.0, path)
-
     by_path: dict[str, list[env_secrets.Hit]] = {}
     for hit in report.hits:
         by_path.setdefault(hit.path, []).append(hit)
     raised = 0
-    # Oldest change first, the order the cursor moves in: sorted by path, the same files won the per-fire cap on every
-    # pass while the cursor sat in front of the others, and those were never raised.
-    for path, hits in sorted(by_path.items(), key=lambda item: order(item[0])):
+    # Each edge of the covered range moves in its own order (hi up, lo down), so the cap must hold back the hits farthest from the
+    # edge it serves: sorted by path, the same files won the per-fire cap on every pass while the edge sat in front of the others,
+    # and those were never raised. raise_order puts the changes above hi first (oldest first), then the backlog newest first.
+    for path in env_secrets.raise_order(by_path, keys, hi):
+        hits = by_path[path]
         if raised >= issue_catalog.MAX_RAISES_PER_FIRE:  # checked before the three git calls of _file_status
             hold(path)  # over the per-fire cap, not a failure: retried next pass without counting a retry
             continue
@@ -303,16 +308,16 @@ def main() -> int:
         out = dedupe.emit_once(
             seen, f"git:{git_exit}:{git_retries}",
             f"[{_NAME}] sweep coverage: untracked files were not listed (git ls-files exited {git_exit}); "
-            f"the cursor stays where it was for up to {env_secrets.MAX_FAIL_RETRIES} passes so that they are read once git works.",
+            f"the covered range stays where it was for up to {env_secrets.MAX_FAIL_RETRIES} passes so that they are read once git works.",
         )
         if out is not None:
             print(out)
     if report.listing_cut_after_s is not None:
-        # Keyed on the date, not on the cut: a lasting cut means the cursor never moves, so the owner must hear of it again, at
+        # Keyed on the date, not on the cut: a lasting cut means the covered range never moves, so the owner must hear of it again, at
         # least once a day, while a same-day repeat stays silent (emit_once prints a key only the first time it is seen).
         out = dedupe.emit_once(
             seen, f"listing-cut:{time.strftime('%Y-%m-%d')}",
-            f"[{_NAME}] the listing of the agent folders took over {int(report.listing_cut_after_s)} s and was cut: no agent-folder file was read this pass and the cursor did not move "
+            f"[{_NAME}] the listing of the agent folders took over {int(report.listing_cut_after_s)} s and was cut: no agent-folder file was read this pass and the covered range did not move "
             "(TRDD-ZANQ1QW0). A tree this large needs a bigger LISTING_BUDGET_S or fewer files under the agent folders.",
         )
         if out is not None:
@@ -330,8 +335,8 @@ def main() -> int:
             print(out)
         state.log_line(_NAME, "not fully covered: " + "; ".join(uncovered[:20]))
 
-    new_cursor = since if hold_for_git or cut else env_secrets.advance_cursor(since, report.processed, holds)
-    # The trash tier moves even while git holds the main cursor: hold_for_git means `git ls-files` failed, which only leaves
+    new_covered = saved["covered"] if hold_for_git or cut else env_secrets.advance_covered(report.covered, report.processed, holds, report.live_edge)
+    # The trash tier moves even while git holds the covered range: hold_for_git means `git ls-files` failed, which only leaves
     # the UNTRACKED roots unread, and .trashcan is gitignored, so no trash file ever depended on that listing.
     new_positions = env_secrets.advance_trash(trash_positions, trash.processed_by_batch, trash_holds)
     present = set(trash.present)
@@ -340,9 +345,9 @@ def main() -> int:
     new_done = {batch for batch in (trash_done | set(trash.exhausted)) if batch in present and batch not in trash_holds}
     new_positions = {batch: position for batch, position in new_positions.items() if batch in present and batch not in new_done}
     # ONE dict, ONE atomic write: the state file is rewritten whole by every pass, so a trash key written anywhere else
-    # would be erased by the next write of this dict (and the cursor by the next write of the trash key).
+    # would be erased by the next write of this dict (and the covered range by the next write of the trash key).
     state.atomic_write(cursor_file, json.dumps({
-        "cursor": list(new_cursor), "retries": retries, "flagged": sorted(flagged),
+        "covered": None if new_covered is None else [list(new_covered[0]), list(new_covered[1])], "retries": retries, "flagged": sorted(flagged),
         "trash": {"positions": {batch: list(position) for batch, position in new_positions.items()}, "done": sorted(new_done)},
     }))
     state.log_line(
@@ -350,7 +355,7 @@ def main() -> int:
         f"pass: {report.scanned} file(s) read ({report.bytes_read // 1024} KiB), {report.left_for_next_pass} left for the next pass, "
         f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped; "
         f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done"
-        + (f"; listing cut after {int(report.listing_cut_after_s)} s, cursor kept" if report.listing_cut_after_s is not None else ""),
+        + (f"; listing cut after {int(report.listing_cut_after_s)} s, covered range kept" if report.listing_cut_after_s is not None else ""),
     )
     state.rotate_log_if_big(_NAME)
     return 0

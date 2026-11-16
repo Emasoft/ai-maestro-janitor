@@ -183,8 +183,8 @@ def _state(project: Path) -> dict:
 
 
 def test_detector_finds_a_value_in_a_trash_file_with_an_old_mtime_and_drops_a_purged_batch(tmp_path: Path) -> None:
-    """A file moved into a batch with an mtime of 1970 is read (the mtime cursor never would), the batch joins done in
-    the same state file as the cursor, and a batch purged from disk leaves the state on the next pass."""
+    """A file moved into a batch with an mtime of 1970 is read (by batch name, whatever its mtime: .trashcan is not a root of the modification-time sweep), the batch joins done in
+    the same state file as the covered range, and a batch purged from disk leaves the state on the next pass."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
     leak = _batch(project / ".trashcan", OLD, {"dump.txt": f"leak {value}\n".encode()}) / "dump.txt"
@@ -193,7 +193,7 @@ def test_detector_finds_a_value_in_a_trash_file_with_an_old_mtime_and_drops_a_pu
     assert first.returncode == 0, first.stderr
     assert "CRED-002" in first.stdout and "FAKE_API_TOKEN_0000" in first.stdout and value not in first.stdout
     assert _state(project)["trash"] == {"positions": {}, "done": [OLD]}
-    assert "cursor" in _state(project)
+    assert _state(project)["covered"] is not None
     shutil.rmtree(project / ".trashcan" / OLD)
     _batch(project / ".trashcan", NEWER, {"clean.txt": b"nothing\n"})
     assert _run(tmp_path, project, value).returncode == 0
@@ -208,15 +208,15 @@ def _write_state(project: Path, data: dict) -> Path:
     return state_file
 
 
-def test_an_old_state_file_without_a_trash_key_keeps_its_cursor_and_flagged_list(tmp_path: Path) -> None:
-    """A state file from before the trash tier keeps its cursor and flagged list; only the trash state starts empty."""
+def test_an_old_state_file_without_a_trash_key_keeps_its_flagged_list_and_drops_its_cursor(tmp_path: Path) -> None:
+    """A state file from before the trash tier keeps its flagged list; its old cursor key is dropped, not migrated; only the trash state starts empty."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
     gone = str(project / "elsewhere" / "gone.txt")  # in no sweep root and not on disk
     _write_state(project, {"cursor": [9000000000.0, ""], "retries": {}, "flagged": [gone]})
     assert _run(tmp_path, project, value).returncode == 0
     written = _state(project)
-    assert written["cursor"][0] == 9000000000.0
+    assert "cursor" not in written and max(written["covered"][0][0], written["covered"][1][0]) < 9000000000.0  # a migrated cursor would put 9e9 in covered
     assert written["flagged"] == [gone]
     assert "trash" in written
 
@@ -258,5 +258,5 @@ def test_a_malformed_trash_state_falls_back_to_a_fresh_pass(tmp_path: Path) -> N
     _write_state(project, {"cursor": [9000000000.0, ""], "retries": {}, "flagged": [gone], "trash": "bad"})
     assert _run(tmp_path, project, value).returncode == 0
     written = _state(project)
-    assert written["cursor"][0] != 9000000000.0
+    assert "cursor" not in written and max(written["covered"][0][0], written["covered"][1][0]) < 9000000000.0  # a migrated cursor would put 9e9 in covered
     assert gone not in written["flagged"]

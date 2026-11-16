@@ -149,8 +149,8 @@ def test_sweep_counts_what_it_did_not_read(tmp_path: Path, monkeypatch: pytest.M
     assert limited.left_for_next_pass > 0 and limited.scanned >= 1
 
 
-def test_cursor_resumes_after_the_last_file_and_holds_in_front_of_a_failure(tmp_path: Path) -> None:
-    """The next pass reads only newer files, and never moves past a file that could not be read."""
+def test_the_range_resumes_after_the_last_file_and_holds_in_front_of_a_failure(tmp_path: Path) -> None:
+    """The next pass reads only files outside the covered range, and hi never moves past a file that could not be read."""
     matcher = _matcher("MY_API_TOKEN", _token(48))
     older, newer = tmp_path / "older.txt", tmp_path / "newer.txt"
     older.write_text("one")
@@ -159,10 +159,10 @@ def test_cursor_resumes_after_the_last_file_and_holds_in_front_of_a_failure(tmp_
 
     os.utime(older, (1000.0, 1000.0))
     os.utime(newer, (2000.0, 2000.0))
-    first = env_secrets.sweep([str(tmp_path)], matcher, SALT)
+    first = env_secrets.sweep([str(tmp_path)], matcher, SALT, covered=((0.0, ""), (0.0, "")))  # both files above hi: the fresh tier, oldest first
     cursor = env_secrets.advance_cursor((0.0, ""), first.processed, first.failed)
     assert cursor == (2000.0, str(newer))
-    assert env_secrets.sweep([str(tmp_path)], matcher, SALT, since=cursor).scanned == 0
+    assert env_secrets.sweep([str(tmp_path)], matcher, SALT, covered=((0.0, ""), cursor)).scanned == 0  # inside the range: not read again
     held = env_secrets.advance_cursor((0.0, ""), first.processed, [(1000.0, str(older))])
     assert held == (0.0, "")
     assert env_secrets.advance_cursor((0.0, ""), first.processed, [(2000.0, str(newer))]) == (1000.0, str(older))
@@ -291,9 +291,11 @@ def test_a_listing_over_its_budget_is_cut_and_reads_nothing(tmp_path: Path) -> N
 def test_the_time_budget_includes_the_listing(tmp_path: Path) -> None:
     """The clock starts before the listing: the listing's own time is spent from time_budget_s, so reads stop after the second file here."""
     _three_files_and_a_subfolder(tmp_path)
-    # clock reads: start 0, two folders 1 and 2 (listing), then 3 before the second file and 4 before the third.
-    # Started after the listing (the old order) the same clock reads 1 and 2 in the read phase and all three files are read.
-    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(1.0), time_budget_s=3.5)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        os.utime(tmp_path / name, (100.0, 100.0))  # far below the live edge: the backlog tier, whose limit is the whole time budget
+    # clock reads: start 0, two folders 1 and 2 (listing), the start of the reads 3, then 4 before the second file and 5 before the third.
+    # Started after the listing (the old order) the same clock reads 1, 2 and 3 in the read phase and all three files are read.
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(1.0), time_budget_s=4.5)
     assert report.listing_cut_after_s is None
     assert report.scanned == 2 and report.left_for_next_pass == 1
 
@@ -313,3 +315,60 @@ def test_one_flat_folder_is_cut_inside_the_folder(tmp_path: Path, monkeypatch: p
     report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(10.0), listing_budget_s=15.0)
     assert report.listing_cut_after_s == 20.0  # clock reads: start 0, the folder 10 (inside), the second file 20 (over)
     assert report.scanned == 0
+
+
+
+def _file_at(folder: Path, name: str, mtime: float, size: int = 10) -> str:
+    """A file of `size` bytes whose modification time is set to `mtime`; returns its path."""
+    target = folder / name
+    target.write_bytes(b"x" * size)
+    os.utime(target, (mtime, mtime))
+    return str(target)
+
+
+def test_a_fresh_state_reads_the_newest_file_first(tmp_path: Path) -> None:
+    """With no saved range the sweep starts at the live edge: the newest file is read first and the older ones wait for later passes."""
+    _file_at(tmp_path, "p100.txt", 100.0)
+    _file_at(tmp_path, "p200.txt", 200.0)
+    p300 = _file_at(tmp_path, "p300.txt", 300.0)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=None, byte_budget=15, wall=lambda: 1000.0)
+    assert report.processed == [(300.0, p300)]
+    assert report.left_for_next_pass == 2
+    assert env_secrets.advance_covered(report.covered, report.processed, [], report.live_edge) == ((300.0, p300), (998.0, ""))
+
+
+def test_hi_stays_below_the_live_edge(tmp_path: Path) -> None:
+    """A file newer than the live edge is read but never covered by hi, so the next pass reads it again."""
+    p600 = _file_at(tmp_path, "p600.txt", 600.0)
+    p999 = _file_at(tmp_path, "p999.txt", 999.5)
+    covered = ((50.0, ""), (500.0, ""))
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=covered, wall=lambda: 1000.0)
+    assert report.processed == [(600.0, p600), (999.5, p999)]
+    advanced = env_secrets.advance_covered(report.covered, report.processed, [], report.live_edge)
+    assert advanced[1] == (600.0, p600)
+    again = env_secrets.sweep([str(tmp_path)], None, SALT, covered=advanced, wall=lambda: 1000.0)
+    assert again.processed == [(999.5, p999)]
+
+
+def test_a_fresh_file_over_the_whole_budget_does_not_stop_the_backlog(tmp_path: Path) -> None:
+    """Each tier reads at least one file per pass, so one huge fresh file cannot starve the backlog below lo."""
+    _file_at(tmp_path, "p300.txt", 300.0, size=40)
+    p50 = _file_at(tmp_path, "p50.txt", 50.0, size=10)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=((100.0, ""), (200.0, "")), byte_budget=30, wall=lambda: 1000.0)
+    assert sorted(mtime for mtime, _ in report.processed) == [50.0, 300.0]
+    assert env_secrets.advance_covered(report.covered, report.processed, [], report.live_edge)[0] == (50.0, p50)
+
+
+def test_a_backlog_hold_stops_lo_above_it() -> None:
+    """lo moves down over the keys read but never to or below the highest backlog hold; hi stops in front of its first hold."""
+    moved = env_secrets.advance_covered(((500.0, ""), (600.0, "")), [(400.0, "a"), (300.0, "b"), (200.0, "c")], [(300.0, "b")], 1000.0)
+    assert moved == ((400.0, "a"), (600.0, ""))
+    up = env_secrets.advance_covered(((100.0, ""), (200.0, "")), [(300.0, "x"), (400.0, "y"), (500.0, "z")], [(400.0, "y")], 1000.0)
+    assert up[1] == (300.0, "x")
+
+
+def test_raise_order_follows_each_edge() -> None:
+    """Findings are raised above hi oldest first, then in the backlog newest first, then the trash files by path."""
+    keys = {path: (mtime, path) for path, mtime in (("p700", 700.0), ("p650", 650.0), ("p400", 400.0), ("p300", 300.0))}
+    ordered = env_secrets.raise_order(["p300", "p400", "p650", "p700", "trash/a"], keys, (600.0, ""))
+    assert ordered == ["p650", "p700", "p400", "p300", "trash/a"]

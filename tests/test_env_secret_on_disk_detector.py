@@ -84,8 +84,8 @@ def test_a_cleaned_file_withdraws_its_finding(tmp_path: Path) -> None:
     assert "column: refused" in proposal.read_text()
 
 
-def test_a_file_the_sweep_cannot_read_is_counted_and_holds_the_cursor(tmp_path: Path) -> None:
-    """An unreadable file is named in a coverage line, and the cursor does not move past it."""
+def test_a_file_the_sweep_cannot_read_is_counted_and_holds_the_covered_range(tmp_path: Path) -> None:
+    """An unreadable file is named in a coverage line, and the covered range does not move past it (lo stays above it)."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
     older = project / "reports_dev" / "a-older.txt"
@@ -95,13 +95,19 @@ def test_a_file_the_sweep_cannot_read_is_counted_and_holds_the_cursor(tmp_path: 
     os.utime(older, (1000.0, 1000.0))
     os.utime(locked, (2000.0, 2000.0))
     locked.chmod(0)
+    before = time.time()
     try:
         out = _run(tmp_path, project, value)
     finally:
         locked.chmod(0o600)
+        after = time.time()
     assert "sweep coverage" in out.stdout and "1 unreadable" in out.stdout
     cursor = json.loads((project / ".janitor" / "state" / "env-secret-on-disk.cursor.json").read_text())
-    assert cursor["cursor"] == [1000.0, str(older)]
+    # Both edges start at the live edge (no saved range). The locked file (2000) is the top backlog hold, so lo cannot move down
+    # over it, and the older file (1000) read behind it stays unclaimed. Both edges are exactly the live edge: the wall clock at the
+    # start of the sweep minus LIVE_EDGE_MARGIN_S, bounded here by two clock reads around the run (lo at 1000 would fail this).
+    assert cursor["covered"][0] == cursor["covered"][1]
+    assert before - 2.0 <= cursor["covered"][0][0] <= after - 2.0  # 2.0 = env_secrets.LIVE_EDGE_MARGIN_S
     assert cursor["retries"] == {str(locked): 1}
 
 
@@ -121,8 +127,8 @@ def _cursor(project: Path) -> dict:
     return json.loads((project / ".janitor" / "state" / "env-secret-on-disk.cursor.json").read_text())
 
 
-def test_a_git_that_cannot_list_untracked_files_is_said_and_holds_the_cursor(tmp_path: Path) -> None:
-    """A failed `git ls-files` used to look like "no untracked files" and the cursor moved past a leaking file that
+def test_a_git_that_cannot_list_untracked_files_is_said_and_holds_the_covered_range(tmp_path: Path) -> None:
+    """A failed `git ls-files` used to look like "no untracked files" and the covered range moved past a leaking file that
     was never read; now it is counted in the coverage line, and a project that has no git at all still advances."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
@@ -131,17 +137,17 @@ def test_a_git_that_cannot_list_untracked_files_is_said_and_holds_the_cursor(tmp
     (project / ".git").write_text("gitdir: /nonexistent\n")
     out = _run(tmp_path, project, value)
     assert "untracked files were not listed" in out.stdout
-    assert _cursor(project)["cursor"] == [0.0, ""]
+    assert _cursor(project)["covered"] is None
     plain = tmp_path / "plain"
     (plain / "reports_dev").mkdir(parents=True)
     (plain / "reports_dev" / "a.txt").write_text("clean\n")
     assert "untracked files were not listed" not in _run(tmp_path, plain, value).stdout
-    assert _cursor(plain)["cursor"][0] > 0
+    assert _cursor(plain)["covered"][1][0] > 0
 
 
 
-def test_a_git_that_keeps_failing_stops_holding_the_cursor_and_the_retry_count_is_cleared_when_it_works(tmp_path: Path) -> None:
-    """After MAX_FAIL_RETRIES failed passes the cursor moves on (git failing for good must not stall the sweep), the
+def test_a_git_that_keeps_failing_stops_holding_the_covered_range_and_the_retry_count_is_cleared_when_it_works(tmp_path: Path) -> None:
+    """After MAX_FAIL_RETRIES failed passes the covered range moves on (git failing for good must not stall the sweep), the
     count rides in the cursor file across passes, and a pass where git works clears it."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
@@ -152,9 +158,9 @@ def test_a_git_that_keeps_failing_stops_holding_the_cursor_and_the_retry_count_i
     for expected in (1, 2, 3):
         _run(tmp_path, project, value)
         state = _cursor(project)
-        assert state["retries"] == {"git ls-files": expected} and state["cursor"] == [0.0, ""]
-    _run(tmp_path, project, value)  # the fourth failure: retries exhausted, the cursor is released
-    assert _cursor(project)["cursor"][0] > 0
+        assert state["retries"] == {"git ls-files": expected} and state["covered"] is None
+    _run(tmp_path, project, value)  # the fourth failure: retries exhausted, the covered range is released
+    assert _cursor(project)["covered"][1][0] > 0
     (project / ".git").unlink()
     git_dir.rename(project / ".git")
     _run(tmp_path, project, value)
@@ -162,7 +168,7 @@ def test_a_git_that_keeps_failing_stops_holding_the_cursor_and_the_retry_count_i
 
 
 def test_more_leaking_files_than_the_cap_are_all_reported_over_the_passes(tmp_path: Path) -> None:
-    """Hit files were raised in path order but the cursor moves in modification order: with names ascending and
+    """Hit files were raised in path order but the covered range moves in modification order: with names ascending and
     times descending the same five were raised every pass and the other four never."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
@@ -219,8 +225,8 @@ def test_a_file_named_after_the_value_is_reported_by_folder_and_the_value_is_sto
     assert _files_holding(tmp_path, value, set()) == []
 
 
-def test_a_cut_listing_keeps_the_cursor_retries_and_findings_and_says_so_once_a_day(tmp_path: Path) -> None:
-    """With the listing forced over its budget the pass reads nothing, keeps cursor, retries and findings, and says so once."""
+def test_a_cut_listing_keeps_the_covered_range_retries_and_findings_and_says_so_once_a_day(tmp_path: Path) -> None:
+    """With the listing forced over its budget the pass reads nothing, keeps both edges of the covered range, retries and findings, and says so once."""
     runner = (
         "import runpy, sys\n"
         "sys.path.insert(0, sys.argv[2])\n"
@@ -238,7 +244,7 @@ def test_a_cut_listing_keeps_the_cursor_retries_and_findings_and_says_so_once_a_
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
     (state_dir / "env-secret-on-disk.cursor.json").write_text(json.dumps({
-        "cursor": [5.0, "x"], "retries": {"/nonexistent/held": 2}, "flagged": [str(planted)], "trash": {"positions": {}, "done": []},
+        "covered": [[5.0, "x"], [9.0, "y"]], "retries": {"/nonexistent/held": 2}, "flagged": [str(planted)], "trash": {"positions": {}, "done": []},
     }))
     (tmp_path / "home").mkdir(exist_ok=True)
     env = {
@@ -251,9 +257,32 @@ def test_a_cut_listing_keeps_the_cursor_retries_and_findings_and_says_so_once_a_
     assert first.returncode == 0, first.stderr
     assert first.stdout.count("the listing of the agent folders took over") == 1 and "URGENT" not in first.stdout
     state = _cursor(project)
-    assert state["cursor"] == [5.0, "x"] and state["retries"]["/nonexistent/held"] == 2 and str(planted) in state["flagged"]
+    assert state["covered"] == [[5.0, "x"], [9.0, "y"]] and state["retries"]["/nonexistent/held"] == 2 and str(planted) in state["flagged"]
+    assert "the covered range did not move" in first.stdout
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
+    assert "listing cut after" in log and "covered range kept" in log
     second = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
     assert second.returncode == 0, second.stderr
     if time.strftime("%Y-%m-%d") == day:
         assert "the listing of the agent folders took over" not in second.stdout
-    assert _cursor(project)["cursor"] == [5.0, "x"]
+    assert _cursor(project)["covered"] == [[5.0, "x"], [9.0, "y"]]
+
+
+
+def test_an_old_state_file_keeps_flagged_and_drops_the_cursor(tmp_path: Path) -> None:
+    """A state file from before the covered range ("cursor", no "covered") starts newest first: flagged is kept and handled, the cursor is dropped."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {value}\n")
+    assert "CRED-002" in _run(tmp_path, project, value).stdout
+    target.write_text("cleaned\n")
+    state_file = project / ".janitor" / "state" / "env-secret-on-disk.cursor.json"
+    state_file.write_text(json.dumps({
+        "cursor": [5.0, "x"], "retries": {}, "flagged": [str(target)], "trash": {"positions": {}, "done": []},
+    }))
+    assert _run(tmp_path, project, value).returncode == 0
+    state = _cursor(project)
+    assert "cursor" not in state
+    assert len(state["covered"]) == 2 and all(len(edge) == 2 for edge in state["covered"])
+    assert state["flagged"] == []  # the flagged file was read again and is clean now: its finding is withdrawn

@@ -3,11 +3,12 @@ have the shape of an environment dump. Nothing in this module returns, prints, l
 a finding carries the variable NAME, the form, the path, the line and a keyed fingerprint.
 
 The needle table lives in memory only. It holds secret values, so a Matcher never shows them in its repr.
-The sweep is bounded (bytes and seconds per pass, the listing included) and incremental (a modification-time cursor), and counts
+The sweep is bounded (bytes and seconds per pass, the listing included) and incremental (a covered range of modification times:
+the changes above it are read first, then the older files below it, newest first), and counts
 everything it did not read: silence is not a pass.
 
-The timestamp batches of .trashcan are the exception to the modification-time cursor: a file moved into the trash
-keeps its old mtime, so the cursor would never see it. sweep_trash scans them by batch name, newest first, from a
+The timestamp batches of .trashcan are the exception to the modification-time range: a file moved into the trash
+keeps its old mtime, so the covered range would never see it. sweep_trash scans them by batch name, newest first, from a
 saved per-batch position (see its docstring).
 """
 from __future__ import annotations
@@ -22,7 +23,7 @@ import re
 import stat
 import time
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,15 +40,22 @@ TIME_BUDGET_S = 60.0  # per pass; the detector timeout is 120 s (CLAUDE_PLUGIN_O
 # Listing and stat of the roots, per pass, counted inside TIME_BUDGET_S. The listing of the non-trash roots of this repo took
 # 8.6 s on 2026-11-16 (28.1 s of walk minus 19.45 s of .trashcan, which is read by name now): 30 s is about 3.5 times that,
 # and it leaves at least half of TIME_BUDGET_S for reads.
-# The clock is checked once per folder and every LISTING_CLOCK_EVERY_FILES files inside a folder, so a huge flat folder is bounded too.
+# The clock is checked once per folder and once every LISTING_CLOCK_EVERY_FILES files listed (the count runs across the whole listing), so a huge flat folder is bounded too.
 LISTING_CLOCK_EVERY_FILES = 1024
 LISTING_BUDGET_S = 30.0
-MAX_FAIL_RETRIES = 3  # passes a failing file holds the cursor before the sweep goes on without it
+# hi never moves above (wall time at the start of the listing minus this margin): a file written during the listing, or with a
+# coarse mtime (2 s on FAT), must not end up below the edge, where it would never be read as a change.
+LIVE_EDGE_MARGIN_S = 2.0
+# The share of the byte budget, and of the time left after the listing, that the fresh tier (changes above hi) may use; the
+# backlog below lo gets the rest, so a stream of new files cannot starve the old ones for ever.
+FRESH_SHARE = 0.5
+MAX_FAIL_RETRIES = 3  # passes a failing file holds the covered range before the sweep goes on without it
 _ANCHORS = (b"PATH=", b"HOME=", b"SHELL=", b"USER=", b"LOGNAME=", b"TMPDIR=", b"LANG=", b"PWD=", b"TERM=", b"SHLVL=")
 _ASSIGNMENT = re.compile(rb"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,63})=([^\s\x00]{16,})")
 _SEPARATORS = re.compile(r"[^\s:|;,&=]+")
 _SKIP_DIRS = {".git", "node_modules", "Pods", "DerivedData", "__pycache__"}
 Key = tuple[float, str]  # (modification time, path): the order the sweep reads files in
+Covered = tuple[Key, Key]  # (lo, hi): every key inside [lo, hi] was read
 TrashPos = tuple[str, ...]  # path components below a batch folder; tuple order is the walk order of sweep_trash
 TRASH_BYTE_BUDGET = 64 * 1024 * 1024  # per pass, on top of BYTE_BUDGET: the trash tier is a backlog of old files, read after the live folders
 TRASH_TIME_BUDGET_S = 15.0  # per pass, listing included; the detector timeout is 120 s
@@ -196,7 +204,7 @@ def agent_writable_roots(project_root: Path, uid: int, tmp_base: str = "/tmp") -
 
     The timestamp batch folders of .trashcan are NOT roots: sweep_trash scans them by batch name. Blind spot that
     remains: a file moved into one of the non-batch children (migrate-memory-scope/ ...) keeps its old modification
-    time, so the cursor of the modification-time sweep never sees it."""
+    time, so the covered range of the modification-time sweep never sees it."""
     roots = [project_root / name for name in ("reports", "reports_dev", ".janitor")]
     roots += _trash_non_batch_roots(project_root / ".trashcan")
     roots += [p for p in project_root.glob("*_dev") if p.is_dir()]
@@ -232,8 +240,8 @@ class SweepReport:
     bytes_read: int = 0
     unreadable: list[str] = field(default_factory=list)
     not_regular: list[str] = field(default_factory=list)  # FIFOs, sockets, devices: open() can wait for ever or never reach EOF
-    # (folder, NAME) of a file whose PATH holds a secret. Such a path may not be printed, logged or kept in the cursor
-    # file, and the cursor, the retry counts and the give-up list all key on paths, so the file is left out of the pass
+    # (folder, NAME) of a file whose PATH holds a secret. Such a path may not be printed, logged or kept in the state
+    # file, and the covered range, the retry counts and the give-up list all key on paths, so the file is left out of the pass
     # whole (its content is not read) and reported by its folder; the finding is the name leak itself.
     secret_named: list[tuple[str, str]] = field(default_factory=list)
     too_big: list[str] = field(default_factory=list)
@@ -243,10 +251,14 @@ class SweepReport:
     failed: list[Key] = field(default_factory=list)  # keys that raised OSError
     # Seconds the listing had run when LISTING_BUDGET_S stopped it; None = the listing completed. A cut pass read nothing.
     listing_cut_after_s: float | None = None
+    # The (lo, hi) range this pass read around, resolved from the argument (None became the live edge on both sides), and the
+    # live edge itself: advance_covered needs both to move the edges.
+    covered: Covered = ((0.0, ""), (0.0, ""))
+    live_edge: float = 0.0
 
     def absorb_findings(self, other: SweepReport) -> None:
         """Add what `other` found and could not cover, so one report feeds the detector's loops. NOT processed, failed,
-        the counters or left_for_next_pass: those are keyed per tier (a cursor key here, a batch position there)."""
+        the counters or left_for_next_pass: those are keyed per tier (a covered-range key here, a batch position there)."""
         self.hits += other.hits
         self.dump_shaped += other.dump_shaped
         self.unreadable += other.unreadable
@@ -313,25 +325,37 @@ def sweep(
     roots: list[str],
     matcher: Matcher | None,
     salt: bytes,
-    since: Key = (0.0, ""),
+    covered: Covered | None = None,
     byte_budget: int = BYTE_BUDGET,
     time_budget_s: float = TIME_BUDGET_S,
     give_up: frozenset[str] = frozenset(),
     clock: Callable[[], float] = time.monotonic,
+    wall: Callable[[], float] = time.time,
     listing_budget_s: float = LISTING_BUDGET_S,
 ) -> SweepReport:
-    """One bounded pass, oldest change first. Everything it did NOT read is counted in the report.
+    """One bounded pass: the changes above the covered range first, oldest of them first, then the backlog below it,
+    newest first. Everything it did NOT read is counted in the report.
+    `covered` is the (lo, hi) range of keys already read; None (no state yet) starts at the wall clock, so the whole
+    tree is backlog and the newest file is read first.
     A root may be a file (the untracked files of a project are passed one by one) or a folder.
     The clock starts before the listing, so time_budget_s covers listing and reads; a listing over listing_budget_s
     is cut (listing_cut_after_s) and nothing is read."""
     report = SweepReport()
     changed: dict[str, tuple[float, int]] = {}
     started = clock()  # before the listing: the read phase gets only what the listing left of time_budget_s
+    # Taken before the listing: a file written while the listing runs has an mtime above this edge, so hi never covers it
+    # (see LIVE_EDGE_MARGIN_S and advance_covered).
+    live_edge = wall() - LIVE_EDGE_MARGIN_S
+    if covered is None:
+        covered = ((live_edge, ""), (live_edge, ""))
+    lo, hi = covered
+    report.covered = covered
+    report.live_edge = live_edge
     listed = 0
 
     def listing_cut() -> bool:
-        # An mtime cursor may move only over a COMPLETE listing: a file not yet listed may hold any mtime above the
-        # cursor, so advancing it after a cut listing would skip that file for good. Cut means read nothing.
+        # The covered range may move only over a COMPLETE listing: a file not yet listed may lie anywhere outside it,
+        # so moving an edge after a cut listing would skip that file for good. Cut means read nothing.
         elapsed = clock() - started
         if elapsed <= listing_budget_s:
             return False
@@ -364,15 +388,32 @@ def sweep(
                 if not stat.S_ISREG(info.st_mode):  # a link to a file passes (stat follows it); a FIFO or a device does not
                     report.not_regular.append(path)
                     continue
-                if (info.st_mtime, path) > since:
+                key = (info.st_mtime, path)
+                if key > hi or key < lo:
                     changed[path] = (info.st_mtime, info.st_size)
-    ordered = sorted((mtime, path, size) for path, (mtime, size) in changed.items())
-    for index, (mtime, path, size) in enumerate(ordered):
-        if size <= MAX_FILE_BYTES and report.scanned and (report.bytes_read + size > byte_budget or clock() - started > time_budget_s):
-            report.left_for_next_pass = len(ordered) - index
-            break
-        done = _read_one(report, matcher, salt, path, size, give_up)
-        (report.processed if done else report.failed).append((mtime, path))
+    fresh = sorted((mtime, path, size) for path, (mtime, size) in changed.items() if (mtime, path) > hi)
+    backlog = sorted(((mtime, path, size) for path, (mtime, size) in changed.items() if (mtime, path) < lo), reverse=True)
+    reads_started = clock()
+    left_s = max(0.0, time_budget_s - (reads_started - started))
+    # Two tiers, each with its own share of the budgets: a flood of new files must not starve the backlog, nor the backlog
+    # delay a file that has just changed. The fresh tier gets FRESH_SHARE of the bytes and of the time left after the listing.
+    fresh_deadline = reads_started + left_s * FRESH_SHARE
+    fresh_byte_cap = byte_budget * FRESH_SHARE
+
+    def read_tier(tier: list[tuple[float, str, int]], over: Callable[[int, int], bool]) -> None:
+        # The guard `report.scanned > scanned0` is PER TIER: each tier reads at least one file per pass, so a fresh file
+        # larger than the whole budget cannot starve the backlog, and a pass always moves an edge.
+        scanned0 = report.scanned
+        bytes0 = report.bytes_read
+        for index, (mtime, path, size) in enumerate(tier):
+            if size <= MAX_FILE_BYTES and report.scanned > scanned0 and over(size, bytes0):
+                report.left_for_next_pass += len(tier) - index
+                return
+            done = _read_one(report, matcher, salt, path, size, give_up)
+            (report.processed if done else report.failed).append((mtime, path))
+
+    read_tier(fresh, lambda size, bytes0: report.bytes_read - bytes0 + size > fresh_byte_cap or clock() > fresh_deadline)
+    read_tier(backlog, lambda size, bytes0: report.bytes_read + size > byte_budget or clock() - started > time_budget_s)
     return report
 
 
@@ -386,6 +427,38 @@ def advance_cursor(since: Key, processed: list[Key], holds: list[Key]) -> Key:
             break
         cursor = key
     return cursor
+
+
+def advance_covered(covered: Covered, processed: list[Key], holds: list[Key], live_edge: float) -> Covered:
+    """Where the covered range is after a pass. hi moves up over the fresh keys read, never past the first fresh hold and
+    never above `live_edge`; lo moves down over the backlog keys read, never to or below the highest backlog hold
+    (a file that could not be read, or whose finding could not be raised): that one is retried."""
+    lo, hi = covered
+    # hi never moves above the live edge: a file written during the listing into a folder already walked has a later mtime, and an
+    # hi moved past it by a newer file listed later would cover it unread. A file above the edge is still read, and read again
+    # next pass.
+    # (The edge sits LIVE_EDGE_MARGIN_S below the wall clock so that a coarse mtime does not put such a file under it.)
+    new_hi = advance_cursor(hi, [k for k in processed if k > hi and k[0] <= live_edge], [k for k in holds if k > hi])
+    back_holds = [k for k in holds if k < lo]
+    top_hold = max(back_holds) if back_holds else None
+    new_lo = lo
+    for key in sorted((k for k in processed if k < lo), reverse=True):
+        if top_hold is not None and key <= top_hold:
+            break
+        new_lo = key
+    return (new_lo, new_hi)
+
+
+def raise_order(paths: Iterable[str], keys: Mapping[str, Key], hi: Key) -> list[str]:
+    """The order to raise findings in: the paths above `hi` oldest first, then the others newest first, then the paths
+    that have no key (trash files) by path. Each edge of the covered range moves in its own reading order, so the per-fire
+    cap must hold back the hits farthest from the edge: oldest first in the backlog would hold the hit next to lo and
+    stop lo for ever."""
+    paths = list(paths)  # an Iterable may be one-shot, and it is read twice below
+    keyed = [path for path in paths if path in keys]
+    fresh = sorted((path for path in keyed if keys[path] > hi), key=lambda path: keys[path])
+    backlog = sorted((path for path in keyed if keys[path] <= hi), key=lambda path: keys[path], reverse=True)
+    return fresh + backlog + sorted(path for path in paths if path not in keys)
 
 
 def trash_path(trash_root: str, batch: str, position: TrashPos) -> str:
@@ -406,7 +479,7 @@ def sweep_trash(
     clock: Callable[[], float] = time.monotonic,
 ) -> TrashReport:
     """The timestamp batches of .trashcan, scanned by batch NAME, never by modification time: safe-delete moves a file
-    in with its old mtime, so no mtime cursor ever sees an arrival. A batch is written once (one safe-delete run)
+    in with its old mtime, so no mtime range ever sees an arrival. A batch is written once (one safe-delete run)
     and is not rewritten, so a position inside it stays sound; a restore moves files OUT, which only shrinks it.
 
     Batches: settled ones only (name older than `settle_s`: a run still moving files into its batch is left alone),
