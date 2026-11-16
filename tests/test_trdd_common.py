@@ -1216,7 +1216,7 @@ def test_exit_on_git_root_error_caps_the_cause_at_200_characters(capsys: pytest.
         ("--opt=/x done", "--opt=<path> done"),
         ("fatal: '/p q/r': no", "fatal: '<path>': no"),
         ("at /a/b:c/d", "at <path>"),
-        ("cd ~typesafe/x", "cd <path>"),
+        ("cd ~typesafe/x", "cd <path>"),  # "typesafe" is the one ~name the pre-commit privacy scan allows; any other ~name blocks the commit
         ("/x: no such", "<path>: no such"),
         ("boom \"/tmp/it's a/x\" end", "boom \"<path>\" end"),
         ("say \"/p q/r\" now", "say \"<path>\" now"),
