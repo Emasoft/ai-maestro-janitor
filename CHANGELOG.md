@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.7] — 2026-11-16
+
+### Bug Fixes
+
+- **clear:** Hold a janitor clear while /janitor-write-handoff composes (TRDD-C9CO0I7L) (ef433a5)
+
+### Documentation
+
+- **memory:** Lesson - a ps-snapshot test row needs a pid no host can hold (TRDD-NLHVLGEP) (bfd4893)
+- **cards:** ADFIO49Q and A70YJLXN record the 3.9.6 auto-update to user scope (TRDD-ADFIO49Q, TRDD-A70YJLXN) (18f652f)
+- **card:** F8EIVTSG records why issue 358 item 4 stays out of scope (TRDD-F8EIVTSG) (95c1699)
+- **card:** NRF7OJ5H records that Scope 3 waits on the report-sanitizer push decision (TRDD-NRF7OJ5H) (1837047)
+- **card:** C9CO0I7L moves to testing with ef433a58; the live check is owed (TRDD-C9CO0I7L) (44f7f9f)
+- **cards:** Owner-gated list, UBS 62-critical verdict, C9CO0I7L key check (TRDD-S6GX1DHN, TRDD-NRF7OJ5H, TRDD-C9CO0I7L) (e742ede)
+- **cards:** Correct stale release claims on BEA87JS1, 1P54BCIX; 85NZX5RJ boxes stay open (TRDD-BEA87JS1, TRDD-1P54BCIX, TRDD-85NZX5RJ) (787b6a5)
+- **card:** NRF7OJ5H UBS lines pass the CI spell check (TRDD-NRF7OJ5H) (4da6f45)
 ## [3.9.6] — 2026-11-16
 
 ### Bug Fixes
@@ -19,6 +35,10 @@ All notable changes to this project will be documented in this file.
 - **card:** ADFIO49Q records the design and implementation steps; test docstring lists its stubs plainly (TRDD-ADFIO49Q) (9b43cec)
 - **card:** ADFIO49Q moves to testing with its implementation commit recorded (TRDD-ADFIO49Q) (bbc25be)
 - **card:** NRF7OJ5H STATE gives the measured report-sanitizer ahead count, 16 (TRDD-NRF7OJ5H) (1753e3f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.9.6 (81575d5)
 ## [3.9.5] — 2026-11-16
 
 ### Documentation
