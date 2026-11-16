@@ -371,7 +371,10 @@ def _pass(sdir: Path) -> int:
         # the main sweep puts it in report.failed and the trash walk in failed_by_batch (unless it is already given up on, which makes it done), so `holds`,
         # `retries` and `trash_holds` above already keep the covered range or the batch position in front of it and count a retry, bounded by
         # MAX_FAIL_RETRIES. It is not in `read`, so a flagged file keeps its finding. Log only, never stdout: the heartbeat output is read by the model.
-        state.log_line(_NAME, "cut by the hard read bound, read again next pass: " + "; ".join(report.cut[:50]))
+        # A given-up cut file is done, not read again: it is named in the "not fully covered" line above and counted in the pass line, so only the held ones are listed here.
+        held_cut = [path for path in report.cut if path not in report.cut_given_up]
+        if held_cut:
+            state.log_line(_NAME, "cut by the hard read bound, read again next pass: " + "; ".join(held_cut[:50]))
     new_covered = saved["covered"] if hold_for_git or cut else env_secrets.advance_covered(report.covered, report.processed, holds, report.live_edge)
     # The trash tier moves even while git holds the covered range: hold_for_git means `git ls-files` failed, which only leaves
     # the UNTRACKED roots unread, and .trashcan is gitignored, so no trash file ever depended on that listing.

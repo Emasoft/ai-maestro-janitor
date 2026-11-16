@@ -441,10 +441,11 @@ def test_a_flagged_file_cut_by_the_hard_read_bound_keeps_its_finding_and_is_held
     assert state["retries"] == {str(target): 1} and state["covered"] == [[1.0, ""], [1.0, ""]]  # held like a failed read
 
 
-def test_a_given_up_file_that_is_cut_is_named_in_that_pass_then_left_behind_the_covered_range(tmp_path: Path) -> None:
+def test_a_given_up_file_that_is_cut_is_counted_and_covered_but_not_listed_as_read_again(tmp_path: Path) -> None:
     """A file already given up on (MAX_FAIL_RETRIES failed reads saved) is opened and cut once more: it is done (the covered range moves past it, its retry entry is
-    dropped) but it is still named in the cut log line and counted in the pass line, and its finding stays. The next pass does NOT read it again (it is inside the
-    covered range, like a given-up failed read), so the cut is named once and the unscanned tail is not read again until the file changes."""
+    dropped) and it is counted in the pass line and named in the "not fully covered" line, but it is NOT in the "read again next pass" line: a given-up file is not read
+    again (it is inside the covered range, like a given-up failed read), so listing it as read again would be false. Its finding stays, and the next pass does not
+    open it until the file changes."""
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
     target = _flag_then_force_a_reread(tmp_path, project, value, retries=env_secrets.MAX_FAIL_RETRIES, body="x" * (64 * 200) + f"\nleak {value}\n")
@@ -455,14 +456,15 @@ def test_a_given_up_file_that_is_cut_is_named_in_that_pass_then_left_behind_the_
     assert any("not fully covered" in line and str(target) in line for line in log_file.read_text().splitlines())
     assert "1 cut by the hard read bound on every try and left unread" in give_up_pass.stdout
     cut_lines = [line for line in log_file.read_text().splitlines() if "cut by the hard read bound, read again next pass" in line]
-    assert len(cut_lines) == 1 and str(target) in cut_lines[0]  # given up, yet named: the cut is a coverage gap in that pass
+    # The pass line counts exactly one cut (the target), so with it given up no "read again next pass" line may exist at all, not even an empty one.
+    assert cut_lines == []
     assert any("pass: " in line and "; cut by the hard read bound: 1;" in line for line in log_file.read_text().splitlines())
     state = _cursor(project)
     assert str(target) not in state["retries"] and state["covered"][1] == [100.0, str(target)]  # given up: done, no longer held
     assert str(target) in state["flagged"]
     _cut_pass(tmp_path, project, value)  # second pass: the target is inside the covered range, so it is not opened again
-    # Another file (the proposal the first pass wrote) may be cut by this tiny clock; the given-up target must not be named again.
-    assert len([line for line in log_file.read_text().splitlines() if "cut by the hard read bound, read again next pass" in line and str(target) in line]) == 1
+    # Another file (the proposal the first pass wrote) may be cut by this tiny clock; the given-up target must still not be in a "read again next pass" line.
+    assert not any("cut by the hard read bound, read again next pass" in line and str(target) in line for line in log_file.read_text().splitlines())
     assert str(target) in _cursor(project)["flagged"]
 
 
