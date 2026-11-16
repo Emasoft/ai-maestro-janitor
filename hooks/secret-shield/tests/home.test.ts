@@ -9,6 +9,7 @@ const h = (text: string, homes: string[] = []) => redactHome(text, homes)
 // WHY a few paths are built from pieces: the privacy pre-commit scan reads source text and has no allow marker, so every literal home path here uses a generic name (runner, admin, user, app). Some fixtures need a made-up name no generic name can stand in for (no generic name holds a non-ASCII letter, a space, or the Shared or Public prefix), so they are joined at run time and no home-shaped literal appears in this file.
 const unix = (...parts: string[]) => parts.join('/')
 const win = (...parts: string[]) => parts.join(BS)
+const AT = '@'
 
 describe('home rewrite: Unix and Git Bash', () => {
   test('/Users/name becomes ~ and counts one hit', () => {
@@ -21,6 +22,21 @@ describe('home rewrite: Unix and Git Bash', () => {
     // Built from pieces (made-up name, see the note above the helpers): no generic name holds a non-ASCII letter.
     expect(h(unix('', 'Users', 'josé', 'x')).text).toBe('~/x')
     expect(h(win('C:', 'Users', 'josé', 'x')).text).toBe(raw`%USERPROFILE%\x`)
+  })
+  test('a Unix name may hold @ (realmd homes on hosts joined to Active Directory)', () => {
+    expect(h(unix('', 'home', 'runner' + AT + 'corp.example', 'x')).text).toBe('~/x')
+    expect(h(unix('', 'Users', 'runner' + AT + 'corp', 'x')).text).toBe('~/x')
+  })
+  test('a home right after an @ is still rewritten (@ is in the Unix name class but not in the start lookbehind)', () => {
+    expect(h('x' + AT + unix('', 'home', 'runner', 'y')).text).toBe('x' + AT + '~/y')
+    expect(h('x' + AT + win('C:', 'Users', 'runner', 'y')).text).toBe('x' + AT + raw`%USERPROFILE%\y`)
+  })
+  test('Public followed by @ and a domain is a name, not the exempt Public', () => {
+    expect(h(unix('', 'home', 'Public' + AT + 'corp', 'x')).text).toBe('~/x')
+    expect(h(unix('', 'home', 'Public', 'x')).text).toBe(unix('', 'home', 'Public', 'x'))
+  })
+  test('an @host tail glued to a home name is hidden with it (intended over-redaction: the host goes too)', () => {
+    expect(h('scp f ' + unix('', 'home', 'runner') + AT + 'host:x').text).toBe('scp f ~:x')
   })
   test('/c/Users/name becomes ~ (Git Bash)', () => {
     expect(h('/c/Users/runner/x').text).toBe('~/x')
@@ -130,6 +146,24 @@ describe('home rewrite: Windows', () => {
     expect(h('/Users/shared/x').text).toBe('/Users/shared/x')
     expect(h('/home/DEFAULT/x').text).toBe('/home/DEFAULT/x')
   })
+  test('mixed separators are rewritten: each slot takes the doubled backslash, the backslash or the slash, and the rest of the path is kept', () => {
+    expect(h(raw`C:\Users/runner\x`).text).toBe(raw`%USERPROFILE%\x`)
+    expect(h(raw`C:/Users\runner/x`).text).toBe('%USERPROFILE%/x')
+    expect(h(raw`C:\\Users\runner\x`).text).toBe(raw`%USERPROFILE%\x`)
+    expect(h(raw`C:\Users\\runner\x`).text).toBe(raw`%USERPROFILE%\x`)
+  })
+  test('a spaced name followed by a separator in a mixed style is one name', () => {
+    // Built from pieces (made-up name, see the note above the helpers): no generic name holds a space.
+    expect(h(win('C:', 'Users', 'John Smith') + '/x').text).toBe('%USERPROFILE%/x')
+  })
+  test('Users in a mixed letter case is the Windows folder, and the exempt names stay exempt', () => {
+    expect(h(raw`C:\UsErS\runner\x`).text).toBe(raw`%USERPROFILE%\x`)
+    for (const s of [raw`C:\Users\Default\x`, raw`C:\UsErS\Public\x`]) expect(h(s)).toEqual({ text: s, hits: {} })
+  })
+  test('a Windows name may hold @ or $ (domain and service accounts)', () => {
+    expect(h(win('C:', 'Users', 'runner' + AT + 'corp', 'x')).text).toBe(raw`%USERPROFILE%\x`)
+    expect(h(win('C:', 'Users', 'run$', 'x')).text).toBe(raw`%USERPROFILE%\x`)
+  })
 })
 
 describe('home rewrite: caller home literals', () => {
@@ -166,6 +200,13 @@ describe('home rewrite: Claude project slug', () => {
     expect(h('/x/projects/-home-runner-proj').text).toBe('/x/projects/-home-USER-proj')
     expect(h('-home-runner-proj').text).toBe('-home-runner-proj')
   })
+  test('a name that is exactly USER is skipped: nothing is rewritten and nothing is counted', () => {
+    for (const s of ['-Users-USER-proj', '/x/.claude/projects/-Users-USER-proj', '-Users-USER', '/x/projects/-home-USER-proj']) expect(h(s)).toEqual({ text: s, hits: {} })
+  })
+  test('a real name is still rewritten and counted once, and a name that only starts with USER is a name', () => {
+    expect(h('-Users-runner-proj')).toEqual({ text: '-Users-USER-proj', hits: { 'home-path': 1 } })
+    expect(h('-Users-USERx-proj')).toEqual({ text: '-Users-USER-proj', hits: { 'home-path': 1 } })
+  })
 })
 
 describe('home rewrite: counts and idempotence', () => {
@@ -176,11 +217,12 @@ describe('home rewrite: counts and idempotence', () => {
   test('results starting with ~/ or %USERPROFILE% never match again', () => {
     for (const s of ['~/Code/x', raw`%USERPROFILE%\Code\x`]) expect(h(s)).toEqual({ text: s, hits: {} })
   })
-  test('running twice gives the text of running once; only the slug rewrites to themselves are counted again', () => {
-    const text = raw`a\n/Users/runner/x C:\\Users\\runner\\y C:/Users/runner/z /mnt/c/Users/runner /home/runner /srv/u/runner/q /x/-Users-runner-p /x/-home-runner-p`
+  test('running twice gives the text of running once and counts 0 hits the second time (a slug already holding USER is skipped)', () => {
+    const text = raw`a\n/Users/runner/x C:\\Users\\runner\\y C:/Users/runner/z C:\Users/runner\w C:\UsErS\runner${AT}corp\v /mnt/c/Users/runner /home/runner /srv/u/runner/q /x/-Users-runner-p /x/-home-runner-p -Users-USER-p`
     const once = h(text, ['/srv/u/runner'])
     expect(once.text).not.toContain('runner')
-    expect(h(once.text, ['/srv/u/runner'])).toEqual({ text: once.text, hits: { 'home-path': 2 } })
+    expect(once.hits).toEqual({ 'home-path': 10 })
+    expect(h(once.text, ['/srv/u/runner'])).toEqual({ text: once.text, hits: {} })
   })
 })
 
@@ -198,11 +240,24 @@ describe('home rewrite: known misses, pinned as they are today', () => {
   test('home known miss windows-name-with-spaces: a spaced Windows name with no separator after it keeps its later words', () => {
     // Built from pieces (made-up name, see the note above the helpers): no generic name holds a space.
     expect(h(win('C:', 'Users', 'John Smith')).text).toBe('%USERPROFILE% Smith')
+    expect(h('C:/Users' + BS + 'John Smith').text).toBe('%USERPROFILE% Smith')
   })
   test('home known miss single-letter-root-in-path: a one-letter root folder before a colon in a PATH list counts as a drive', () => {
     // Held in a variable: a path with no trailing slash plus a later slash on the same line reads to the privacy scan as one home path.
     const list = 'PATH=/x:/Users/user'
     expect(h(list).text).toBe('PATH=/%USERPROFILE%')
+  })
+  test('home known miss windows-name-with-brackets: a Windows name holding round brackets keeps its tail after the rewritten part', () => {
+    // Round brackets stay out of the Windows name class on purpose, so prose such as (C:\Users\app) keeps its closing bracket.
+    expect(h(win('C:', 'Users', 'app(1)', 'x')).text).toBe(raw`%USERPROFILE%(1)\x`)
+    expect(h(raw`(C:\Users\app)`).text).toBe('(%USERPROFILE%)')
+  })
+  test('home known miss unix-name-with-trailing-dollar: a Linux name ending in a dollar sign (a Samba machine account) is hidden but the dollar sign stays after ~', () => {
+    // Built from pieces (made-up name, see the note above the helpers): the privacy scan has no allow marker.
+    expect(h(unix('', 'home', 'svc' + '$', 'x')).text).toBe('~$/x')
+  })
+  test('home known miss home-domain-then-user: a home with a domain folder and then the user folder (SSSD on hosts joined to Active Directory) rewrites the domain folder and keeps the user name', () => {
+    expect(h(unix('', 'home', 'corp.example', 'runner', 'x')).text).toBe('~/runner/x')
   })
 })
 
@@ -211,7 +266,9 @@ describe('home rewrite: timing', () => {
     const fragments = (raw`C:\Users\a a a a ` + '/Users/').repeat(Math.ceil(200000 / 24)).slice(0, 200000)
     const longRun = raw`C:\Users` + BS + 'a '.repeat(100000)
     const wordy = (raw`C:\Users` + BS + 'abcdefgh '.repeat(25000)).slice(0, 200000)
-    for (const input of [fragments, longRun, wordy]) {
+    // WHY a fourth input with mixed separators and @ or $ in the name: the Windows rule gained SEP and WIN_N (TRDD-L1I0FP5T), and the linear claim must be measured on them too.
+    const mixed = (raw`C:\\Users/a@b$ a a a ` + 'C:/Users').repeat(Math.ceil(200000 / 20)).slice(0, 200000)
+    for (const input of [fragments, longRun, wordy, mixed]) {
       expect(input.length).toBeGreaterThanOrEqual(200000)
       const start = performance.now()
       h(input, ['/opt/people/app'])
