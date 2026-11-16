@@ -121,7 +121,8 @@ def _coerce_int(raw: str | None, default: int) -> int:
 
 
 def _bucket_tokens(n: int) -> str:
-    """Floor `n` to the nearest 10k and render it as a cache-STABLE label.
+    """Floor `n` to a cache-STABLE bucket and render it as a label: 10k buckets from 10k up,
+    1k buckets below 10k.
 
     TRDD-YRPUSIFY (cache-stability): this hook injects its context-window line into
     model context on EVERY tool call above the suggest threshold. A raw per-call token
@@ -129,10 +130,17 @@ def _bucket_tokens(n: int) -> str:
     cache and compounds across a session. Flooring to a 10k bucket collapses a whole
     band of raw counts to ONE label ("~650k"), so consecutive tool calls at the same
     occupancy emit byte-identical text. Pure + deterministic (unit-tested): same bucket
-    → same string, always. `~1.3M` for >=1M, `~40k` otherwise, `~0k` for <10k.
+    → same string, always. `~1.3M` for >=1M, `~40k` otherwise.
+
+    #342 item 5c / TRDD-BEA87JS1: below 10k the 10k bucket rendered "~0k", so the PREPARE
+    line read "~0k until the auto-compact point" at the exact moment the distance was
+    smallest and most urgent. Under 10k the bucket is 1k wide ("~5k"): still byte-stable
+    within a band, and no longer a lie. Only a count under 1k reads "~0k", which is true.
     """
     if n < 0:
         n = 0
+    if n < 10_000:
+        return f"~{n // 1_000}k"
     b = (n // 10_000) * 10_000
     if b >= 1_000_000:
         return f"~{b / 1_000_000:.1f}M"

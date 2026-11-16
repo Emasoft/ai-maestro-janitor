@@ -176,7 +176,7 @@ def test_bucket_tokens_and_pct() -> None:
     mod = _import_hook()
     assert mod._bucket_tokens(806000) == "~800k"  # floored to the 10k bucket
     assert mod._bucket_tokens(1_000_000) == "~1.0M"
-    assert mod._bucket_tokens(9_999) == "~0k"
+    assert mod._bucket_tokens(9_999) == "~9k"  # 1k bucket below 10k (#342 item 5c), not "~0k"
     assert mod._bucket_tokens(-5) == "~0k"
     assert mod._bucket_pct(72) == "~70%"
     assert mod._bucket_pct(85) == "~85%"

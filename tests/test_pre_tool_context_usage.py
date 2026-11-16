@@ -105,7 +105,8 @@ def test_bucket_tokens_and_pct() -> None:
     assert hook._bucket_tokens(674_300) == "~670k"  # floored to the 10k bucket
     assert hook._bucket_tokens(1_000_000) == "~1.0M"
     assert hook._bucket_tokens(1_340_000) == "~1.3M"
-    assert hook._bucket_tokens(9_999) == "~0k"
+    assert hook._bucket_tokens(9_999) == "~9k"  # 1k bucket below 10k (#342 item 5c), not "~0k"
+    assert hook._bucket_tokens(999) == "~0k"
     assert hook._bucket_tokens(-5) == "~0k"
     assert hook._bucket_pct(71) == "~70%"
     assert hook._bucket_pct(72) == "~70%"  # same 5-pt band as 71
@@ -408,6 +409,24 @@ def test_prepare_alert_fires_end_to_end_then_silent_within_the_renudge_window(tm
     second = _ctx(_run(s, enabled=True, snapshot=_prepare_snapshot(650_000), project=p, extra_env=env))
     assert first is not None and "PREPARE" in first
     assert second is None, "an immediate repeat inside the renudge window must be silent"
+
+
+def test_prepare_line_never_renders_a_sub_10k_distance_as_0k() -> None:
+    """#342 item 5c residue (TRDD-BEA87JS1): 5k tokens short of the auto-compact point must
+    read "~5k until", not "~0k until" — the nearest, most urgent PREPARE moment was the one
+    the 10k bucket floored to nothing."""
+    hook = _import_hook()
+    env = {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "700000"}
+    pred = hook.token_meter.predict_auto_compact(661_000, env=env)  # point 666000 -> 5000 left
+    assert pred is not None and pred.tokens_until_compact == 5_000
+    line = hook._format_prepare_line(94, pred)
+    assert "~0k" not in line
+    assert "~5k until the auto-compact point" in line
+    past = hook.token_meter.predict_auto_compact(672_000, env=env)  # 6000 past
+    assert past is not None
+    past_line = hook._format_prepare_line(96, past)
+    assert "~0k" not in past_line
+    assert "~6k PAST the auto-compact point" in past_line
 
 
 def test_prepare_renudge_fires_end_to_end_after_the_interval(tmp_path: Path) -> None:
