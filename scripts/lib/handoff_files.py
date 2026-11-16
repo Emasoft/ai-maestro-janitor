@@ -25,8 +25,10 @@ the bytes still exist on disk, so a wrong selection is recoverable and a clobber
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -226,6 +228,77 @@ def newest(state_dir: Path) -> Path | None:
     if not entries:
         return None
     return max(entries, key=lambda e: e[1])[2]
+
+
+# `compose_agent_handoff.py` runs `llm-ext` synchronously for up to this long (its own
+# `_SUMMARY_BUDGET_S` is this value). It lives here so the probe below and the script share ONE
+# number (issue 356, TRDD-C9CO0I7L). 15 minutes is long enough for llm-ext retry/backoff to ride
+# out a transient failure, short enough that a genuinely broken summarizer degrades within one
+# skill invocation.
+COMPOSE_BUDGET_S = 15 * 60
+
+# Grace past the budget before a stamp whose owner pid is still alive is treated as stale.
+_COMPOSE_STAMP_GRACE_S = 60
+
+
+def compose_stamp_name(key: str) -> str:
+    """Per-SESSION stamp filename, written by `compose_agent_handoff.py` for the duration of the
+    compose and read by `compose_inflight`. `key` is the same one `write` files the handoff under."""
+    return f"handoff-compose-inflight-{key}.json"
+
+
+def compose_stamp_write(state_dir: Path, key: str) -> Path:
+    """Write the in-flight stamp for session `key` (the composing process: pid + start time).
+
+    The ONE writer, so the probe and the composer cannot drift on the stamp shape. The caller
+    removes the file (missing_ok) in a `finally`; `compose_inflight` is the backstop for a kill.
+    """
+    path = Path(state_dir) / compose_stamp_name(key)
+    state.atomic_write(path, json.dumps({"pid": os.getpid(), "started": time.time(), "key": key}))
+    return path
+
+
+def compose_inflight(
+    state_dir: Path, key: str, now: float | None = None, budget_s: float = COMPOSE_BUDGET_S
+) -> bool:
+    """True iff THIS session (`key`) has a `/janitor-write-handoff` compose running RIGHT NOW.
+
+    WHY (issue 356, TRDD-C9CO0I7L): the compose can take up to `budget_s`, and until the
+    handoff file lands nothing says "a handoff is being written" -- a janitor clear fired in that
+    window destroyed the context the handoff was summarizing and the handoff was lost.
+
+    PER SESSION, not per project: `.janitor/state` is shared by every session of a project, so a
+    compose in one pane must not hold the clear of another. An empty `key` (the caller could not
+    resolve its session) reads False -- never a project-wide fallback.
+
+    Fail-safe toward "no compose": a missing, unreadable or corrupt stamp, a dead pid, or a stamp
+    older than budget + grace all read False, so a crashed compose can never veto a clear forever.
+    The pid check makes a hard-killed compose (no `finally`) stop holding within one probe; the
+    age bound covers pid reuse. `PermissionError` from `os.kill` means the pid EXISTS (another
+    user) and so counts as alive.
+    """
+    if not key:
+        return False
+    try:
+        data = json.loads((Path(state_dir) / compose_stamp_name(key)).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    pid, started = data.get("pid"), data.get("started")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False  # pid 0 / negative would make os.kill signal a process GROUP, not probe one
+    if isinstance(started, bool) or not isinstance(started, (int, float)):
+        return False
+    if (time.time() if now is None else now) - started >= budget_s + _COMPOSE_STAMP_GRACE_S:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _main() -> int:

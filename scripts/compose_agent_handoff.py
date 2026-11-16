@@ -20,10 +20,12 @@ WHY IT IS A SEPARATE SCRIPT, NOT A FLAG ON THE SIBLING. `summarize_previous_sess
 specifically to EXCLUDE the live session's transcript (`previous_transcript` filters it out by
 stem) — that exclusion is load-bearing there, because summarizing your own still-growing
 transcript from a background daemon would race the very session it targets. Here the model is
-asking for its OWN handoff, synchronously, mid-turn: there is no race to guard against and no
-resume-hold to coordinate (unlike the daemon path, nothing here is deciding whether to `/clear`
-or waiting out a TTL before resuming blind) — so the hold/pending machinery in
-`external_handoff_clear.py` does not apply and is deliberately not used.
+asking for its OWN handoff, synchronously, mid-turn: there is no race to guard against, and the
+hold/pending machinery in `external_handoff_clear.py` (a daemon deciding whether to `/clear`)
+does not apply. What it DOES need is one narrow per-session in-flight stamp, `handoff-compose-inflight-<key>.json`,
+written for the duration of the summarize+write: a janitor clear that fired while it ran destroyed
+the context being summarized and lost the handoff (issue 356, TRDD-C9CO0I7L), so the clear decision
+sites defer on `handoff_files.compose_inflight`.
 
 NOTHING HERE COSTS CLAUDE TOKENS. `llm-ext` runs out of process against its own models; this
 script's whole job is to name the source, summarize, and write.
@@ -46,11 +48,11 @@ import state  # noqa: E402
 
 _LOG = "agent-handoff-compose"
 
-# Same budget as the sibling's hold TTL (`external_handoff_clear._HOLD_TTL_S`) — there is no
-# hold here to derive a deadline FROM, so this is a plain constant instead of a read-off-disk
-# value. 15 minutes is long enough for llm-ext's retry/backoff to ride out a transient failure,
-# short enough that a genuinely broken summarizer degrades within one skill invocation.
-_SUMMARY_BUDGET_S = 15 * 60
+# Same number the in-flight probe (`handoff_files.compose_inflight`) bounds a stamp with, so the
+# deadline here and the stamp age bound there cannot drift apart. 15 minutes is long enough for
+# llm-ext retry/backoff to ride out a transient failure, short enough that a genuinely broken
+# summarizer degrades within one skill invocation.
+_SUMMARY_BUDGET_S = handoff_files.COMPOSE_BUDGET_S
 
 
 def main() -> int:
@@ -76,31 +78,49 @@ def main() -> int:
         state.log_line(_LOG, "no transcript found for this session — nothing to summarize")
         return 0
 
-    got = les.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S)
-    text = (got.text or "").strip()
-    if not text:
-        reason = f"{got.outcome}: {got.detail}"
-        print(f"SUMMARY_FAILED {reason}")
-        state.log_line(_LOG, f"llm-ext produced no summary ({reason}) — degrading, nothing written")
-        return 0
-
-    if args.dry_run:
-        print("DRY_RUN")
-        print(text)
-        return 0
-
     key = handoff_files.in_session_key()
-    # Stamped so `clear_trigger.check_handoff_concise` can tell WHO wrote this. Prepended to
-    # the text, not tracked beside it: the file is the only artifact the check ever sees.
-    # This changes what `handoff_files.write` compares for its identical-re-write no-op. Steady
-    # state is fine (the marker is constant, so two identical summaries still match), but ACROSS
-    # THIS CHANGE a session that composed before and after gets two files instead of one no-op —
-    # one extra injection of the same summary, once per such session. Accepted rather than
-    # special-cased: `write`'s rule is "a CHANGED handoff is always written", the text genuinely
-    # changed, and stripping a prefix inside a producer-agnostic helper to fake a match would be
-    # a worse thing to leave behind than a bounded one-time duplicate.
-    marked = f"{handoff_files.COMPOSED_MARKER}\n{text}"
-    path = handoff_files.write(sd, key, marked, now=now)
+    # In-flight stamp (issue 356, TRDD-C9CO0I7L): the summarize below can run up to
+    # `_SUMMARY_BUDGET_S`, and a janitor clear that lands meanwhile destroys the very context
+    # being summarized, losing the handoff. `compose_inflight` makes the clear decision sites
+    # defer while this stamp is live. A `--dry-run` writes no handoff, so it takes no hold (and
+    # must not remove the stamp of a real compose running at the same time).
+    stamp = sd / handoff_files.compose_stamp_name(key)
+    hold = not args.dry_run
+    if hold:
+        handoff_files.compose_stamp_write(sd, key)
+    try:
+        got = les.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S)
+        text = (got.text or "").strip()
+        if not text:
+            reason = f"{got.outcome}: {got.detail}"
+            print(f"SUMMARY_FAILED {reason}")
+            state.log_line(
+                _LOG, f"llm-ext produced no summary ({reason}) — degrading, nothing written"
+            )
+            return 0
+
+        if args.dry_run:
+            print("DRY_RUN")
+            print(text)
+            return 0
+
+        # Stamped so `clear_trigger.check_handoff_concise` can tell WHO wrote this. Prepended to
+        # the text, not tracked beside it: the file is the only artifact the check ever sees.
+        # This changes what `handoff_files.write` compares for its identical-re-write no-op. Steady
+        # state is fine (the marker is constant, so two identical summaries still match), but ACROSS
+        # THIS CHANGE a session that composed before and after gets two files instead of one no-op —
+        # one extra injection of the same summary, once per such session. Accepted rather than
+        # special-cased: `write`'s rule is "a CHANGED handoff is always written", the text genuinely
+        # changed, and stripping a prefix inside a producer-agnostic helper to fake a match would be
+        # a worse thing to leave behind than a bounded one-time duplicate.
+        marked = f"{handoff_files.COMPOSED_MARKER}\n{text}"
+        path = handoff_files.write(sd, key, marked, now=now)
+    finally:
+        # Covers the write too: the hold must outlive the handoff landing on disk, and a raise
+        # anywhere above must not leave a stamp behind (the pid + age checks in `compose_inflight`
+        # are the backstop for a hard kill, which skips this).
+        if hold:
+            stamp.unlink(missing_ok=True)
 
     # Same one-line pointer the model-authored path writes (janitor-write-handoff SKILL.md
     # step 3) — the PostCompact hook and the heartbeat's resume nudge only know to look here.

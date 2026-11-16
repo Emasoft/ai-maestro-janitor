@@ -160,6 +160,19 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
                 "-- fallback: harness auto-compact + C-a continuity nudge",
             )
             return
+        import handoff_files  # noqa: PLC0415 -- lazy; scripts/lib is already on path
+        # Issue 356, TRDD-C9CO0I7L: a /janitor-write-handoff compose is mid-flight FOR THIS SESSION;
+        # a clear now destroys the context it is summarizing and loses the handoff. Re-fires at the
+        # next Stop. Keyed by the session key of the transcript (`<session-id>.jsonl`), the same
+        # key the composer files its stamp under; no key => no hold, never a project-wide one.
+        if handoff_files.compose_inflight(
+            Path(project_dir) / ".janitor" / "state", handoff_files.session_key(transcript_path)
+        ):
+            state.log_line(
+                "token-meter",
+                f"clear deferred: handoff compose running, {pct}% < ceiling {ceiling_pct}%",
+            )
+            return
         try:
             import user_intent  # noqa: PLC0415
 

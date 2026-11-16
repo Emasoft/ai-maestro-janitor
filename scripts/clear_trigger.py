@@ -724,6 +724,18 @@ def _run_chain_payload(payload_b64: str) -> int:
                 return False, f"{len(live)} agent(s) live"
         except Exception:  # noqa: BLE001
             pass
+        # Issue 356, TRDD-C9CO0I7L: a /janitor-write-handoff compose is mid-flight FOR THIS SESSION --
+        # a /clear now destroys the context it is summarizing. Cancel; the next Stop re-fires it.
+        # The session key comes from the transcript path (payload, else the env the spawner sets),
+        # the same `session_key` the composer files its stamp under; no transcript => no key => no
+        # hold (never a project-wide check).
+        if handoff_files.compose_inflight(
+            sd,
+            handoff_files.session_key(
+                data.get("transcript_path") or os.environ.get("JANITOR_TRANSCRIPT_PATH")
+            ),
+        ):
+            return False, "handoff compose running"
         try:
             import user_intent  # noqa: PLC0415
 
