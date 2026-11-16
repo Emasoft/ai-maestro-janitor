@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.4] — 2026-11-16
+
+### Bug Fixes
+
+- **context-usage:** Render a sub-10k distance in 1k buckets, not ~0k (TRDD-BEA87JS1, #342) (417297c)
+
+### Documentation
+
+- Add TRDD-NRF7OJ5H — janitor consumes the report-sanitizer core (TRDD-NRF7OJ5H) (a90accf)
+- **trdd:** Q4T4PQ4J and XJI19HO7 to testing, SBUAGE9F records 7b174748 (TRDD-Q4T4PQ4J) (fd49b40)
+- **trdd:** Refresh stale STATE lines on Q4T4PQ4J, XJI19HO7, SBUAGE9F, NRF7OJ5H (TRDD-Q4T4PQ4J, TRDD-XJI19HO7, TRDD-SBUAGE9F, TRDD-NRF7OJ5H) (dc1b07c)
+- **claude-md:** Wikimem index lists root topics only (#328, TRDD-Q9MU9CWK) (52a90b8)
+- **cards:** Correct BEA87JS1 release claim; record FADYLSQB and #328 progress (TRDD-BEA87JS1, TRDD-FADYLSQB, TRDD-Q23COADS) (63cee42)
+- **cards:** Close KT0G5A43; re-column idle dev cards before the publish (TRDD-KT0G5A43, TRDD-BEA87JS1) (8db2e5e)
+
+### Miscellaneous Tasks
+
+- **cspell:** Accept two fake-secret fragments as project words (TRDD-KT0G5A43) (65d9464)
+
+### Testing
+
+- Build secret-shaped fixtures at run time in three tests (TRDD-KT0G5A43) (2ac3788)
+- Build URL-credential and sk- fixtures at run time (TRDD-KT0G5A43) (20abeba)
+- Guard sk-ant and sk-proj literals; join env_detect placeholders (TRDD-KT0G5A43, TRDD-BEA87JS1) (010f04c)
+- **secret-shield:** Split assignment fixture values into fragments (TRDD-KT0G5A43) (058979b)
+- Split prompt-injection sample phrases in fixtures (TRDD-KT0G5A43) (728bf64)
 ## [3.9.3] — 2026-11-15
 
 ### Bug Fixes
@@ -21,6 +47,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Bump version to 3.9.3 (21b17d3)
+- Bump version to 3.9.3 (a816cd9)
 
 ### Testing
 

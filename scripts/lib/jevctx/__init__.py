@@ -54,7 +54,7 @@ from jevctx.types import (
     TurnSignals,
 )
 
-__version__ = "3.9.3"
+__version__ = "3.9.4"
 
 __all__ = [
     "ADMIT_QUESTION", "AdmitResult", "Batch", "Block", "BudgetPlanner",
