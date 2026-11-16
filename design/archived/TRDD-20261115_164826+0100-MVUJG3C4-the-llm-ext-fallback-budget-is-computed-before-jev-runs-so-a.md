@@ -1,10 +1,10 @@
 ---
 trdd-id: MVUJG3C4
 title: The llm-ext fallback budget is computed before Jev runs so a slow Jev pushes the fallback past the 15 minute summary hold
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-11-15T16:48:26+0100
-updated: 2026-11-15T17:44:10+0100
+updated: 2026-11-16T15:41:46+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-15T16:48:26+0100
-implementation-commits: [e9ebc702]
+implementation-commits: [e9ebc702, 646a3165]
 ---
 
 # The llm-ext fallback budget is computed before Jev runs so a slow Jev pushes the fallback past the 15 minute summary hold
@@ -27,8 +27,15 @@ MAIN-VERIFIED 2026-11-15 (code read, nothing run). scripts/summarize_previous_se
 ## Approval log
 
 - 2026-11-15T16:48:26+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T15:41:41+0100 — CLOSED by main-agent@ai-maestro-janitor: box 1 by the 570 s test and the 600 s cap test (646a3165), both passing alone, the cap test failing with 1670 when the cap is raised; box 2 by code read (summarize_previous_session.py:270, jev_compaction_lane.py:1551, no 570 left). Fix delivered in e9ebc702, first release tag ai-maestro-janitor--v3.9.2.
+- 2026-11-16T15:41:46+0100 — COMPLETE by main-agent@ai-maestro-janitor. archived as complete (from column testing).
 
 ## Implementation
 
 2026-11-15T17:41+0100 IMPLEMENTED in e9ebc702: run_compact_with_fallback takes hold_expires (epoch seconds) instead of a precomputed llm_ext_timeout_s and computes max(0, min(hold_expires - now - 30, 600)) right before the fallback (scripts/lib/jev_compaction_lane.py, near 'TRDD-MVUJG3C4: the fallback budget MUST be measured HERE'); the constants moved into the lane; summarize_previous_session.py passes hold_expires=float(pending['expires']) and the false 570 s comment is gone. Hold TTL confirmed in code: external_handoff_clear.py:72 _HOLD_TTL_S = 15 * 60. Gate checks run by the main agent in their exact forms: ruff scripts tests exit 0; mypy scripts/ exit 0 (543 files); pyright project-wide 0 errors. Test test_llm_ext_fallback_budget_is_measured_after_jev_spent_its_time (lane level, injected clock 0 then 300, hold 900) asserts --timeout-s 570; the worker ran it once (1 passed) against the instruction, disclosed. NOT VERIFIED: the other 65 tests in that file (pre-push run); no dedicated main-level wiring test (accepted: one visible line, exercised by the existing sps.main tests per a worker code read). UBS: 2 critical groups, both python.ctcompare.secret_eq on 'assert key_a != key_b' (session keys, false positive).
 2026-11-15T17:44+0100 REVIEW FOLLOW-UP, main-verified: (1) the wiring line is exercised: sps.main tests reach the llm-ext fallback through it, e.g. test_auth_failure_falls_back_to_llm_ext_without_waiting and test_rate_limited_retry_after_exceeding_the_budget_falls_back_immediately (tests/test_summarize_previous_session.py ~893-980, stub _stub_llm_ext_compact); (2) no existing test pins the fallback's --timeout-s: the only assertion is the new test's (:1047); the direct _run_llm_ext_fallback calls (:1989, :2042, :2103) pass their own timeout_s and are unaffected; (3) UBS's two critical groups have exactly two samples, :1777 'key_a != key_b' and :1802 'rec["key"] == key_b', both summary-hold keys, false positives; (4) the new test's power against the OLD code is unproven: it would fail on the unknown hold_expires keyword, not on the arithmetic (the argument stays: a budget taken at clock 0 gives 600, not 570); (5) the moved comment cited ec.LLM_EXT_TIMEOUT_S, but the lane imports no ec alias; being reworded to external_clear.LLM_EXT_TIMEOUT_S (scripts/lib/external_clear.py:284).
+
+## Acceptance checklist
+
+- [x] a test where Jev consumes its whole budget asserts the fallback gets at most hold-remaining - 30 s, capped at 600 s
+- [x] the misleading comment is corrected
