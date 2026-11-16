@@ -1,10 +1,10 @@
 ---
 trdd-id: GX6HUNGB
 title: env-secret-on-disk reads nothing while the agent-folder listing overruns its 30 s share
-column: todo
+column: design
 status: tasked
 created: 2026-11-16T14:43:33+0100
-updated: 2026-11-16T14:46:24+0100
+updated: 2026-11-16T15:09:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
