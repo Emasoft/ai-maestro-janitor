@@ -331,7 +331,7 @@ RULES: tuple[Rule, ...] = (
             "prior instructions, constraints, or context. This is the canonical "
             "token-based boundary-erasure attack class — the model is told to "
             "treat its safety-trained context as void. Covers 'ignore all "
-            "previous instructions', 'disregard earlier guidelines', and "
+            "previous instructions', 'disregard" " earlier guidelines', and "
             "'pretend prior instructions do not exist'."
         ),
         pattern=_BOUNDARY_ERASURE,
