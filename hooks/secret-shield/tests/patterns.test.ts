@@ -1762,9 +1762,12 @@ describe('token rule order', () => {
       id('google-api-key', /\b(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])/g),
       id('jwt', /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})[A-Za-z0-9_-]*?(?<![A-Za-z0-9_])(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g),
       id('npm-token', /\b(npm_[A-Za-z0-9]{36})\b/g),
+      id('docker-pat', /\b(dckr_(?:pat|oat)_[A-Za-z0-9_-]{20,})/g),
       id('pypi-token', /\b(pypi-AgE[A-Za-z0-9_-]{50,})/g),
       id('huggingface-token', /\b(hf_[A-Za-z0-9]{34,})\b/g),
       id('sendgrid-key', /\b(SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g),
+      id('npmrc-auth-token', /(:_authToken[ \t]*=[ \t]*["']?)(?![$\[])([^\s'"#;]{16,})/g),
+      id('xml-password', /<(password|passphrase)>(?![$\[{])([^<\s]{6,})<\/\1>/gi),
       id('bearer-token', /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g),
     ])
   })
@@ -1846,6 +1849,51 @@ describe('token rule order', () => {
     expect(text).toBe(`key ${mark('anthropic-key')} end`)
     expect(hits['anthropic-key']).toBe(1)
     expect(hits['openai-key']).toBeUndefined()
+  })
+})
+
+describe('docker tokens, scoped npmrc auth tokens and Maven passwords are hidden', () => {
+  // Fake values are joined at run time from short fragments so no scanner or spell checker sees a token.
+  const docker = j('dc', 'kr_', 'pa', 't_', 'Ab1', 'Cd2', 'Ef3', 'Gh4', 'Ij5', 'Kl6', 'Mn7')
+  const dockerOrg = j('dc', 'kr_', 'oa', 't_', 'Ab1', 'Cd2', 'Ef3', 'Gh4', 'Ij5', 'Kl6', 'Mn7')
+  const scoped = j('Qr1', 'St2', 'Uv3', 'Wx4', 'Yz5', 'Ab6')
+  const pw = j('Pw1', 'Xy2', 'Zq3')
+  const npmrc = (value: string) => `//registry.example.com/:_authToken=${value}`
+  const hidden: Array<[string, string, string, string]> = [
+    ['docker-pat', `login with ${docker} now`, docker, 'login with [JANITOR-REDACTED:docker-pat] now'],
+    ['docker-pat', `org token ${dockerOrg}.`, dockerOrg, 'org token [JANITOR-REDACTED:docker-pat].'],
+    ['npmrc-auth-token', npmrc(scoped), scoped, '//registry.example.com/:_authToken=[JANITOR-REDACTED:npmrc-auth-token]'],
+    ['npmrc-auth-token', `//registry.example.com/:_authToken="${scoped}"`, scoped, '//registry.example.com/:_authToken="[JANITOR-REDACTED:npmrc-auth-token]"'],
+    ['npmrc-auth-token', `//registry.example.com/:_authToken='${scoped}'`, scoped, "//registry.example.com/:_authToken='[JANITOR-REDACTED:npmrc-auth-token]'"],
+    ['xml-password', `<password>${pw}</password>`, pw, '<password>[JANITOR-REDACTED:xml-password]</password>'],
+    ['xml-password', `<passphrase>${pw}</passphrase>`, pw, '<passphrase>[JANITOR-REDACTED:xml-password]</passphrase>'],
+  ]
+  for (const [index, [kind, input, raw, expected]] of hidden.entries()) {
+    test(`${kind}: case ${index + 1} is hidden with its kind`, () => {
+      const { text, hits } = redact(input)
+      expect(hits[kind]).toBe(1)
+      expect(text).not.toContain(raw)
+      expect(text).toBe(expected)
+    })
+  }
+  const kept = ['//registry.example.com/:_authToken=${NPM_TOKEN}', '//registry.example.com/:_authToken="${NPM_TOKEN}"', '<password>${env.PW}</password>', '<password>abc</password>']
+  for (const input of kept) {
+    test(`kept unchanged: ${input}`, () => {
+      const { text, hits } = redact(input)
+      expect(text).toBe(input)
+      expect(hits).toEqual({})
+    })
+  }
+  test('an empty _authToken value followed by a newline and a long line leaves the next line unchanged', () => {
+    const input = `//registry.example.com/:_authToken=\n${j('Ab1', 'Cd2', 'Ef3', 'Gh4', 'Ij5', 'Kl6', 'Mn7')}`
+    const { text, hits } = redact(input)
+    expect(text).toBe(input)
+    expect(hits).toEqual({})
+  })
+  test('an npm_-prefixed value on a scoped npmrc line keeps the npm-token kind', () => {
+    const { text, hits } = redact(npmrc(j('npm', '_', A36)))
+    expect(hits).toEqual({ 'npm-token': 1 })
+    expect(text).toBe('//registry.example.com/:_authToken=[JANITOR-REDACTED:npm-token]')
   })
 })
 

@@ -3,7 +3,7 @@
 import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiProjectKey } from './rules/ai'
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
-import { npmToken, pypiToken, sendgridKey } from './rules/dev-services'
+import { dockerPat, npmrcAuthToken, npmToken, pypiToken, sendgridKey, xmlPassword } from './rules/dev-services'
 import { bearerToken, jwt, jwtWide, privateKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeApiKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
@@ -58,6 +58,7 @@ const PASSWORD_END = /[\s@'"`]|:\/\//g
 // skipped by every later rule. The private key runs first, so nothing inside a key block is matched on its
 // own, and the more specific prefix (sk-ant-) runs before the more general one (sk-). Never build this list by
 // concatenating the category files: their order is not this order. tests/patterns.test.ts pins it through TOKEN_ORDER.
+// npmrcAuthToken and xmlPassword are context rules: they run after every provider rule so a provider kind wins on the same value.
 // Never run these patterns directly: see rules/rule.ts.
 const TOKENS: readonly Rule[] = [
   privateKey,
@@ -104,9 +105,12 @@ const TOKENS: readonly Rule[] = [
   googleApiKey,
   jwt,
   npmToken,
+  dockerPat,
   pypiToken,
   huggingfaceToken,
   sendgridKey,
+  npmrcAuthToken,
+  xmlPassword,
   bearerToken,
 ]
 

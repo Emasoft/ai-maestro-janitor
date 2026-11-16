@@ -331,6 +331,7 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       openaiKey48: { prefix: j('s', 'k-'), secret: fake('nXKSGTTYMoBb3OiUawkQ5k1drWFDdbGErHbaYtp19BJNr0vT') },
       huggingfaceToken: { prefix: j('hf', '_'), secret: fake('PVgRkI0TCYZsNbnb69tlLOunTocelUoANT') },
       npmToken: { prefix: j('npm', '_'), secret: fake('1AfaIySP80jWP2iI40g0TjHWk0kvx1Se7PsN') },
+      dockerPat: { prefix: j('dc', 'kr_', 'pa', 't_'), secret: fake('Ab1Cd2Ef3Gh4Ij5Kl6Mn7') },
       pypiToken: { prefix: j('pypi', '-AgE'), secret: fake('QhjvrsUhcUCGfRZD0ggKjwgR09UBFYUMNa32dOLUOihkUJwXrV8xATHq_vNl') },
       sendgridKey: { prefix: j('S', 'G.'), secret: fake('UyoLcYn_OTP2AVnN8HHo3Q') + '.' + fake('zd0Dzbfr-051hbSf0q2FAkX09yd9Ojua28m2G_SA3hm') },
       jwt: { prefix: 'eyJ', secret: fake('SERoiffMb4bZ') + '.eyJ' + fake('Uj8OA2qbvyc4') + '.' + fake('ekp09zbYOWXMyF_w6XKS') },
@@ -350,7 +351,7 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
       .filter(([, rule]) => /^(\\b|\(\?<[!=])/.test(rule.pattern.source))
       .map(([name]) => name)
       .sort()
-    expect(led.length).toBe(22)
+    expect(led.length).toBe(23)
     expect(Object.keys(tokens).sort().join(',')).toBe(led.join(','))
     for (const name of led) {
       const { lead = '', prefix, secret } = tokens[name]
