@@ -4,7 +4,7 @@ title: Janitor consumes the report-sanitizer core as a vendored copy
 column: todo
 status: tasked
 created: 2026-11-16T01:25:36+0100
-updated: 2026-11-16T05:43:36+0100
+updated: 2026-11-16T06:57:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -41,3 +41,4 @@ Owner goal 2026-11-15 (verbatim): "complete and improve the `~/Code/report-sanit
 
 2026-11-16: a re-probe of the live shield confirmed three gaps (bare dckr_pat_/dckr_oat_ tokens, Maven <password>/<passphrase> values, scoped npmrc :_authToken values without the npm_ prefix); the upstream rules are being written by the shield-gaps worker.
 2026-11-16: 9dcaa0a3 adds the three shield rules (rules/dev-services.ts: dockerPat, npmrcAuthToken, xmlPassword); dockerPat joins the led list in tests/known-misses.test.ts. report-sanitizer fb4320d re-pins core/ to 9dcaa0a3 and removes its Python copies of the three rules, counting xml-password and npmrc-auth-token as cred. sanitize-reports on this host is a symlink to report-sanitizer main's sanitize_reports.py (clean at fb4320d), and it redacted each of the three probe lines. Timing, measured only: a scratch A/B with the main agent's own timing script, on the GitLab cookie shapes only, at load 124-156, failed "dense names with a value between" in 9 of 11 runs on both 9dcaa0a3^ and 9dcaa0a3, and "32-hex runs with no name" in 1 of 11 on the base and 0 of 11 on the new code. Five runs of the secret-shield mod on 9dcaa0a3 at load 96-115, with the main agent's own UBS scan (7 GB) running alongside, failed 3 of 5, on seven different timing tests in patterns.test.ts and url-password-walk.test.ts; the base was not run at that load. Whether the new rules shift those ratios is not established; the publish gate G3b needs one passing run on a quiet host (TRDD-Z41A13XV). UBS on 9dcaa0a3 is not settled: the commit hook reported 62 advisory criticals, and two re-scans were stopped when the UBS JS scanner grew past 3 GB.
+2026-11-16 (main agent) Scope 3 is blocked on the same owner decision as Scope 2: sanitize-reports --stdin exists only in the report-sanitizer repo (commit 70217f5, 16 commits ahead of its origin, not pushed), and on this host the sanitize-reports command is a symlink into that local checkout. A janitor release that calls --stdin would fail on every machine without that checkout, so Scope 3 waits until the report-sanitizer push is decided.
