@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T22:34:12+0100
+updated: 2026-11-16T23:33:28+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -20,6 +20,10 @@ approval-datetime: 2026-11-16T19:10:40+0100
 ---
 
 # Shield and report-sanitizer share one rule core and never mask a path except the home prefix
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-16
+
+Done: steps 1 and 2 (shield core), report-sanitizer home-prefix-only (8039916), --project-root removed (8d7b2a6), janitor caller fixed (c611d3e7), and the re-pin (report-sanitizer commit 953ec92 pins its vendored core to janitor 49a9d171; home.ts and its test join the vendored file list; sanitize_reports.py LEGACY_KINDS now names every core kind: ssh-public-key maps to the ssh label and counter, every other kind to [REDACTED TOKEN]/token, the label they already got through the fallback). Nothing calls redactHome yet. NEXT ACTION: route the home prefix through redactHome in report-sanitizer (B2 commit 2), then the shared fixture parity run (checklist items 3 and 4 stay open). Behaviour changes of the re-pin, found by the old-against-new comparison (old 8d7b2a6, sampled corpora; no case where the new output hides less; evidence in private reports_dev/shield-parity: repin-diff and differ-trace of 20261116): (1) an SSH key keeps its type visible, ssh-rsa [REDACTED SSH KEY] where it was [REDACTED SSH KEY]; (2) a JWT after Bearer whose second segment does not start with eyJ is labelled [REDACTED], not [REDACTED TOKEN], because bearerBare runs before the last-pass jwtWide; (3) a value found by bearerBare is hidden at every other place it appears in the same text (core found-value propagation); (4) bearerBare (hooks/secret-shield/rules/key-material.ts:56), like the old Python BEARER, uses \s+, which crosses a line break, so a path or identifier at the start of the line after a line ending in Bearer is masked: an inherited false positive, fix pending a measurement of newline-crossing matches; (5) a ghp_ value with a 20-character body after api_key = is now [REDACTED TOKEN] (github-token, floor 30 lowered to 20) where it was [REDACTED] (assignment). Test note: report-sanitizer core/tests/patterns.test.ts (801 tests, the vendored copy) failed timing assertions in 2 of 4 runs, both under a 1-minute load average of 60 to 72 on 14 CPUs, and passed on a quiet-host rerun: load sensitivity, not settled by repetition.
 
 Owner 2026-11-16 (verbatim): they most cover the same set of secrets types.
 Owner 2026-11-16 (verbatim): both must detect and redact all 62 types of secrets
@@ -37,6 +41,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-16T21:13:51+0100 main-agent: step 2 done, shield floors widened to the report-sanitizer floors (owner order: same secret types in both tools): GitHub classic body 30 to 20, Hugging Face 34 to 30 with no trailing word boundary, and a new bare Bearer rule (8+ characters holding a digit, any case, no leading word boundary so a token after an escape is hidden, TRDD-5VZTPXBJ). Candidates of the new floors, counted before the change in 95,006 plugin-cache and 4,891,492 code-tree files: GitHub 14 / 293, Hugging Face 0 / 2, bare Bearer 27 / 208, short Authorization values 15 / 1,043, other Bearer forms 0 / 137; mostly placeholders and test tokens, judged by file location and masked shape (94 of 208 bare and 87 of 137 other-form hits look random). Differential through redact(), HEAD against the new core on the plugin cache: 0 spans no longer hidden, 0 kind changes, 56 new spans plus 25 repeats; shield gate 1001 pass. Accepted over-hide: placeholders in docs and tests, a value after a word ending in bearer, a sentence-final period after a Bearer value; a short-segment JWT after Bearer is now labelled bearer-token. Cost once the shield is wired: an agent can write a marker over a test token; TRDD-0Y3UW1NF (write-back guard) blocks the wiring card TRDD-2V7OAUPE, so the guard lands first.
 - 2026-11-16T21:53:59+0100 main-agent: report-sanitizer now masks only the home prefix (8039916); the janitor caller stopped passing --project-root (c611d3e7). A local measurement (not in git) of the current home rule found these misses: about 12,600 Windows backslash paths and about 4,200 paths after a literal backslash-n or backslash-t in the code tree, Git Bash and WSL drive paths, and about 1,000 C:/Users/<name> paths rewritten to C:~. Its false-rewrite counts come from an unvalidated context heuristic and are not a rate. The core home rule (next step) handles the drive forms, the escape boundary and the C:~ mangling.
 - 2026-11-16T22:12:14+0100 main-agent: plan change: the --project-root flag was first kept for cached janitor 3.9.x copies (58668bf); a hook scan then showed no hook runs them, so the flag is removed now (8d7b2a6) instead of after a release.
+- 2026-11-16T23:33:10+0100 main-agent: re-pin done: report-sanitizer 953ec92 pins its vendored core to janitor 49a9d171 (home.ts and its test added, LEGACY_KINDS names every core kind); old-against-new comparison found five behaviour changes and no case that hides less (listed in the STATE block); nothing calls redactHome yet, next is B2 commit 2; report-sanitizer patterns.test.ts failed timing assertions in 2 of 4 runs under a load average of 60 to 72 and passed on a quiet host.
 
 ## Design
 
