@@ -1,10 +1,10 @@
 ---
 trdd-id: Q4T4PQ4J
 title: The template handoff NEXT ACTION must name the newest assistant message and the open dispatches, not a stale reply (issue 356)
-column: todo
+column: testing
 status: tasked
 created: 2026-11-14T22:27:21+0100
-updated: 2026-11-14T22:27:21+0100
+updated: 2026-11-16T01:31:47+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T22:27:21+0100
+implementation-commits: [040421c0]
 ---
 
 # The template handoff NEXT ACTION must name the newest assistant message and the open dispatches, not a stale reply (issue 356)
@@ -25,6 +26,7 @@ approval-datetime: 2026-11-14T22:27:21+0100
 
 - NEXT ACTION: write the failing test T8 (real transcript with a later assistant message and an Agent dispatch after a heartbeat prompt), then extend lib/session_continuity.py clear_fields and next_action. Do not change the human-quote logic. One bounded change; tests only run before the push.
 - Status: not started. Parent work: TRDD-V8GWJVFN; GitHub issue 356. Related: archived TRDD-IN4493LC (owner's last assignment carried across clears, issue 338), whose protections must stay.
+- 2026-11-16: 040421c0 (in v3.9.2 and v3.9.3) implements the design: clear_fields records latest_assistant, background_launches and compact_intent; next_action appends them after the #338 framing (human-quote logic unchanged); test T8-equivalent plus a cap test added. Supersedes 'Status: not started' above. The separate Re-invoke-skills fix is in 7b174748 (TRDD-SBUAGE9F). Still open: live check of a real post-clear handoff; optional Continuity-block dispatch listing (render path) not done.
 
 ## Problem
 
@@ -41,3 +43,4 @@ tests/test_session_continuity.py, real JSONL: human message, assistant reply, he
 ## Approval log
 
 - 2026-11-14T22:27:21+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T01:31:47+0100 — column → testing by main-agent@ai-maestro-janitor. implementation released in v3.9.2/v3.9.3; live check pending

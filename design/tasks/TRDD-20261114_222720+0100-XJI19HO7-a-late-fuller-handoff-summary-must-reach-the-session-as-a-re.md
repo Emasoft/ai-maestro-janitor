@@ -1,10 +1,10 @@
 ---
 trdd-id: XJI19HO7
 title: A late fuller handoff summary must reach the session as a resume cue instead of a bare drift line (issue 356)
-column: todo
+column: testing
 status: tasked
 created: 2026-11-14T22:27:20+0100
-updated: 2026-11-14T22:27:20+0100
+updated: 2026-11-16T01:31:54+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T22:27:20+0100
+implementation-commits: [726f2c74]
 ---
 
 # A late fuller handoff summary must reach the session as a resume cue instead of a bare drift line (issue 356)
@@ -25,6 +26,7 @@ approval-datetime: 2026-11-14T22:27:20+0100
 
 - NEXT ACTION: write the failing test (both phases forced in one fire), then change _phase_late_summary_drift to emit a [janitor-resume] cue guarded by _decision_fired. One bounded change in scripts/dispatch.py; tests only run before the push.
 - Status: not started. Parent work: TRDD-V8GWJVFN; GitHub issue 356.
+- 2026-11-16: 726f2c74 (in v3.9.2 and v3.9.3) implements the design: _phase_late_summary_drift now emits one [janitor-resume] via _emit_decision carrying every pending key's line, and returns before any stamp when _decision_fired; tests added for the resume cue and the keep-going collision. Supersedes 'Status: not started' above. Still open: live check; _stamp_resume to mute keep-going was not added (unverified whether wanted).
 
 ## Problem
 
@@ -43,3 +45,4 @@ Update the existing tests/test_dispatch_phases.py test that asserts the plain dr
 ## Approval log
 
 - 2026-11-14T22:27:20+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T01:31:54+0100 — column → testing by main-agent@ai-maestro-janitor. implementation released in v3.9.2/v3.9.3; live check pending
