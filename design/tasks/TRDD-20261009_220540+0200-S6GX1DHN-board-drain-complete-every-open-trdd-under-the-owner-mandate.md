@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-16T17:49:22+0100
+updated: 2026-11-16T18:12:22+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -145,6 +145,8 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 - 2026-11-16T13:30:02+0100 — stays in dev across release 3.9.8: umbrella card. This release lands TRDD-ZANQ1QW0, TRDD-ZFD3KBM3 and TRDD-XNZFKX0L; the rest of its scope continues after it.
 2026-11-16T17:50+0100 — RELEASE 3.9.9 basis (main agent): the owner's goal for this session orders 'publish and install the janitor plugin', newer than the 2026-11-15 16:12 POSITION line that held further releases for the owner's answer; the Fable advisor judged a checkpoint release in bounds. It lands TRDD-W6DZPXLG, TRDD-56FOY1U1, TRDD-7KPG2PCO and TRDD-M0LAC49Q, plus the TRDD-7XDBJZCZ and TRDD-MVUJG3C4 test pins. The board is not drained (65 todo, 88 testing); testing cards close only on field evidence from an installed build. This card stays in dev across 3.9.9.
 2026-11-16T17:49+0100 — correction to the 3.9.9 basis line above: it is stamped 17:50 but was written at 17:43; the board counted by grep at 17:45 was 64 todo and 89 testing, not 65 and 88.
+2026-11-16 18:25 (main agent) 3.9.9 NOT published: publish.py --patch exit 2 at CPV strict (pinned v5.16.2), one MAJOR, a false positive: the absolute-path rule counts a trailing comma as part of a system bin directory named in archived card 7KPG2PCO line 42, so the system-directory allowlist misses it. trddgrep refused the correction (archived cards are immutable). Filed Emasoft/claude-plugins-validation#277 with a version correction comment. Unblock needs a CPV fix release plus a .cpv-version pin bump in its own commit, or an owner-authorised redo of the 7KPG2PCO close-out. Nothing tagged or pushed; HEAD b9090ba7. Evidence: reports_dev/release-399/publish.log line 471 and reports_dev/release-399/20261116_180311+0100-path-fix.md.
+2026-11-16 18:12 (main agent) CORRECTION to the "3.9.9 NOT published" line above: it was written at 18:10, not 18:25 (the stamp was typed, not read from the clock). Verified since: publish.log line 315 shows the publish ran CPV v5.16.2; validate shows 19 ERROR rows corpus-wide, none naming S6GX1DHN.
 
 ## Rules added by the review of 4de85716
 
