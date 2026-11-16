@@ -60,6 +60,15 @@ TrashPos = tuple[str, ...]  # path components below a batch folder; tuple order 
 TRASH_BYTE_BUDGET = 64 * 1024 * 1024  # per pass, on top of BYTE_BUDGET: the trash tier is a backlog of old files, read after the live folders
 TRASH_TIME_BUDGET_S = 15.0  # per pass, listing included; the detector timeout is 120 s
 TRASH_SETTLE_S = 120  # a batch younger than this may still be receiving files from the safe-delete run that made it
+# TRDD-ZANQ1QW0 increment 5: a HARD read bound, one deadline PER SWEEP (counted from that sweep own start, so the trash walk is not starved by the main
+# sweep). The soft budgets above are checked only BEFORE a read, and each tier reads at least one file whatever they say. At about 9 MiB/s under load one
+# MAX_FILE_BYTES file takes about 30 s, so the first files of the fresh tier, of the backlog and of the trash walk could add up to about 135 s, over
+# the 120 s detector timeout (CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT), and a killed pass writes no state, so the next pass would repeat the same reads.
+# 75 s + 25 s + git ls-files, start-up and the raise loops stay under that timeout; a chunk of CHUNK_BYTES is read in under 0.5 s at 9 MiB/s, so a bound
+# is overshot by at most that. MAX_SHAPE_BYTES is 8 MiB (about 1 s at 9 MiB/s): the dump-shape read of _read_one sits outside the chunk loop and is small
+# enough to need no bound of its own. The library default is None (off); only the detector passes these.
+MAIN_HARD_DEADLINE_S = 75.0
+TRASH_HARD_DEADLINE_S = 25.0
 
 
 def live_secrets(environ: Mapping[str, str]) -> dict[str, str]:
@@ -147,9 +156,16 @@ class Matcher:
     __str__ = __repr__
 
 
-def scan_file(path: str, matcher: Matcher, salt: bytes, chunk: int = CHUNK_BYTES) -> list[Hit]:
+def scan_file(
+    path: str,
+    matcher: Matcher,
+    salt: bytes,
+    chunk: int = CHUNK_BYTES,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[list[Hit], bool]:
     """Reads in chunks with an overlap, so a file of any size is searched and a value on a chunk edge is found.
-    One name on one line is one hit, whichever form matched first.
+    One name on one line is one hit, whichever form matched first. Returns (hits, cut).
 
     One bytes.find per needle and chunk, not one regular-expression alternation: measured on 48 MiB of base64-like
     text with 120 needles, the alternation read 1.5 MiB/s because every character can start a branch, while
@@ -157,12 +173,29 @@ def scan_file(path: str, matcher: Matcher, salt: bytes, chunk: int = CHUNK_BYTES
 
     The line number of a match is carried forward from the previous match of the same needle. Counting newlines from
     the start of the chunk for every match made a file that holds the value on every line quadratic (2 MiB: 40 s,
-    8 MiB: 321 s, past the detector timeout), and the fingerprint is computed once per name, not once per match."""
+    8 MiB: 321 s, past the detector timeout), and the fingerprint is computed once per name, not once per match.
+
+    `deadline` is a value of `clock` (None = no bound, and the clock is never read): before every chunk AFTER the first, a clock past the deadline
+    stops the read and `cut` is True. The hits found before the cut are real and are returned; a cut file was NOT fully scanned, so a caller must not
+    treat it as clean. TRDD-ZANQ1QW0 increment 5: at about 9 MiB/s under load one MAX_FILE_BYTES file takes about 30 s, and a bound checked only before a
+    read cannot stop it. A chunk is read in under 0.5 s at that speed, so the bound is overshot by at most that."""
     fingerprints = {name: fingerprint(value, salt) for name, value in matcher.secrets.items()}
     hits: dict[tuple[str, int], Hit] = {}
     tail, line = b"", 1
+    cut = False
+    first = True
     with open(path, "rb") as handle:
-        while block := handle.read(chunk):
+        while True:
+            if deadline is not None and not first and clock() > deadline:
+                # cut only when bytes are left: a file whose last chunk was the one read before the deadline was scanned to its end, and calling it cut
+                # would hold its finding and retry it for nothing.
+                cut = handle.tell() < os.fstat(handle.fileno()).st_size
+                if cut:
+                    break
+            block = handle.read(chunk)
+            if not block:
+                break
+            first = False
             data = tail + block
             for needle in matcher.ordered:
                 name, form = matcher.table[needle]
@@ -174,10 +207,10 @@ def scan_file(path: str, matcher: Matcher, salt: bytes, chunk: int = CHUNK_BYTES
                         counted_to = at
                         hits.setdefault((name, row), Hit(name, form, path, row, fingerprints[name]))
                     at = data.find(needle, at + 1)
-            cut = max(len(data) - matcher.keep, 0)
-            line += data.count(b"\n", 0, cut)
-            tail = data[cut:]
-    return list(hits.values())
+            keep_from = max(len(data) - matcher.keep, 0)
+            line += data.count(b"\n", 0, keep_from)
+            tail = data[keep_from:]
+    return list(hits.values()), cut
 
 
 def env_dump_names(data: bytes) -> list[str]:
@@ -248,7 +281,12 @@ class SweepReport:
     shape_not_checked: list[str] = field(default_factory=list)
     left_for_next_pass: int = 0
     processed: list[Key] = field(default_factory=list)  # keys read this pass, in order
-    failed: list[Key] = field(default_factory=list)  # keys that raised OSError
+    failed: list[Key] = field(default_factory=list)  # keys that raised OSError, or whose read was cut by the hard bound (held, retried next pass)
+    # TRDD-ZANQ1QW0 increment 5: paths whose read the hard read bound stopped part-way. Its own list, so the coverage line never calls them unreadable;
+    # they are not in `read` (not fully scanned) and not counted in scanned or bytes_read. The hits found before the cut are in `hits`.
+    cut: list[str] = field(default_factory=list)
+    # The subset of `cut` that was already given up on (MAX_FAIL_RETRIES cut or failed tries): done, left behind the covered range, never fully scanned.
+    cut_given_up: list[str] = field(default_factory=list)
     # TRDD-XNZFKX0L: the paths whose content was scanned for the live secret values this pass (the exact matcher ran and the read
     # succeeded). `processed`/`failed` cannot say this: `processed` also holds a file over MAX_FILE_BYTES and a file given up on,
     # neither of which was read. Only a path in `read` may withdraw its CRED-002 finding.
@@ -277,6 +315,8 @@ class SweepReport:
         self.secret_named += other.secret_named
         self.too_big += other.too_big
         self.shape_not_checked += other.shape_not_checked
+        self.cut += other.cut  # a coverage gap (a file stopped by the hard read bound), so the detector counts and logs both tiers from one list
+        self.cut_given_up += other.cut_given_up
 
 
 @dataclass
@@ -308,16 +348,43 @@ def _note_secret_named(report: SweepReport, matcher: Matcher, path: str, leaked:
     report.secret_named.append((parent, leaked))
 
 
-def _read_one(report: SweepReport, matcher: Matcher | None, salt: bytes, path: str, size: int, give_up: frozenset[str]) -> bool:
+def _read_one(
+    report: SweepReport,
+    matcher: Matcher | None,
+    salt: bytes,
+    path: str,
+    size: int,
+    give_up: frozenset[str],
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
     """Reads one regular file: the exact matcher, then the dump-shape test, and the counters. Shared by the
     modification-time sweep and the trash tier, so the two cannot read differently. True when the file is done with
-    (read, too big to read, or failing too often: `give_up`), False when its read failed and it must be retried."""
+    (read, too big to read, or failing too often: `give_up`), False when its read failed or was cut and it must be retried.
+    `deadline` (a value of `clock`, None = no bound) is the hard read bound of scan_file; see there."""
     if size > MAX_FILE_BYTES:
         report.too_big.append(path)
         return True
     try:
         if matcher is not None and matcher.table:
-            report.hits += scan_file(path, matcher, salt)
+            # chunk=CHUNK_BYTES is passed here, at call time: scan_file binds CHUNK_BYTES as a DEFAULT ARGUMENT, evaluated when the module loads, so a
+            # test that sets env_secrets.CHUNK_BYTES (a small chunk makes a small file span several) would never reach it through the default.
+            hits, cut = scan_file(path, matcher, salt, chunk=CHUNK_BYTES, deadline=deadline, clock=clock)
+            report.hits += hits  # a cut file still reports what it found before the cut: those hits are real
+            if cut:
+                # Its own list, not unreadable: the coverage line says "unreadable" and this file was readable, only stopped. Not in `read`: a cut file was
+                # NOT fully scanned, so it must not withdraw its CRED-002 finding (TRDD-XNZFKX0L). Not counted in scanned or bytes_read and no dump-shape
+                # read: a cut ends this sweep reading, so no later read decision uses bytes_read, and the pass line names the cut file. Returned like a failed
+                # read (False: retried next pass); a file already given up on is done, so one unfinishable file cannot pin the covered range for ever.
+                report.cut.append(path)
+                if path in give_up:
+                    # Given up on: the file is done and the covered range (or the batch position) moves past it, so it is never read again until it changes.
+                    # Without this list its unscanned tail would be left with only a log line; the detector puts it in the coverage output, as a given-up
+                    # unreadable file is.
+                    report.cut_given_up.append(path)
+                    return True
+                return False
+        # MAX_SHAPE_BYTES is 8 MiB (about 1 s at 9 MiB/s under load), so this one read outside the chunk loop needs no deadline of its own.
         if size <= MAX_SHAPE_BYTES:
             with open(path, "rb") as handle:
                 names = env_dump_names(handle.read())
@@ -346,6 +413,7 @@ def sweep(
     clock: Callable[[], float] = time.monotonic,
     wall: Callable[[], float] = time.time,
     listing_budget_s: float = LISTING_BUDGET_S,
+    hard_deadline_s: float | None = None,
 ) -> SweepReport:
     """One bounded pass: the changes above the covered range first, oldest of them first, then the backlog below it,
     newest first. Everything it did NOT read is counted in the report.
@@ -353,10 +421,15 @@ def sweep(
     tree is backlog and the newest file is read first.
     A root may be a file (the untracked files of a project are passed one by one) or a folder.
     The clock starts before the listing, so time_budget_s covers listing and reads; a listing over listing_budget_s
-    is cut (listing_cut_after_s) and nothing is read."""
+    is cut (listing_cut_after_s) and nothing is read.
+    hard_deadline_s (None = off) is a HARD bound, in seconds from the start of this sweep, checked before EVERY read (the guarded first file of each
+    tier included) and between the chunks of one read: a read cut by it is reported in `cut`, held like a failed read, and ends the sweep reading.
+    The soft budgets above only decide whether to START the next file, and each tier reads at least one file whatever they say."""
     report = SweepReport()
     changed: dict[str, tuple[float, int]] = {}
     started = clock()  # before the listing: the read phase gets only what the listing left of time_budget_s
+    # TRDD-ZANQ1QW0 increment 5: the hard read bound of THIS sweep (None = off: the library default; the detector opts in with MAIN_HARD_DEADLINE_S).
+    hard = None if hard_deadline_s is None else started + hard_deadline_s
     # Taken before the listing: a file written while the listing runs has an mtime above this edge, so hi never covers it
     # (see LIVE_EDGE_MARGIN_S and advance_covered).
     live_edge = wall() - LIVE_EDGE_MARGIN_S
@@ -415,22 +488,41 @@ def sweep(
     fresh_deadline = reads_started + left_s * FRESH_SHARE
     fresh_byte_cap = byte_budget * FRESH_SHARE
 
-    def read_tier(tier: list[tuple[float, str, int]], over: Callable[[int, int], bool]) -> None:
+    def read_tier(tier: list[tuple[float, str, int]], over: Callable[[int, int], bool]) -> bool:
         # The guard `report.scanned > scanned0` is PER TIER: each tier reads at least one file per pass, so a fresh file
         # larger than the whole budget cannot starve the backlog, and a pass always moves an edge.
+        # TRDD-ZANQ1QW0 increment 5: the HARD bound is NOT subject to that guard. It is checked before EVERY read, the guarded first file of the tier
+        # included (a first file that starts past the deadline is the 30 s read the bound exists to prevent), and a read cut by it ends the tier.
+        # Returns True when the tier was stopped that way, so the caller skips the backlog; False for a soft stop or a finished tier.
+        # With hard None the clock is not read here, so a test clock sees the same reads as before.
         scanned0 = report.scanned
         bytes0 = report.bytes_read
         for index, (mtime, path, size) in enumerate(tier):
+            if hard is not None and clock() > hard:
+                report.left_for_next_pass += len(tier) - index
+                return True
             if size <= MAX_FILE_BYTES and report.scanned > scanned0 and over(size, bytes0):
                 report.left_for_next_pass += len(tier) - index
-                return
-            done = _read_one(report, matcher, salt, path, size, give_up)
+                return False
+            cut_before = len(report.cut)
+            done = _read_one(report, matcher, salt, path, size, give_up, hard, clock)
             (report.processed if done else report.failed).append((mtime, path))
+            if len(report.cut) > cut_before:
+                # Explicit stop after a cut, not left to the next deadline check: the cut file is held (failed) or given up on (processed), and no further
+                # file may be opened in this sweep whatever the clock reads.
+                report.left_for_next_pass += len(tier) - index - 1
+                return True
+        return False
 
-    read_tier(fresh, lambda size, bytes0: report.bytes_read - bytes0 + size > fresh_byte_cap or clock() > fresh_deadline)
+    fresh_stopped = read_tier(fresh, lambda size, bytes0: report.bytes_read - bytes0 + size > fresh_byte_cap or clock() > fresh_deadline)
     fresh_ended = clock()
     report.fresh_s = fresh_ended - reads_started  # TRDD-ZANQ1QW0: per-phase seconds for the pass line only; nothing branches on them
-    read_tier(backlog, lambda size, bytes0: report.bytes_read + size > byte_budget or clock() - started > time_budget_s)
+    if fresh_stopped:
+        # TRDD-ZANQ1QW0 increment 5: the hard deadline passed or a read was cut, and a cut ENDS this sweep reading: the backlog tier does not start
+        # (its guarded first file would be one more read past the bound). Only the soft FRESH_SHARE stop lets the backlog run, as before.
+        report.left_for_next_pass += len(backlog)
+    else:
+        read_tier(backlog, lambda size, bytes0: report.bytes_read + size > byte_budget or clock() - started > time_budget_s)
     report.backlog_s = clock() - fresh_ended
     return report
 
@@ -495,6 +587,7 @@ def sweep_trash(
     settle_s: int = TRASH_SETTLE_S,
     give_up: frozenset[str] = frozenset(),
     clock: Callable[[], float] = time.monotonic,
+    hard_deadline_s: float | None = None,
 ) -> TrashReport:
     """The timestamp batches of .trashcan, scanned by batch NAME, never by modification time: safe-delete moves a file
     in with its old mtime, so no mtime range ever sees an arrival. A batch is written once (one safe-delete run)
@@ -513,9 +606,14 @@ def sweep_trash(
     The clock starts before the first listing, and either budget stops the walk wherever it is. A secret-named
     file or folder is never read, never descended into and never stored (a position only holds a path that was read),
     and is reported by its folder, as in sweep(). Known gap: a file moved by hand into a batch that is already in
-    `done` (or behind the saved position) is not read."""
+    `done` (or behind the saved position) is not read.
+
+    hard_deadline_s (None = off) is a HARD bound from the start of this sweep: no read starts after it, and a read cut by it (scan_file checks it between
+    chunks) ends the walk, so one huge file cannot run the pass past the detector timeout. The cut file is held like a failed read (failed_by_batch)."""
     report = TrashReport()
     started = clock()
+    # One deadline for THIS sweep, from its own start (not one for the whole pass): the trash tier is not starved when the main sweep used its bound.
+    hard = None if hard_deadline_s is None else started + hard_deadline_s
     if not os.path.isdir(trash_root):
         report.elapsed_s = clock() - started
         return report
@@ -578,10 +676,20 @@ def sweep_trash(
             if not stat.S_ISREG(info.st_mode):
                 report.not_regular.append(path)
                 continue
+            # TRDD-ZANQ1QW0 increment 5: no read STARTS after the hard deadline. It is checked before the soft guard below, and for every file, so the first
+            # file of a pass is bounded too (that is the 30 s read this bound exists to prevent).
+            if hard is not None and clock() > hard:
+                return True
             if info.st_size <= MAX_FILE_BYTES and over(info.st_size):
                 return True
-            target = report.processed_by_batch if _read_one(report, matcher, salt, path, info.st_size, give_up) else report.failed_by_batch
+            cut_before = len(report.cut)
+            target = report.processed_by_batch if _read_one(report, matcher, salt, path, info.st_size, give_up, hard, clock) else report.failed_by_batch
             target.setdefault(batch, []).append(here)
+            if len(report.cut) > cut_before:
+                # A cut file is in failed_by_batch (in processed_by_batch only when given up on), like a failed read, so advance_trash keeps the position in
+                # front of it and the detector counts a retry. Returning True leaves the batch unfinished (left_for_next_pass), and every walk level above
+                # returns True too, so no later file of this walk is read, whatever the clock says.
+                return True
         return False
 
     for index, (_, batch) in enumerate(batches):

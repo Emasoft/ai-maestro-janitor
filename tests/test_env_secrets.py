@@ -37,7 +37,9 @@ def _matcher(name: str, value: str) -> env_secrets.Matcher:
 def _scan(tmp_path: Path, content: bytes, name: str, value: str, chunk: int = env_secrets.CHUNK_BYTES) -> list[env_secrets.Hit]:
     target = tmp_path / "out.txt"
     target.write_bytes(content)
-    return env_secrets.scan_file(str(target), _matcher(name, value), SALT, chunk=chunk)
+    hits, cut = env_secrets.scan_file(str(target), _matcher(name, value), SALT, chunk=chunk)
+    assert cut is False  # no deadline was given: a read is never cut
+    return hits
 
 
 def test_live_secrets_takes_only_secret_named_long_varied_values(tmp_path: Path) -> None:
@@ -219,7 +221,7 @@ def test_a_file_full_of_hits_is_scanned_in_linear_time(tmp_path: Path) -> None:
     target = tmp_path / "dense.log"
     target.write_bytes(line * count)
     started = time.monotonic()
-    hits = env_secrets.scan_file(str(target), _matcher("MY_API_TOKEN", value), SALT)
+    hits, _ = env_secrets.scan_file(str(target), _matcher("MY_API_TOKEN", value), SALT)
     assert time.monotonic() - started < 10
     assert len(hits) == count and hits[-1].line == count
 
@@ -391,3 +393,114 @@ def test_a_cut_listing_stores_its_seconds_once_and_reads_nothing(tmp_path: Path)
     report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=((100.0, ""), (200.0, "")), wall=lambda: 1000.0, clock=_stepping_clock(1.0), listing_budget_s=0)
     assert report.listing_cut_after_s == 1.0 and report.listing_s == 0.0
     assert report.fresh_s == 0.0 and report.backlog_s == 0.0 and report.scanned == 0
+
+
+# TRDD-ZANQ1QW0 increment 5: the hard read bound. The clocks below are injected (no mocks, real files); a bound is only a number compared with a clock.
+def _scripted_clock(values: list[float], rest: float):
+    """A clock that returns `values` in order and then `rest` for ever. It can move BACK, which a real clock never does, so a test can tell an explicit
+    stop (after a cut) from the next deadline check, which would stop the sweep on a real clock anyway."""
+    ticks = iter(values)
+    return lambda: next(ticks, rest)
+
+
+def _raising_clock() -> float:
+    raise AssertionError("the clock was read although no deadline was given")
+
+
+def _secret_file_at(folder: Path, name: str, mtime: float, value: str) -> str:
+    """A file of several 64-byte chunks with the value in the first one; its modification time is set to `mtime`; returns its path."""
+    target = folder / name
+    target.write_bytes(value.encode() + b"\n" + b"x" * 200)
+    os.utime(target, (mtime, mtime))
+    return str(target)
+
+
+def test_a_read_past_the_hard_deadline_stops_between_chunks_and_keeps_the_hits_found_before_it(tmp_path: Path) -> None:
+    """A 3-chunk file with the value in chunk 1 and in chunk 3, and a clock past the deadline after chunk 1: the read is cut, the chunk-1 hit is returned, the chunk-3 hit is not."""
+    value = _token(30)
+    first = value.encode() + b"\n"
+    content = first + b"x" * (230 - len(first)) + value.encode() + b"y" * (300 - 230 - len(value))
+    assert len(content) == 300  # chunks of 100 bytes: 0-99 (value on line 1), 100-199, 200-299 (value on line 2, outside the overlap)
+    target = tmp_path / "three.txt"
+    target.write_bytes(content)
+    # The first clock read (before chunk 2) is 0.0, already past -0.5: the deadline has passed after chunk 1.
+    hits, cut = env_secrets.scan_file(str(target), _matcher("MY_API_TOKEN", value), SALT, chunk=100, deadline=-0.5, clock=_stepping_clock(1.0))
+    assert cut is True
+    assert [(h.name, h.line) for h in hits] == [("MY_API_TOKEN", 1)]
+
+
+def test_a_file_read_to_its_end_before_the_deadline_check_is_not_a_cut(tmp_path: Path) -> None:
+    """The clock passes the deadline only at the check before the empty read at the end of the file: every byte was scanned, so cut is False and the hit in the last chunk counts."""
+    value = _token(30)
+    target = tmp_path / "two.txt"
+    target.write_bytes(b"x" * 100 + value.encode() + b"y" * 70)  # 200 bytes, chunks of 100: the value is in chunk 2, the last
+    # clock reads: before chunk 2 0.0 (inside 0.5), before the empty read after chunk 2 1.0 (past 0.5): nothing is left to read, so no cut.
+    hits, cut = env_secrets.scan_file(str(target), _matcher("MY_API_TOKEN", value), SALT, chunk=100, deadline=0.5, clock=_stepping_clock(1.0))
+    assert cut is False
+    assert [h.name for h in hits] == ["MY_API_TOKEN"]
+
+
+def test_without_a_deadline_the_clock_is_never_read(tmp_path: Path) -> None:
+    """With deadline None, scan_file and _read_one make no clock call at all, so every existing fake-clock test sees the same reads as before."""
+    value = _token(30)
+    target = tmp_path / "multi.txt"
+    target.write_bytes(b"x" * 100 + value.encode() + b"y" * 100)  # the value crosses the chunk edge at 128
+    matcher = _matcher("MY_API_TOKEN", value)
+    hits, cut = env_secrets.scan_file(str(target), matcher, SALT, chunk=64, clock=_raising_clock)
+    assert cut is False and [h.name for h in hits] == ["MY_API_TOKEN"]
+    report = env_secrets.SweepReport()
+    assert env_secrets._read_one(report, matcher, SALT, str(target), target.stat().st_size, frozenset(), clock=_raising_clock) is True
+    assert report.scanned == 1 and report.cut == [] and [h.name for h in report.hits] == ["MY_API_TOKEN"]
+
+
+def test_a_cut_read_keeps_its_hits_but_is_neither_read_nor_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_read_one on a cut read: the hits found stay, the path goes to `cut` only (not read, not unreadable, not counted), it is retried (False) unless given up on (True)."""
+    monkeypatch.setattr(env_secrets, "CHUNK_BYTES", 64)  # _read_one passes CHUNK_BYTES at call time, so this reaches scan_file
+    value = _token(30)
+    target = tmp_path / "cutme.txt"
+    target.write_bytes(value.encode() + b"\n" + b"x" * 300)
+    size = target.stat().st_size
+    matcher = _matcher("MY_API_TOKEN", value)
+    report = env_secrets.SweepReport()
+    assert env_secrets._read_one(report, matcher, SALT, str(target), size, frozenset(), deadline=-0.5, clock=_stepping_clock(1.0)) is False
+    assert report.cut == [str(target)] and [h.line for h in report.hits] == [1]
+    assert report.read == [] and report.unreadable == [] and report.dump_shaped == []
+    assert report.scanned == 0 and report.bytes_read == 0
+    given_up = env_secrets.SweepReport()
+    assert env_secrets._read_one(given_up, matcher, SALT, str(target), size, frozenset({str(target)}), deadline=-0.5, clock=_stepping_clock(1.0)) is True
+    assert given_up.cut == [str(target)] and given_up.read == []
+
+
+def test_a_cut_read_ends_the_sweep_reading_and_leaves_the_rest_for_the_next_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first fresh file is cut by the hard bound: only that file is opened, the other fresh file and the whole backlog are counted as left, and nothing else is read."""
+    monkeypatch.setattr(env_secrets, "CHUNK_BYTES", 64)
+    value = _token(30)
+    p300 = _secret_file_at(tmp_path, "p300.txt", 300.0, value)
+    _secret_file_at(tmp_path, "p301.txt", 301.0, value)
+    _secret_file_at(tmp_path, "p50.txt", 50.0, value)
+    _secret_file_at(tmp_path, "p40.txt", 40.0, value)
+    # clock reads: start 0, the one folder 1, the start of the reads 2, the hard check before p300 3 (inside 3.5), the check before chunk 2 of p300 4 (past
+    # 3.5: the cut). Then the clock moves BACK to 0.0 for ever: only the explicit stop after a cut, not a later deadline check, can end the sweep reading.
+    report = env_secrets.sweep(
+        [str(tmp_path)], _matcher("MY_API_TOKEN", value), SALT, covered=((100.0, ""), (200.0, "")), wall=lambda: 1000.0,
+        clock=_scripted_clock([0.0, 1.0, 2.0, 3.0, 4.0], 0.0), hard_deadline_s=3.5,
+    )
+    assert report.cut == [p300]
+    assert [h.path for h in report.hits] == [p300]  # the hit before the cut is real; no other file was opened
+    assert report.scanned == 0 and report.bytes_read == 0 and report.read == [] and report.unreadable == []
+    assert report.failed == [(300.0, p300)] and report.processed == []  # held like a failed read
+    assert report.left_for_next_pass == 3  # p301 and the two backlog files
+
+
+def test_the_hard_deadline_stops_the_guarded_first_read_of_the_backlog_too(tmp_path: Path) -> None:
+    """Each tier reads one file whatever the soft budgets say, but the hard bound has no such guard: past it, the first backlog file is not read."""
+    p300 = _file_at(tmp_path, "p300.txt", 300.0)
+    _file_at(tmp_path, "p50.txt", 50.0)
+    _file_at(tmp_path, "p40.txt", 40.0)
+    # clock reads: start 0, the one folder 1, the start of the reads 2, the hard check before p300 3 (inside 3.5), the end of the fresh tier 4,
+    # the hard check before the first backlog file 5 (past 3.5): that file is not read.
+    report = env_secrets.sweep(
+        [str(tmp_path)], None, SALT, covered=((100.0, ""), (200.0, "")), wall=lambda: 1000.0, clock=_stepping_clock(1.0), hard_deadline_s=3.5,
+    )
+    assert report.processed == [(300.0, p300)] and report.scanned == 1
+    assert report.left_for_next_pass == 2 and report.cut == []

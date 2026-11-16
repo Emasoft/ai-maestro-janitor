@@ -195,12 +195,16 @@ def _pass(sdir: Path) -> int:
     git_retries = saved["retries"].get(_GIT_RETRY_KEY, 0)
     hold_for_git = git_exit is not None and git_retries < env_secrets.MAX_FAIL_RETRIES  # bounded: git failing for good must not stall the sweep for good
     roots = env_secrets.agent_writable_roots(project, os.getuid()) + untracked
-    report = env_secrets.sweep(roots, matcher, salt, covered=saved["covered"], give_up=give_up)
+    # TRDD-ZANQ1QW0 increment 5: each sweep gets its own hard read bound (75 s main, 25 s trash), so a huge file cannot run the pass past the 120 s detector
+    # timeout, and a killed pass (which writes no state) cannot repeat the same reads on the next heartbeat.
+    report = env_secrets.sweep(roots, matcher, salt, covered=saved["covered"], give_up=give_up, hard_deadline_s=env_secrets.MAIN_HARD_DEADLINE_S)
     hi = report.covered[1]
     trash_root = str(project / ".trashcan")
     trash_positions: dict[str, env_secrets.TrashPos] = saved["trash"]["positions"]
     trash_done = frozenset(saved["trash"]["done"])
-    trash = env_secrets.sweep_trash(trash_root, matcher, salt, trash_positions, trash_done, int(time.time()), give_up=give_up)
+    trash = env_secrets.sweep_trash(
+        trash_root, matcher, salt, trash_positions, trash_done, int(time.time()), give_up=give_up, hard_deadline_s=env_secrets.TRASH_HARD_DEADLINE_S,
+    )
     report.absorb_findings(trash)  # its hits, secret-named paths and coverage gaps go through the loops below like any other
 
     holds: list[env_secrets.Key] = list(report.failed)
@@ -344,19 +348,30 @@ def _pass(sdir: Path) -> int:
         )
         if out is not None:
             print(out)
-    uncovered = sorted(report.unreadable) + sorted(report.too_big) + sorted(report.shape_not_checked) + sorted(report.not_regular)
+    # TRDD-ZANQ1QW0 increment 5: cut_given_up (a file cut by the hard read bound on each of its MAX_FAIL_RETRIES tries, then given up) is a coverage gap like a given-up
+    # unreadable file: the covered range or batch position moves past it, so it is never read again until it changes. "On every try" in the text below means those tries,
+    # not later passes.
+    uncovered = sorted(report.unreadable) + sorted(report.too_big) + sorted(report.shape_not_checked) + sorted(report.not_regular) + sorted(report.cut_given_up)
     if uncovered:
         coverage = (
             f"[{_NAME}] sweep coverage: {len(report.too_big)} file(s) over {env_secrets.MAX_FILE_BYTES // (1024 * 1024)} MiB not read, "
             f"{len(report.unreadable)} unreadable, {len(report.not_regular)} not regular files (pipes, devices), "
             f"{len(report.shape_not_checked)} over {env_secrets.MAX_SHAPE_BYTES // (1024 * 1024)} MiB "
-            "not checked for the dump shape (paths in this detector's log)."
+            "not checked for the dump shape"
+            + (f", {len(report.cut_given_up)} cut by the hard read bound on every try and left unread" if report.cut_given_up else "")
+            + " (paths in this detector's log)."
         )
         out = dedupe.emit_once(seen, f"coverage:{zlib.crc32(chr(0).join(uncovered).encode()) & 0xFFFFFFFF}", coverage)
         if out is not None:
             print(out)
         state.log_line(_NAME, "not fully covered: " + "; ".join(uncovered[:20]))
 
+    if report.cut:
+        # TRDD-ZANQ1QW0 increment 5: the hard read bound stopped these reads part-way (report.cut holds both tiers). A cut file is held like a failed read:
+        # the main sweep puts it in report.failed and the trash walk in failed_by_batch (unless it is already given up on, which makes it done), so `holds`,
+        # `retries` and `trash_holds` above already keep the covered range or the batch position in front of it and count a retry, bounded by
+        # MAX_FAIL_RETRIES. It is not in `read`, so a flagged file keeps its finding. Log only, never stdout: the heartbeat output is read by the model.
+        state.log_line(_NAME, "cut by the hard read bound, read again next pass: " + "; ".join(report.cut[:50]))
     new_covered = saved["covered"] if hold_for_git or cut else env_secrets.advance_covered(report.covered, report.processed, holds, report.live_edge)
     # The trash tier moves even while git holds the covered range: hold_for_git means `git ls-files` failed, which only leaves
     # the UNTRACKED roots unread, and .trashcan is gitignored, so no trash file ever depended on that listing.
@@ -378,6 +393,8 @@ def _pass(sdir: Path) -> int:
         f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped; "
         f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done"
         + (f"; listing cut after {int(report.listing_cut_after_s)} s, covered range kept" if report.listing_cut_after_s is not None else "")
+        # TRDD-ZANQ1QW0 increment 5: how many reads the hard read bound stopped part-way (both tiers); the paths are in the log line above, never on stdout.
+        + (f"; cut by the hard read bound: {len(report.cut)}" if report.cut else "")
         # TRDD-ZANQ1QW0: where the seconds of this pass went (listing is the cut elapsed when the listing was cut, since listing_s stays 0.0 then;
         # trash is its own sweep; total is the whole of main() up to here).
         + f"; seconds: listing {report.listing_s if report.listing_cut_after_s is None else report.listing_cut_after_s:.1f}, fresh {report.fresh_s:.1f}, "

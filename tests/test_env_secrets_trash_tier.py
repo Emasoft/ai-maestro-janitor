@@ -300,3 +300,37 @@ def test_the_trash_tier_reports_the_seconds_it_ran(tmp_path: Path) -> None:
     ticks = iter(range(1000))
     report = env_secrets.sweep_trash(str(trash), None, SALT, {}, frozenset(), int(time.time()), clock=lambda: float(next(ticks)))
     assert report.scanned == 1 and report.elapsed_s > 0.0
+
+
+def test_a_cut_read_ends_the_trash_walk_and_the_file_is_held_not_processed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hard bound cuts the first trash file: it is in failed_by_batch (the position stays in front of it), the walk stops there, and the next file is not read (TRDD-ZANQ1QW0)."""
+    monkeypatch.setattr(env_secrets, "CHUNK_BYTES", 100)  # _read_one passes CHUNK_BYTES at call time, so a small file spans several chunks
+    trash = tmp_path / ".trashcan"
+    value = secrets.token_urlsafe(36)
+    _batch(trash, OLD, {"a1": value.encode() + b"\n" + b"x" * 400, "a2": KB})
+    # clock reads: start 0.0, the hard check before a1 1.0 (inside 1.5), the check before chunk 2 of a1 2.0 (past 1.5: the cut). Then the clock moves BACK to 0.0 for
+    # ever, which a real clock never does: only the explicit stop after a cut, not a later deadline check, can keep a2 from being read.
+    ticks = iter([0.0, 1.0, 2.0])
+    report = env_secrets.sweep_trash(
+        str(trash), _matcher(value), SALT, {}, frozenset(), int(time.time()), clock=lambda: next(ticks, 0.0), hard_deadline_s=1.5,
+    )
+    a1 = str(trash / OLD / "a1")
+    assert report.cut == [a1] and [h.path for h in report.hits] == [a1]  # the hit before the cut is real
+    assert report.failed_by_batch == {OLD: [("a1",)]} and report.processed_by_batch == {}
+    assert report.scanned == 0 and report.read == [] and report.left_for_next_pass == 1 and report.exhausted == []
+    assert env_secrets.advance_trash({}, report.processed_by_batch, report.failed_by_batch) == {}  # the position does not pass the cut file
+
+
+def test_no_trash_read_starts_after_the_hard_deadline_even_for_a_small_file(tmp_path: Path) -> None:
+    """A second small file is not opened once the hard deadline has passed. With no matcher no read is ever cut, so only the hard check before each read can stop it; the soft budgets stay out of it (1000 s time budget, default byte budget, over() reads the clock only after a read) (TRDD-ZANQ1QW0)."""
+    trash = tmp_path / ".trashcan"
+    _batch(trash, OLD, {"a1": b"x", "a2": b"x"})
+    # No matcher, so no scan_file and no clock read inside a read. Reads of the clock: start 0.0, the hard check before a1 1.0 (inside 5.0: a1 is read), the hard check
+    # before a2 100.0 (past 5.0: the walk stops). The soft guard is not the cause: over() reads the clock only after a read, and its time budget (1000 s) and byte budget
+    # (the default) are far above anything this walk uses, so with the hard check removed a2 is read, not stopped.
+    ticks = iter([0.0, 1.0, 100.0])
+    report = env_secrets.sweep_trash(
+        str(trash), None, SALT, {}, frozenset(), int(time.time()), time_budget_s=1000.0, clock=lambda: next(ticks, 100.0), hard_deadline_s=5.0,
+    )
+    assert report.processed_by_batch == {OLD: [("a1",)]} and report.failed_by_batch == {} and report.scanned == 1
+    assert report.cut == [] and report.left_for_next_pass == 1 and report.exhausted == []

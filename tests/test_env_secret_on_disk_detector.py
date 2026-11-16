@@ -315,11 +315,11 @@ _PATCHED_RUNNER = (
 )
 
 
-def _flag_then_force_a_reread(tmp_path: Path, project: Path, value: str, retries: int | None = None) -> Path:
+def _flag_then_force_a_reread(tmp_path: Path, project: Path, value: str, retries: int | None = None, body: str | None = None) -> Path:
     """First pass flags reports_dev/dump.txt; then the state is rewritten so the next pass must read the file again, with `retries`
-    failed reads already saved against it when given."""
+    failed reads already saved against it when given. `body` replaces the default one-line content (the value must stay in it)."""
     target = project / "reports_dev" / "dump.txt"
-    target.write_text(f"leak {value}\n")
+    target.write_text(body if body is not None else f"leak {value}\n")
     assert "CRED-002" in _run(tmp_path, project, value).stdout
     state = _cursor(project)
     assert state["flagged"] == [str(target)]
@@ -392,6 +392,78 @@ def test_a_flagged_file_given_up_keeps_its_finding(tmp_path: Path) -> None:
     # as the failed-read test above sees ({target: 1}). Without this the test could not tell a give-up from an ordinary failure.
     assert str(target) not in state["retries"]
     assert str(target) in state["flagged"]
+
+
+# TRDD-ZANQ1QW0 increment 5, the hard read bound at the detector level. Two things are patched inside the detector process through runpy: CHUNK_BYTES (small, so the
+# flagged file spans many chunks; _read_one passes CHUNK_BYTES at call time, which is what lets this reach scan_file) and env_secrets.sweep, wrapped to inject a
+# stepping clock and a hard deadline (sweep binds clock=time.monotonic as a default argument, so patching time.monotonic would not reach it). The detector is not changed
+# for the test: it only passes MAIN_HARD_DEADLINE_S, which the wrapper overrides. The deadline is read into a variable first, because sys.argv is rewritten before the run.
+_CUT_RUNNER = (
+    "import itertools, runpy, sys\n"
+    "sys.path.insert(0, sys.argv[2])\n"
+    "import env_secrets\n"
+    "env_secrets.CHUNK_BYTES = int(sys.argv[3])\n"
+    "deadline = float(sys.argv[4])\n"
+    "original = env_secrets.sweep\n"
+    "ticks = itertools.count()\n"
+    "env_secrets.sweep = lambda *a, **k: original(*a, **{**k, \"clock\": lambda: float(next(ticks)), \"hard_deadline_s\": deadline})\n"
+    "detector = sys.argv[1]\n"
+    "sys.argv = [detector, \"--one-shot\"]\n"
+    "runpy.run_path(detector, run_name=\"__main__\")\n"
+)
+
+
+def _cut_pass(tmp_path: Path, project: Path, value: str) -> subprocess.CompletedProcess[str]:
+    """One detector pass through _CUT_RUNNER. The clock steps 1.0 per read: the deadline of 40 passes inside the 200 chunks of the flagged file (the listing,
+    a few reads, comes first), after its first chunk."""
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), _NAME: value}
+    argv = [sys.executable, "-c", _CUT_RUNNER, str(_DETECTOR), str(_DETECTOR.parent.parent / "lib"), "64", "40"]
+    done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+def test_a_flagged_file_cut_by_the_hard_read_bound_keeps_its_finding_and_is_held(tmp_path: Path) -> None:
+    """A flagged file whose read the hard bound stops part-way was not fully scanned: it keeps its finding, stays held (retry counted, covered range in front of it), and is named in the log, not on stdout."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    # 200 chunks of 64 bytes of padding, the value only at the END: the cut falls long before it, so the pass finds no hit in the file, and the finding stays only
+    # because the file was not fully scanned (a pass that wrongly counted it as read would withdraw it).
+    target = _flag_then_force_a_reread(tmp_path, project, value, body="x" * (64 * 200) + f"\nleak {value}\n")
+    done = _cut_pass(tmp_path, project, value)
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text().splitlines()
+    cut_lines = [line for line in log if "cut by the hard read bound, read again next pass" in line]
+    assert len(cut_lines) == 1 and str(target) in cut_lines[0]  # the cut happened, and it was this file: asserted before the finding
+    assert any("pass: " in line and "; cut by the hard read bound: 1;" in line for line in log)
+    assert "cut by the hard read bound" not in done.stdout
+    state = _cursor(project)
+    assert str(target) in state["flagged"]
+    assert state["retries"] == {str(target): 1} and state["covered"] == [[1.0, ""], [1.0, ""]]  # held like a failed read
+
+
+def test_a_given_up_file_that_is_cut_is_named_in_that_pass_then_left_behind_the_covered_range(tmp_path: Path) -> None:
+    """A file already given up on (MAX_FAIL_RETRIES failed reads saved) is opened and cut once more: it is done (the covered range moves past it, its retry entry is
+    dropped) but it is still named in the cut log line and counted in the pass line, and its finding stays. The next pass does NOT read it again (it is inside the
+    covered range, like a given-up failed read), so the cut is named once and the unscanned tail is not read again until the file changes."""
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = _flag_then_force_a_reread(tmp_path, project, value, retries=env_secrets.MAX_FAIL_RETRIES, body="x" * (64 * 200) + f"\nleak {value}\n")
+    log_file = project / ".janitor" / "logs" / "env-secret-on-disk.log"
+    give_up_pass = _cut_pass(tmp_path, project, value)
+    # The give-up pass also reaches the stdout coverage line (parity with a given-up unreadable file), with the count, and the log names the file.
+    # "On every try" in that text means the MAX_FAIL_RETRIES tries before give-up, not later passes: the file is not read again after the give-up pass.
+    assert any("not fully covered" in line and str(target) in line for line in log_file.read_text().splitlines())
+    assert "1 cut by the hard read bound on every try and left unread" in give_up_pass.stdout
+    cut_lines = [line for line in log_file.read_text().splitlines() if "cut by the hard read bound, read again next pass" in line]
+    assert len(cut_lines) == 1 and str(target) in cut_lines[0]  # given up, yet named: the cut is a coverage gap in that pass
+    assert any("pass: " in line and "; cut by the hard read bound: 1;" in line for line in log_file.read_text().splitlines())
+    state = _cursor(project)
+    assert str(target) not in state["retries"] and state["covered"][1] == [100.0, str(target)]  # given up: done, no longer held
+    assert str(target) in state["flagged"]
+    _cut_pass(tmp_path, project, value)  # second pass: the target is inside the covered range, so it is not opened again
+    # Another file (the proposal the first pass wrote) may be cut by this tiny clock; the given-up target must not be named again.
+    assert len([line for line in log_file.read_text().splitlines() if "cut by the hard read bound, read again next pass" in line and str(target) in line]) == 1
+    assert str(target) in _cursor(project)["flagged"]
 
 
 def test_a_pass_with_no_secret_in_the_environment_withdraws_nothing(tmp_path: Path) -> None:
