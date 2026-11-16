@@ -4,7 +4,7 @@ title: Move the CPV pin to v5.22.2 by devitalizing the RC-39 persistence finding
 column: todo
 status: tasked
 created: 2026-10-22T03:26:35+0200
-updated: 2026-10-22T23:05:24+0200
+updated: 2026-11-16T18:25:29+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -37,3 +37,4 @@ Also fix the one markdownlint NIT reported in a design/tasks card.
 
 - 2026-10-22T03:26:35+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-22 — USER answered "Yes, reword them" to rewording the 13 frozen-card lines, then: "you verify each one of them, integrate or modify when necessary, and open an issue on the cpv plugin github repo if there is no issue or its a false positive." The rewording was stopped by the session's safety classifier and not retried; no card line changed. All 13 verified as Markdown design-doc prose (pattern per line measured): 5 bare path nouns and f892e109:196 are in Emasoft/claude-plugins-validation#262 (comment 6351290130 explains why the v5.22.5 removal predicate fails closed on backtick-wrapped prose); the other 7 (71ABD7V7:63/201/207, JEP2XFB1:26, f892e109:186, V13RIZUI:24/26) filed as Emasoft/claude-plugins-validation#263. Pin bump waits on CPV's verdicts.
+- 2026-11-16T18:25+0100 (main agent) Two more frozen-card CPV findings join the USER decision in plan item 4. (a) Archived 7KPG2PCO line 42 (written 2026-11-16) trips the absolute-path MAJOR at the current v5.16.2 pin: a bare system bin directory followed by a comma misses the allowlist, a false positive filed as Emasoft/claude-plugins-validation#277; it blocks the 3.9.9 publish (nothing tagged or pushed). trddgrep refused the correction. (b) Archived BVTYT2BN line 29 trips the same MAJOR at v5.23.0 only. Measured 2026-11-16 18:21, v5.23.0 --strict on HEAD: CRITICAL=0 MAJOR=6 MINOR=19 (v5.16.2 baseline MAJOR=1 MINOR=0); 9 of the 24 new findings sit on 7 archived cards. Evidence: reports_dev/release-399/20261116_182115+0100-cpv-pin-bump-cost.md. The 2026-10-22 grant named the 13 RC-39 lines only, so these two need their own owner word.
