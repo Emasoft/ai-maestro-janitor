@@ -186,8 +186,8 @@ Test: KNOWN DEFECT TRDD-0VOXC39W nontext-blocks: a token in a tool_use input or 
 
 ## escape-boundary
 
-Reason: (d) an open defect: every token rule whose pattern starts with a word boundary or a lookbehind (21 rules at 5ef604a1) misses a valid token right after a backslash-n inside a JSON string, after %22, and after a backslash-t.
-Shape: A valid token of each of the 21 rules directly after each of the three escapes.
+Reason: (d) an open defect: every token rule whose pattern starts with a word boundary or a lookbehind (23 rules, the count pinned by the test) misses a valid token right after a backslash-n inside a JSON string, after %22, and after a backslash-t.
+Shape: A valid token of each of the 23 rules directly after each of the three escapes.
 Hidden instead: The same token standalone, for each rule.
 Card: TRDD-5VZTPXBJ
 Test: KNOWN DEFECT TRDD-5VZTPXBJ escape-boundary: a valid token right after a backslash-n, %22 or a backslash-t is not hidden by any rule that starts with a word boundary or a lookbehind

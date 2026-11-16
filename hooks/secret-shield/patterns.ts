@@ -4,7 +4,7 @@ import { anthropicKey, huggingfaceToken, openaiKey48, openaiLegacyKey, openaiPro
 import { awsAccessKey, awsSecretKeyAssignment, awsSecretKeyJson, awsSessionToken, digitaloceanOAuthToken, digitaloceanPat, digitaloceanRefreshToken, googleApiKey, googleOAuthAccessToken, googleOAuthClientSecret, googleOAuthRefreshToken } from './rules/cloud'
 import { githubTokenClassic, githubTokenFineGrained, gitlabAgentToken, gitlabCicdJobToken, gitlabDeployToken, gitlabFeatureFlagClientToken, gitlabFeedToken, gitlabIncomingMailToken, gitlabOAuthAppSecret, gitlabPat, gitlabRunnerRegistrationToken, gitlabRunnerToken, gitlabScimToken, gitlabSessionCookie, gitlabSessionCookieValueFirst, gitlabTriggerToken, gitlabWorkspaceToken } from './rules/code-hosts'
 import { dockerPat, npmrcAuthToken, npmToken, pypiToken, sendgridKey, xmlPassword } from './rules/dev-services'
-import { bearerToken, jwt, jwtWide, privateKey, sshPublicKey } from './rules/key-material'
+import { bearerBare, bearerToken, jwt, jwtWide, privateKey, sshPublicKey } from './rules/key-material'
 import { slackAppToken, slackConfigAccessToken, slackConfigRefreshToken, slackToken, slackWebhook, stripeApiKey, stripeWebhookSecret } from './rules/messaging-payments'
 import type { Rule } from './rules/rule'
 
@@ -114,6 +114,8 @@ const TOKENS: readonly Rule[] = [
   npmrcAuthToken,
   xmlPassword,
   bearerToken,
+  // Last: after the Authorization-led rule, so its values keep their kind and are already markers here (TRDD-L1I0FP5T).
+  bearerBare,
 ]
 
 /** Each rule's kind, pattern source and flags, in run order: the data tests/patterns.test.ts pins, without the RegExps. */

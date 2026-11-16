@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T20:28:20+0100
+updated: 2026-11-16T21:13:51+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -34,6 +34,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-16T19:52:56+0100 main-agent: owner asked "what are you waiting for?"; proceeding on the recommended defaults: (e) card rule on in report-sanitizer; (a) and the live half of (e) wait for mod wiring, the home rule gets a caller-side switch.
 - 2026-11-16T19:58:23+0100 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-11-16T19:58:28+0100 main-agent: step 1 done: ssh-public-key rule in the shield core (no leading word boundary, so a key after an escape is hidden; it also hides xssh-rsa AAAA..., which hides more, never less). cookie as a secret name is deferred: adding it broke 11 pinned tests because the assignment pass swallows the gitlab-session-cookie kind; it needs a cookie-aware assignment pass and a false-match measurement first.
+- 2026-11-16T21:13:51+0100 main-agent: step 2 done, shield floors widened to the report-sanitizer floors (owner order: same secret types in both tools): GitHub classic body 30 to 20, Hugging Face 34 to 30 with no trailing word boundary, and a new bare Bearer rule (8+ characters holding a digit, any case, no leading word boundary so a token after an escape is hidden, TRDD-5VZTPXBJ). Candidates of the new floors, counted before the change in 95,006 plugin-cache and 4,891,492 code-tree files: GitHub 14 / 293, Hugging Face 0 / 2, bare Bearer 27 / 208, short Authorization values 15 / 1,043, other Bearer forms 0 / 137; mostly placeholders and test tokens, judged by file location and masked shape (94 of 208 bare and 87 of 137 other-form hits look random). Differential through redact(), HEAD against the new core on the plugin cache: 0 spans no longer hidden, 0 kind changes, 56 new spans plus 25 repeats; shield gate 1001 pass. Accepted over-hide: placeholders in docs and tests, a value after a word ending in bearer, a sentence-final period after a Bearer value; a short-segment JWT after Bearer is now labelled bearer-token. Cost once the shield is wired: an agent can write a marker over a test token; TRDD-0Y3UW1NF (write-back guard) blocks the wiring card TRDD-2V7OAUPE, so the guard lands first.
 
 ## Design
 

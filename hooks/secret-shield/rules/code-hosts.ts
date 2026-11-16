@@ -2,10 +2,11 @@
 
 import type { Rule } from './rule'
 
-// WHY the floors are 30 and 20 and there is no trailing \b (TRDD-6A3XW3VO, widened 2026-11-14): the old floors (36 and 22) came from upstream secret-shield 1.0.0 with no recorded
+// WHY the floors are 20 and 20 and there is no trailing \b (TRDD-6A3XW3VO, widened 2026-11-14; classic body floor lowered 30 -> 20 on 2026-11-16, TRDD-L1I0FP5T): the old floors (36 and 22) came from upstream secret-shield 1.0.0 with no recorded
 // reason. jr-redact hid shorter tokens the shield left visible; the TRDD-6A3XW3VO measurement showed that widening them hides all 15 such samples (shield-test strings and catalog samples), and that on 140 MB of separate repo and plugin-cache text every match was already hidden by the shield's existing rules.
 // The trailing \b is dropped because a token whose tail continues with an underscore (a word character) never reaches a boundary, so the old rule left the whole token visible.
-export const githubTokenClassic: Rule = { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{30,255})/g, group: 1 }
+// WHY the classic floor is 20 (TRDD-L1I0FP5T, 2026-11-16): owner order "they most cover the same set of secrets types", so the shield hides what the report sanitizer hides (sanitize_reports.py: gh[pousr]_ plus 20 or more). Measured candidates (measured 2026-11-16 for TRDD-L1I0FP5T) of the 20-29 body range in 95,006 plugin-cache files and 4,891,492 code-tree files: 14 matches in the cache and 293 in the code tree (6 and 13 distinct), mostly doc and test placeholders. Accepted over-hide: such placeholders are hidden.
+export const githubTokenClassic: Rule = { kind: 'github-token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{20,255})/g, group: 1 }
 export const githubTokenFineGrained: Rule = { kind: 'github-token', pattern: /\b(github_pat_[A-Za-z0-9_]{20,255})/g, group: 1 }
 
 // GitLab prefixed tokens, standalone (no secret name before them needed). Sources (NOTICE credits gitleaks v8.30.1): the prefixes come from

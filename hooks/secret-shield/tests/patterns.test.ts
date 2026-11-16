@@ -113,12 +113,13 @@ describe('GitHub tokens shorter than the old floors are hidden, nothing the old 
     for (const n of [36, 37]) expect(redact(`value: ${classic(n)} end`).text).toBe(`value: ${mark('github-token')} end`)
   })
 
-  test('FLOOR pin (minimum length): a classic body of 29 and a fine-grained body of 19 stay visible', () => {
-    expect(redact(`value: ${classic(29)} end`).text).toContain(classic(29))
+  // TRDD-L1I0FP5T (2026-11-16): the classic floor moved 30 -> 20 to match the report sanitizer, so this pin moved from 29 to 19 (a body of 20 is hidden: see 'report-sanitizer floors').
+  test('FLOOR pin (minimum length): a classic body of 19 and a fine-grained body of 19 stay visible', () => {
+    expect(redact(`value: ${classic(19)} end`).text).toContain(classic(19))
     expect(redact(`value: ${fine(19)} end`).text).toContain(fine(19))
   })
 
-  // The two tests below pin the CURRENT, deliberately chosen behaviour of the {30,255} / {20,255} caps and of the classic character class. They are not claims about what is ideal. A new rule that hides the 45-character tail or the `_suffixtext` tail must update these pins on purpose.
+  // The two tests below pin the CURRENT, deliberately chosen behaviour of the {20,255} / {20,255} caps and of the classic character class. They are not claims about what is ideal. A new rule that hides the 45-character tail or the `_suffixtext` tail must update these pins on purpose.
   test('deliberate pin of current behaviour: a 300-character body is hidden up to the 255 cap only, the last 45 characters stay visible', () => {
     for (const [token, prefix] of [[classic(300), j('gh', 'p_')], [fine(300), j('github', '_pat_')]] as const) {
       const body = token.slice(prefix.length)
@@ -1787,6 +1788,73 @@ describe('the GitLab session cookie value is found by its shape in a window arou
     })
   }
 })
+describe('report-sanitizer floors (TRDD-L1I0FP5T)', () => {
+  // The shield hides the shapes the report sanitizer hides: gh[pousr]_ + 20, hf_ + 30, and a bare Bearer value of 8+ characters holding a digit. Bodies are built at run time.
+  const cycle = (n: number) => 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5'.repeat(8).slice(0, n)
+  test('a GitHub classic body of 20 is hidden for every prefix letter, a body of 19 stays visible', () => {
+    for (const letter of ['p', 'o', 'u', 's', 'r']) {
+      const prefix = j('gh', letter, '_')
+      expect(redact(`value: ${prefix}${cycle(20)} end`).text).toBe(`value: ${mark('github-token')} end`)
+      expect(redact(`value: ${prefix}${cycle(19)} end`).text).toContain(cycle(19))
+    }
+  })
+  test('a Hugging Face body of 30 is hidden, a body of 29 stays visible', () => {
+    expect(redact(`value: ${j('hf', '_')}${cycle(30)} end`).text).toBe(`value: ${mark('huggingface-token')} end`)
+    expect(redact(`value: ${j('hf', '_')}${cycle(29)} end`).text).toContain(cycle(29))
+  })
+  test('a Hugging Face token followed by an underscore is hidden up to the underscore', () => {
+    expect(redact(`value: ${j('hf', '_')}${cycle(34)}_more end`).text).toBe(`value: ${mark('huggingface-token')}_more end`)
+  })
+  test('a bare Bearer value of 8 characters with a digit is hidden, 7 characters stay visible', () => {
+    expect(redact('curl -H Bearer ' + 'abcdefg1' + ' x').text).toBe(`curl -H Bearer ${mark('bearer-token')} x`)
+    expect(redact('curl -H Bearer ' + 'abcdef1' + ' x').text).toContain('abcdef1')
+  })
+  test('a bare Bearer value with no digit stays visible', () => {
+    expect(redact('Bearer ' + 'authentication-scheme').text).toBe('Bearer authentication-scheme')
+  })
+  test('a lower-case or upper-case bearer word is hidden like the capitalized one', () => {
+    expect(redact('bearer ' + 'abcdefg1').text).toBe(`bearer ${mark('bearer-token')}`)
+    expect(redact('BEARER ' + 'abcdefg1').text).toBe(`BEARER ${mark('bearer-token')}`)
+  })
+  test('an Authorization value of 8 to 15 characters is hidden as a bearer-token, a 16-character one keeps its kind and its single hit', () => {
+    expect(redact('Authorization: Bearer ' + 'abcdefg1hij').text).toBe(`Authorization: Bearer ${mark('bearer-token')}`)
+    const long = redact('Authorization: Bearer ' + cycle(16))
+    expect(long.text).toBe(`Authorization: Bearer ${mark('bearer-token')}`)
+    expect(long.hits).toEqual({ 'bearer-token': 1 })
+  })
+})
+describe('bare Bearer rule and short-segment JWTs (TRDD-L1I0FP5T)', () => {
+  // Deliberate pin of current behaviour: bearerBare is a TOKENS entry and jwtWide is the last pass, so a short-segment JWT (8-character segments) after the word Bearer is hidden as bearer-token, not jwt. Moving either rule changes the kind and must update this pin on purpose.
+  test('a short-segment JWT after Bearer, with or without Authorization, is hidden as a bearer-token with one hit', () => {
+    const jwt8 = j('eyJ', 'abcd1234', '.', 'efgh5678', '.', 'ijkl9012')
+    for (const lead of ['Bearer ', 'Authorization: Bearer ']) {
+      const done = redact(lead + jwt8)
+      expect(done.text).toBe(lead + mark('bearer-token'))
+      expect(done.hits).toEqual({ 'bearer-token': 1 })
+    }
+  })
+})
+describe('bare Bearer rule: escapes, final period, worst cases (TRDD-L1I0FP5T)', () => {
+  const BS = '\\'
+  const secret = 'abcdefg1hij'
+  test('a bare Bearer value with a digit is hidden right after a backslash-n, %22 and a backslash-t (no leading word boundary, TRDD-5VZTPXBJ)', () => {
+    for (const frame of [(t: string) => `{"m":"line${BS}n${t}"}`, (t: string) => `q=%22${t}%22`, (t: string) => `a${BS}t${t}`]) {
+      const done = redact(frame('Bearer ' + secret))
+      expect(done.text).not.toContain(secret)
+      expect(done.hits).toEqual({ 'bearer-token': 1 })
+    }
+  })
+  test('deliberate pin of current behaviour: a sentence-final period after a bare Bearer value is swallowed into the marker', () => {
+    expect(redact('Bearer ' + secret + '.').text).toBe(`Bearer ${mark('bearer-token')}`)
+  })
+  // Worst cases of the lookahead plus whitespace run; the bound is a fixed ceiling, in the style of the other timing pins.
+  test('2000 Bearer words then a long digit-free run, and one Bearer then a 1 MB digit-free run, each finish in under 1 second', { timeoutMs: 15000 }, () => {
+    const timed = (text: string) => { const start = performance.now(); redact(text); return performance.now() - start }
+    expect(timed('Bearer '.repeat(2000) + 'a'.repeat(100000))).toBeLessThan(1000)
+    expect(timed('Bearer ' + 'a'.repeat(1048576))).toBeLessThan(1000)
+    expect(timed('Bearer' + ' '.repeat(1048576) + 'x')).toBeLessThan(1000)
+  })
+})
 describe('token rule order', () => {
   // The rules live in rules/ but run in the order patterns.ts lists them, and the first match wins.
   // This pins each rule by kind, pattern source and flags, so moving a rule between category files, reordering
@@ -1808,7 +1876,7 @@ describe('token rule order', () => {
       id('aws-secret-key', /\b(?:aws_?secret_?(?:access_?)?key|secret_?access_?key)["']?\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi),
       id('aws-secret-key', /"SecretAccessKey"\s*:\s*"([A-Za-z0-9/+=]{40})"/g),
       id('aws-session-token', /"SessionToken"\s*:\s*"([A-Za-z0-9/+=]{100,})"/g),
-      id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{30,255})/g),
+      id('github-token', /\b(gh[pousr]_[A-Za-z0-9]{20,255})/g),
       id('github-token', /\b(github_pat_[A-Za-z0-9_]{20,255})/g),
       id('gitlab-pat', /glpat-[0-9A-Za-z_-]{20,}(?:\.[0-9a-z]{9}(?![0-9A-Za-z]))?/gi),
       id('gitlab-oauth-app-secret', /gloas-[0-9A-Za-z_-]{20,}/gi),
@@ -1841,11 +1909,12 @@ describe('token rule order', () => {
       id('npm-token', /\b(npm_[A-Za-z0-9]{36})\b/g),
       id('docker-pat', /\b(dckr_(?:pat|oat)_[A-Za-z0-9_-]{20,})/g),
       id('pypi-token', /\b(pypi-AgE[A-Za-z0-9_-]{50,})/g),
-      id('huggingface-token', /\b(hf_[A-Za-z0-9]{34,})\b/g),
+      id('huggingface-token', /\b(hf_[A-Za-z0-9]{30,})/g),
       id('sendgrid-key', /\b(SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g),
       id('npmrc-auth-token', /(:_authToken[ \t]*=[ \t]*["']?)(?![$\[])([^\s'"#;]{16,})/g),
       id('xml-password', /<(password|passphrase)>(?![$\[{])([^<\s]{6,})<\/\1>/gi),
       id('bearer-token', /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g),
+      id('bearer-token', /Bearer\s+((?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,})/gi),
     ])
   })
   test('a PEM private key whose body holds an AWS access key is one private-key hit', () => {
