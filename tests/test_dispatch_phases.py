@@ -1446,7 +1446,7 @@ def test_a_missing_flag_timestamp_keeps_todays_behaviour_and_logs_nothing(
 
 
 def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
-    env_isolation: dict,
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """C1b gap 3: the resume fired on a TEMPLATE handoff; a real summary written later by the
     detached retry lane is named by exactly one drift line, with its absolute path."""
@@ -1457,6 +1457,7 @@ def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
 
     _arm_clear_flag(state, "continue TRDD-Z582IKIR")
     sd = state.state_dir()
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
     _arm_summary_hold(sd, expires_in_s=900, key="k0k0k0k0", captured_ago_s=6)
     now = int(time.time())
     handoff_files.write(
@@ -1471,7 +1472,7 @@ def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
     assert "fuller summary" not in _run_main(dispatch), "announced once only"
 
 
-def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict) -> None:
+def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """C1c: the once-only stamp is per key, so two cleared sessions of one project each get their
     own note (a project-wide stamp let the first session's note swallow the second's)."""
     import handoff_files
@@ -1480,6 +1481,8 @@ def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict
     import state
 
     sd = state.state_dir()
+    _set_successor(monkeypatch, sd, "k1k1k1k1", _SUCC)
+    _set_successor(monkeypatch, sd, "k2k2k2k2", _SUCC)
     now = int(time.time())
     for n, key in enumerate(("k1k1k1k1", "k2k2k2k2")):
         _arm_clear_flag(state, "continue TRDD-Z582IKIR")
@@ -1498,7 +1501,7 @@ def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict
     assert "fuller summary" not in _run_main(dispatch), "each announced once only"
 
 
-def test_a_late_summary_reaches_the_session_as_a_resume_cue_not_beside_quiet(env_isolation: dict) -> None:
+def test_a_late_summary_reaches_the_session_as_a_resume_cue_not_beside_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """Issue #356: the fuller-summary note is a [janitor-resume] decision, so the fire is not quiet."""
     import handoff_files
 
@@ -1507,6 +1510,7 @@ def test_a_late_summary_reaches_the_session_as_a_resume_cue_not_beside_quiet(env
 
     _arm_clear_flag(state, "continue TRDD-Z582IKIR")
     sd = state.state_dir()
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
     _arm_summary_hold(sd, expires_in_s=900, key="k0k0k0k0", captured_ago_s=6)
     now = int(time.time())
     handoff_files.write(sd, "k0k0k0k0", f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template", now=now)
@@ -1518,7 +1522,7 @@ def test_a_late_summary_reaches_the_session_as_a_resume_cue_not_beside_quiet(env
     assert "[janitor-quiet]" not in out, out
 
 
-def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolation: dict) -> None:
+def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """Issue #356: one fire never carries two [janitor-resume] tokens; the late note stays armed and
     fires on the next beat."""
     import handoff_files
@@ -1528,6 +1532,7 @@ def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolati
 
     state.init_state()
     sd = state.state_dir()
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
     real = handoff_files.write(sd, "k0k0k0k0", "synthetic real summary", now=int(time.time()))
     state.atomic_write(dispatch._late_summary_stamp(sd, "k0k0k0k0"), "\n")
     _make_idle_and_stale(state)
@@ -1539,6 +1544,164 @@ def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolati
     later = _capture_stdout(dispatch._phase_late_summary_drift)
     assert later.splitlines()[0] == "[janitor-resume]", later
     assert str(real.resolve()) in later, later
+
+
+# TRDD-W6DZPXLG box 1: the late-summary cue goes to the cleared session's SUCCESSOR only. The
+# post-clear hook records `clear-successor-<old key>.txt` (the full new session id); the phase
+# compares it with the firing session's own CLAUDE_CODE_SESSION_ID.
+_SUCC = "fedcbafe-abcd-4ef0-8abc-abcdefabcdef"
+_OTHER = "0ther000-abcd-4ef0-8abc-abcdefabcdee"
+
+
+def _set_successor(monkeypatch: pytest.MonkeyPatch, sd: Path, key: str, successor: str) -> None:
+    """Write the record the post-clear hook writes for the clear of `key`, and make `successor`
+    the session that fires (CLAUDE_CODE_SESSION_ID)."""
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / f"clear-successor-{key}.txt").write_text(f"{successor}\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", successor)
+
+
+def _late_summary_pending(dispatch, state, key: str) -> tuple[Path, Path, Path, str]:
+    """A stamp naming an OLDER real handoff of `key` plus a NEWER real one: the cue is due.
+    Returns (state dir, stamp, newer handoff, the stamp text)."""
+    import handoff_files
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    older = handoff_files.write(sd, key, "synthetic older summary", now=now)
+    stamp = dispatch._late_summary_stamp(sd, key)
+    state.atomic_write(stamp, f"{older.resolve()}\n")
+    real = handoff_files.write(sd, key, "synthetic newer real summary", now=now + 5)
+    return sd, stamp, real, stamp.read_text(encoding="utf-8")
+
+
+def test_the_late_summary_cue_fires_in_the_cleared_sessions_successor(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The session recorded as the clear's successor gets the cue, and the stamp is rewritten."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, stamp, real, _before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
+    out = _capture_stdout(dispatch._phase_late_summary_drift)
+    assert out.splitlines()[0] == "[janitor-resume]", out
+    assert f"a fuller summary of the cleared session is at {real.resolve()}" in out, out
+    assert stamp.read_text(encoding="utf-8").strip() == str(real.resolve())
+
+
+def test_a_newer_handoff_of_the_same_cleared_key_still_reaches_the_successor(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After one delivery, a second newer real handoff for the same key reaches the successor too."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd, _stamp, first, _before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
+    assert f"is at {first.resolve()}" in _capture_stdout(dispatch._phase_late_summary_drift)
+    second = handoff_files.write(sd, "k0k0k0k0", "synthetic still newer summary", now=int(time.time()) + 60)
+    setattr(dispatch, "_decision_fired", False)
+    out = _capture_stdout(dispatch._phase_late_summary_drift)
+    assert f"is at {second.resolve()}" in out, out
+
+
+def test_the_late_summary_cue_is_held_for_the_successor_when_another_session_fires(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A different session gets nothing and leaves the stamp armed; the successor then gets it once."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, stamp, real, before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _OTHER)
+    assert _capture_stdout(dispatch._phase_late_summary_drift) == ""
+    assert stamp.read_text(encoding="utf-8") == before, "the stamp must stay armed"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _SUCC)
+    out = _capture_stdout(dispatch._phase_late_summary_drift)
+    assert out.count(f"is at {real.resolve()}") == 1, out
+
+
+def test_no_late_summary_cue_without_a_successor_record(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clear that left no successor record names nobody: neither session gets the cue."""
+    dispatch = _import_dispatch()
+    import state
+
+    _sd, stamp, _real, before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    for session in (_SUCC, _OTHER):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session)
+        assert _capture_stdout(dispatch._phase_late_summary_drift) == ""
+    assert stamp.read_text(encoding="utf-8") == before, "the stamp must stay armed"
+
+
+def test_no_late_summary_cue_when_the_firing_session_is_unknown(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With CLAUDE_CODE_SESSION_ID unset the firer cannot be matched to the successor: no cue."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, stamp, _real, before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    _set_successor(monkeypatch, sd, "k0k0k0k0", _SUCC)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    assert _capture_stdout(dispatch._phase_late_summary_drift) == ""
+    assert stamp.read_text(encoding="utf-8") == before, "the stamp must stay armed"
+
+
+def test_a_corrupt_successor_record_holds_the_cue_without_crashing(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successor record with undecodable bytes reads as unknown: no crash, no cue, stamp armed."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, stamp, _real, before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    (sd / "clear-successor-k0k0k0k0.txt").write_bytes(b"\xff\xfe\x00bad")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _SUCC)
+    assert _capture_stdout(dispatch._phase_late_summary_drift) == ""
+    assert stamp.read_text(encoding="utf-8") == before, "the stamp must stay armed"
+
+
+def test_a_held_late_summary_cue_logs_its_reason_once_across_fires(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same hold reason seen on two fires is logged once. Under test is the FILE-based dedupe: the
+    second `_import_dispatch()` is a fresh module object standing in for a fresh process."""
+    dispatch = _import_dispatch()
+    import state
+
+    _late_summary_pending(dispatch, state, "k0k0k0k0")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _SUCC)
+    _capture_stdout(dispatch._phase_late_summary_drift)
+    second_fire = _import_dispatch()
+    _capture_stdout(second_fire._phase_late_summary_drift)
+    log = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    held = [ln for ln in log.splitlines() if "late-summary cue held (cleared session k0k0k0k0)" in ln]
+    assert len(held) == 1, held
+    assert "no successor was recorded" in held[0], held[0]
+    assert _SUCC not in log, "the log must not carry a session id"
+
+
+def test_a_missing_handoff_module_is_logged_once_not_silently_skipped(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If external_handoff_clear cannot be imported the phase logs one line per day and returns."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, _stamp, _real, _before = _late_summary_pending(dispatch, state, "k0k0k0k0")
+    monkeypatch.setitem(sys.modules, "external_handoff_clear", None)
+    for _ in range(2):
+        assert _capture_stdout(dispatch._phase_late_summary_drift) == ""
+    log = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert log.count("late-summary phase skipped: external_handoff_clear is missing") == 1, log
+
+
+def test_a_session_gets_only_the_late_summary_of_the_clear_it_succeeded(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two cleared keys with two different successors: S1 gets key 1's line only."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd, stamp1, real1, _b1 = _late_summary_pending(dispatch, state, "k1k1k1k1")
+    _sd, stamp2, real2, before2 = _late_summary_pending(dispatch, state, "k2k2k2k2")
+    s1, s2 = _SUCC, "fedcbafe-abcd-4ef0-8abc-abcdefabcded"
+    _set_successor(monkeypatch, sd, "k2k2k2k2", s2)
+    _set_successor(monkeypatch, sd, "k1k1k1k1", s1)
+    out = _capture_stdout(dispatch._phase_late_summary_drift)
+    assert f"is at {real1.resolve()}" in out, out
+    assert str(real2.resolve()) not in out, out
+    assert stamp1.read_text(encoding="utf-8").strip() == str(real1.resolve())
+    assert stamp2.read_text(encoding="utf-8") == before2, "the other key stays armed"
 
 
 def test_the_latest_handoff_of_a_key_orders_by_filename_timestamp_not_mtime(

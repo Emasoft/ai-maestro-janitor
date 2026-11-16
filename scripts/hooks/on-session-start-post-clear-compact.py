@@ -348,6 +348,22 @@ def _main() -> int:
     import jev_compaction_lane as jcl  # noqa: PLC0415
 
     key = handoff_files.session_key(transcript_path)
+    # TRDD-W6DZPXLG: persist which session succeeded the cleared one. Reached only AFTER the
+    # staleness check above, so a stale sidecar (an earlier clear on a reused pane) records
+    # nothing. `_phase_late_summary_drift` reads this to cue the successor and nobody else.
+    # Own try/except: a record fault must never cost the post-clear injection.
+    new_session_id = str(data.get("session_id", "") or "").strip()
+    if key and new_session_id:
+        try:
+            import external_handoff_clear as ehc  # noqa: PLC0415
+            ehc.record_clear_successor(sd, key, new_session_id)
+            # Settles on the first live clear whether the id recorded here is the id dispatch will
+            # compare it with (CLAUDE_CODE_SESSION_ID): a mismatch would hold every cue forever.
+            env_sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+            matches = (new_session_id == env_sid) if env_sid else "env unset"
+            state.log_line("jev-post-clear-hook", f"recorded successor of {key}; payload id matches CLAUDE_CODE_SESSION_ID: {matches}")
+        except Exception as exc:  # noqa: BLE001 -- best-effort, never breaks the hook
+            state.log_line("jev-post-clear-hook", f"clear-successor record failed: {exc!r}")
     # Card 5 injection-caps review (TRDD-RAEGS1D5, chain-hardening §7): captured BEFORE this
     # hook's own `handoff_files.write` calls below -- see `_recent_model_handoff`'s docstring for
     # why the ordering is load-bearing.

@@ -2421,6 +2421,19 @@ def _stamp_late_summary(sd: Path, clear_ts: int | None = None) -> None:
     state.atomic_write(_late_summary_stamp(sd, key), f"{named}\n")
 
 
+def _log_late_summary_once(sd: Path, dedupe_key: str, message: str) -> None:
+    """Log `message` to dispatch.log once per `dedupe_key` per day (why a late-summary cue is held).
+
+    WHY persisted: every heartbeat fire is a NEW dispatch.py process, so an in-memory "already
+    logged" set would repeat the line on every fire. Reuses the drift seen-file (`dedupe.emit_once`,
+    exact-key match) with the local day in the key, as `_dedupe_drift_line` does. Callers pass the
+    cleared-session key only (at most 8 chars of its id), never a full session id (TRDD-W6DZPXLG).
+    """
+    seen = sd / _DRIFT_SEEN_FILE_NAME
+    if dedupe.emit_once(seen, f"late-summary-held:{_local_day()}:{dedupe_key}", message) is not None:
+        state.log_line("dispatch", message)
+
+
 def _phase_late_summary_drift() -> None:
     """One `[janitor-resume]` cue per fire when a real summary lands AFTER a resume that fired on
     a template handoff (issue #356, TRDD-XJI19HO7).
@@ -2443,6 +2456,12 @@ def _phase_late_summary_drift() -> None:
     sd = state.state_dir()
     lines: list[str] = []
     pending: list[tuple[Path, str]] = []
+    try:
+        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
+    except ImportError:
+        _log_late_summary_once(sd, "import", "late-summary phase skipped: external_handoff_clear is missing")
+        return
+    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
     for stamp in sorted(sd.glob(f"{_LATE_SUMMARY_STAMP_PREFIX}*.txt")):
         key = stamp.stem[len(_LATE_SUMMARY_STAMP_PREFIX) :]
         real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
@@ -2450,6 +2469,27 @@ def _phase_late_summary_drift() -> None:
             continue
         path = str(_latest_handoff(real).resolve())
         if stamp.read_text(encoding="utf-8").strip() == path:
+            continue
+        # TRDD-W6DZPXLG: the cue goes to the cleared session's SUCCESSOR only. It used to go to
+        # whichever session fired next, so a sibling session in the same project was told to read
+        # another session's summary and "reconcile its plan" with it (the TRDD-4P4Y2KBR failure
+        # shape), AND rewriting the stamp below consumed the cue so the right session never got it.
+        # Unknown is DROPPED, not guessed: no successor record (a clear with no sidecar, a
+        # pane-less terminal) or no firing session id means nobody can be named. The stamp is
+        # left untouched, so the cue stays armed for the right session. Known loss: a successor
+        # that is itself cleared before the summary lands never receives it (the later session
+        # gets its own handoff instead).
+        successor = _ehc.clear_successor(sd, key)
+        if not me:
+            skip = "the firing session is unknown"
+        elif not successor:
+            skip = "no successor was recorded for this clear"
+        elif successor != me:
+            skip = "the cleared session's successor is another session"
+        else:
+            skip = ""
+        if skip:
+            _log_late_summary_once(sd, f"{key}:{skip}", f"late-summary cue held (cleared session {key}): {skip}")
             continue
         pending.append((stamp, path))
         lines.append(

@@ -244,6 +244,31 @@ def cleared_session_key(sd: Path, clear_ts: int) -> str:
     return next(iter(keys)) if len(keys) == 1 else ""
 
 
+def _clear_successor_path(sd: Path, old_key: str) -> Path:
+    return sd / f"clear-successor-{old_key}.txt"
+
+
+def record_clear_successor(sd: Path, old_key: str, new_session_id: str) -> None:
+    """Record that `new_session_id` is the session the clear of `old_key` produced.
+
+    WHY (TRDD-W6DZPXLG): the late-summary cue (`dispatch._phase_late_summary_drift`) used to go
+    to whichever session fired next, so a sibling session in the same project was told to read
+    another session's summary. The post-clear hook is the only place holding BOTH ids (the
+    cleared transcript from the pane sidecar, the new id from the SessionStart payload); nothing
+    else persisted the pair. One file per old key, the full new id as its only content.
+    """
+    state.atomic_write(_clear_successor_path(sd, old_key), new_session_id)
+
+
+def clear_successor(sd: Path, old_key: str) -> str:
+    """The full session id recorded as the successor of the clear of `old_key`, or "" when no
+    record exists or it is unreadable (the caller must read "" as "unknown", never as a match)."""
+    try:
+        return _clear_successor_path(sd, old_key).read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):  # ValueError: undecodable bytes in a corrupt record
+        return ""
+
+
 def pending_summary_key(sd: Path, now: int, clear_ts: int | None = None) -> str:
     """The key for the handoff of the session that was just cleared, for this state dir.
 

@@ -1,10 +1,10 @@
 ---
 trdd-id: W6DZPXLG
 title: The late-summary resume cue reaches whichever session fires first, not the cleared session
-column: backburner
+column: dev
 status: tasked
 created: 2026-11-16T15:33:59+0100
-updated: 2026-11-16T15:33:59+0100
+updated: 2026-11-16T16:43:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,4 @@ approval-datetime: 2026-11-16T15:33:59+0100
 ## Approval log
 
 - 2026-11-16T15:33:59+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T16:43:12+0100 — column → dev by main-agent@ai-maestro-janitor. box 1 and box 2 in progress
