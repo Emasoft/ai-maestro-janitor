@@ -1,10 +1,10 @@
 ---
 trdd-id: ADFIO49Q
 title: The publish smoke install leaves the new version in the shared plugin cache, so the janitor update check counts it as installed
-column: todo
+column: testing
 status: tasked
 created: 2026-11-16T06:46:55+0100
-updated: 2026-11-16T07:07:52+0100
+updated: 2026-11-16T07:22:23+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-16T06:46:55+0100
+implementation-commits: [30112e57]
 ---
 
 # The publish smoke install leaves the new version in the shared plugin cache, so the janitor update check counts it as installed
@@ -26,6 +27,7 @@ On the host that runs scripts/publish.py, stage_install_smoke (scripts/publish.p
 ## Approval log
 
 - 2026-11-16T06:46:55+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16 (main agent) code landed in 30112e57 (fix) and 9b43cec5 (card and test docstring); moved to testing until the next release is installed and the detector and daemon are observed comparing against the user-scope record.
 
 ## Design
 
