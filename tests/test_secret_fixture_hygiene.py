@@ -56,6 +56,11 @@ _MARKERS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"xox[bp]-[0-9]{8,}"),
     re.compile(r"AIza[A-Za-z0-9_-]{30,}"),
+    # Anthropic API/admin keys and OpenAI project keys (TRDD-KT0G5A43). sk-ant-oat01- (OAuth
+    # access tokens) is NOT covered yet: its one contiguous fixture is in
+    # tests/test_oauth_rotator.py, frozen by the owner on 2026-11-05.
+    re.compile(r"sk-ant-(?:api|admin)\d\d-[A-Za-z0-9_-]{24,}"),
+    re.compile(r"sk-proj-[A-Za-z0-9_-]{24,}"),
 ]
 
 # Connection strings with embedded credentials — scheme://user:password@host —

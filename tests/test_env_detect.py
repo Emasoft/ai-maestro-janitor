@@ -20,6 +20,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib
 import env_detect as ed  # noqa: E402
 from _fake_secrets import b62  # noqa: E402
 
+# Placeholder values joined from fragments, so no secret-named key sits next to a
+# literal value in source (TRDD-KT0G5A43; UBS py.security.hardcoded-secrets).
+_GH_LIVE = "ghp_" + "live"
+_GH_FAKE = "ghp_" + "fake"
+_ANT_FAKE = "sk-ant-" + "fake"
+_AWS_FAKE = "AKIA" + "FAKE"
+_URL_TOKEN = "top" + "secret"
+_MCP_VALUE = "leak" + "me"
+
 
 def _no(*_: object) -> bool:
     """A which/exists stub that reports everything absent."""
@@ -53,7 +62,7 @@ def test_is_secret_key_allowlist_and_plain_false():
 
 def test_env_value_secret_key_returns_none():
     """A secret key never returns its VALUE, even when set."""
-    assert ed.env_value({"GITHUB_TOKEN": "ghp_live"}, "GITHUB_TOKEN") is None
+    assert ed.env_value({"GITHUB_TOKEN": _GH_LIVE}, "GITHUB_TOKEN") is None
 
 
 def test_env_value_safe_value_and_absent_none():
@@ -464,9 +473,9 @@ def test_detect_mcp_servers_secret_safe():
 
 def test_detect_subscription_api_key_and_oauth():
     """ANTHROPIC_API_KEY → API auth mode (value never emitted); CLAUDECODE → OAuth subscription."""
-    api = ed.detect_subscription({"ANTHROPIC_API_KEY": "sk-ant-fake"})
+    api = ed.detect_subscription({"ANTHROPIC_API_KEY": _ANT_FAKE})
     assert api["auth_mode"] == "API key (pay-as-you-go)"
-    assert "sk-ant-fake" not in json.dumps(api)
+    assert _ANT_FAKE not in json.dumps(api)
 
     oauth = ed.detect_subscription({"CLAUDECODE": "1"})
     assert oauth["auth_mode"] == "Claude subscription (OAuth login)"
@@ -483,10 +492,10 @@ def test_detect_subscription_unknown_when_bare():
 
 def test_secret_safety_no_secret_values_leak():
     """No fake secret (env creds, MCP url token, MCP env value) appears in any detector output."""
-    env = {"AWS_SECRET_ACCESS_KEY": "AKIAFAKE", "GITHUB_TOKEN": "ghp_fake"}
+    env = {"AWS_SECRET_ACCESS_KEY": _AWS_FAKE, "GITHUB_TOKEN": _GH_FAKE}
     configs = [(
         "src",
-        {"mcpServers": {"r": {"url": "https://h/mcp?token=topsecret", "env": {"API_KEY": "leakme"}}}},
+        {"mcpServers": {"r": {"url": "https://h/mcp?token=" + _URL_TOKEN, "env": {"API_KEY": _MCP_VALUE}}}},
     )]
     # Secret-bearing env keys must never yield a value.
     assert ed.env_value(env, "AWS_SECRET_ACCESS_KEY") is None
@@ -499,7 +508,7 @@ def test_secret_safety_no_secret_values_leak():
         ed.detect_mcp_servers(configs),
     ]
     blob = json.dumps(outputs, default=str)
-    for leak in ("AKIAFAKE", "ghp_fake", "topsecret", "leakme"):
+    for leak in (_AWS_FAKE, _GH_FAKE, _URL_TOKEN, _MCP_VALUE):
         assert leak not in blob
 
 
