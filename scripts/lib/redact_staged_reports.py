@@ -84,8 +84,9 @@ def main() -> int:
                 + ". Stage or stash those changes, then retry."
             )
 
+        # No --project-root: sanitize-reports no longer masks project-root paths, only the home prefix (TRDD-L1I0FP5T).
         r = subprocess.run(
-            ["sanitize-reports", "--project-root", toplevel, *(f"{toplevel}/{f}" for f in files)],
+            ["sanitize-reports", *(f"{toplevel}/{f}" for f in files)],
             capture_output=True, text=True,
         )
         if r.returncode != 0:
