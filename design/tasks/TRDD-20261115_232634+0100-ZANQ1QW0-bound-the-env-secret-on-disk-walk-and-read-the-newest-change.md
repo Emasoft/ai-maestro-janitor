@@ -4,7 +4,7 @@ title: Bound the env-secret-on-disk walk and read the newest change first, then 
 column: dev
 status: tasked
 created: 2026-11-15T23:26:34+0100
-updated: 2026-11-16T11:09:37+0100
+updated: 2026-11-16T11:27:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ approval-datetime: 2026-11-15T23:26:34+0100
 
 Follow-up of TRDD-G14LKPEC (issue 354). env-secret-on-disk is on demand only; tests/test_env_secret_on_disk_registration.py pins it off the roster. Fix before scheduling it. (1) Bound the walk: the time and byte budget must also cover listing and stat (today started = clock() runs after the walk in env_secrets.sweep), for example stop the walk at the budget and resume from a saved position, or skip folders unchanged since the last pass. (2) Read new changes before the backlog, so a fresh leak is found on the next pass. Then add back the roster row, the cadence option, the doctor and fleet-status entries, the quiet-heartbeat security entry and the two README rows (patch kept at reports_dev/fanout-apply/scratch/inc2/step10-schedule.patch, gitignored), and flip the registration test. Measured numbers are in the TRDD-G14LKPEC Approval log.
 - 2026-11-16 increment 2 (listing bound, design item 3) landed in 9a1cea8c: the clock starts before the listing, the listing has a 30 s share (LISTING_BUDGET_S), and a cut listing moves no state and prints a coverage line once a day. Two real passes after it, at load 13 to 14: 35.2 s and 40.9 s in total, no cut, 0 hits, 455,681 files left for later passes (the backlog grew by a 199,366-file scratch copy under reports_dev/zanq1qw0/mutation that the owner must decide on before the schedule done-when measurement). Not released yet. NEXT ACTION: increment 3 (design items 4 and 5, spelled out in the Design section), then the schedule.
+- 2026-11-16 increment 3 (newest first, design items 4 and 5) landed in c0e14873: a covered range [lo, hi] replaces the cursor, the fresh tier (keys above hi, ascending) has half the pass budget, the backlog below lo is read newest first, each tier reads at least one file per pass, and hi never moves above the live edge. Two real passes after it, at load 6 to 7: 48.5 s and 56.2 s in total, 0 hits; the first pass read the newest files of this session first, and its 3 dump-shape flags were copies of the test value OTHER_API_KEY in worker output; 463,026 files left (the 199,366-file scratch copy under reports_dev/zanq1qw0/mutation still counts). Not released yet. NEXT ACTION: TRDD-XNZFKX0L, then the schedule (patch reports_dev/fanout-apply/scratch/inc2/step10-schedule.patch), whose done-when measurement waits on the owner decision about that scratch copy.
 
 ## Approval log
 
