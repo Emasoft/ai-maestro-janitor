@@ -4,7 +4,7 @@ title: secret-shield recognises every format and secret-bearing context in its c
 column: todo
 status: tasked
 created: 2026-11-04T00:34:08+0100
-updated: 2026-11-16T02:56:18+0100
+updated: 2026-11-16T05:34:51+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -230,3 +230,7 @@ TRDD-M1218EMH, after the 2026-11-03 pm2 environment dump.
 - 2026-11-05 — Review of eb370f5e (GitLab session cookie, round 3): linear, but still leaking. The value key and the value-first name key accept only a colon, so Python keyword arguments (create_cookie(name='_gitlab_session', value='V'), http.cookiejar.Cookie) and Ruby hash rockets ({ :value => 'V' }) leak. Also leaking: a compact Rails hash with no spaces (the plain = branch hides the wrong run); a 16+ character key right after the name in compact JSON (the positional branch hides the key); a key that ends in value, such as defaultvalue, read as the value key; the value nested under the name ("_gitlab_session": {"value": "V"}, and the YAML form); a Ruby symbol in a positional call; a tab before =; a Go raw-string value in backticks. Undisclosed over-hide: the 400-character field-list span crosses line breaks in brace-less text, and the positional branch hides any quoted second argument of 16+ characters after a quoted name. Not run: the 84-file FP corpus on eb370f5e. Also on this card: the earlier claim that the superlinear part of the GitLab no-separator timing most likely predates those rules is unmeasured (the pre-f79a81b3 timing was not run).
 - 2026-11-05 — Additions to the eb370f5e review note (review of 39a534db): "linear" there means no superlinear path was found by analysis; two span shapes were not timed (a backslash run after `value` inside the span, and `value` repeated inside it). Also from that review: the value-first rule hides `value: '<16+ characters>'` when `name: '_gitlab_session'` follows within 400 characters, across lines (undisclosed); the KNOWN-MISSES "400 characters" is measured from after the comma to the start of `value`, and the entry should say so; there is no over-400 test in the value-first direction; the long-key-in-compact-JSON leak was rated low and not seen in real exports.
 - 2026-11-16: a vendored copy of patterns.ts, rules/, NOTICE, LICENSE, KNOWN-MISSES.md and the tests except shield.test.ts goes to report-sanitizer core/, pinned by core/UPSTREAM.json to a janitor commit. This tree stays upstream for now; report-sanitizer's scripts/sync_core.py --check reports when this tree moves ahead. Consumption: card NRF7OJ5H.
+
+## Backlog
+
+2026-11-16 (from TRDD-NRF7OJ5H, commit 9dcaa0a3): shapes the new shield rules still miss, each needing a measured admission reason before it can be a KNOWN-MISSES entry or a rule: a Maven <password>/<passphrase> value with spaces or under 6 characters; npmrc `_auth=` lines (a base64 authentication string, per the npm docs page npmrc, Auth related configuration); npmrc `_password=` lines.
