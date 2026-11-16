@@ -4,7 +4,7 @@ title: Hold a janitor clear while the handoff is being composed and trace the du
 column: testing
 status: tasked
 created: 2026-11-14T22:27:19+0100
-updated: 2026-11-16T09:02:36+0100
+updated: 2026-11-16T09:42:56+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ implementation-commits: [ef433a58]
 - Status: Part 1 landed in ef433a58 (column testing); Part 2 not started. Parent work: TRDD-V8GWJVFN (F1 landed, which already prevents the 356 sequence on its own); GitHub issue 356. Related: TRDD-AIT2KNBU (F2+F3).
 - 2026-11-16 Part 1 landed in ef433a58: a per-session stamp handoff-compose-inflight-<key>.json held by compose_agent_handoff.py; handoff_files.compose_inflight(state_dir, key); the Stop-hook _maybe_clear defers below the ceiling, and the chain's _agents_and_interrupt_ok returns not-ok, which _still_wanted (clear_trigger.py:1001-1003) turns into a cancel; the next Stop's _maybe_clear re-evaluates (tested). Both sides key through session_key() (composer from CLAUDE_CODE_SESSION_ID, clear side from <session-id>.jsonl); the state dir is the project root from CLAUDE_PROJECT_DIR on all three sides (composer via the skill's --project-root, hook at on-stop-token-meter.py:217). Known limits: at or above the clear ceiling a clear still fires; two composes in one session share one stamp. Test deviation: tests/test_compose_inflight.py stubs only clear_trigger._spawn_chain, the pane-typing point the sibling tests also stub. Live check owed: auto clear is off on this host, so no real clear has exercised the hold. Part 2 stays: reproduce once with llm-ext and file on Emasoft/llm-externalizer.
 - 2026-11-16 key check: this session's CLAUDE_CODE_SESSION_ID key equals its transcript stem key (5d861615), also after a compaction. Chain side: the Stop-hook caller passes transcript_path (on-stop-token-meter.py:201) and spawn_shrink_chain sets JANITOR_TRANSCRIPT_PATH for the chain (clear_trigger.py:1285); the dispatch, reload and reload-skills callers were judged from their comments only (inferred). No test covers the chain-side key.
+- 2026-11-16 — Part 1 (commit ef433a58) is first released in v3.9.7 (git tag --contains ef433a58 lists v3.9.7 and ai-maestro-janitor--v3.9.7, the two tags of the same release, and no earlier tag). Still owed: the live check (auto clear is off on this host) and Part 2.
 
 ## Part 1 - hold the clear while /janitor-write-handoff composes
 
