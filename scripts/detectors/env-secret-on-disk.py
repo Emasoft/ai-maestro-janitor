@@ -16,11 +16,12 @@ the human's decision.
 
 Limits, stated in every finding: an overwritten file can survive in snapshots and backups; a value that was
 already printed into a conversation has already been sent; a secret that was transformed (compressed, split,
-encrypted) is not found; the sweep reads files changed since the last pass, a few at a time, so a file moved in
-with an old modification time is not seen until the cursor is reset (the timestamp batches of .trashcan are the
-exception: env_secrets.sweep_trash reads them by batch name from a saved per-batch position, so a file moved into
-the trash is seen; a file moved by hand into a batch that was already read is not, nor one moved into another
-.trashcan child such as migrate-memory-scope/).
+encrypted) is not found; a listing of the agent folders over env_secrets.LISTING_BUDGET_S is cut (no agent-folder
+file is read, the cursor stays, a coverage line is printed once a day); the sweep reads files changed since the
+last pass, a few at a time, so a file moved in with an old modification time is not seen until the cursor is
+reset (the timestamp batches of .trashcan are the exception: env_secrets.sweep_trash reads them by batch name
+from a saved per-batch position, so a file moved into the trash is seen; a file moved by hand into a batch that
+was already read is not, nor one moved into another .trashcan child such as migrate-memory-scope/).
 
 It does NOT use state.is_self_scan_target(): that guard exists because pattern scanners flag the janitor's own
 fixtures, and an exact-value matcher has no fixtures to match. Skipping the janitor's own repo would blind the
@@ -176,7 +177,10 @@ def main() -> int:
 
     holds: list[env_secrets.Key] = list(report.failed)
     trash_holds: dict[str, list[env_secrets.TrashPos]] = {batch: list(failed) for batch, failed in trash.failed_by_batch.items()}  # held per batch, not by (mtime, path)
-    retries = {key[1]: saved["retries"].get(key[1], 0) + 1 for key in report.failed}
+    cut = report.listing_cut_after_s is not None  # an incomplete listing: a file not listed yet may hold any mtime above the cursor
+    # A cut pass read nothing, so it proves nothing about the files that failed before: the saved retry counts are kept, or a
+    # persistently cut listing would reset every count and a failing file would never reach MAX_FAIL_RETRIES.
+    retries = dict(saved["retries"]) if cut else {key[1]: saved["retries"].get(key[1], 0) + 1 for key in report.failed}
     for batch, failed in trash.failed_by_batch.items():
         for position in failed:
             failed_path = env_secrets.trash_path(trash_root, batch, position)
@@ -303,6 +307,16 @@ def main() -> int:
         )
         if out is not None:
             print(out)
+    if report.listing_cut_after_s is not None:
+        # Keyed on the date, not on the cut: a lasting cut means the cursor never moves, so the owner must hear of it again, at
+        # least once a day, while a same-day repeat stays silent (emit_once prints a key only the first time it is seen).
+        out = dedupe.emit_once(
+            seen, f"listing-cut:{time.strftime('%Y-%m-%d')}",
+            f"[{_NAME}] the listing of the agent folders took over {int(report.listing_cut_after_s)} s and was cut: no agent-folder file was read this pass and the cursor did not move "
+            "(TRDD-ZANQ1QW0). A tree this large needs a bigger LISTING_BUDGET_S or fewer files under the agent folders.",
+        )
+        if out is not None:
+            print(out)
     uncovered = sorted(report.unreadable) + sorted(report.too_big) + sorted(report.shape_not_checked) + sorted(report.not_regular)
     if uncovered:
         coverage = (
@@ -316,7 +330,7 @@ def main() -> int:
             print(out)
         state.log_line(_NAME, "not fully covered: " + "; ".join(uncovered[:20]))
 
-    new_cursor = since if hold_for_git else env_secrets.advance_cursor(since, report.processed, holds)
+    new_cursor = since if hold_for_git or cut else env_secrets.advance_cursor(since, report.processed, holds)
     # The trash tier moves even while git holds the main cursor: hold_for_git means `git ls-files` failed, which only leaves
     # the UNTRACKED roots unread, and .trashcan is gitignored, so no trash file ever depended on that listing.
     new_positions = env_secrets.advance_trash(trash_positions, trash.processed_by_batch, trash_holds)
@@ -335,7 +349,8 @@ def main() -> int:
         _NAME,
         f"pass: {report.scanned} file(s) read ({report.bytes_read // 1024} KiB), {report.left_for_next_pass} left for the next pass, "
         f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped; "
-        f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done",
+        f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done"
+        + (f"; listing cut after {int(report.listing_cut_after_s)} s, cursor kept" if report.listing_cut_after_s is not None else ""),
     )
     state.rotate_log_if_big(_NAME)
     return 0

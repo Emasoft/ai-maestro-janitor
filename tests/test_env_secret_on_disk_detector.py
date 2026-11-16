@@ -13,6 +13,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -216,3 +217,43 @@ def test_a_file_named_after_the_value_is_reported_by_folder_and_the_value_is_sto
     assert value not in out.stdout and value not in out.stderr
     assert "CRED-002" in out.stdout and f"value of {_NAME}" in out.stdout and "reports_dev" in out.stdout
     assert _files_holding(tmp_path, value, set()) == []
+
+
+def test_a_cut_listing_keeps_the_cursor_retries_and_findings_and_says_so_once_a_day(tmp_path: Path) -> None:
+    """With the listing forced over its budget the pass reads nothing, keeps cursor, retries and findings, and says so once."""
+    runner = (
+        "import runpy, sys\n"
+        "sys.path.insert(0, sys.argv[2])\n"
+        "import env_secrets\n"
+        "original = env_secrets.sweep\n"
+        "env_secrets.sweep = lambda *a, **k: original(*a, **{**k, \"listing_budget_s\": -1.0})\n"
+        "detector = sys.argv[1]\n"
+        "sys.argv = [detector, \"--one-shot\"]\n"
+        "runpy.run_path(detector, run_name=\"__main__\")\n"
+    )
+    value = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    planted = project / "reports_dev" / "dump.txt"
+    planted.write_text(f"leak {value}\n")
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "env-secret-on-disk.cursor.json").write_text(json.dumps({
+        "cursor": [5.0, "x"], "retries": {"/nonexistent/held": 2}, "flagged": [str(planted)], "trash": {"positions": {}, "done": []},
+    }))
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env = {
+        "PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), _NAME: value,
+    }
+    argv = [sys.executable, "-c", runner, str(_DETECTOR), str(_DETECTOR.parent.parent / "lib")]
+    day = time.strftime("%Y-%m-%d")  # the detector keys the line on the local date: a pass pair straddling midnight proves nothing
+    first = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.count("the listing of the agent folders took over") == 1 and "URGENT" not in first.stdout
+    state = _cursor(project)
+    assert state["cursor"] == [5.0, "x"] and state["retries"]["/nonexistent/held"] == 2 and str(planted) in state["flagged"]
+    second = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert second.returncode == 0, second.stderr
+    if time.strftime("%Y-%m-%d") == day:
+        assert "the listing of the agent folders took over" not in second.stdout
+    assert _cursor(project)["cursor"] == [5.0, "x"]

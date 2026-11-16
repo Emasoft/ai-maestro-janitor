@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import itertools
 import os
 import secrets
 import subprocess
@@ -265,3 +266,50 @@ def test_a_file_whose_name_holds_the_value_is_reported_by_its_folder_and_never_b
     report = env_secrets.sweep([str(tmp_path)], _matcher("MY_API_TOKEN", value), SALT)
     assert report.secret_named == [(str(tmp_path), "MY_API_TOKEN")]
     assert report.scanned == 1 and value not in repr(report)
+
+
+def _stepping_clock(step: float):
+    """A clock that moves `step` seconds on every call, so a test sets time by counting the sweep's own clock reads."""
+    ticks = itertools.count()
+    return lambda: next(ticks) * step
+
+
+def _three_files_and_a_subfolder(folder: Path) -> None:
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (folder / name).write_text(name)
+    (folder / "sub").mkdir()
+
+
+def test_a_listing_over_its_budget_is_cut_and_reads_nothing(tmp_path: Path) -> None:
+    """A listing that overruns listing_budget_s reports the seconds it ran and reads nothing, so no cursor key exists to advance."""
+    _three_files_and_a_subfolder(tmp_path)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(10.0), listing_budget_s=15.0)
+    assert report.listing_cut_after_s == 20.0  # clock reads: start 0, first folder 10 (inside), second folder 20 (over)
+    assert report.scanned == 0 and report.processed == [] and report.failed == []
+
+
+def test_the_time_budget_includes_the_listing(tmp_path: Path) -> None:
+    """The clock starts before the listing: the listing's own time is spent from time_budget_s, so reads stop after the second file here."""
+    _three_files_and_a_subfolder(tmp_path)
+    # clock reads: start 0, two folders 1 and 2 (listing), then 3 before the second file and 4 before the third.
+    # Started after the listing (the old order) the same clock reads 1 and 2 in the read phase and all three files are read.
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(1.0), time_budget_s=3.5)
+    assert report.listing_cut_after_s is None
+    assert report.scanned == 2 and report.left_for_next_pass == 1
+
+
+def test_a_completed_listing_has_no_cut(tmp_path: Path) -> None:
+    """A listing inside its budget leaves listing_cut_after_s None and the files are read."""
+    _three_files_and_a_subfolder(tmp_path)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT)
+    assert report.listing_cut_after_s is None and report.scanned == 3
+
+
+def test_one_flat_folder_is_cut_inside_the_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The listing clock is read every LISTING_CLOCK_EVERY_FILES files, so a single huge folder is bounded too."""
+    monkeypatch.setattr(env_secrets, "LISTING_CLOCK_EVERY_FILES", 2)
+    for index in range(5):
+        (tmp_path / f"{index}.txt").write_text("x")
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(10.0), listing_budget_s=15.0)
+    assert report.listing_cut_after_s == 20.0  # clock reads: start 0, the folder 10 (inside), the second file 20 (over)
+    assert report.scanned == 0

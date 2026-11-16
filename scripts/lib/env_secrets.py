@@ -3,7 +3,7 @@ have the shape of an environment dump. Nothing in this module returns, prints, l
 a finding carries the variable NAME, the form, the path, the line and a keyed fingerprint.
 
 The needle table lives in memory only. It holds secret values, so a Matcher never shows them in its repr.
-The sweep is bounded (bytes and seconds per pass) and incremental (a modification-time cursor), and counts
+The sweep is bounded (bytes and seconds per pass, the listing included) and incremental (a modification-time cursor), and counts
 everything it did not read: silence is not a pass.
 
 The timestamp batches of .trashcan are the exception to the modification-time cursor: a file moved into the trash
@@ -36,6 +36,12 @@ MAX_SHAPE_BYTES = 8 * 1024 * 1024
 CHUNK_BYTES = 4 * 1024 * 1024
 BYTE_BUDGET = 256 * 1024 * 1024  # per pass; one synthetic measurement (54 MiB/s, 120 needles, no hits): text with long repeated prefixes may be slower, TIME_BUDGET_S stops the pass
 TIME_BUDGET_S = 60.0  # per pass; the detector timeout is 120 s (CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT)
+# Listing and stat of the roots, per pass, counted inside TIME_BUDGET_S. The listing of the non-trash roots of this repo took
+# 8.6 s on 2026-11-16 (28.1 s of walk minus 19.45 s of .trashcan, which is read by name now): 30 s is about 3.5 times that,
+# and it leaves at least half of TIME_BUDGET_S for reads.
+# The clock is checked once per folder and every LISTING_CLOCK_EVERY_FILES files inside a folder, so a huge flat folder is bounded too.
+LISTING_CLOCK_EVERY_FILES = 1024
+LISTING_BUDGET_S = 30.0
 MAX_FAIL_RETRIES = 3  # passes a failing file holds the cursor before the sweep goes on without it
 _ANCHORS = (b"PATH=", b"HOME=", b"SHELL=", b"USER=", b"LOGNAME=", b"TMPDIR=", b"LANG=", b"PWD=", b"TERM=", b"SHLVL=")
 _ASSIGNMENT = re.compile(rb"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,63})=([^\s\x00]{16,})")
@@ -235,6 +241,8 @@ class SweepReport:
     left_for_next_pass: int = 0
     processed: list[Key] = field(default_factory=list)  # keys read this pass, in order
     failed: list[Key] = field(default_factory=list)  # keys that raised OSError
+    # Seconds the listing had run when LISTING_BUDGET_S stopped it; None = the listing completed. A cut pass read nothing.
+    listing_cut_after_s: float | None = None
 
     def absorb_findings(self, other: SweepReport) -> None:
         """Add what `other` found and could not cover, so one report feeds the detector's loops. NOT processed, failed,
@@ -310,11 +318,25 @@ def sweep(
     time_budget_s: float = TIME_BUDGET_S,
     give_up: frozenset[str] = frozenset(),
     clock: Callable[[], float] = time.monotonic,
+    listing_budget_s: float = LISTING_BUDGET_S,
 ) -> SweepReport:
     """One bounded pass, oldest change first. Everything it did NOT read is counted in the report.
-    A root may be a file (the untracked files of a project are passed one by one) or a folder."""
+    A root may be a file (the untracked files of a project are passed one by one) or a folder.
+    The clock starts before the listing, so time_budget_s covers listing and reads; a listing over listing_budget_s
+    is cut (listing_cut_after_s) and nothing is read."""
     report = SweepReport()
     changed: dict[str, tuple[float, int]] = {}
+    started = clock()  # before the listing: the read phase gets only what the listing left of time_budget_s
+    listed = 0
+
+    def listing_cut() -> bool:
+        # An mtime cursor may move only over a COMPLETE listing: a file not yet listed may hold any mtime above the
+        # cursor, so advancing it after a cut listing would skip that file for good. Cut means read nothing.
+        elapsed = clock() - started
+        if elapsed <= listing_budget_s:
+            return False
+        report.listing_cut_after_s = elapsed
+        return True
     for root in roots:
         # os.walk skips a folder it cannot list without a word: onerror counts it, so silence is not a pass.
         walker = (
@@ -323,8 +345,13 @@ def sweep(
             else os.walk(root, onerror=lambda error: _note_unreadable_folder(report, matcher, str(error.filename)))
         )
         for folder, dirs, files in walker:
+            if listing_cut():
+                return report
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
             for name in files:
+                listed += 1
+                if listed % LISTING_CLOCK_EVERY_FILES == 0 and listing_cut():
+                    return report
                 path = os.path.join(folder, name)
                 if matcher is not None and (leaked := matcher.name_in(path)) is not None:  # decided before any stat: every list below holds paths
                     _note_secret_named(report, matcher, path, leaked)
@@ -340,7 +367,6 @@ def sweep(
                 if (info.st_mtime, path) > since:
                     changed[path] = (info.st_mtime, info.st_size)
     ordered = sorted((mtime, path, size) for path, (mtime, size) in changed.items())
-    started = clock()
     for index, (mtime, path, size) in enumerate(ordered):
         if size <= MAX_FILE_BYTES and report.scanned and (report.bytes_read + size > byte_budget or clock() - started > time_budget_s):
             report.left_for_next_pass = len(ordered) - index
