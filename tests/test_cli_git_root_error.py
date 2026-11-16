@@ -86,8 +86,8 @@ def test_ticket_cli_proposals_reports_git_failure_in_one_line(tmp_path: Path, fa
 
 
 @pytest.mark.skipif(
-    shutil.which("lsof", path="/usr/bin:/bin:/usr/sbin:/sbin") is None,
-    reason="fleet_status reads the fake session's cwd with lsof, and lsof is not on /usr/bin:/bin:/usr/sbin:/sbin",
+    sys.platform != "darwin" or shutil.which("lsof", path="/usr/bin:/bin:/usr/sbin:/sbin") is None,
+    reason="fleet_status end to end is checked on macOS only: its fleet probes (ps, lsof, osascript, tmux) were never run on Linux and the test asserts exactly one stderr line",
 )
 def test_fleet_status_reports_git_failure_in_one_line(tmp_path: Path, failing_worktree_list_git_path: str) -> None:
     """fleet_status exits 1 with one stderr line when `git worktree list` fails while gathering the kanban."""

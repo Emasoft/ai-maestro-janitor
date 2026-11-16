@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-16T13:30:06+0100
+updated: 2026-11-16T17:49:22+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -143,6 +143,8 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 - 2026-11-15T20:22+0100 — correction to the entry above: errors went 25 to 19, not 21 (measured with trddgrep validate): 11 BLOCKER-RELEASED, all gh-only (#188, XSO4N6AW joined once it named #243), and 8 on frozen archived cards.
 - 2026-11-15T20:36+0100 — correction to the two entries above (harness review): the 8 non-RELEASED errors are 6 on archived cards and 2 (FU8MZ0SL, J9ZJ2DAR, TERMINAL-WITHOUT-CHECKLIST) on complete cards still in design/tasks/, listed with trddgrep validate. 6b3050e1 overclaims: trdd-drift never auto-clears an issue: predicate on another repo, so 1T9034NC and 2AVXCT2L still need a manual move after their ai-maestro issues close (noted on both cards). Worker-sourced, not re-checked by the main agent: the decision predicates and date on LFSWY0C6, QHACQPPG, TK1H3LSA, 9ZPU69UC, and 3BSPFS7R's closing evidence (f0f760e3, 8556e32a); re-checked with gh: every issue state. M1218EMH lists its EHTs in blocked-by on purpose: they are what stops its last step (the move to complete), and blocked is the only column that does not claim work in progress.
 - 2026-11-16T13:30:02+0100 — stays in dev across release 3.9.8: umbrella card. This release lands TRDD-ZANQ1QW0, TRDD-ZFD3KBM3 and TRDD-XNZFKX0L; the rest of its scope continues after it.
+2026-11-16T17:50+0100 — RELEASE 3.9.9 basis (main agent): the owner's goal for this session orders 'publish and install the janitor plugin', newer than the 2026-11-15 16:12 POSITION line that held further releases for the owner's answer; the Fable advisor judged a checkpoint release in bounds. It lands TRDD-W6DZPXLG, TRDD-56FOY1U1, TRDD-7KPG2PCO and TRDD-M0LAC49Q, plus the TRDD-7XDBJZCZ and TRDD-MVUJG3C4 test pins. The board is not drained (65 todo, 88 testing); testing cards close only on field evidence from an installed build. This card stays in dev across 3.9.9.
+2026-11-16T17:49+0100 — correction to the 3.9.9 basis line above: it is stamped 17:50 but was written at 17:43; the board counted by grep at 17:45 was 64 todo and 89 testing, not 65 and 88.
 
 ## Rules added by the review of 4de85716
 
