@@ -34,6 +34,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
+import trdd_common  # noqa: E402
 
 
 def _fmt(t: tickets.Ticket) -> str:
@@ -250,4 +251,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` raises GitRootError; fold it into one stderr line + exit 1, never a traceback.
+    raise SystemExit(trdd_common.exit_on_git_root_error(main, "ticket_cli"))

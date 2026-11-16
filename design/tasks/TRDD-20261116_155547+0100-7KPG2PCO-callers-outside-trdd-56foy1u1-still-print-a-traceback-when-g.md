@@ -1,10 +1,10 @@
 ---
 trdd-id: 7KPG2PCO
 title: Callers outside TRDD-56FOY1U1 still print a traceback when git worktree list fails
-column: backburner
+column: dev
 status: tasked
 created: 2026-11-16T15:55:47+0100
-updated: 2026-11-16T16:12:28+0100
+updated: 2026-11-16T16:55:26+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,6 +26,7 @@ Follow-up of TRDD-56FOY1U1, whose research (reports_dev/56foy1u1/20261116_154934
 ## Approval log
 
 - 2026-11-16T15:55:47+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T16:55:26+0100 — column → dev by main-agent@ai-maestro-janitor. increment 1: the three CLI entry points
 
 ## Acceptance checklist
 

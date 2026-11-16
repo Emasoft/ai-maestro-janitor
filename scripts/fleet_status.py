@@ -1288,4 +1288,5 @@ def _write_report(content: str, *, out_override: str = "") -> str:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` raises GitRootError; fold it into one stderr line + exit 1, never a traceback.
+    raise SystemExit(trdd_common.exit_on_git_root_error(main, "fleet_status"))

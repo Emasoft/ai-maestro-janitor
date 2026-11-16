@@ -107,4 +107,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` raises GitRootError; fold it into one stderr line + exit 1, never a traceback.
+    sys.exit(trdd_common.exit_on_git_root_error(main, "findings_cli"))
