@@ -4,7 +4,7 @@ title: Sessions born from a janitor clear are named clear clear instead of the p
 column: testing
 status: tasked
 created: 2026-11-14T22:26:10+0100
-updated: 2026-11-14T22:26:13+0100
+updated: 2026-11-16T09:05:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ implementation-commits: [7d1c8b43]
 - DONE: fix 7d1c8b43 (local main, not released: v3.8.13 does not contain it). Not pushed.
 - NEXT ACTION: after the next release containing 7d1c8b43 is installed (claude plugin update), verify live that a session born from a janitor /clear gets the project folder name (or the project plus one TRDD id and title when the newest handoff lists exactly one in-flight card) as its session name, instead of "/clear clear"; also verify that a session ALREADY named "/clear clear" is renamed on its next prompt. Then close GitHub issue 357 on Emasoft/ai-maestro-janitor with the evidence. Do not close the card or the issue before that live check.
 - OPEN: field proof only. Everything else is committed and gated.
+2026-11-16 CORRECTION: the DONE line "fix 7d1c8b43 (local main, not released: v3.8.13 does not contain it)" is stale. 7d1c8b43 is an ancestor of 81575d5c2 (git merge-base --is-ancestor) and shipped in ai-maestro-janitor--v3.9.0 (first tag by git tag --contains); it is installed with 3.9.6. Only the live field check in NEXT ACTION stays open.
 
 ## Facts (GitHub issue 357)
 

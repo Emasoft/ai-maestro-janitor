@@ -4,7 +4,7 @@ title: Token-spike advisory renders output ~0k and still recommends compaction
 column: testing
 status: tasked
 created: 2026-10-18T08:58:49+0200
-updated: 2026-11-16T02:04:05+0100
+updated: 2026-11-16T09:07:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,3 +39,6 @@ Built as an absolute floor in the hook, not finer buckets (design revision 2, af
 417297cd fixes the sibling renderer in scripts/hooks/pre-tool-context-usage.py: its own _bucket_tokens now renders a distance under 10k in 1k buckets (~9k down to ~1k; ~0k only under 1k) instead of ~0k for every value under 10k. Checks: that hook's test file 64 passed; ruff, mypy and pyright clean on the hook.
 Correction: the 417297cd commit message says 9f7abe3e fixed the budget hook's own renderer. It did not change the renderer: 9f7abe3e added an absolute floor (_ADVISORY_MIN_OUTPUT = 10_000, pre-tool-token-budget.py:84 and :512) that turns an advisory verdict under that output into ok, so the advisory ~0k text is no longer shown. _bucket_tokens there (line 237) still floors to 10k; a hard-tier or cache-miss line can still print a floored bucket (not checked).
 Stays in testing: 9f7abe3e is in the released v3.9.3 (checked 2026-11-16 with git merge-base --is-ancestor); 417297cd is in no release tag yet and ships with the next publish; live check = after that release, no "~0k" for a distance of 1k or more in a context-usage or budget advisory line (a distance under 1k still reads "~0k", which is accurate).
+2026-11-16 CORRECTION: the sentence above "417297cd is in no release tag yet and ships with the next publish" is stale. 417297cd is an ancestor of 81575d5c2 (checked with git merge-base --is-ancestor) and shipped in ai-maestro-janitor--v3.9.4 (first tag by git tag --contains); it is installed with 3.9.6. 9f7abe3e shipped in v3.9.3. Only the live check stays open.
+2026-11-16 CORRECTION of the line above: the clause "9f7abe3e shipped in v3.9.3" was copied from this card's earlier text, not checked then. Checked now: 9f7abe3e is an ancestor of 81575d5c2 and its first tag (git tag --contains, sort -V) is ai-maestro-janitor--v3.8.12, so the v3.9.3 claim is wrong or at best not the first release.
+2026-11-16 CLARIFICATION: the original "9f7abe3e is in the released v3.9.3" is true. git tag --contains 9f7abe3e lists v3.9.3 among its tags; the earliest tag that contains it is ai-maestro-janitor--v3.8.12. The previous correction line wrongly called the v3.9.3 wording wrong.
