@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import lru_cache
@@ -115,6 +117,41 @@ class GitRootError(RuntimeError):
     """git could not resolve the main checkout root inside a known repo."""
 
 
+def exit_on_git_root_error(main_fn: Callable[[], int], name: str) -> int:
+    """Run a detector `main_fn`; turn a GitRootError into ONE stderr line + exit code 1.
+
+    TRDD-56FOY1U1: a failing `git worktree list` inside a known repo used to escape the five
+    TRDD detectors as a multi-line traceback on the agent-visible stderr. It must be one visible
+    line and a non-zero exit (dispatch records error:rc=1 and its 3-strike streak raises
+    DETECTOR-FAIL) — never a traceback, and NEVER a fallback root: `_main_checkout_root` is
+    lru_cached, so a returned fallback path would be memoised for the whole process lifetime
+    and silently point a linked worktree at the wrong LOCAL design root. Any other exception
+    propagates unchanged (fail fast). The cause is kept on the one line, machine paths replaced
+    by <path> and capped at 200 characters (janitor#342 item 2: concise, no machine paths); the
+    dispatcher records only the exit code."""
+    try:
+        return main_fn()
+    except GitRootError as exc:
+        # Machine paths must not reach the agent-visible line (janitor#342 item 2). A quoted path
+        # (spaces allowed) becomes "<path>" inside its quotes, one pass per quote kind, so an
+        # apostrophe in a double-quoted repr does not end the match. An unquoted absolute or ~ path
+        # becomes "<path>" after a bracket or "=", not when glued to a word, "." "-" or "/" (so
+        # "and/or" stays); it ends at whitespace, a quote, a bracket, "," or ";", and ":" stays in it
+        # when a path character follows. REMAINING limits: an unquoted path with a space is cut at the
+        # space (our messages quote their paths, git quotes its own); a quoted path ends at the next
+        # quote of its kind, so a path holding both kinds leaks its tail; Windows drive paths are not
+        # scrubbed; the 200-character cut may split a "<path>" marker.
+        one_line = " ".join(str(exc).split())
+        reason = re.sub(r"\x27(?:~[\w.-]*)?/[^\x27]*\x27", "\x27<path>\x27", one_line)
+        reason = re.sub(r"\x22(?:~[\w.-]*)?/[^\x22]*\x22", "\x22<path>\x22", reason)
+        reason = re.sub(r"(?<![\w/.~-])(?:~[\w.-]*)?/(?:[^\s\x27\x22`()\[\]{}<>,;:]|:(?=[^\s\x27\x22`()\[\]{}<>,;:]))+", "<path>", reason)[:200]
+        print(
+            f"{name}: git failed resolving the design root ({reason}); skipped this pass",
+            file=sys.stderr,
+        )
+        return 1
+
+
 @lru_cache(maxsize=None)
 def _main_checkout_root(project_dir: str) -> Path:
     """Resolve `project_dir` to its MAIN git checkout, for the LOCAL design corpus.
@@ -171,12 +208,12 @@ def _main_checkout_root(project_dir: str) -> Path:
         # whole process lifetime (the daemon reaches this), silently pointing a linked worktree at
         # the wrong LOCAL design root. A bare TimeoutExpired also printed a traceback to the agent.
         raise GitRootError(
-            f"git worktree list --porcelain timed out after 5s inside known git repo {project_dir}"
+            f"git worktree list --porcelain timed out after 5s inside known git repo {project_dir!r}"
         ) from exc
     if result.returncode != 0:
         raise GitRootError(
             f"git worktree list --porcelain failed (exit {result.returncode}) inside "
-            f"known git repo {project_dir}: {result.stderr.strip()}"
+            f"known git repo {project_dir!r}: {result.stderr.strip()}"
         )
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
@@ -190,13 +227,13 @@ def _main_checkout_root(project_dir: str) -> Path:
                 if toplevel.returncode == 0 and toplevel.stdout.strip():
                     return Path(toplevel.stdout.strip())
                 raise GitRootError(
-                    f"git worktree list --porcelain reported a gitdir ({candidate}) as "
-                    f"the worktree for {project_dir}, and rev-parse --show-toplevel "
+                    f"git worktree list --porcelain reported a gitdir ({str(candidate)!r}) as "
+                    f"the worktree for {project_dir!r}, and rev-parse --show-toplevel "
                     "failed to recover the real checkout root"
                 )
             return candidate
     raise GitRootError(
-        f"git worktree list --porcelain produced no worktree line for {project_dir}"
+        f"git worktree list --porcelain produced no worktree line for {project_dir!r}"
     )
 
 

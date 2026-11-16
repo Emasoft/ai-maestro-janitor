@@ -1369,3 +1369,27 @@ def _auto_clear_master_on(monkeypatch: "pytest.MonkeyPatch") -> None:
     itself, so they run with the master on; default-off behaviour is pinned by tests that
     `delenv` it explicitly."""
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_AUTO_CLEAR_ENABLED", "true")
+
+
+@pytest.fixture
+def failing_worktree_list_git_path(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A PATH string whose `git` answers `rev-parse --is-inside-work-tree` with `true`, fails
+    `worktree list` instantly (stderr `boom`, exit 1) and execs the real git for everything else.
+    TRDD-56FOY1U1: drives `trdd_common._main_checkout_root` into its non-zero-exit GitRootError
+    branch without the ~5 s wait of the hanging-git fixture in test_ticket_dispatch.py. The real
+    git is resolved BEFORE any PATH override."""
+    real_git = shutil.which("git")
+    assert real_git is not None, "git must be installed to run this test"
+    fake_bin = tmp_path_factory.mktemp("failing-git-bin")
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/bin/sh\n"
+        "case \" $* \" in\n"
+        "  *\" rev-parse --is-inside-work-tree \"*) echo true; exit 0;;\n"
+        "  *\" worktree list \"*) echo boom >&2; exit 1;;\n"
+        "esac\n"
+        f"exec \"{real_git}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    return f"{fake_bin}:{Path(real_git).parent}:/usr/bin:/bin"

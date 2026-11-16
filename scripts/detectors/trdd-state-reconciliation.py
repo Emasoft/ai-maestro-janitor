@@ -879,4 +879,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(trdd_common.exit_on_git_root_error(main, "trdd-state-reconciliation"))

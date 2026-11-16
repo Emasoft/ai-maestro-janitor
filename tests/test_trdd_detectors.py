@@ -312,5 +312,26 @@ class TestTrddDetectors(unittest.TestCase):
             self.assertIn("TRDD-33333333", out)
 
 
+def test_failing_git_worktree_list_is_one_stderr_line_and_exit_1(tmp_path: Path, failing_worktree_list_git_path: str) -> None:
+    """TRDD-56FOY1U1: a failing `git worktree list` is one trdd-drift stderr line + exit 1, not a traceback."""
+    project = tmp_path / "proj"
+    (project / "design" / "tasks").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+    env = dict(os.environ)
+    env["CLAUDE_PROJECT_DIR"] = str(project)
+    env["CLAUDE_SESSION_ID"] = "gitfail"
+    env["JANITOR_FORCE_AI_MAESTRO"] = "1"
+    env["PATH"] = failing_worktree_list_git_path
+    env.pop("CLAUDE_PLUGIN_OPTION_TRDD_PATH", None)
+    proc = subprocess.run(
+        [sys.executable, str(DRIFT), "--one-shot"], capture_output=True, text=True, env=env, timeout=60
+    )
+    assert proc.returncode == 1, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    lines = [ln for ln in proc.stderr.splitlines() if ln.strip()]
+    assert len(lines) == 1, proc.stderr
+    assert lines[0].startswith("trdd-drift:"), proc.stderr
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "scripts" / "lib"))
 
@@ -1177,3 +1179,90 @@ def test_check3_a_named_other_card_as_the_blocker_is_still_a_true_positive():
 def test_check3_without_a_state_block_scans_the_body_minus_the_approval_log():
     assert _c3("\n# T\n\npublish is BLOCKED on GROUP B\n") is True
     assert _c3("\n# T\n\nTRDD-ABCDEFGH is blocked, LIVE.\n") is False
+
+
+def test_exit_on_git_root_error_is_one_stderr_line_and_rc_1(capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-56FOY1U1: a multi-line GitRootError with a machine path is one `<name>:` stderr line, path as <path>, rc 1."""
+
+    def main() -> int:
+        raise tc.GitRootError("git worktree list --porcelain failed (exit 1)\ninside known git repo /x: boom")
+
+    assert tc.exit_on_git_root_error(main, "some-detector") == 1
+    err = capsys.readouterr().err
+    assert err == (
+        "some-detector: git failed resolving the design root "
+        "(git worktree list --porcelain failed (exit 1) inside known git repo <path>: boom); skipped this pass\n"
+    )
+
+
+def test_exit_on_git_root_error_caps_the_cause_at_200_characters(capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-56FOY1U1: a GitRootError cause longer than 200 characters is cut to exactly 200 on the one stderr line."""
+
+    def main() -> int:
+        raise tc.GitRootError("y" * 300)
+
+    assert tc.exit_on_git_root_error(main, "some-detector") == 1
+    err = capsys.readouterr().err
+    assert err == "some-detector: git failed resolving the design root (" + "y" * 200 + "); skipped this pass\n"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_reason"),
+    [
+        ("cd ~/y, next", "cd <path>, next"),
+        ("bad root /x; retry", "bad root <path>; retry"),
+        ("fatal: not a git repository: '/Users/shared/b' (/Users/user/d)", "fatal: not a git repository: '<path>' (<path>)"),
+        ("reads /dev/null) ok", "reads <path>) ok"),
+        ("--opt=/x done", "--opt=<path> done"),
+        ("fatal: '/p q/r': no", "fatal: '<path>': no"),
+        ("at /a/b:c/d", "at <path>"),
+        ("cd ~typesafe/x", "cd <path>"),
+        ("/x: no such", "<path>: no such"),
+        ("boom \"/tmp/it's a/x\" end", "boom \"<path>\" end"),
+        ("say \"/p q/r\" now", "say \"<path>\" now"),
+    ],
+)
+def test_exit_on_git_root_error_replaces_each_machine_path_token(
+    capsys: pytest.CaptureFixture[str], message: str, expected_reason: str
+) -> None:
+    """TRDD-56FOY1U1: a machine path is replaced by <path> even when quoted, bracketed, after "=" or before punctuation."""
+
+    def main() -> int:
+        raise tc.GitRootError(message)
+
+    assert tc.exit_on_git_root_error(main, "some-detector") == 1
+    err = capsys.readouterr().err
+    assert err == f"some-detector: git failed resolving the design root ({expected_reason}); skipped this pass\n"
+
+
+def test_exit_on_git_root_error_passes_the_return_code_and_other_exceptions_through() -> None:
+    """TRDD-56FOY1U1: only GitRootError is caught; a normal return code and any other exception are untouched."""
+    assert tc.exit_on_git_root_error(lambda: 0, "d") == 0
+
+    def boom() -> int:
+        raise ValueError("not a git problem")
+
+    with pytest.raises(ValueError, match="not a git problem"):
+        tc.exit_on_git_root_error(boom, "d")
+
+
+def test_exit_on_git_root_error_keeps_a_quoted_project_dir_with_a_space_out_of_stderr(
+    tmp_path: Path,
+    failing_worktree_list_git_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """TRDD-56FOY1U1: a real worktree-list failure for a project dir with a space leaks no part of that path."""
+    project_dir = tmp_path / "a b" / "c"
+    project_dir.mkdir(parents=True)
+    monkeypatch.setenv("PATH", failing_worktree_list_git_path)
+
+    def main() -> int:
+        tc._main_checkout_root(str(project_dir))
+        return 0
+
+    assert tc.exit_on_git_root_error(main, "some-detector") == 1
+    err = capsys.readouterr().err
+    assert "known git repo '<path>': boom" in err
+    assert "b/c" not in err
+    assert str(tmp_path) not in err
