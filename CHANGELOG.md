@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.5] — 2026-11-16
+
+### Documentation
+
+- **cards:** NRF7OJ5H to todo; issue map on FQVEILVK; F8EIVTSG premise corrected (TRDD-NRF7OJ5H, TRDD-FQVEILVK, TRDD-F8EIVTSG) (b86e535)
+- **cards:** Close Q9MU9CWK and 8BNV75TV; A70YJLXN records why 3.9.4 cannot serve box 2 (TRDD-Q9MU9CWK, TRDD-8BNV75TV, TRDD-A70YJLXN) (67fbc0e)
+- **cards:** NRF7OJ5H records the shield rules and the core re-pin; Q6LPJTPO lists the shapes still missed (TRDD-NRF7OJ5H, TRDD-Q6LPJTPO) (6dee3af)
+
+### Features
+
+- **secret-shield:** Hide Docker Hub tokens, scoped npmrc auth tokens and Maven XML passwords (TRDD-NRF7OJ5H) (9dcaa0a)
+
+### Testing
+
+- **redact:** Allow bun in the sanitize-reports tests; NRF7OJ5H records the swap consequences (TRDD-NRF7OJ5H) (6fa48e7)
 ## [3.9.4] — 2026-11-16
 
 ### Bug Fixes
@@ -20,6 +35,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - **cspell:** Accept two fake-secret fragments as project words (TRDD-KT0G5A43) (65d9464)
+- Bump version to 3.9.4 (e38fde0)
 
 ### Testing
 
