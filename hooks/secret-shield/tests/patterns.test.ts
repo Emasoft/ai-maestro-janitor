@@ -2068,7 +2068,7 @@ describe('a rule pattern run directly does not break redact', () => {
 // with an upper-case letter, a lower-case letter and a digit, and a DIFFERENT one on every call: a test cannot pass
 // because another value was hidden before it, and every positive uses its own redact() call so known-secret
 // propagation cannot hide a value the rules missed.
-const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' // trufflehog:ignore
 let fakeCount = 0
 const fake = (length = 32): string => {
   fakeCount += 1
