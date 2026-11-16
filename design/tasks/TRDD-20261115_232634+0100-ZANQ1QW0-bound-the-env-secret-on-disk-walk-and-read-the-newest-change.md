@@ -1,10 +1,10 @@
 ---
 trdd-id: ZANQ1QW0
 title: Bound the env-secret-on-disk walk and read the newest change first, then schedule it
-column: backburner
+column: dev
 status: tasked
 created: 2026-11-15T23:26:34+0100
-updated: 2026-11-16T10:08:08+0100
+updated: 2026-11-16T10:35:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -20,6 +20,10 @@ approval-datetime: 2026-11-15T23:26:34+0100
 ---
 
 # Bound the env-secret-on-disk walk and read the newest change first, then schedule it
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-16
+
+- 2026-11-16 increment 1 (trash tier, design item 2) landed in 54674cc4: .trashcan batch folders are read by name from saved per-batch positions, not by modification time. Two real passes of the new detector on this project took 34.8 s and 13.1 s in total (the walk alone took 28.1 s before), with 0 hits; a state file from before the change keeps its cursor and flagged list. Not released yet. NEXT ACTION: increment 2, the listing bound (design item 3), then newest-first order (items 4 and 5), then the schedule. Follow-up: TRDD-XNZFKX0L (a CRED-002 finding withdrawn for a file that was not read).
 
 Follow-up of TRDD-G14LKPEC (issue 354). env-secret-on-disk is on demand only; tests/test_env_secret_on_disk_registration.py pins it off the roster. Fix before scheduling it. (1) Bound the walk: the time and byte budget must also cover listing and stat (today started = clock() runs after the walk in env_secrets.sweep), for example stop the walk at the budget and resume from a saved position, or skip folders unchanged since the last pass. (2) Read new changes before the backlog, so a fresh leak is found on the next pass. Then add back the roster row, the cadence option, the doctor and fleet-status entries, the quiet-heartbeat security entry and the two README rows (patch kept at reports_dev/fanout-apply/scratch/inc2/step10-schedule.patch, gitignored), and flip the registration test. Measured numbers are in the TRDD-G14LKPEC Approval log.
 

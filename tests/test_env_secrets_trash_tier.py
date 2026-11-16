@@ -162,7 +162,7 @@ def _project(tmp_path: Path) -> Path:
     project = tmp_path / "proj"
     project.mkdir()
     (project / ".gitignore").write_text(".trashcan/\n.janitor/\n")
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, env={**os.environ, "HOME": str(tmp_path / "home")})
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True, timeout=120, env={**os.environ, "HOME": str(tmp_path / "home")})
     return project
 
 
