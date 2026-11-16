@@ -1,10 +1,10 @@
 ---
 trdd-id: ZANQ1QW0
 title: Bound the env-secret-on-disk walk and read the newest change first, then schedule it
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-11-15T23:26:34+0100
-updated: 2026-11-16T13:11:27+0100
+updated: 2026-11-16T13:30:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-15T23:26:34+0100
+implementation-commits: [54674cc4, 9a1cea8c, c0e14873, f2c70baa, 3181a0ea, 0db48c58, e1184b6e, 64880ea5]
 ---
 
 # Bound the env-secret-on-disk walk and read the newest change first, then schedule it
@@ -31,10 +32,13 @@ Follow-up of TRDD-G14LKPEC (issue 354). env-secret-on-disk is on demand only; te
 - 2026-11-16 schedule decision (advisor-reviewed, supersedes the schedule-hold line of e26ca748): two real passes after f2c70baa at load 12 to 20 split as listing 19.0/18.9 s, fresh 5.1/0.6 s, backlog 23.0/29.6 s, trash 15.0/15.0 s, total 62.2/64.2 s; the main sweep (listing plus reads) stayed inside its 60 s budget and the trash tier stopped at its 15 s cap, so the budgets hold and the 1 h cadence stands. The seconds are mostly the 30 GiB scratch copy under reports_dev/zanq1qw0/mutation (the covered lo edge sits inside it) and the 951,892-file .trashcan, not a typical host. Read throughput was about 9 MiB/s (253 MiB in 28 s, 256 MiB in 30 s), not the 54 MiB/s the MAX_FILE_BYTES comment assumes, so one 256 MiB read is about 30 s and the at-least-one-file-per-tier guard can put the worst pass at about 135 s (extrapolated from mixed files), over the 120 s detector timeout; a killed pass saves no state. Three blockers before the schedule patch: increment 4, a non-blocking flock on a separate lock file held from the cursor read to the cursor write (dispatch stamps last-run only after the subprocess and no lock covers a fire, so two sessions of one project can run overlapping passes and the later cursor write drops the other flagged list); increment 5, a hard read bound checked between chunks inside the file read, one deadline per sweep (main and trash, the ceilings plus overhead under 120 s), a cut ends that sweep (no read starts after its deadline, guarded or not), keeps the partial hits, has its own report list, never enters read, and is opt-in (default None); and the patch adds env-secret-on-disk to _PRESSURE_HEAVY_DETECTORS (the bar is 300 runnable, the recorded healthy band 118 to 169, and dispatch.log holds no host-pressure deferral since it began on 2026-10-12).
 - 2026-11-16 increment 4 landed in 3181a0ea: main() takes an exclusive non-blocking flock on .janitor/state/env-secret-on-disk.lock (never written, renamed or deleted; the daily age sweep deletes only .txt and .ts files there) from before the cursor read to after the cursor write; a pass that finds it held logs one line and returns 0. The pass-line total now starts after the lock. With the flock made a no-op in a scratch copy, test_a_second_pass_while_one_holds_the_lock_changes_nothing fails.
 - 2026-11-16 increment 5 landed in 0db48c58: a hard read bound per sweep (MAIN_HARD_DEADLINE_S 75, TRASH_HARD_DEADLINE_S 25, each from its own sweep start), checked before every read, the guarded first file included, and between chunks inside scan_file. A cut keeps its partial hits, goes to SweepReport.cut, never enters read, is held like a failed read, and ends that sweep reading (the backlog does not start after a hard stop of the fresh tier). A cut file already given up on goes to cut_given_up and is counted on the coverage line. Known limits: 75 + 25 s assume the default 120 s CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT, so a smaller configured timeout is not protected; a trash file over about 200 MiB cannot be read inside 25 s at 9 MiB/s, so it is cut on every try, given up and counted. Two of the three blockers are done; the third (env-secret-on-disk in _PRESSURE_HEAVY_DETECTORS) goes with the schedule patch, after TRDD-ZFD3KBM3 lands (advisor: once passes run hourly from every session, a pass withdrawing a finding for a secret it does not hold becomes routine).
+- 2026-11-16 the schedule landed in 64880ea5: an hourly roster row (env_secret_on_disk_interval, 3600 s), env-secret-on-disk in _PRESSURE_HEAVY_DETECTORS, the doctor detector list, the fleet-status and quiet-heartbeat security lists, the plugin.json option and the README rows; the registration test is flipped, and dropping the heavy-set entry fails test_it_is_deferred_under_host_pressure. Live pass after it, at load 9 to 21: listing 23.9 s, fresh 10.7 s, backlog 13.4 s (main sweep 48.0 s, inside its 60 s budget), trash 15.0 s at its cap, 63.1 s total, 0 secret hits, 8 dump-shape flags on copies of the test value OTHER_API_KEY. Two wording errors in the 64880ea5 commit body: doctor.py _DETECTORS is the doctor's general detector list, not a security list; a pass before the bounds took 49 to 55 s (about a minute), not minutes. NEXT ACTION: none, the card is complete.
 
 ## Approval log
 
 - 2026-11-15T23:26:34+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T13:30:02+0100 — CLOSED by main-agent@ai-maestro-janitor: every acceptance box is met; evidence in the last STATE line (live pass 63.1 s total, main sweep 48.0 s inside its 60 s budget).
+- 2026-11-16T13:30:44+0100 — COMPLETE by main-agent@ai-maestro-janitor. schedule landed in 64880ea5; live pass inside the budget.
 
 ## Design 2026-11-16 (advisor-reviewed, supersedes the one-paragraph plan in the body)
 
@@ -60,3 +64,11 @@ Increment 3, live edge = wall time at the start of the listing minus LIVE_EDGE_M
 Increment 3, tiers: the fresh tier is the keys above hi, read ascending (contiguity forces it, so inside the fresh tier the order is still oldest first; newest first holds between the tiers), with FRESH_SHARE (0.5) of the byte budget and of the time left after the listing. The backlog is the keys below lo, read descending, with the rest of the pass budget. Each tier reads at least one file per pass, so a fresh file larger than the whole budget cannot stop the backlog.
 Increment 3, holds go to their own edge: hi stops below the lowest fresh hold, lo stops above the highest backlog hold. A listing cut or a failing git keeps both edges. The raise order under the per-fire cap follows each edge: fresh hits ascending, then backlog hits descending, then trash hits by path.
 Increment 3, known limit: a file whose mtime is in the future (clock skew, or touch with a later date) stays above the live edge, so it is read again on every pass inside the fresh share; it costs at most that share and never stops the backlog, which has its own at-least-one-file guarantee.
+
+## Acceptance
+
+- [x] The listing and the reads are bounded: a 30 s listing share, a hard read bound of 75 s on the main sweep and 25 s on the trash sweep (9a1cea8c, 0db48c58).
+- [x] New changes are read before the backlog, from a covered range, newest first (c0e14873).
+- [x] The trash tier reads .trashcan batches by name from saved positions (54674cc4).
+- [x] One pass at a time per project, by a non-blocking lock (3181a0ea).
+- [x] Scheduled hourly and deferred under host pressure; done-when met: a live pass after 64880ea5 kept the main sweep at 48.0 s, inside its 60 s budget (64880ea5).

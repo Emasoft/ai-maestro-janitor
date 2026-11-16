@@ -4,7 +4,7 @@ title: Env dumps Bash guard, live-value matcher and agent-folder sweep for issue
 column: testing
 status: tasked
 created: 2026-11-15T23:02:40+0100
-updated: 2026-11-15T23:41:00+0100
+updated: 2026-11-16T13:30:02+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -31,3 +31,4 @@ Issue Emasoft/ai-maestro-janitor#354. Delivers: Bash guard for commands that pri
 - 2026-11-15T23:26:38+0100 — DECIDED by main-agent@ai-maestro-janitor (owner standing order to decide): env-secret-on-disk ships ON DEMAND only, off the hourly roster. Measured on this repo 2026-11-15: two passes took 49.3 s and 55.2 s; 6 then 3,565 files read, 1,206,764 then 1,203,204 left for the next pass (the agent folders hold about 1.2 million files, 952,625 of them in .trashcan/); no hit in the 3,571 files read, about 0.3 percent of the backlog. Two defects read from env_secrets.sweep(): (1) every file is listed and stat-ed before the time budget starts, so the budget does not bound the pass and a larger tree could pass the 120 s detector kill before the cursor is written (that the walk is most of the 49-55 s is inferred, not timed per phase); (2) files are read oldest change first, so a fresh leak waits behind the backlog. The six roster edits were undone with git restore; they are recoverable only from reports_dev/fanout-apply/scratch/inc2/step10-schedule.patch (gitignored). Follow-up: TRDD-ZANQ1QW0.
 - 2026-11-15T23:37:18+0100 — part 2 committed in af9bedf7 (env-secret-on-disk on demand only, CRED-002); bc1abf68 added five cspell words of a2e5807c. A CI-parity preflight on af9bedf7 still failed on cspell (mkfifo) and bandit B108 (env_secrets.py, the /tmp default); fixed in the working tree, not yet committed. Moved to testing.
 - 2026-11-15T23:40:59+0100 — the CI fixes are committed in 29b8d55f (supersedes 'not yet committed' in the entry above); the CI-parity preflight on 29b8d55f is PARITY-CLEAN (FAIL=0, WARNING=0, PASS=11).
+- 2026-11-16T13:30:02+0100 — SUPERSEDES the 2026-11-15T23:26:38 DECIDED line (on demand only): env-secret-on-disk runs hourly from the heartbeat since 64880ea5 (TRDD-ZANQ1QW0), after the trash tier by batch name (54674cc4), the listing bound (9a1cea8c), newest-first reading (c0e14873), one pass at a time per project (3181a0ea) and a hard read bound per sweep (0db48c58). A live pass on this repo after 64880ea5 took 63.2 s wall at load 9 to 21, under the 120 s detector timeout.

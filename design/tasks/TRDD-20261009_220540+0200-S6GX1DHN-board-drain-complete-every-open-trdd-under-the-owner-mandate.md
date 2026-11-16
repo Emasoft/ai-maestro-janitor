@@ -4,7 +4,7 @@ title: Board drain — complete every open TRDD under the owner mandate of 2026-
 column: dev
 status: tasked
 created: 2026-10-09T22:05:40+0200
-updated: 2026-11-16T09:02:36+0100
+updated: 2026-11-16T13:30:06+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -142,6 +142,7 @@ CORRECTION, written at 2026-10-10 23:37 by the clock: the times that head this s
 - 2026-11-15T20:20+0100 — DRAIN PROGRESS (main agent): M1218EMH items 1, 2, 4, 5 done (913f1db0, 3907ae2c, d88743d5, 2a09d06d, 9772b2b1) and parked in blocked on its EHTs (47fc6cf1); validate ERROR triage (worker report reports_dev/board-drain/20261115_195713+0100-blocker-released-24-v2.md, re-checked with gh): 12 BLOCKER-RELEASED are gh-only blockers, the doctor false positive Emasoft/ai-maestro#188; RSSN9A0P and 6054NY8H had CLOSED issues but sit under the owner's rotator code freeze, moved to backburner (ea00cc2a); 3BSPFS7R archived, 1T9034NC and 2AVXCT2L unblock-when fixed (6b3050e1); probes on F1NZMDWF, A56E22AL, XSO4N6AW (acec2d68). Errors 25 to 21. NEXT: the QAF3N673 increment-3 proposal (draft reports_dev/main-agent/20261115_195535+0100-qaf3n673-proposal-draft.md).
 - 2026-11-15T20:22+0100 — correction to the entry above: errors went 25 to 19, not 21 (measured with trddgrep validate): 11 BLOCKER-RELEASED, all gh-only (#188, XSO4N6AW joined once it named #243), and 8 on frozen archived cards.
 - 2026-11-15T20:36+0100 — correction to the two entries above (harness review): the 8 non-RELEASED errors are 6 on archived cards and 2 (FU8MZ0SL, J9ZJ2DAR, TERMINAL-WITHOUT-CHECKLIST) on complete cards still in design/tasks/, listed with trddgrep validate. 6b3050e1 overclaims: trdd-drift never auto-clears an issue: predicate on another repo, so 1T9034NC and 2AVXCT2L still need a manual move after their ai-maestro issues close (noted on both cards). Worker-sourced, not re-checked by the main agent: the decision predicates and date on LFSWY0C6, QHACQPPG, TK1H3LSA, 9ZPU69UC, and 3BSPFS7R's closing evidence (f0f760e3, 8556e32a); re-checked with gh: every issue state. M1218EMH lists its EHTs in blocked-by on purpose: they are what stops its last step (the move to complete), and blocked is the only column that does not claim work in progress.
+- 2026-11-16T13:30:02+0100 — stays in dev across release 3.9.8: umbrella card. This release lands TRDD-ZANQ1QW0, TRDD-ZFD3KBM3 and TRDD-XNZFKX0L; the rest of its scope continues after it.
 
 ## Rules added by the review of 4de85716
 
