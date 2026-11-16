@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.8] — 2026-11-16
+
+### Bug Fixes
+
+- **env-secret:** Withdraw a CRED-002 finding only for a file read this pass (TRDD-XNZFKX0L) (9f9e7f5)
+- **env-secret:** List only held cut files as read again (TRDD-ZANQ1QW0) (e1184b6)
+- **env-secret:** Withdraw a finding only for a secret the pass held (TRDD-ZFD3KBM3) (d611dea)
+
+### Documentation
+
+- **cards:** ZANQ1QW0 design, I6ZZWVDN blocked, C9CO0I7L in v3.9.7 (TRDD-ZANQ1QW0, TRDD-I6ZZWVDN, TRDD-C9CO0I7L) (b4b0e7c)
+- **memory:** Split the review-fork-gate page under the size cap (issue 359) (4f015ae)
+- **card:** ZANQ1QW0 per-root walk timing; the trash tier lands first (TRDD-ZANQ1QW0) (d4f024d)
+- **memory:** Capture the secret-shield rule and test work in its page (343c801)
+- **card:** FADYLSQB records the race-test fix 46821b03 (TRDD-FADYLSQB) (9132f00)
+- **cards:** ZANQ1QW0 increment 1 STATE, C9CO0I7L part 2 closed, two follow-up cards (TRDD-ZANQ1QW0, TRDD-C9CO0I7L, TRDD-XNZFKX0L, TRDD-G3DB7NCW) (62fd638)
+- **cards:** 1P54BCIX field check revised, C9CO0I7L names its follow-up (TRDD-1P54BCIX, TRDD-C9CO0I7L) (19fd375)
+- **cards:** ZANQ1QW0 increment 2 STATE and increment 3 design, 1P54BCIX final field reading (TRDD-ZANQ1QW0, TRDD-1P54BCIX) (28a328d)
+- **cards:** ZANQ1QW0 increment 3 STATE line (TRDD-ZANQ1QW0) (e52a9e8)
+- **cards:** Close XNZFKX0L, record its gaps on ZFD3KBM3 and the schedule hold on ZANQ1QW0 (TRDD-XNZFKX0L, TRDD-ZFD3KBM3, TRDD-ZANQ1QW0) (481cfea)
+- **cards:** ZANQ1QW0 hold line counts the trash tier once, ZFD3KBM3 holds the XNZFKX0L evidence scope (TRDD-ZANQ1QW0, TRDD-ZFD3KBM3, TRDD-XNZFKX0L) (e26ca74)
+- **cards:** ZANQ1QW0 schedule decision and three blockers (TRDD-ZANQ1QW0) (cb59630)
+- **cards:** ZANQ1QW0 records increments 4 and 5 and their limits (TRDD-ZANQ1QW0) (832ea0a)
+- **cards:** Close ZFD3KBM3 (TRDD-ZFD3KBM3) (7d691f5)
+- **cards:** Close ZANQ1QW0, record the schedule on G14LKPEC (TRDD-ZANQ1QW0) (18a72a7)
+- **memory:** The roster page says 79 registered, not 71 (TRDD-ZANQ1QW0) (b8dd4e3)
+- **claude-md:** Refresh the wikimem index to 79 registered detectors (TRDD-ZANQ1QW0) (a0faab3)
+
+### Features
+
+- **env-secret:** Read the .trashcan batches by name, not by mtime (TRDD-ZANQ1QW0) (54674cc)
+- **env-secret:** Bound the listing of the agent folders (TRDD-ZANQ1QW0) (9a1cea8)
+- **env-secret:** Read the newest change first, from a covered range (TRDD-ZANQ1QW0) (c0e1487)
+- **env-secret:** Per-phase seconds on the pass line (TRDD-ZANQ1QW0) (f2c70ba)
+- **env-secret:** One pass at a time per project (TRDD-ZANQ1QW0) (3181a0e)
+- **env-secret:** A hard read bound per sweep (TRDD-ZANQ1QW0) (0db48c5)
+- **env-secret:** Run env-secret-on-disk hourly from the heartbeat (TRDD-ZANQ1QW0) (64880ea)
+
+### Miscellaneous Tasks
+
+- **cspell:** Add unfinishable, cutme, unserialized (TRDD-ZANQ1QW0) (e068164)
+
+### Testing
+
+- **repomap:** Serialize the race test's own two writers (TRDD-FADYLSQB) (46821b0)
 ## [3.9.7] — 2026-11-16
 
 ### Bug Fixes
@@ -18,6 +63,10 @@ All notable changes to this project will be documented in this file.
 - **cards:** Owner-gated list, UBS 62-critical verdict, C9CO0I7L key check (TRDD-S6GX1DHN, TRDD-NRF7OJ5H, TRDD-C9CO0I7L) (e742ede)
 - **cards:** Correct stale release claims on BEA87JS1, 1P54BCIX; 85NZX5RJ boxes stay open (TRDD-BEA87JS1, TRDD-1P54BCIX, TRDD-85NZX5RJ) (787b6a5)
 - **card:** NRF7OJ5H UBS lines pass the CI spell check (TRDD-NRF7OJ5H) (4da6f45)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.9.7 (3e65de4)
 ## [3.9.6] — 2026-11-16
 
 ### Bug Fixes
