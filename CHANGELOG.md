@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.6] — 2026-11-16
+
+### Bug Fixes
+
+- **version-update:** Compare releases with the user-scope install, not the cache (TRDD-ADFIO49Q) (30112e5)
+- **runaway:** The CPU-time lookup skips the host under the ps snapshot test seam (TRDD-NLHVLGEP) (65fe0cf)
+- **tests:** Runaway e2e tests use a pid no host can hold (TRDD-NLHVLGEP) (dadcf73)
+
+### Documentation
+
+- **card:** Z41A13XV records why the CPU-time fix was not applied (TRDD-Z41A13XV) (60450a2)
+- **memory:** Lesson - measure secret-shield timing tests in the mod sandbox, not plain bun (TRDD-Z41A13XV) (314dc42)
+- **cards:** A70YJLXN box 2 is blocked by the publish smoke install; ADFIO49Q files the fix; Z41A13XV records the 3.9.5 G3b datum (TRDD-A70YJLXN, TRDD-ADFIO49Q, TRDD-Z41A13XV) (b63e433)
+- **card:** NRF7OJ5H records that Scope 3 waits on the report-sanitizer push decision (TRDD-NRF7OJ5H) (4fed0da)
+- **card:** ADFIO49Q records the design and implementation steps; test docstring lists its stubs plainly (TRDD-ADFIO49Q) (9b43cec)
+- **card:** ADFIO49Q moves to testing with its implementation commit recorded (TRDD-ADFIO49Q) (bbc25be)
+- **card:** NRF7OJ5H STATE gives the measured report-sanitizer ahead count, 16 (TRDD-NRF7OJ5H) (1753e3f)
 ## [3.9.5] — 2026-11-16
 
 ### Documentation
@@ -13,6 +30,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **secret-shield:** Hide Docker Hub tokens, scoped npmrc auth tokens and Maven XML passwords (TRDD-NRF7OJ5H) (9dcaa0a)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.9.5 (5be4acb)
 
 ### Testing
 
