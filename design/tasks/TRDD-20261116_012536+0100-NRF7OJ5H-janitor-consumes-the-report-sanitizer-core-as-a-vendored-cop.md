@@ -1,10 +1,10 @@
 ---
 trdd-id: NRF7OJ5H
 title: Janitor consumes the report-sanitizer core as a vendored copy
-column: backburner
+column: todo
 status: tasked
 created: 2026-11-16T01:25:36+0100
-updated: 2026-11-16T04:25:18+0100
+updated: 2026-11-16T04:59:04+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -35,3 +35,8 @@ Owner goal 2026-11-15 (verbatim): "complete and improve the `~/Code/report-sanit
 ## Approval log
 
 - 2026-11-16T01:25:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-16T04:58:34+0100 — column → todo. holds three live obligations after the 3.9.4 sanitizer swap
+
+## Progress
+
+2026-11-16: a re-probe of the live shield confirmed three gaps (bare dckr_pat_/dckr_oat_ tokens, Maven <password>/<passphrase> values, scoped npmrc :_authToken values without the npm_ prefix); the upstream rules are being written by the shield-gaps worker.

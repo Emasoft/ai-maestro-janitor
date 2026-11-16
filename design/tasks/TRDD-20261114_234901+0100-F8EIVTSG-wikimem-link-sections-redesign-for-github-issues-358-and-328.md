@@ -4,7 +4,7 @@ title: Wikimem link sections redesign for GitHub issues 358 and 328 option b
 column: todo
 status: tasked
 created: 2026-11-14T23:49:01+0100
-updated: 2026-11-16T02:56:16+0100
+updated: 2026-11-16T04:59:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -72,3 +72,7 @@ Owner questions: (1) defer frontmatter-as-source; (2) the project-map fence G7.1
 - 2026-11-14T23:49:01+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-15T10:05:00+0100 — Spec 3.0.0 backticked the unbuilt flags --rel and --retire-link, which failed tests/test_wikimem_spec_drift.py::test_the_spec_names_no_flag_that_does_not_exist in the 3.9.0 release gate. They are being unquoted at spec lines 1247, 1420, 1428, 1440 and 1441, and WM-CLI-28 marked not built. When increment 4 lands, put the backticks back. A planned-flags mechanism in that test is a possible follow-up, not done.
 - 2026-11-16T02:56:16+0100 — column → todo by main-agent@ai-maestro-janitor. not worked in this session; queued so the dev column is true before the publish
+
+## Progress
+
+2026-11-16 correction to the increment 4 note: its premise "the plugin cannot publish (TRDD-AGV84UGC)" no longer holds, because 3.9.4 was published and installed at user scope on 2026-11-16, so increment 4 need not hold the cargo install for a publish; every refusal message must still carry the full remedy.

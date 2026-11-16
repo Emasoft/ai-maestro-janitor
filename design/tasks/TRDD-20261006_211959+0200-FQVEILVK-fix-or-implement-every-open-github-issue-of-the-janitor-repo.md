@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-11-10T15:58:13+0100
+updated: 2026-11-16T04:59:48+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -55,6 +55,16 @@ SUPERSEDED NEXT ACTION: #332's drift classes, card by card (idle cards, reminder
 2026-10-07 12:50: accepted worker breach, diff read: plain Edit on a test function body in scripts/memgrep/src/mem_split.rs (dbf2f0c9) after one fastedit refusal, without trying the full-function replacement. Its subject wrongly cites 20JQQVDQ (noted on that card). Release still needs: memory-system.md duplicate See also and MEMORY.md title fix, a check whether publish.py compares the CLAUDE.md memory index, the full gate on the newest main, publish and install.
 2026-10-07 — 3.8.10 published (release commit e7ded327, three bump commits, attempts 1 and 2 refused by load-sensitive tests fixed in 45dd32f1 and 94ff7c0b) and installed at user scope; all five workflows green; CI log confirms the real GitHub 404 test ran (not in the skip list). Release notes added on GitHub. Validator integrity check skipped again.
 2026-10-08 B14 note: YXY992BN's superseded-by value 'agentlenspro-investigate-burn' is a SKILL name, not a TRDD id — no replacement card was minted because the replacement is the external agentlenspro investigate_burn tool, verified live 2026-07-11. The DANGLING-REF error is a false positive; unfixable in place (archived cards are immutable), accepted as known-noise.
+Issue to card map, 2026-11-16: - #358 atom-after-footer: F8EIVTSG (umbrella, todo), QAF3N673 (increment 3, todo)
+- #328 wikimem index in CLAUDE.md: Q9MU9CWK; owner chose option (b) root topics only, shipped in 52a90b81
+- #356 stale template handoff on clear: C9CO0I7L (todo)
+- #355, #357, #343 clear chain: live checks need a probe session after install (plan: /janitor-compact-context in a probe)
+- #354 environment dumps reach disk: ZANQ1QW0 (backburner)
+- #353 weekly drift 2026-11-09: 6ESS2MGE (testing); read its 20 KB report
+- #348 item 5 reports/ ignore line: M5BRPISQ (backburner), waits on CPV#275
+- #342 heartbeat noise: 1J9B7MWO (todo)
+- #338 P3: 0TSG80CL
+- #332 weekly drift 2026-10-05: closeable class shipped in 3.8.2 (TRDD-8BNV75TV)
 
 ## Approval log
 
