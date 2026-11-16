@@ -45,7 +45,7 @@ CheckResult = tuple[str, str, str, str]  # (name, status, detail, fix)
 _DETECTORS = (
     "pr-reconciler", "worktree-janitor", "trdd-drift", "trdd-reminder",
     "task-pr-mismatch", "stale-task", "dirty-tree", "subagent-report",
-    "version-update", "trashcan-purge", "remote-credentials", "stale-stash",
+    "version-update", "trashcan-purge", "remote-credentials", "env-secret-on-disk", "stale-stash",
     "nested-git-safety", "tracked-ignored", "plugin-updates",
     "mcp-config-drift", "settings-scope-drift", "subagent-scope-drift",
     "claude-md-scope-drift", "cross-scope-reference-drift",

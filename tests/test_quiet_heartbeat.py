@@ -189,7 +189,7 @@ def test_no_security_detector_is_on_the_advisory_list():
     """A standing guard on the LIST itself, not on the filter: the whole design rests on
     security-class detectors never appearing here, and a list is edited by people."""
     security = {
-        "workflow-security", "branch-protection", "remote-credentials", "memory-scope-leak",
+        "workflow-security", "branch-protection", "remote-credentials", "env-secret-on-disk", "memory-scope-leak",
         "supply-chain-fingerprints", "historical-cache-scan", "typosquat-watcher",
         "mcp-rugpull", "repo-trust-score", "binary-magic-scanner", "provenance-audit",
         "janitor-self-integrity", "agent-context-integrity", "ai-context-poisoning",

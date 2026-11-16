@@ -28,6 +28,7 @@ It does NOT use state.is_self_scan_target(): that guard exists because pattern s
 fixtures, and an exact-value matcher has no fixtures to match. Skipping the janitor's own repo would blind the
 sweep exactly where agents write the most scratch.
 
+It also runs hourly from the heartbeat (dispatch.py roster, env_secret_on_disk_interval), and a manual run is still useful.
 ON DEMAND, right after a slip: run this file directly (`uv run <plugin>/scripts/detectors/env-secret-on-disk.py`). For a full pass
 from the newest file, delete `.janitor/state/env-secret-on-disk.cursor.json` first (regenerated state); each run
 still reads at most one budget of files, so repeat it until the log line says 0 left for the next pass.

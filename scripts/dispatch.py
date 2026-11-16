@@ -143,6 +143,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("runaway-file-growth", 3600, "CLAUDE_PLUGIN_OPTION_RUNAWAY_FILE_GROWTH_INTERVAL"),
     # v0.4.0 additions:
     ("remote-credentials", 3600, "CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL"),
+    # env-secret-on-disk (janitor issue #354): the live secret values of THIS session's environment, searched as
+    # exact bytes in the folders agents write to. Hourly; each fire is bounded: a soft budget (256 MiB, 60 s; trash 64 MiB, 15 s)
+    # and a hard read bound (75 s main, 25 s trash, checked between chunks, so a 256 MiB file cannot run a pass past the 120 s
+    # detector timeout). One pass at a time per project; a covered modification-time range is read newest first, so a backlog
+    # drains over several fires.
+    ("env-secret-on-disk", 3600, "CLAUDE_PLUGIN_OPTION_ENV_SECRET_ON_DISK_INTERVAL"),
     ("stale-stash", 86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
     # The two GitHub notification chores. ALWAYS ON since the 2026-08-02 owner directive
     # ("must be a chore executed always by the janitor. no need to enable it") — the
@@ -621,6 +627,8 @@ _PRESSURE_HEAVY_DETECTORS = frozenset({
     "worktree-janitor",
     "memory-maintenance",
     "memgrep-index-health",
+    # Lists every file of the agent-written folders (about a million on a large host) and reads up to 256 MiB; a deferred detector stays due (see the block comment above).
+    "env-secret-on-disk",
 })
 
 

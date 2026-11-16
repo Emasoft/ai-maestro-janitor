@@ -44,7 +44,7 @@ _SECURITY_DETECTORS = (
     "supply-chain-fingerprints", "typosquat-watcher", "provenance-audit",
     "repo-trust-score", "package-manager-policy", "workflow-security",
     "historical-cache-scan", "binary-magic-scanner", "ai-context-poisoning",
-    "remote-credentials", "mcp-rugpull",
+    "remote-credentials", "env-secret-on-disk", "mcp-rugpull",
 )
 
 

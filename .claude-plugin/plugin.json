@@ -395,6 +395,13 @@
       "default": 3600,
       "sensitive": false
     },
+    "env_secret_on_disk_interval": {
+      "title": "Env Secret On Disk Detector Cadence (seconds)",
+      "description": "Minimum seconds between env-secret-on-disk sweeps. Default: 3600 (1 h). Each sweep reads at most 256 MiB or 60 s of the folders agents write to (plus 64 MiB or 15 s of .trashcan), hard-stopped at 75 s and 25 s: first the files changed since the previous sweep, then the older files newest first, so a backlog drains over several sweeps. One sweep at a time per project. Report-only: it never rewrites a file.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
     "nested_git_safety_interval": {
       "title": "Nested Git Safety Detector Cadence (seconds)",
       "description": "Minimum seconds between nested-.git scans. Default: 3600 (1 h). The check is depth-limited (mindepth 2 maxdepth 4) and prunes node_modules / .trashcan, so it stays well under the 10s detector budget on typical projects.",
