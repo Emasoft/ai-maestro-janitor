@@ -213,11 +213,15 @@ def test_an_old_state_file_without_a_trash_key_keeps_its_flagged_list_and_drops_
     value = secrets.token_urlsafe(36)
     project = _project(tmp_path)
     gone = str(project / "elsewhere" / "gone.txt")  # in no sweep root and not on disk
+    # TRDD-ZFD3KBM3 rule change: a flagged path that is gone with no trash copy is now withdrawn (nothing holds the value any more), so this test, which is about the
+    # flagged list surviving the state-file upgrade, gives the path a copy in the trash (as safe-delete would have left it): the finding then stays, which is the
+    # original intent. The withdrawal of a gone path is covered in test_env_secret_on_disk_detector.py.
+    _batch(project / ".trashcan", OLD, {"elsewhere/gone.txt": b"nothing\n"})
     _write_state(project, {"cursor": [9000000000.0, ""], "retries": {}, "flagged": [gone]})
     assert _run(tmp_path, project, value).returncode == 0
     written = _state(project)
     assert "cursor" not in written and max(written["covered"][0][0], written["covered"][1][0]) < 9000000000.0  # a migrated cursor would put 9e9 in covered
-    assert written["flagged"] == [gone]
+    assert written["flagged"] == {gone: ["unknown"]}  # TRDD-ZFD3KBM3: the old list loads as unknown-secret entries and is written in the object shape
     assert "trash" in written
 
 

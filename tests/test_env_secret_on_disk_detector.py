@@ -83,10 +83,10 @@ def test_a_cleaned_file_withdraws_its_finding(tmp_path: Path) -> None:
     target.write_text(f"leak {value}\n")
     assert "CRED-002" in _run(tmp_path, project, value).stdout
     cursor = project / ".janitor" / "state" / "env-secret-on-disk.cursor.json"
-    assert json.loads(cursor.read_text())["flagged"] == [str(target)]
+    assert list(json.loads(cursor.read_text())["flagged"]) == [str(target)]  # TRDD-ZFD3KBM3: an object path -> fingerprints, no longer a list of paths
     target.write_text("cleaned\n")
     _run(tmp_path, project, value)
-    assert json.loads(cursor.read_text())["flagged"] == []
+    assert json.loads(cursor.read_text())["flagged"] == {}
     proposal = next((project / "design" / "proposals").glob("*"))
     assert "column: refused" in proposal.read_text()
 
@@ -296,7 +296,9 @@ def test_an_old_state_file_keeps_flagged_and_drops_the_cursor(tmp_path: Path) ->
     state = _cursor(project)
     assert "cursor" not in state
     assert len(state["covered"]) == 2 and all(len(edge) == 2 for edge in state["covered"])
-    assert state["flagged"] == []  # the flagged file was read again and is clean now: its finding is withdrawn
+    # TRDD-ZFD3KBM3 rule change (was: withdrawn, == []): an old bare-path entry cannot name the secret behind its finding, so a clean read by a pass that
+    # cannot know which secret to look for proves nothing. The entry is kept, rewritten in the object shape with the sentinel "unknown" as its secret.
+    assert state["flagged"] == {str(target): ["unknown"]}
 
 
 # TRDD-XNZFKX0L: a finding is withdrawn only for a file that was READ and scanned this pass. Each test below flags a file with a first
@@ -322,7 +324,7 @@ def _flag_then_force_a_reread(tmp_path: Path, project: Path, value: str, retries
     target.write_text(body if body is not None else f"leak {value}\n")
     assert "CRED-002" in _run(tmp_path, project, value).stdout
     state = _cursor(project)
-    assert state["flagged"] == [str(target)]
+    assert list(state["flagged"]) == [str(target)]  # TRDD-ZFD3KBM3: "flagged" is an object path -> fingerprints now, no longer a list of paths
     os.utime(target, (100.0, 100.0))
     state["covered"] = [[1.0, ""], [1.0, ""]]
     if retries is not None:
@@ -413,10 +415,10 @@ _CUT_RUNNER = (
 )
 
 
-def _cut_pass(tmp_path: Path, project: Path, value: str) -> subprocess.CompletedProcess[str]:
+def _cut_pass(tmp_path: Path, project: Path, value: str, also: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """One detector pass through _CUT_RUNNER. The clock steps 1.0 per read: the deadline of 40 passes inside the 200 chunks of the flagged file (the listing,
     a few reads, comes first), after its first chunk."""
-    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), _NAME: value}
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), _NAME: value, **(also or {})}
     argv = [sys.executable, "-c", _CUT_RUNNER, str(_DETECTOR), str(_DETECTOR.parent.parent / "lib"), "64", "40"]
     done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
     assert done.returncode == 0, done.stderr
@@ -543,3 +545,193 @@ def test_a_second_pass_while_one_holds_the_lock_changes_nothing(tmp_path: Path) 
     assert cursor.read_bytes() == before
     log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
     assert "another pass of this project holds the lock: this pass was skipped" in log
+
+
+# TRDD-ZFD3KBM3: a finding is withdrawn only by a pass that held the same secret as the finding (the matcher is built from the environment of the process
+# running the pass, so a pass of another session, or one run after a rotation, reads the file clean without having looked for the secret). "flagged" maps each
+# path to the sorted fingerprints of its secrets (the sentinel "unknown" for a finding of an old state file, whose secret is not known). The second pass is forced to read the file the
+# same way as _flag_then_force_a_reread: mtime 100.0 lies above hi of the saved covered range [[1.0, ""], [1.0, ""]], so the file is in the fresh tier.
+_NAME_B = "FAKE_API_TOKEN_0001"
+
+
+def _run_env(tmp_path: Path, project: Path, held: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """One detector pass whose environment holds exactly the secrets of `held` (name -> value) and nothing else that could be a needle."""
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), **held}
+    done = subprocess.run([sys.executable, str(_DETECTOR), "--one-shot"], env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+def _fp(tmp_path: Path, value: str) -> str:
+    """The fingerprint the detector records for `value`: the salt is the one the first pass wrote to the global state directory."""
+    salt_file = next((tmp_path / "gstate").rglob("env-secret-fingerprint.salt"))
+    return env_secrets.fingerprint(value, bytes.fromhex(salt_file.read_text().strip()))
+
+
+def _force_reread(project: Path, target: Path, flagged: object = None) -> None:
+    """Make the next pass read `target` again (mtime 100.0 above hi of the saved range), optionally rewriting the saved "flagged" value (an old-shape list)."""
+    os.utime(target, (100.0, 100.0))
+    state = _cursor(project)
+    state["covered"] = [[1.0, ""], [1.0, ""]]
+    if flagged is not None:
+        state["flagged"] = flagged
+    (project / ".janitor" / "state" / "env-secret-on-disk.cursor.json").write_text(json.dumps(state))
+
+
+def _issue_refused(project: Path) -> bool:
+    """Whether the one CRED-002 proposal of the project was withdrawn (clear_issue marks it column: refused)."""
+    proposals = list((project / "design" / "proposals").glob("*"))
+    assert len(proposals) == 1
+    return "column: refused" in proposals[0].read_text()
+
+
+def test_a_finding_of_secret_a_stays_after_a_clean_pass_that_holds_only_secret_b(tmp_path: Path) -> None:
+    """The file is cleaned, but the second pass has only secret B in its environment: it read the file clean without looking for A, so the finding stays."""
+    a, b = secrets.token_urlsafe(36), secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    assert _cursor(project)["flagged"] == {str(target): [_fp(tmp_path, a)]}
+    target.write_text("cleaned\n")
+    _force_reread(project, target)
+    _run_env(tmp_path, project, {_NAME_B: b})
+    assert _cursor(project)["flagged"] == {str(target): [_fp(tmp_path, a)]}
+    assert not _issue_refused(project)
+
+
+def test_a_finding_of_secret_a_is_withdrawn_by_a_clean_pass_that_holds_a_and_b(tmp_path: Path) -> None:
+    """The same clean file read by a pass that holds A (and B) proves A is gone: the finding is withdrawn and the issue cleared."""
+    a, b = secrets.token_urlsafe(36), secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    target.write_text("cleaned\n")
+    _force_reread(project, target)
+    _run_env(tmp_path, project, {_NAME: a, _NAME_B: b})
+    assert _cursor(project)["flagged"] == {}
+    assert _issue_refused(project)
+
+
+def test_a_clean_pass_drops_only_the_fingerprints_of_the_secrets_it_holds(tmp_path: Path) -> None:
+    """A file flagged for A and B, cleaned, read by a pass that holds only A: the entry keeps B (that pass could not look for it) and the issue stays."""
+    a, b = secrets.token_urlsafe(36), secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a} and {b}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a, _NAME_B: b}).stdout
+    assert _cursor(project)["flagged"] == {str(target): sorted([_fp(tmp_path, a), _fp(tmp_path, b)])}
+    target.write_text("cleaned\n")
+    _force_reread(project, target)
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): [_fp(tmp_path, b)]}
+    assert not _issue_refused(project)
+
+
+def test_an_old_bare_path_entry_is_never_withdrawn_by_a_clean_read(tmp_path: Path) -> None:
+    """An old state file lists bare paths, which cannot name the secret behind a finding: each loads as the sentinel "unknown", a clean read keeps it even by a pass that holds a secret, and a hit adds its fingerprint beside it, so the unknown secret is not forgotten."""
+    a = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    target.write_text("cleaned\n")
+    _force_reread(project, target, flagged=[str(target)])
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): ["unknown"]}
+    assert not _issue_refused(project)
+    # The unknown secret is not forgotten when a hit adds a fingerprint: the file gets a hit for A, is cleaned again, and a pass that holds A reads it clean.
+    target.write_text(f"leak {a}\n")
+    _force_reread(project, target)
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): sorted(["unknown", _fp(tmp_path, a)])}
+    target.write_text("cleaned\n")
+    _force_reread(project, target)
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): ["unknown"]}
+    assert not _issue_refused(project)
+
+
+def test_a_flagged_file_deleted_with_no_trash_copy_is_withdrawn(tmp_path: Path) -> None:
+    """A flagged file that is gone (os.lstat says so, whatever the listing says) and has no copy in the trash holds no value any more: the finding is withdrawn."""
+    a = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    target.unlink()
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {}
+    assert _issue_refused(project)
+
+
+def test_a_flagged_file_moved_to_the_trash_keeps_its_finding_until_the_copy_is_gone(tmp_path: Path) -> None:
+    """safe-delete moves the file to .trashcan/<batch>/<relative path>, the value is still on disk and the trash tier reads an unsettled batch only later: the finding stays while a copy exists and closes when it is gone."""
+    a = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    (project / ".gitignore").write_text("reports_dev/\n.janitor/\n.trashcan/\n")  # the copy is then reached by the trash tier only, which skips an unsettled batch
+    target = project / "reports_dev" / "dump.txt"
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    batch = project / ".trashcan" / time.strftime("%Y%m%d_%H%M%S%z")
+    (batch / "reports_dev").mkdir(parents=True)
+    os.replace(target, batch / "reports_dev" / "dump.txt")
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): [_fp(tmp_path, a)]}
+    assert not _issue_refused(project)
+    shutil.rmtree(batch)
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {}
+    assert _issue_refused(project)
+
+
+def test_a_file_cut_by_the_hard_bound_gains_the_fingerprint_of_a_new_secret_and_keeps_the_recorded_one(tmp_path: Path) -> None:
+    """A flagged file the hard read bound cuts was not fully scanned: the hit for secret B before the cut is added, and the recorded fingerprint of A is kept (the unread rest may still hold A)."""
+    a, b = secrets.token_urlsafe(36), secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    target = project / "reports_dev" / "dump.txt"
+    # B first (inside the first 64-byte chunk, before the cut), then 200 chunks of padding, then A at the END: pass 1 holds only A and reads the whole file.
+    target.write_text(f"{b}\n" + "x" * (64 * 200) + f"\nleak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    _force_reread(project, target)
+    _cut_pass(tmp_path, project, a, also={_NAME_B: b})
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text().splitlines()
+    assert any("cut by the hard read bound, read again next pass" in line and str(target) in line for line in log)  # the file was cut: a precondition of this test
+    assert _cursor(project)["flagged"] == {str(target): sorted([_fp(tmp_path, a), _fp(tmp_path, b)])}
+
+
+def test_a_flagged_file_in_a_folder_named_with_leading_dots_is_inside_the_project_and_its_trash_copy_is_looked_up(tmp_path: Path) -> None:
+    """A project folder named "..cache" is inside the project (its relative path starts with two dots but is not "../"): the file moved to the trash keeps its finding."""
+    a = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    (project / ".gitignore").write_text("reports_dev/\n.janitor/\n.trashcan/\n")
+    target = project / "..cache" / "dump.txt"
+    target.parent.mkdir()
+    target.write_text(f"leak {a}\n")
+    assert "CRED-002" in _run_env(tmp_path, project, {_NAME: a}).stdout
+    assert list(_cursor(project)["flagged"]) == [str(target)]
+    batch = project / ".trashcan" / time.strftime("%Y%m%d_%H%M%S%z")
+    (batch / "..cache").mkdir(parents=True)
+    os.replace(target, batch / "..cache" / "dump.txt")
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {str(target): [_fp(tmp_path, a)]}
+    assert not _issue_refused(project)
+
+
+def test_a_flagged_path_outside_the_project_that_is_gone_is_withdrawn_without_a_trash_lookup(tmp_path: Path) -> None:
+    """A path outside the project can have no copy under the project's .trashcan: once it is gone its finding closes."""
+    a = secrets.token_urlsafe(36)
+    project = _project(tmp_path)
+    # without the outside-project branch the lookup would join "../outside/gone.txt" under the trash child "outside" and find this file, so the finding would wrongly stay
+    (project / ".trashcan" / "outside").mkdir(parents=True)
+    (project / ".trashcan" / "outside" / "gone.txt").write_text("x\n")
+    (project / "notes.txt").write_text("nothing\n")
+    assert _run_env(tmp_path, project, {_NAME: a}).returncode == 0
+    outside = tmp_path / "outside" / "gone.txt"  # never created
+    state = _cursor(project)
+    state["flagged"] = {str(outside): ["aaaaaaaaaaaa"]}
+    (project / ".janitor" / "state" / "env-secret-on-disk.cursor.json").write_text(json.dumps(state))
+    _run_env(tmp_path, project, {_NAME: a})
+    assert _cursor(project)["flagged"] == {}

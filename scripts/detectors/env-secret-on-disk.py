@@ -58,6 +58,7 @@ _SALT_FILE = "env-secret-fingerprint.salt"
 _SYNCED_MARKERS = ("/Library/Mobile Documents/", "/Dropbox", "/Google Drive", "/GoogleDrive", "/OneDrive", "/iCloud")
 _PATH_SHOWN = 60  # issue_catalog rejects an identifier field over 64 characters
 _GIT_RETRY_KEY = "git ls-files"  # the retries entry of a failing git: not a path, so no file can collide with it
+_UNKNOWN_SECRET = "unknown"  # stands for the secret behind a finding migrated from the old bare-path "flagged" list; never equal to a fingerprint (12 hex characters)
 
 
 def _load_salt() -> bytes:
@@ -129,8 +130,15 @@ def _display(project: Path, path: str) -> str:
     return shown if len(shown) <= _PATH_SHOWN else "…" + shown[-(_PATH_SHOWN - 1):]
 
 
+def _fingerprints(value: object) -> list[str]:
+    # A string would iterate as characters and load as a list of one-letter "fingerprints": a malformed state file must reach _read_cursor's except instead.
+    if not isinstance(value, list):
+        raise TypeError("fingerprints of a flagged path must be a list")
+    return sorted(str(fp) for fp in value)
+
+
 def _read_cursor(file: Path) -> dict:
-    fresh: dict = {"covered": None, "retries": {}, "flagged": [], "trash": {"positions": {}, "done": []}}
+    fresh: dict = {"covered": None, "retries": {}, "flagged": {}, "trash": {"positions": {}, "done": []}}
     if not file.exists():
         return fresh
     try:
@@ -143,7 +151,15 @@ def _read_cursor(file: Path) -> dict:
         data["covered"] = None if covered is None else ((float(covered[0][0]), str(covered[0][1])), (float(covered[1][0]), str(covered[1][1])))
         data.pop("cursor", None)
         data["retries"] = {str(k): int(v) for k, v in data["retries"].items()}
-        data["flagged"] = [str(p) for p in data["flagged"]]
+        # TRDD-ZFD3KBM3: "flagged" is an object path -> sorted fingerprints. The OLD shape is a list of bare paths, which cannot name the secret behind a finding:
+        # each loads as [_UNKNOWN_SECRET]. The sentinel is a normal list element that is never in a live fingerprint set (a fingerprint is 12 hex characters, so
+        # it cannot collide), so the per-path rule "keep a recorded fingerprint this pass does not hold" keeps it for ever: a clean read, even by a pass that holds
+        # a secret, never withdraws the entry, hits add their fingerprints beside it (the unknown secret is not forgotten), and it closes only when the file is gone.
+        raw_flagged = data["flagged"]
+        if isinstance(raw_flagged, dict):
+            data["flagged"] = {str(p): _fingerprints(fps) for p, fps in raw_flagged.items()}
+        else:
+            data["flagged"] = {str(p): [_UNKNOWN_SECRET] for p in raw_flagged}
         # An ABSENT "trash" key (a state file from before the trash tier) starts the trash state empty; falling back to fresh
         # would lose "flagged", so open CRED-002 issues would never be withdrawn, and restart the covered range and the retries.
         trash = data.get("trash", fresh["trash"])
@@ -155,6 +171,35 @@ def _read_cursor(file: Path) -> dict:
         state.log_line(_NAME, f"state file unreadable ({type(exc).__name__}): starting a fresh pass from the newest file")
         return fresh
     return data
+
+
+def _file_gone_for_good(project: Path, path: str) -> bool:
+    """True when a flagged file no longer exists AND no copy of it sits in the trash, so its CRED-002 finding can close.
+
+    TRDD-ZFD3KBM3. The absence is checked directly with os.lstat, not inferred from the listing (a listing can be cut, or skip a file). Only
+    FileNotFoundError counts: any other OSError (permission, a parent that became a file) says nothing about the file, so the finding stays.
+    safe-delete MOVES a file to <project>/.trashcan/<batch>/<path relative to the project>: the secret is still on disk there, and the trash tier
+    reads a batch only once it is settled, so closing the finding at the move would leave a value on disk with no finding. While a copy exists
+    under any batch folder the original finding stays (the trash tier flags the copy by itself when it reads it); it closes when every copy is
+    gone, for example purged by trashcan-purge. A path outside the project can have no copy there, so it gets no lookup."""
+    try:
+        os.lstat(path)
+        return False
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    relative = os.path.relpath(path, project)
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):  # not startswith(".."): a project folder named "..cache" is inside the project
+        return True
+    trash = project / ".trashcan"
+    try:
+        batches = os.listdir(trash)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False  # the trash cannot be listed: a copy may exist, so keep the finding
+    return not any(os.path.lexists(trash / batch / relative) for batch in batches)
 
 
 def main() -> int:
@@ -220,11 +265,12 @@ def _pass(sdir: Path) -> int:
     if git_exit is not None:
         retries[_GIT_RETRY_KEY] = git_retries + 1
     keys = {path: (mtime, path) for mtime, path in [*report.processed, *report.failed]}
-    # TRDD-XNZFKX0L: the paths whose content was actually scanned for the live secret values this pass, in both tiers. A finding is withdrawn
-    # only for such a path. `keys` holds the failed reads (report.failed) as well as a file over MAX_FILE_BYTES and a file given up on; the trash
+    # TRDD-XNZFKX0L: the paths whose content was actually scanned for the live secret values this pass, in both tiers. A fingerprint of a finding is
+    # dropped only for such a path. `keys` holds the failed reads (report.failed) as well as a file over MAX_FILE_BYTES and a file given up on; the trash
     # `processed_by_batch` holds a file over MAX_FILE_BYTES and a file given up on (a plain failed trash read goes to `failed_by_batch`). None of
     # those was rescanned, and a pass with no secret in the environment scans nothing: withdrawing for any of
-    # those would clear a CRED-002 issue about a file that was never checked.
+    # those would clear a CRED-002 issue about a file that was never checked. TRDD-ZFD3KBM3: being in read_now is necessary, not sufficient: the pass must
+    # also hold the same secret as the finding (see the withdrawal loop below), because the secret set is the environment of the process running the pass.
     read_now = set(report.read) | set(trash.read)
 
     def hold(path: str) -> None:
@@ -303,12 +349,30 @@ def _pass(sdir: Path) -> int:
         )
         if out is not None:
             print(out)
-    flagged = set(saved["flagged"]) | set(by_path)
-    for path in sorted(flagged - set(by_path)):
-        # Only a path read and scanned this pass is "clean now"; a failed, too-big, given-up or unscanned file keeps its finding (TRDD-XNZFKX0L).
-        if path in read_now:  # rescanned and clean now: withdraw the finding
+    # TRDD-ZFD3KBM3: "flagged" maps each path to the sorted fingerprints of the secrets found in it (a bare-path entry of the old state file carries the
+    # sentinel _UNKNOWN_SECRET instead, see _read_cursor). `read_now` only says the file was scanned for the secrets of THIS pass, and that set is the environment
+    # of the process running the pass: a pass of another session, or one run after the secret was rotated, scans without it and reads the file clean. So a
+    # recorded fingerprint is dropped only when this pass held that same secret (its fingerprint is in `live`), read the file fully and found no hit for it.
+    # A fingerprint this pass does not hold stays: it could not look for it (the sentinel is never in `live`, so it stays for ever by this same rule). A rotated
+    # secret never returns to a live set, so its finding closes only when the file is gone. A path NOT in read_now (failed, cut, too big, given up, unscanned)
+    # adds the fingerprints of its hits (a cut file has real partial hits) and drops nothing. A path is withdrawn when its fingerprint list is empty, or when the
+    # file is gone and no trash copy keeps the value on disk.
+    live = {env_secrets.fingerprint(value, salt) for value in matcher.secrets.values()} if matcher is not None else set()
+    found = {path: {hit.fingerprint for hit in hits} for path, hits in by_path.items()}
+    flagged: dict[str, list[str]] = {}
+    for path in sorted(set(saved["flagged"]) | set(by_path)):
+        if path not in by_path and _file_gone_for_good(project, path):
             issue_catalog.clear_issue("CRED-002", where=f"file:{_portable(project, path)}")
-            flagged.discard(path)
+            continue
+        new = found.get(path, set())
+        kept = set(saved["flagged"].get(path, []))
+        if path in read_now:
+            kept = {fp for fp in kept if fp not in live or fp in new}
+        kept |= new
+        if kept:
+            flagged[path] = sorted(kept)
+        else:
+            issue_catalog.clear_issue("CRED-002", where=f"file:{_portable(project, path)}")
 
     # The heartbeat stdout is read by the model: a folder of dump copies must not print one line each.
     for path, names in report.dump_shaped[: issue_catalog.MAX_RAISES_PER_FIRE]:
@@ -387,7 +451,7 @@ def _pass(sdir: Path) -> int:
     # ONE dict, ONE atomic write: the state file is rewritten whole by every pass, so a trash key written anywhere else
     # would be erased by the next write of this dict (and the covered range by the next write of the trash key).
     state.atomic_write(cursor_file, json.dumps({
-        "covered": None if new_covered is None else [list(new_covered[0]), list(new_covered[1])], "retries": retries, "flagged": sorted(flagged),
+        "covered": None if new_covered is None else [list(new_covered[0]), list(new_covered[1])], "retries": retries, "flagged": flagged,
         "trash": {"positions": {batch: list(position) for batch, position in new_positions.items()}, "done": sorted(new_done)},
     }))
     state.log_line(

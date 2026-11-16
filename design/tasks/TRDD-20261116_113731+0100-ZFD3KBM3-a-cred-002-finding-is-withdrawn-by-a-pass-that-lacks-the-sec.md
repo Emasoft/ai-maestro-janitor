@@ -4,7 +4,7 @@ title: A CRED-002 finding is withdrawn by a pass that lacks the secret behind it
 column: todo
 status: tasked
 created: 2026-11-16T11:37:31+0100
-updated: 2026-11-16T11:59:18+0100
+updated: 2026-11-16T13:11:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,10 @@ Evidence scope of TRDD-XNZFKX0L (that card is archived and frozen, so it is reco
 ## Approval log
 
 - 2026-11-16T11:37:31+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Decisions
+
+2026-11-16 implemented (main agent; brief reports_dev/zfd3kbm3/brief-v2.md, advisor-reviewed): "flagged" is an object, path to the sorted fingerprints of its secrets (Hit.fingerprint, the salted hash of the whole value; one salt per installation). A recorded fingerprint is dropped only when the path was fully scanned this pass (read_now), the pass held that same secret, and no hit for it came back. A fingerprint the pass does not hold is kept. A path not in read_now (failed, cut, too big, given up) only adds the fingerprints of its hits. The path is withdrawn when its list is empty.
+Legacy rule (supersedes the body's "withdrawn only by a pass that holds every secret"): a bare-path entry of the old list loads as the sentinel ["unknown"], which is never in a live set, so no read withdraws it; hits add beside it, so the unknown secret is not forgotten; it closes only when the file is gone. The live state on this host held 0 such entries (measured 2026-11-16).
+Vanished file (the related gap in the body): a flagged path whose os.lstat raises FileNotFoundError is withdrawn only when no copy exists under <project>/.trashcan/<child>/<path relative to the project>, the path safe-delete builds (scripts/safe_delete.py, lines 281 to 312). Any other OSError, or a trash folder that cannot be listed, keeps the finding. A path outside the project gets no lookup.
+Known limits: a rotated secret never returns to a live set, so its finding closes only when the file is gone; one malformed fingerprint list makes _read_cursor start from a fresh state, as any malformed field already did; an older janitor version run on demand would write "flagged" back as a bare-path list, which this version then loads as unknown entries.

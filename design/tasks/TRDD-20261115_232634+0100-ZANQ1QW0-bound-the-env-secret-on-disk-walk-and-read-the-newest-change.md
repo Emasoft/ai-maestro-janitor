@@ -4,7 +4,7 @@ title: Bound the env-secret-on-disk walk and read the newest change first, then 
 column: dev
 status: tasked
 created: 2026-11-15T23:26:34+0100
-updated: 2026-11-16T12:12:51+0100
+updated: 2026-11-16T13:11:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
