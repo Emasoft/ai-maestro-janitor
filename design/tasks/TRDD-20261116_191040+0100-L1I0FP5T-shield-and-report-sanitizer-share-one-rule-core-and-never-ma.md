@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-16T19:58:28+0100
+updated: 2026-11-16T20:16:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -54,3 +54,4 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - [ ] report-sanitizer rewrites no path except the home prefix, with tests
 - [ ] the secret gaps and the card rule changes are in the shield core, each with a KNOWN-MISSES entry, and the 800-test floor holds
 - [ ] report-sanitizer is re-pinned to the new core and both tools give byte-identical output on one shared fixture set covering all 54 types
+- [ ] the path-floor CPV check is rerun on the pinned CPV version before the report-sanitizer path masks are removed (the 2026-11-16 run read the cached CPV 5.23.0 and needed PLUGIN_SKIP_GITHUB_INTEGRITY exported)
