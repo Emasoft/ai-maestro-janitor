@@ -4,7 +4,7 @@ title: A CRED-002 finding is withdrawn by a pass that lacks the secret behind it
 column: todo
 status: tasked
 created: 2026-11-16T11:37:31+0100
-updated: 2026-11-16T11:47:52+0100
+updated: 2026-11-16T11:59:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,6 +26,8 @@ The env-secret-on-disk detector keeps state["flagged"] as a list of paths only. 
 Verify first: read env_secrets.load_matcher (or whatever builds the Matcher) and the detector main() to confirm which environment a pass reads, and whether two sessions on one project share the state file. If the gap is real, keep the secret name or its salted fingerprint with each flagged path, and withdraw a finding only when that same secret was in this pass set. That is a state-shape change: an old flagged list of bare paths must keep working (treat a bare path as a finding of unknown secret, withdrawn only by a pass that holds every secret). Tests: a finding made with secret A stays flagged after a clean pass that holds only secret B.
 
 Related gap, older than TRDD-XNZFKX0L and kept by it: a flagged file that is deleted (not moved to .trashcan) is never read again, so its finding is never withdrawn and the CRED-002 issue stays open. Decide in the same change whether a flagged path that no longer exists withdraws its finding (a file moved into .trashcan is read there under its new path and flagged on its own).
+
+Evidence scope of TRDD-XNZFKX0L (that card is archived and frozen, so it is recorded here): NOTE by main-agent@ai-maestro-janitor, scope of acceptance box 1: in the trash tier only the over-the-limit case has its own test (test_a_flagged_trash_file_over_the_read_limit_is_not_withdrawn); a failed or given-up trash read keeps its finding by construction (both tiers share _read_one, and withdrawal reads only read_now). The 5-failed mutation proof ran before the given-up test gained its retries assertion; the give-up-branch mutation ran on the final test file.
 
 ## Approval log
 
