@@ -58,6 +58,7 @@ import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 import suppression  # type: ignore[import-not-found]  # noqa: E402
+import trdd_common  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "agent-context-integrity"
 _CODE = "AICTX-003"
@@ -766,4 +767,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` escapes raise_issue/clear_issue/reconcile as a traceback; one line + exit 1 instead.
+    sys.exit(trdd_common.exit_on_git_root_error(main, "agent-context-integrity"))

@@ -55,6 +55,7 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
+import trdd_common  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "historical-cache-scan"
 
@@ -354,4 +355,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` escapes raise_issue/clear_issue/reconcile as a traceback; one line + exit 1 instead.
+    sys.exit(trdd_common.exit_on_git_root_error(main, "historical-cache-scan"))

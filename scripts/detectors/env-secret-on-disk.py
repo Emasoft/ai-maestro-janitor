@@ -52,6 +52,7 @@ import env_secrets  # noqa: E402
 import global_state  # noqa: E402
 import issue_catalog  # noqa: E402
 import state  # noqa: E402
+import trdd_common  # noqa: E402
 
 _NAME = "env-secret-on-disk"
 _SALT_FILE = "env-secret-fingerprint.salt"
@@ -473,4 +474,5 @@ def _pass(sdir: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` escapes raise_issue/clear_issue/reconcile as a traceback; one line + exit 1 instead.
+    sys.exit(trdd_common.exit_on_git_root_error(main, "env-secret-on-disk"))

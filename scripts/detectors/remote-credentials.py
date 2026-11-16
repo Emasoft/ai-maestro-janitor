@@ -33,6 +33,7 @@ import dedupe  # noqa: E402
 import issue_catalog  # noqa: E402
 import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
+import trdd_common  # noqa: E402
 
 # Pattern A — explicit basic-auth: `scheme://user:secret@host/...` with a
 # non-empty password component after the `:`. Matches the historical
@@ -185,4 +186,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # TRDD-7KPG2PCO: a failing `git worktree list` escapes raise_issue/clear_issue/reconcile as a traceback; one line + exit 1 instead.
+    sys.exit(trdd_common.exit_on_git_root_error(main, "remote-credentials"))
