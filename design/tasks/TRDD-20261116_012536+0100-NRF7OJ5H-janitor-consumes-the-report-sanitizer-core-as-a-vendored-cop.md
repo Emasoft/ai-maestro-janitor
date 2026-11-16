@@ -4,7 +4,7 @@ title: Janitor consumes the report-sanitizer core as a vendored copy
 column: todo
 status: tasked
 created: 2026-11-16T01:25:36+0100
-updated: 2026-11-16T07:25:20+0100
+updated: 2026-11-16T08:35:11+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -24,6 +24,7 @@ approval-datetime: 2026-11-16T01:25:36+0100
 ## STATE — 2026-11-16
 - NEXT ACTION: Scope 2 (the CI pin bump) waits on the owner: report-sanitizer main is 16 commits ahead of its origin (git rev-list --count origin/main..main, 2026-11-16 07:23) and pushing it is the owner's call. The current pin 16c9a12 still installs the standalone single-file tool, and the last CI run on main (e38fde00, release 3.9.4) passed with it; the commits after e38fde00 have not run in CI yet. Scope 3 and 4 are not started. report-sanitizer's merge (its card ZADXHV6W) is closed and its core/ is pinned to janitor 9dcaa0a3 (its commit fb4320d).
 - 2026-11-16 (main agent): report-sanitizer feat/shield-core (TRDD-ZADXHV6W there) is merged into its main; the tool now spawns bun for every redaction. Janitor consequences: (1) tests/test_redact_staged_reports.py needed `bun` in its real_subprocess markers, or the sandbox guard (tests/sandbox_guard.py:703) blocks the spawn and 2 of 5 tests fail; added in the same commit as this line. (2) The CI step "Install sanitize-reports (pinned)" (ci.yml, SANITIZER_SHA 16c9a12) fetches ONE raw file; a pin bump past the merge must fetch the whole tree (core/, shield_bridge.ts) and install bun, or every real run exits 4. (3) Done: the shield hides dckr_pat_/dckr_oat_ tokens, Maven <password>/<passphrase> literals and npmrc :_authToken literals since 9dcaa0a3, and report-sanitizer dropped its Python copies of those three rules in its fb4320d.
+- 2026-11-16 scope 3 re-scoped (main agent, checked this day): (1) it waits behind scope 2, because the report-sanitizer --stdin filter mode is commit 70217f5, which is not on report-sanitizer origin/main (git merge-base --is-ancestor 70217f5 origin/main exits 1), and janitor CI installs pin 16c9a12, so any janitor code calling --stdin would pass locally and fail in CI; (2) _SECRET_SHAPE_RE in scripts/detectors/memory-scope-leak.py is not a redactor but a per-token test inside two conditions (lines 362 and 373), so it leaves scope 3; (3) _masked_stderr_tail in scripts/daemon.py also logs the rotator tick's stderr (line 954), so changing it is under the rotator freeze, and its other caller is the workload retry log (line 611). Scope 3 is now only jev_shadow_log._redact_text, and the preferred route is the one scope 4 names: generate the Python patterns from the core instead of spawning the CLI, which would add bun and an undeclared tool as runtime needs of the published plugin.
 ## Scope
 1. hooks/secret-shield/{patterns.ts,rules/} become a vendored copy of report-sanitizer core/, pinned by hash, with a test.
 2. CI install: .github/workflows/ci.yml:108-123 fetches sanitize_reports.py as one raw file pinned by SHA; after the swap the tool needs its core/ folder and bun, so CI installs bun and checks out the repo at a pinned commit.
