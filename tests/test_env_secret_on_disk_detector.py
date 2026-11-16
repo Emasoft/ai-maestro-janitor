@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -237,7 +238,10 @@ def test_a_cut_listing_keeps_the_covered_range_retries_and_findings_and_says_so_
         "sys.path.insert(0, sys.argv[2])\n"
         "import env_secrets\n"
         "original = env_secrets.sweep\n"
-        "env_secrets.sweep = lambda *a, **k: original(*a, **{**k, \"listing_budget_s\": -1.0})\n"
+        # TRDD-ZANQ1QW0: a clock moving 12.3 s per read makes the cut elapsed exactly 12.3, so the pass line's listing figure is told from listing_s (0.0 on a cut).
+        "import itertools\n"
+        "ticks = itertools.count(1)\n"
+        "env_secrets.sweep = lambda *a, **k: original(*a, **{**k, \"listing_budget_s\": -1.0, \"clock\": lambda: next(ticks) * 12.3})\n"
         "detector = sys.argv[1]\n"
         "sys.argv = [detector, \"--one-shot\"]\n"
         "runpy.run_path(detector, run_name=\"__main__\")\n"
@@ -266,6 +270,7 @@ def test_a_cut_listing_keeps_the_covered_range_retries_and_findings_and_says_so_
     assert "the covered range did not move" in first.stdout
     log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
     assert "listing cut after" in log and "covered range kept" in log
+    assert "listing cut after 12 s" in log and "; seconds: listing 12.3, fresh 0.0, backlog 0.0, trash " in log  # the cut elapsed, not listing_s (0.0 on a cut)
     second = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, check=False)
     assert second.returncode == 0, second.stderr
     if time.strftime("%Y-%m-%d") == day:
@@ -397,3 +402,45 @@ def test_a_pass_with_no_secret_in_the_environment_withdraws_nothing(tmp_path: Pa
     os.utime(target, (100.0, 100.0))  # the rewrite moved the mtime: put it back below the live edge, above hi
     _second_run(tmp_path, project, None)
     assert str(target) in _cursor(project)["flagged"]
+
+
+def test_the_pass_line_reports_the_seconds_of_each_phase(tmp_path: Path) -> None:
+    """The detector log line that carries the pass segment ends with the per-phase seconds and a total, in the expected format (TRDD-ZANQ1QW0)."""
+    project = _project(tmp_path)
+    (project / "notes.txt").write_text("nothing to find\n")
+    result = _run(tmp_path, project, secrets.token_urlsafe(36))
+    assert result.returncode == 0, result.stderr
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
+    lines = [line for line in log.splitlines() if "pass: " in line]
+    assert len(lines) == 1 and "; seconds: listing " in lines[0] and "total " in lines[0]
+    # One decimal of a real clock: a fast pass prints 0.0, so only the format is asserted, not a positive value (the sweep tests pin the values).
+    assert re.search(r"; seconds: listing \d+\.\d, fresh \d+\.\d, backlog \d+\.\d, trash \d+\.\d, total \d+\.\d$", lines[0])
+
+
+def test_the_pass_line_prints_the_sweep_phase_seconds_when_the_listing_was_not_cut(tmp_path: Path) -> None:
+    """On a complete listing the pass line prints listing_s, fresh_s and backlog_s of the sweep report, not the cut elapsed (TRDD-ZANQ1QW0)."""
+    runner = (
+        "import runpy, sys\n"
+        "sys.path.insert(0, sys.argv[2])\n"
+        "import env_secrets\n"
+        "original = env_secrets.sweep\n"
+        "def patched(*a, **k):\n"
+        "    report = original(*a, **k)\n"
+        "    report.listing_s, report.fresh_s, report.backlog_s = 4.2, 1.1, 2.3\n"
+        "    return report\n"
+        "env_secrets.sweep = patched\n"
+        "detector = sys.argv[1]\n"
+        "sys.argv = [detector, \"--one-shot\"]\n"
+        "runpy.run_path(detector, run_name=\"__main__\")\n"
+    )
+    project = _project(tmp_path)
+    (project / "notes.txt").write_text("nothing to find\n")
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env = {
+        "PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"), _NAME: secrets.token_urlsafe(36),
+    }
+    result = subprocess.run([sys.executable, "-c", runner, str(_DETECTOR), str(_DETECTOR.parent.parent / "lib")], env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert result.returncode == 0, result.stderr
+    log = (project / ".janitor" / "logs" / "env-secret-on-disk.log").read_text()
+    assert "listing cut after" not in log and "; seconds: listing 4.2, fresh 1.1, backlog 2.3, trash " in log

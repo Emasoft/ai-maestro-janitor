@@ -157,6 +157,7 @@ def _read_cursor(file: Path) -> dict:
 
 
 def main() -> int:
+    main_started = time.monotonic()  # TRDD-ZANQ1QW0: the pass line reports per-phase seconds and the whole of main() as its total
     state.init_state()
     project = state.project_root()
     sdir = state.state_dir()
@@ -196,8 +197,9 @@ def main() -> int:
         retries[_GIT_RETRY_KEY] = git_retries + 1
     keys = {path: (mtime, path) for mtime, path in [*report.processed, *report.failed]}
     # TRDD-XNZFKX0L: the paths whose content was actually scanned for the live secret values this pass, in both tiers. A finding is withdrawn
-    # only for such a path. `keys` and the trash `processed_by_batch` also hold a file whose read FAILED, a file over MAX_FILE_BYTES and
-    # a file given up on (none of them rescanned), and a pass with no secret in the environment scans nothing: withdrawing for any of
+    # only for such a path. `keys` holds the failed reads (report.failed) as well as a file over MAX_FILE_BYTES and a file given up on; the trash
+    # `processed_by_batch` holds a file over MAX_FILE_BYTES and a file given up on (a plain failed trash read goes to `failed_by_batch`). None of
+    # those was rescanned, and a pass with no secret in the environment scans nothing: withdrawing for any of
     # those would clear a CRED-002 issue about a file that was never checked.
     read_now = set(report.read) | set(trash.read)
 
@@ -355,7 +357,11 @@ def main() -> int:
         f"pass: {report.scanned} file(s) read ({report.bytes_read // 1024} KiB), {report.left_for_next_pass} left for the next pass, "
         f"{len(report.hits)} hit(s) in {len(by_path)} file(s), {len(report.dump_shaped)} dump-shaped; "
         f"trash: {trash.scanned} file(s) read ({trash.bytes_read // 1024} KiB), {trash.left_for_next_pass} batch(es) left, {len(new_done)} done"
-        + (f"; listing cut after {int(report.listing_cut_after_s)} s, covered range kept" if report.listing_cut_after_s is not None else ""),
+        + (f"; listing cut after {int(report.listing_cut_after_s)} s, covered range kept" if report.listing_cut_after_s is not None else "")
+        # TRDD-ZANQ1QW0: where the seconds of this pass went (listing is the cut elapsed when the listing was cut, since listing_s stays 0.0 then;
+        # trash is its own sweep; total is the whole of main() up to here).
+        + f"; seconds: listing {report.listing_s if report.listing_cut_after_s is None else report.listing_cut_after_s:.1f}, fresh {report.fresh_s:.1f}, "
+        f"backlog {report.backlog_s:.1f}, trash {trash.elapsed_s:.1f}, total {time.monotonic() - main_started:.1f}",
     )
     state.rotate_log_if_big(_NAME)
     return 0

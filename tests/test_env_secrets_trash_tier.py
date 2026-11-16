@@ -291,3 +291,12 @@ def test_a_malformed_trash_state_falls_back_to_a_fresh_pass(tmp_path: Path) -> N
     written = _state(project)
     assert "cursor" not in written and max(written["covered"][0][0], written["covered"][1][0]) < 9000000000.0  # a migrated cursor would put 9e9 in covered
     assert gone not in written["flagged"]
+
+
+def test_the_trash_tier_reports_the_seconds_it_ran(tmp_path: Path) -> None:
+    """After reading one file on a clock that moves one second per call, elapsed_s is above 0 (TRDD-ZANQ1QW0)."""
+    trash = tmp_path / ".trashcan"
+    _batch(trash, OLD, {"f1": b"x"})
+    ticks = iter(range(1000))
+    report = env_secrets.sweep_trash(str(trash), None, SALT, {}, frozenset(), int(time.time()), clock=lambda: float(next(ticks)))
+    assert report.scanned == 1 and report.elapsed_s > 0.0

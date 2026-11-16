@@ -293,9 +293,10 @@ def test_the_time_budget_includes_the_listing(tmp_path: Path) -> None:
     _three_files_and_a_subfolder(tmp_path)
     for name in ("a.txt", "b.txt", "c.txt"):
         os.utime(tmp_path / name, (100.0, 100.0))  # far below the live edge: the backlog tier, whose limit is the whole time budget
-    # clock reads: start 0, two folders 1 and 2 (listing), the start of the reads 3, then 4 before the second file and 5 before the third.
-    # Started after the listing (the old order) the same clock reads 1, 2 and 3 in the read phase and all three files are read.
-    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(1.0), time_budget_s=4.5)
+    # clock reads: start 0, two folders 1 and 2 (listing), the start of the reads 3, the end of the fresh tier 4 (TRDD-ZANQ1QW0: the phase timing
+    # reads the clock between the tiers), then 5 before the second file and 6 before the third.
+    # Started after the listing (the old order) the elapsed is 3 before the second file and 4 before the third, both inside 5.5: all three files are read.
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, clock=_stepping_clock(1.0), time_budget_s=5.5)
     assert report.listing_cut_after_s is None
     assert report.scanned == 2 and report.left_for_next_pass == 1
 
@@ -372,3 +373,21 @@ def test_raise_order_follows_each_edge() -> None:
     keys = {path: (mtime, path) for path, mtime in (("p700", 700.0), ("p650", 650.0), ("p400", 400.0), ("p300", 300.0))}
     ordered = env_secrets.raise_order(["p300", "p400", "p650", "p700", "trash/a"], keys, (600.0, ""))
     assert ordered == ["p650", "p700", "p400", "p300", "trash/a"]
+
+
+def test_each_phase_of_a_pass_reports_its_seconds(tmp_path: Path) -> None:
+    """A pass over a fresh file and a backlog file reports listing_s, fresh_s and backlog_s, all above 0 on a stepping clock (TRDD-ZANQ1QW0)."""
+    _file_at(tmp_path, "p300.txt", 300.0)
+    _file_at(tmp_path, "p50.txt", 50.0)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=((100.0, ""), (200.0, "")), wall=lambda: 1000.0, clock=_stepping_clock(1.0))
+    assert len(report.processed) == 2 and report.listing_cut_after_s is None
+    # clock reads: start 0, the one folder 1, the start of the reads 2, the end of the fresh tier 3, the end of the backlog tier 4.
+    assert (report.listing_s, report.fresh_s, report.backlog_s) == (2.0, 1.0, 1.0)
+
+
+def test_a_cut_listing_stores_its_seconds_once_and_reads_nothing(tmp_path: Path) -> None:
+    """A cut listing keeps its elapsed in listing_cut_after_s and leaves listing_s, fresh_s and backlog_s at 0.0, so the seconds are stored once (TRDD-ZANQ1QW0)."""
+    _file_at(tmp_path, "p300.txt", 300.0)
+    report = env_secrets.sweep([str(tmp_path)], None, SALT, covered=((100.0, ""), (200.0, "")), wall=lambda: 1000.0, clock=_stepping_clock(1.0), listing_budget_s=0)
+    assert report.listing_cut_after_s == 1.0 and report.listing_s == 0.0
+    assert report.fresh_s == 0.0 and report.backlog_s == 0.0 and report.scanned == 0

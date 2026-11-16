@@ -255,6 +255,12 @@ class SweepReport:
     read: list[str] = field(default_factory=list)
     # Seconds the listing had run when LISTING_BUDGET_S stopped it; None = the listing completed. A cut pass read nothing.
     listing_cut_after_s: float | None = None
+    # TRDD-ZANQ1QW0: seconds each phase of this pass took, for the detector pass line, so a slow pass can be split into listing,
+    # fresh reads and backlog reads (the trash tier has its own TrashReport.elapsed_s). Measured with the injected clock; reporting only.
+    # listing_s is set only after a COMPLETE listing: a cut listing keeps its elapsed in listing_cut_after_s alone, and all three stay 0.0 (stored once).
+    listing_s: float = 0.0
+    fresh_s: float = 0.0
+    backlog_s: float = 0.0
     # The (lo, hi) range this pass read around, resolved from the argument (None became the live edge on both sides), and the
     # live edge itself: advance_covered needs both to move the edges.
     covered: Covered = ((0.0, ""), (0.0, ""))
@@ -282,6 +288,7 @@ class TrashReport(SweepReport):
     exhausted: list[str] = field(default_factory=list)  # walked to the end this pass with no read failing and every folder listed
     processed_by_batch: dict[str, list[TrashPos]] = field(default_factory=dict)  # in walk order
     failed_by_batch: dict[str, list[TrashPos]] = field(default_factory=dict)
+    elapsed_s: float = 0.0  # TRDD-ZANQ1QW0: seconds the trash tier ran, listing included, for the detector pass line; set on every return
 
 
 def _note_unreadable_folder(report: SweepReport, matcher: Matcher | None, folder: str) -> None:
@@ -401,6 +408,7 @@ def sweep(
     fresh = sorted((mtime, path, size) for path, (mtime, size) in changed.items() if (mtime, path) > hi)
     backlog = sorted(((mtime, path, size) for path, (mtime, size) in changed.items() if (mtime, path) < lo), reverse=True)
     reads_started = clock()
+    report.listing_s = reads_started - started  # TRDD-ZANQ1QW0: only a complete listing gets here; a cut one returned with listing_cut_after_s set
     left_s = max(0.0, time_budget_s - (reads_started - started))
     # Two tiers, each with its own share of the budgets: a flood of new files must not starve the backlog, nor the backlog
     # delay a file that has just changed. The fresh tier gets FRESH_SHARE of the bytes and of the time left after the listing.
@@ -420,7 +428,10 @@ def sweep(
             (report.processed if done else report.failed).append((mtime, path))
 
     read_tier(fresh, lambda size, bytes0: report.bytes_read - bytes0 + size > fresh_byte_cap or clock() > fresh_deadline)
+    fresh_ended = clock()
+    report.fresh_s = fresh_ended - reads_started  # TRDD-ZANQ1QW0: per-phase seconds for the pass line only; nothing branches on them
     read_tier(backlog, lambda size, bytes0: report.bytes_read + size > byte_budget or clock() - started > time_budget_s)
+    report.backlog_s = clock() - fresh_ended
     return report
 
 
@@ -506,6 +517,7 @@ def sweep_trash(
     report = TrashReport()
     started = clock()
     if not os.path.isdir(trash_root):
+        report.elapsed_s = clock() - started
         return report
     batches: list[tuple[int, str]] = []
     try:
@@ -519,6 +531,7 @@ def sweep_trash(
                     batches.append((epoch, entry.name))
     except OSError:
         _note_unreadable_folder(report, matcher, trash_root)
+        report.elapsed_s = clock() - started
         return report
     report.present.sort()
     batches.sort(reverse=True)  # newest first
@@ -579,6 +592,7 @@ def sweep_trash(
         # A batch whose folder could not be listed is not finished: it is walked again, and counted again, next pass.
         if batch not in report.failed_by_batch and not listing_failed:
             report.exhausted.append(batch)
+    report.elapsed_s = clock() - started  # TRDD-ZANQ1QW0: every return sets it, so the pass line never reads a stale 0.0 for a tier that did run
     return report
 
 
