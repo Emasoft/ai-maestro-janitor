@@ -161,7 +161,13 @@ def test_format_drift_line_none_when_no_findings() -> None:
 
 # A single process pegging CPU without ballooning RSS — the false-positive shape that
 # fired twice in one night on a process `top -l 2` measured at 5.3% and 0.8%.
-_PS_CPU_BURST = "74805 1 512000 161.0 /usr/local/bin/node\n"
+# 4999999 must be a pid no host can hold. On macOS `ps -p 4999999` exits 1 with
+# "process id too large" (checked 2026-11-16). Linux PID_MAX_LIMIT is 4194304 per
+# include/linux/threads.h (not checked on this host). The detector asks the real `ps` for
+# each CPU finding's time (_gather_cpu_times), so a synthetic pid a live process happens
+# to hold reads that process's time; that failed test_cpu_runaway_needs_two_fires_end_to_end
+# in the 2026-11-16 publish gate (pid 74805, collision inferred). Never use an in-range pid.
+_PS_CPU_BURST = "4999999 1 512000 161.0 /usr/local/bin/node\n"
 
 
 def _cpu_finding(text: str = _PS_CPU_BURST) -> list[dr.Finding]:
@@ -175,15 +181,15 @@ def test_cpu_finding_is_silent_on_its_first_fire() -> None:
     could never grow and a genuinely sustained burn would stay silent forever."""
     reportable, streaks = dr.sustained_findings(_cpu_finding(), {}, min_streak=2)
     assert reportable == []
-    assert streaks == {"74805:node": 1}
+    assert streaks == {"4999999:node": 1}
 
 
 def test_cpu_finding_alarms_once_the_streak_is_met() -> None:
     """The same process still over the bar on the next fire IS reported, and the
     returned streak carries the count the drift line quotes."""
-    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 1}, min_streak=2)
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"4999999:node": 1}, min_streak=2)
     assert [f.command for f in reportable] == ["node"]
-    assert streaks == {"74805:node": 2}
+    assert streaks == {"4999999:node": 2}
 
 
 def test_a_burst_that_ended_is_dropped_and_must_start_over() -> None:
@@ -192,7 +198,7 @@ def test_a_burst_that_ended_is_dropped_and_must_start_over() -> None:
     on fire 3 it starts from 1 and stays silent — an ended burst can never be summed
     with a later one into a fake 'sustained' alarm."""
     _, after_fire1 = dr.sustained_findings(_cpu_finding(), {}, min_streak=2)
-    assert after_fire1 == {"74805:node": 1}
+    assert after_fire1 == {"4999999:node": 1}
 
     # Fire 2: the burst is over, so classify_runaway produces nothing at all.
     quiet_reportable, after_fire2 = dr.sustained_findings([], after_fire1, min_streak=2)
@@ -202,7 +208,7 @@ def test_a_burst_that_ended_is_dropped_and_must_start_over() -> None:
     # Fire 3: it crosses again — but this is a NEW episode, so it is silent again.
     reportable, after_fire3 = dr.sustained_findings(_cpu_finding(), after_fire2, min_streak=2)
     assert reportable == []
-    assert after_fire3 == {"74805:node": 1}
+    assert after_fire3 == {"4999999:node": 1}
 
 
 def test_rss_finding_alarms_on_the_first_fire_and_is_never_streaked() -> None:
@@ -221,9 +227,9 @@ def test_streak_key_carries_the_command_so_a_recycled_pid_cannot_inherit_it() ->
     """Pids are recycled. A streak keyed on the number alone would let an unrelated new
     process inherit a dead one's history and alarm on its very first sample — the exact
     single-sample bug the gate exists to prevent."""
-    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:some-dead-tool": 1}, min_streak=2)
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"4999999:some-dead-tool": 1}, min_streak=2)
     assert reportable == []
-    assert streaks == {"74805:node": 1}
+    assert streaks == {"4999999:node": 1}
 
 
 def test_alive_findings_drops_a_pid_that_exited_before_emit() -> None:
@@ -246,7 +252,7 @@ def test_alive_findings_drops_a_pid_that_exited_before_emit() -> None:
 def test_cpu_drift_line_names_the_metrics_window() -> None:
     """A reader who cross-checks with `top` and sees 0.8% must be able to reconcile the
     two numbers from the line itself, instead of concluding the detector is lying."""
-    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 2}, min_streak=2)
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"4999999:node": 2}, min_streak=2)
     line = dr.format_drift_line(reportable, False, 50.0, streaks=streaks)
     assert line is not None
     assert "~1-minute decaying average" in line
@@ -257,7 +263,7 @@ def test_cpu_drift_line_reports_disk_pressure_without_escalating_on_it() -> None
     """A near-full disk does not make a CPU average worse. Pairing them manufactured a
     compound emergency out of two independent non-events that had both been true and
     harmless all night — so for CPU the disk is stated, never called an amplifier."""
-    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 1}, min_streak=2)
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"4999999:node": 1}, min_streak=2)
     line = dr.format_drift_line(reportable, True, 4.0, streaks=streaks)
     assert line is not None
     assert "disk 96% full" in line
@@ -374,7 +380,7 @@ def test_cpu_runaway_needs_two_fires_end_to_end(tmp_path: Path) -> None:
     written even when nothing is reported — without that write the streak could never
     grow past 1 and this alarm would never fire at all."""
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
-    assert _streak_file(tmp_path).read_text() == '{"74805:node": 1}'
+    assert _streak_file(tmp_path).read_text() == '{"4999999:node": 1}'
 
     line = _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST))
     assert line.startswith("[system-daemon-runaway] HOST-002 node ")
@@ -408,10 +414,10 @@ def test_corrupt_streak_file_degrades_to_no_history_not_a_crash(tmp_path: Path) 
     a crash and never a bogus count fed straight into the gate."""
     streaks = _streak_file(tmp_path)
     streaks.parent.mkdir(parents=True, exist_ok=True)
-    streaks.write_text('{"74805:node": "not-an-int", "bad": tru')  # truncated + wrong type
+    streaks.write_text('{"4999999:node": "not-an-int", "bad": tru')  # truncated + wrong type
 
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
-    assert streaks.read_text() == '{"74805:node": 1}'
+    assert streaks.read_text() == '{"4999999:node": 1}'
     assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)).startswith("[system-daemon-runaway] HOST-002 node ")
 
 
