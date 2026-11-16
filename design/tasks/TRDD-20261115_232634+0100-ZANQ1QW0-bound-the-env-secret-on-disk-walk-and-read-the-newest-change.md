@@ -4,7 +4,7 @@ title: Bound the env-secret-on-disk walk and read the newest change first, then 
 column: backburner
 status: tasked
 created: 2026-11-15T23:26:34+0100
-updated: 2026-11-16T09:44:36+0100
+updated: 2026-11-16T10:08:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -43,3 +43,5 @@ Design:
 4. Newest first: state holds a covered interval [lo, hi]. Read above hi ascending, then below lo descending. New state shape, no migration (regenerated state; the old cursor sits at 0.3 percent).
 5. Starvation check before 4 lands: if the same growing files lead two passes (live transcripts via scratch links, .janitor/logs), cap the fresh tier byte share so the backlog always advances.
 Landing: items 2-5 share the state file, so design them once on the card; land as three increments: bound (3), order (4,5), trash tier (2); then schedule (patch reports_dev/fanout-apply/scratch/inc2/step10-schedule.patch, git apply --check passed 2026-11-16 at 4da6f455; re-run then). Done-when for scheduling: a re-measured pass on this repo inside the 60 s budget, not a green unit test.
+Measured 2026-11-16 10:07 (design step 1, load 5.7 to 8.4 on 14 cores, scripts_dev/zanq_measure.py, the sweep's own listing and stat loop, no file read): git ls-files --others 0.01 s, 0 files; .trashcan 19.45 s for 951,892 files; docs_dev 5.68 s for 180,013 files (26 GiB); reports_dev 0.91 s (34,651); downloads_dev 0.73 s; scripts_dev 0.47 s; session scratch 0.49 s; the rest under 0.4 s. Walk total 28.1 s, about half of the 60 s pass budget before any file is read; .trashcan is 69 percent of it.
+Landing order changed by that table: the trash tier (design item 2) lands FIRST, then the listing bound (item 3), then newest-first order (items 4 and 5), then the schedule. A bound that lands first would refuse to move state on most passes, because the full listing alone nears its share while .trashcan is still walked.
