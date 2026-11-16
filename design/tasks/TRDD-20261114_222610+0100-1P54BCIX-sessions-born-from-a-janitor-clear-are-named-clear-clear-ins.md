@@ -4,7 +4,7 @@ title: Sessions born from a janitor clear are named clear clear instead of the p
 column: testing
 status: tasked
 created: 2026-11-14T22:26:10+0100
-updated: 2026-11-16T09:05:43+0100
+updated: 2026-11-16T10:41:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ implementation-commits: [7d1c8b43]
 - NEXT ACTION: after the next release containing 7d1c8b43 is installed (claude plugin update), verify live that a session born from a janitor /clear gets the project folder name (or the project plus one TRDD id and title when the newest handoff lists exactly one in-flight card) as its session name, instead of "/clear clear"; also verify that a session ALREADY named "/clear clear" is renamed on its next prompt. Then close GitHub issue 357 on Emasoft/ai-maestro-janitor with the evidence. Do not close the card or the issue before that live check.
 - OPEN: field proof only. Everything else is committed and gated.
 2026-11-16 CORRECTION: the DONE line "fix 7d1c8b43 (local main, not released: v3.8.13 does not contain it)" is stale. 7d1c8b43 is an ancestor of 81575d5c2 (git merge-base --is-ancestor) and shipped in ai-maestro-janitor--v3.9.0 (first tag by git tag --contains); it is installed with 3.9.6. Only the live field check in NEXT ACTION stays open.
+2026-11-16 field check, revised the same day (supersedes the NOT-proven reading of the same session, which took a 3.8.13 path the model had typed for the loaded version). Case 2 of NEXT ACTION is most likely observed (? INFERRED: the rename is seen in the transcript, the code that set it is inferred): session 0adc2cfd of the llm-externalizer project, born from a janitor /clear on 2026-11-15 and titled "/clear clear", took the title "llm-externalizer" (the project folder name, one of the two titles 7d1c8b43 sets) at the first prompt after a resume at 2026-11-15T16:18:53Z, and kept it. VERIFIED: the 3.9.1 plugin cache (3.9.0 and later contain 7d1c8b43) was created at 2026-11-15T10:50:13Z, before that resume; the first skill the harness loaded in that session after the resume came from the 3.9.1 folder (2026-11-15T18:08:04Z); the transcript shows no plugin reload between the resume and that load (only SessionStart:resume and SessionStart:compact). The 3.8.13 path of its /janitor-arm at 16:19:56Z was typed by the model from older context, not read from the loaded plugin. Case 1 (a session born from a janitor clear while a release with 7d1c8b43 is installed is named at birth) is still unobserved, since auto clear is off on this host. GitHub issue 357 stays open until case 1 is seen.
 
 ## Facts (GitHub issue 357)
 
