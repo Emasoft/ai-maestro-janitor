@@ -4,7 +4,7 @@ title: Wikimem link sections redesign for GitHub issues 358 and 328 option b
 column: todo
 status: tasked
 created: 2026-11-14T23:49:01+0100
-updated: 2026-11-16T04:59:59+0100
+updated: 2026-11-16T08:32:29+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -36,6 +36,7 @@ Host load was 91 to 168 on 2026-11-14/15: one worker at a time.
 2026-11-15 why this card stays in dev: it is the umbrella of increments 2 to 6 and its work happens on those cards, one of which (TRDD-QAF3N673) is in dev now; it moves when the last increment closes. Correction to the position line above: TRDD-FADYLSQB's remaining items are not all owner questions: inserting S27.1 now or waiting for TRDD-4A4HXDIN is an agent decision, and its spec increment 6 waits on TRDD-DXBJMT1K.
 2026-11-15 increment 3 review (TRDD-QAF3N673) REVISES D5 and changes what increment 4 inherits: (1) the SAFE fixer keeps only content-neutral arms (bullet an unbulleted link line in place, footnote definitions to the Notes pool, known bootstrap placeholder to none-yet, delete a bullet that only repeats a globs: entry); an atom or prose block, other placeholder text and link-less bullets are REPORT ONLY with a named remedy, because any heading closes an atom (memory.rs resolve_atoms_from_text, read 2026-11-15), so text moved above the layout boundary joins the last atom's body; (2) WM-LINT-13 is narrowed for link-less text (gate branch only, out-of-band deletion a known limit), spec MAJOR 3.0.0 to 4.0.0; (3) WM-CLI-29 (increment 4) gains a clause refusing removal of unrelocated link-section text, with an escape flag that names the retired line. Details and the grammar order: TRDD-QAF3N673 STATE.
 2026-11-15 20:41 SUPERSEDES the line 'Host load was 91 to 168 on 2026-11-14/15: one worker at a time': load averages 11.98, 14.12, 16.58 on 14 cores; writer workers capped at 3 at a time. CORRECTION to the D5 revision line: moved text joins the last atom only when no heading separates them. NOTE: design/specs/wikimem-layout-spec.md lines 10 and 149 plan a merge into wikimem-memgrep 3.0.0, a version this card already used (the spec goes to 4.0.0); fix the number when that layout spec merges.
+2026-11-16 GitHub issue 358 item 4 (an optional in-page move verb, for example memgrep move-mem-atom --page P --atom ID --before-footer) is on no increment card. The issue calls it optional, and the D5 SAFE fixer already does the move-above-footer repair it was meant for, so it stays out of scope for increments 2 to 6; a separate card is opened only if increment 4 shows a hand repair still needs it.
 
 ## Owner directive (verbatim, 2026-11-14)
 
