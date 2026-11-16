@@ -279,3 +279,11 @@ Shape: a URL whose password holds a double quote or a backtick, or whose user pa
 Hidden instead: the same URL with a plain password, hidden with the url-password marker.
 Card: none
 Test: KNOWN MISS url-userinfo-quote-backtick-bracket: a URL password holding a double quote or a backtick, or a user part holding a quote, a backtick or an opening bracket, is not hidden, a plain one is
+
+## bearer-value-on-next-line
+
+Reason: (a) the bare Bearer rule (hooks/secret-shield/rules/key-material.ts, bearerBare) takes only spaces and tabs between the word and the value, because a whitespace run that crossed a line break masked a path or a variable name at the start of the next line, and the found-value propagation then hid that name everywhere in the file. Measured 2026-11-16: 43 newline-crossing matches in the code tree and 0 in the plugin cache; all 43 were one identifier after a blank line, 0 were real tokens.
+Shape: the word Bearer, a line break (with or without further blank lines), then 8 or more characters of letters, digits and . _ ~ + / = - holding a digit.
+Hidden instead: the same value after Bearer and a space or a tab on the same line, and after Authorization: Bearer on one line (hidden with the bearer-token marker).
+Card: none
+Test: KNOWN MISS bearer-value-on-next-line: a token wrapped onto the next line after Bearer stays visible, on the same line it is hidden

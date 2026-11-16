@@ -180,6 +180,14 @@ describe('known misses: formats and names the shield does not hide on their own'
   })
 })
 
+describe('known misses: a Bearer value the shield does not read across a line break', () => {
+  test('KNOWN MISS bearer-value-on-next-line: a token wrapped onto the next line after Bearer stays visible, on the same line it is hidden', () => {
+    const value = fake('abcdefg1' + 'hijk')
+    expect(shown('Bearer\n' + value, value)).toBe(true)
+    check('the same-line value is hidden', hiddenAs('Bearer ' + value + ' x', value, 'bearer-token'))
+  })
+})
+
 describe('known misses: PEM headers and URL userinfo the shield does not read', () => {
   test('KNOWN MISS private-key-header-shapes: a PEM header with a leading space, a double space or a word glued to PRIVATE is not hidden, a standard header is', () => {
     const body = fake('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7')

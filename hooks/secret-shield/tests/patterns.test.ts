@@ -1812,6 +1812,16 @@ describe('report-sanitizer floors (TRDD-L1I0FP5T)', () => {
   test('a bare Bearer value with no digit stays visible', () => {
     expect(redact('Bearer ' + 'authentication-scheme').text).toBe('Bearer authentication-scheme')
   })
+  test('a bare Bearer value on the same line after a tab is still hidden', () => {
+    expect(redact('Bearer\t' + 'abcdefg1').text).toBe('Bearer\t' + mark('bearer-token'))
+  })
+  test('a bare Bearer followed by a line break stays visible: a path or a name on the next line is not a value (TRDD-L1I0FP5T)', () => {
+    for (const text of ['Bearer\n' + '/opt/x1/y', 'Bearer\n\n' + 'token_ab1cdef']) {
+      const done = redact(text)
+      expect(done.text).toBe(text)
+      expect(done.hits['bearer-token']).toBeUndefined()
+    }
+  })
   test('a lower-case or upper-case bearer word is hidden like the capitalized one', () => {
     expect(redact('bearer ' + 'abcdefg1').text).toBe(`bearer ${mark('bearer-token')}`)
     expect(redact('BEARER ' + 'abcdefg1').text).toBe(`BEARER ${mark('bearer-token')}`)
@@ -1914,7 +1924,7 @@ describe('token rule order', () => {
       id('npmrc-auth-token', /(:_authToken[ \t]*=[ \t]*["']?)(?![$\[])([^\s'"#;]{16,})/g),
       id('xml-password', /<(password|passphrase)>(?![$\[{])([^<\s]{6,})<\/\1>/gi),
       id('bearer-token', /\b(?:Authorization|Proxy-Authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic|token|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g),
-      id('bearer-token', /Bearer\s+((?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,})/gi),
+      id('bearer-token', /Bearer[ \t]+((?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,})/gi),
     ])
   })
   test('a PEM private key whose body holds an AWS access key is one private-key hit', () => {
