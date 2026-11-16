@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-10-21T20:54:57+0200
+updated: 2026-11-16T05:07:40+0100
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -187,6 +187,7 @@ undoing). Tests now 9: 6 on the pure predicate, 2 on the stamp round-trips (`las
 
 2026-10-19 — box-2 third condition FAILED for v3.8.11 (checked by main session). publish 2026-10-07T21:02:13Z → user-scope lastUpdated 2026-10-07T21:04:21Z = 2m08s, but ~/.aimaestro/plugin-update-trail.jsonl (509 entries) has NO fleet-plugins-update entry within ±15 min of publish, so the installer was not the server's absorbed tick; and version-update-last-raised.ts (1791401753 = 21:35:53 local Oct 7) predates the install by ~90 min and belongs to the 3.8.10 window. The trigger is unattributed — consistent with Claude Code's own marketplace autoUpdate. Box 2 stays open; a future release needs the last-raised stamp to bracket the install time.
 2026-10-21 — records that could not go on the archived cards (archived cards are immutable, TRDD-MQE5D28T D8): R8DRK3DG's first STATE line ('cadence half split to TRDD-EKZ44CDZ') is superseded by its later line; R8DRK3DG's rotation-threshold and generation clause was NOT met as a gate and is withdrawn here: daemon-version-update.log is only size-rotated (1 MiB, one previous generation) and no sweep reaches the global-state dir, and at a few lines per run its window is months (the detector's project-tree log measured 154 days across two generations on a busy host, 2026-10-20 06:50); its checklist box 2 tests are structural, only the disabled path runs end to end. EKZ44CDZ's cancellation reason holds only for the janitor's own path, as the CURRENT paragraph above says.
+2026-11-16: the 3.9.4 release cannot serve box 2. GitHub published it at 04:10:49+0100 (publishedAt 03:10:49Z). By 04:11:17 the shared plugin cache already held 3.9.4 (.janitor/logs/version-update.log: latest_installed=3.9.4 while 3.9.3 ran; running=3.9.4 at 04:16:18). The cause is not established: the publish smoke install and the Claude Code marketplace auto-update both fit, and the smoke install removes its own registration, so it leaves no timestamp. User scope was then updated by hand: ~/.claude/plugins/installed_plugins.json lastUpdated 03:21:14Z (04:21:14+0100), matching the cache dir mtime 04:21:15. The janitor daemon-version-update.log has no line after 02:54. A future measurement must read the user-scope lastUpdated in installed_plugins.json, not the cache or latest_installed, and must not follow a hand update.
 
 
 

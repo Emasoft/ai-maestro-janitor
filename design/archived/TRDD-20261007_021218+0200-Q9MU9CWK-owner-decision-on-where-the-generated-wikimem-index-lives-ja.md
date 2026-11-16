@@ -1,10 +1,10 @@
 ---
 trdd-id: Q9MU9CWK
 title: Owner decision on where the generated wikimem index lives (janitor#328)
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-07T02:12:18+0200
-updated: 2026-11-15T01:12:32+0100
+updated: 2026-11-16T05:07:58+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -22,6 +22,7 @@ approval-datetime: 2026-11-14T23:12:47+0100
 - 2026-11-14T23:12:36+0100 — OWNER DECISION, verbatim answer the owner gave in this session (session 1603e47a, AskUserQuestion on issue 328): "(b) Root topics only (Recommended)". Meaning: keep golden rules G7.1 and G10.1; the generated wikimem index block in CLAUDE.md lists only ROOT topics, so it changes only when a root topic is added, renamed or re-described. Built as part of the wikimem redesign for GitHub issues 358 and 328.
 - 2026-11-14T23:12:47+0100 — APPROVED by user (min-approval-requirement: user). owner chose option (b) in session 1603e47a.
 - 2026-11-14T23:12:48+0100 — column → todo by user. approved by the owner; built with the wikimem redesign (issues 358, 328)
+- 2026-11-16T05:07:58+0100 — COMPLETE by main-agent@ai-maestro-janitor. option (b) shipped in 3.9.4, pinned by tests, issue 328 closed.
 
 ## STATE
 
@@ -36,6 +37,7 @@ Golden PRRD rules G7.1 and G10.1 require the wikimem index fence in CLAUDE.md an
 2026-10-10 04:25 CORRECTION to the 04:05 line: 'was put to the owner' overstates. The question is written in the session's replies and on this card and the drain card; no human has been present in the session since it began, so the owner has not seen it.
 2026-11-14T23:13:55+0100 SUPERSEDES the NEXT ACTION 'owner picks (a), (b) or (c)' above, the 2026-10-10 04:05 and 04:25 lines and the NEXT ACTION 'wait for the owner's yes or no on option (b)': the owner HAS now seen the question and answered it in session 1603e47a (AskUserQuestion on issue 328), verbatim "(b) Root topics only (Recommended)"; recorded in the Approval log. NEXT ACTION: build option (b), the index block listing only ROOT topics, as part of the wikimem redesign for GitHub issues 358 and 328 (proposal to the owner first). STILL OPEN and still the owner's: G7.1 and G10.1 also require a project-map fence that CLAUDE.md lacks; that question was not part of this answer.
 2026-11-15 the project-map fence question (G7.1, G10.1) is ANSWERED, the owner answered 2026-11-15, verbatim: "no, the project map is important. it was a little too big for the context, so i asked you to make a more concise version of the map. if you succeed, you can amend the block from CLAUDE.md". G7.1 and G10.1 stand; the concise map is TRDD-FADYLSQB (todo).
+2026-11-16 CLOSED: option (b) was built in a91d6f4f and 52a90b81 and released in 3.9.4 (2026-11-16). tests/test_claudemd_slim.py pins it (25 passed 2026-11-16, among them test_render_index_lists_root_topics_only, test_cli_index_ignores_edits_beneath_root_topics, test_cli_index_rewrites_when_a_root_topic_changes); the main session's own session-start context shows the root-topics index block; janitor#328 was closed with a comment naming both commits.
 
 ## Background
 
@@ -45,9 +47,9 @@ Still true: the block changes whenever PROJECT memory changes, so the tracked fi
 
 ## Acceptance
 
-- [ ] Owner chose (a), (b) or (c), recorded verbatim in this card
-- [ ] If (b) or (c): the block changes only on root-topic changes (b) or is no longer written into any tracked file (c)
-- [ ] If (c): an existing block in a tracked CLAUDE.md is removed once (migration) without touching other content
-- [ ] If (b) or (c): Claude still sees the index at session start (verified live)
-- [ ] If (b) or (c): a test pins the chosen behaviour
-- [ ] janitor#328 closed with a comment naming the commits
+- [x] Owner chose (a), (b) or (c), recorded verbatim in this card
+- [x] If (b) or (c): the block changes only on root-topic changes (b) or is no longer written into any tracked file (c)
+- [x] If (c): an existing block in a tracked CLAUDE.md is removed once (migration) without touching other content — not applicable: option (b) was chosen
+- [x] If (b) or (c): Claude still sees the index at session start (verified live)
+- [x] If (b) or (c): a test pins the chosen behaviour
+- [x] janitor#328 closed with a comment naming the commits

@@ -1,10 +1,10 @@
 ---
 trdd-id: 8BNV75TV
 title: trdd-state-reconciliation flags testing cards that are correctly waiting on a live event
-column: testing
-status: tasked
+column: published
+status: archived
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-10T04:16:31+0200
+updated: 2026-11-16T05:16:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,12 +45,16 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 2026-10-10 04:05 CORRECTIONS to the 03:45 line above (review of 7308719f and c463d2ac). (1) 'TRDD-VIFQ1LKI is a stale heading' is the reading of a review fork from one quoted log line, not re-read by the main session. (2) 'one true hit (TRDD-3XS3PDCF)' is what the message of 7786f140 says; whether it was a correct catch was not re-verified. (3) TRDD-JD2QR5SQ is absent today LIKELY because of the two edits named; check 3 was not run on its old text. (4) Replace the DETECT of that line with: after a release containing 7308719f is installed and a weekly audit has run, the newest reports/trdd-reconciliation/*-board.md contains neither 'prose says blocked' nor a stale-blocker line for a card whose blocked-by is empty. (5) BY CARD: eight ids leave the report and none enter (5Q24T9SO, 6CF3L7IJ, 8SC3YEIG, AHKL0L4H, M9XGH2KB, MMUSDJHQ, S6GX1DHN, VT332PJG); the other ten flagged cards stay as rows under another class. (6) release-via set to publish: the code reaches users only through a release; the card still waits in testing on the field check above and on the older closeable wait (first weekly audit on 3.8.2 or later), two field checks.
 2026-10-10 04:25 CORRECTIONS to the 04:05 line (review of 11c583e4). Item (5): 17 distinct cards were flagged (16 prose-blocked plus MMUSDJHQ), 8 leave, so NINE stay, not ten; that they stay is read from the id diff, their class was not read per card. Item (4), the DETECT, as three runnable conditions, all required: (a) find reports/trdd-reconciliation -name '*-board.md' -newer <the installed release's plugin.json> prints at least one file; (b) grep -c 'prose says blocked' on that file prints 0; (c) grep -c TRDD-PROSE-BLOCKED .janitor/state/findings-ledger.ndjsonl prints 1 or more. Not expressed as a command: that no stale-blocker row belongs to a card with an empty blocked-by. Unverified side effect: what class this card itself gets in the next audit now that it carries release-via publish with released and unreleased commits.
 2026-10-10 04:16 CORRECTION to the known limit 'nobody reads these notes until TRDD-6ESS2MGE routes them' (findings_ledger.surface_block read by the main session): the SessionStart hook injects the unread ledger lines, capped, plus one fold line ('N older unread'), then advances the cursor over the whole ledger. So the notes DO reach the agent once, at the next session start; when many are unread most are folded into the count and are then readable only through /janitor-findings. Not read: the size of the cap. What 6ESS2MGE still owes is routing by kind, not a first reader.
+2026-11-16 CLOSED on the 2026-10-10 DETECT, all three conditions met: (a) reports_dev/trdd-reconciliation/20261115_193130+0100-board.md was written by a release containing 7308719f (first tag v3.8.12); (b) it holds 0 "prose says blocked" rows; (c) the findings ledger holds 17 TRDD-PROSE-BLOCKED notes. The 2026-11-09 CI weekly audit (#353) lists no closeable candidates.
 
 ## Approval log
 
 - 2026-10-07T00:45:39+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-09 STAYS in testing (board drain, wave 3; fix commits are ancestors of the v3.8.11 tag and the card's tests pass on a re-run by the assessing worker). Waits on the first weekly audit on 3.8.2 or later, and on the choice between design A and design B, which the owner's mandate of 2026-10-09 leaves to the main session; not yet decided. Assessment: reports/board/20261009_232631+0200-wave3-batchG.md.
 2026-10-10 02:45 DESIGN CHOICE NOT YET MADE (board drain, step iii). The main session leaned to design B on the 2026-10-07 sizing (check3 14 flags, 1 real; check4 2 of 2 false) and the closeable precedent; the review of 92d6b144 showed that basis is insufficient: (1) this card itself requires an old-versus-new comparison on the same board, by card, before landing, and none exists for B; (2) nobody reads the one-time ledger notes until TRDD-6ESS2MGE routes them, so B would move the one real finding class to a channel with no reader; (3) the sizing predates about 26 closures and 30 stay notes written on 2026-10-09 and 2026-10-10, many containing the words blocked, waits on and stays, so today check3 and check4 counts are unknown. NEXT: run both checks on the current board and classify every flag by card; choose from that count. The owner mandate of 2026-10-09 (quoted on TRDD-S6GX1DHN) leaves the choice to the main session. Column note: testing is wrong for this card once a design is chosen, since the chosen design is unimplemented work.
+- 2026-11-16T05:08:03+0100 — column → complete by main-agent@ai-maestro-janitor. DETECT conditions a, b, c all met on 2026-11-16
+2026-11-16 CORRECTION to the CLOSED line in STATE: condition (a) was read as "a board written by a running release that contains 7308719f". The board is reports_dev/trdd-reconciliation/20261115_193130+0100-board.md (private reports moved to reports_dev, issue 348), written on 2026-11-15 by 3.8.13 or later; it is not newer than the 3.9.4 plugin.json, rewritten on 2026-11-16, so the literal (a) does not hold. The fourth, unscripted condition holds: that board has no stale-blocker row at all. The code shipped in v3.8.12, so the card ends in published, not complete.
+- 2026-11-16T05:16:18+0100 — PUBLISHED by main-agent@ai-maestro-janitor. release-via publish; the code shipped in v3.8.12.
 
 ## Implementation commits
 
@@ -61,3 +65,9 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 
 emit_once marks the SHA seen BEFORE findings_ledger.record writes: a failed ledger write loses that card's closeable note until a new citing SHA appears. Accepted, rare.
 The findings ledger keeps the last 500 lines, so the first live run's ~34 closeable notes evict the oldest ledger entries.
+
+## Acceptance
+
+- [x] The closeable class left the weekly report (2026-11-09 CI audit, #353)
+- [x] The prose classes became one-time ledger notes (0 prose rows on the 2026-11-15 board; 17 TRDD-PROSE-BLOCKED notes)
+- [x] Measured on a board written by a release containing 7308719f
