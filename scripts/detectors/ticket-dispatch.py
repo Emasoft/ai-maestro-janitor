@@ -174,14 +174,15 @@ def main() -> int:
     # wrong LOCAL design root), and NO traceback (the inherited stderr lands in the agent context). Exit 1
     # so the dispatcher records error:rc=1 and the 3-strike DETECTOR-FAIL streak still counts; whatever
     # was already collected is still printed.
+    # TRDD-A8I95PPV: the stderr reason comes from trdd_common.git_root_error_reason, the one shared scrubber
+    # (machine paths to <path>, 200-character cap). Do not copy its regex here: a second copy drifts.
     failed = False
     try:
         lines.extend(_proposal_reminder(now))
     except trdd_common.GitRootError as exc:
         failed = True
-        what = " ".join(str(exc).split()[:3])
         print(
-            f"ticket-dispatch: git failed resolving the design root ({what}); proposal reminder skipped this pass",
+            f"ticket-dispatch: git failed resolving the design root ({trdd_common.git_root_error_reason(exc)}); proposal reminder skipped this pass",
             file=sys.stderr,
         )
         state.log_line("ticket-dispatch", f"git failed resolving the design root: {exc}")

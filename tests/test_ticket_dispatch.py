@@ -290,6 +290,45 @@ def test_a_hung_git_is_one_stderr_line_and_exit_1_not_a_traceback(project: Path,
     assert f"[ticket] {t.id} NEEDS A HUMAN" in proc.stdout
 
 
+def test_a_failed_git_worktree_list_is_one_scrubbed_stderr_line_with_no_machine_path(project: Path) -> None:
+    """A `git worktree list` that exits non-zero inside a known repo raises GitRootError in the detector
+    process. Its one stderr line must carry the scrubbed `<path>` marker and never the raw machine path:
+    the reason comes from the one shared scrubber, trdd_common.git_root_error_reason (TRDD-A8I95PPV).
+    Exit 1, no traceback."""
+    real_git = shutil.which("git")
+    assert real_git is not None, "git must be installed to run this test"
+    init = subprocess.run([real_git, "init", "-q"], capture_output=True, text=True, cwd=project)
+    assert init.returncode == 0, init.stderr
+    fake_bin = project / "fakebin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/bin/sh\n"
+        "case \" $* \" in\n"
+        "  *\" rev-parse --is-inside-work-tree \"*) echo true; exit 0;;\n"
+        "  *\" worktree list \"*) echo \"fatal: /tmp/fake-repo-x/sub: broken\" >&2; exit 128;;\n"
+        "esac\n"
+        f"exec \"{real_git}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    env = {
+        "PATH": _path_with_fake_git(fake_bin),
+        "HOME": str(project / "home"),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(project / "gs"),
+    }
+
+    proc = subprocess.run([sys.executable, str(DETECTOR)], capture_output=True, text=True, env=env, cwd=project)
+
+    assert proc.returncode == 1, proc.stderr
+    assert "Traceback" not in proc.stderr
+    detector_lines = [ln for ln in proc.stderr.splitlines() if ln.startswith("ticket-dispatch: git failed resolving the design root (")]
+    assert len(detector_lines) == 1, proc.stderr
+    assert "<path>" in detector_lines[0], detector_lines[0]
+    assert "/tmp/fake-repo-x" not in detector_lines[0], detector_lines[0]
+
+
 @pytest.mark.no_timeout_scale  # the 5 s timeout IS the subject; the suite otherwise scales it away
 def test_main_checkout_root_raises_gitrooterror_when_worktree_list_hangs(
     project: Path, hanging_git: Path, monkeypatch: pytest.MonkeyPatch
