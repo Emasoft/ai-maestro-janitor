@@ -1,10 +1,10 @@
 ---
 trdd-id: C9CO0I7L
 title: Hold a janitor clear while the handoff is being composed and trace the duplicated handoff sections (issue 356)
-column: todo
+column: testing
 status: tasked
 created: 2026-11-14T22:27:19+0100
-updated: 2026-11-14T22:27:19+0100
+updated: 2026-11-16T08:51:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,14 +17,16 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-14T22:27:19+0100
+implementation-commits: [ef433a58]
 ---
 
 # Hold a janitor clear while the handoff is being composed and trace the duplicated handoff sections (issue 356)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-11-14
 
-- NEXT ACTION: build the compose in-flight stamp and the two decision-site checks described below, one bounded change, tests written, run only before the push. Part 2 (duplicated handoff sections) is NOT a janitor bug: file an issue on Emasoft/llm-externalizer after one real reproduction; add no de-duplication workaround here.
-- Status: not started. Parent work: TRDD-V8GWJVFN (F1 landed, which already prevents the 356 sequence on its own); GitHub issue 356. Related: TRDD-AIT2KNBU (F2+F3).
+- NEXT ACTION: live check owed. One janitor clear that reaches a decision site while /janitor-write-handoff composes must log 'clear deferred: handoff compose running' (token-meter) or cancel the chain with that reason; auto clear is off on this host, so this waits on a host or session with it on. Part 2 (duplicated handoff sections) is NOT a janitor bug: file an issue on Emasoft/llm-externalizer after one real reproduction; add no de-duplication workaround here.
+- Status: Part 1 landed in ef433a58 (column testing); Part 2 not started. Parent work: TRDD-V8GWJVFN (F1 landed, which already prevents the 356 sequence on its own); GitHub issue 356. Related: TRDD-AIT2KNBU (F2+F3).
+- 2026-11-16 Part 1 landed in ef433a58: a per-session stamp handoff-compose-inflight-<key>.json held by compose_agent_handoff.py; handoff_files.compose_inflight(state_dir, key); the Stop-hook _maybe_clear defers below the ceiling, and the chain's _agents_and_interrupt_ok returns not-ok, which _still_wanted (clear_trigger.py:1001-1003) turns into a cancel; the next Stop's _maybe_clear re-evaluates (tested). Both sides key through session_key() (composer from CLAUDE_CODE_SESSION_ID, clear side from <session-id>.jsonl); the state dir is the project root from CLAUDE_PROJECT_DIR on all three sides (composer via the skill's --project-root, hook at on-stop-token-meter.py:217). Known limits: at or above the clear ceiling a clear still fires; two composes in one session share one stamp. Test deviation: tests/test_compose_inflight.py stubs only clear_trigger._spawn_chain, the pane-typing point the sibling tests also stub. Live check owed: auto clear is off on this host, so no real clear has exercised the hold. Part 2 stays: reproduce once with llm-ext and file on Emasoft/llm-externalizer.
 
 ## Part 1 - hold the clear while /janitor-write-handoff composes
 
