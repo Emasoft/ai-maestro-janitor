@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=05ac4c6bcd46 generated=2026-11-16T02:26:52+0100
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=134cc4ec27d4 generated=2026-11-16T13:38:54+0100
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Root topics only; pages beneath them are not listed. Entry point: `memgrep overview .claude/project/memory`. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -134,7 +134,7 @@ Root topics only; pages beneath them are not listed. Entry point: `memgrep overv
 - [janitor-architecture](.claude/project/memory/janitor-architecture.md) — how does the ai-maestro-janitor work
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
-- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (78 registered, marketplace-refresh retired 2026-09-17)
+- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (79 registered, marketplace-refresh retired 2026-09-17)
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
 - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
