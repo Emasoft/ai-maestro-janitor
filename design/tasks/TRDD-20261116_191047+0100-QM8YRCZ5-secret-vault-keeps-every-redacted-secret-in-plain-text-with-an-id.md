@@ -4,7 +4,7 @@ title: Secret vault keeps every redacted secret stored in plain text with an id 
 column: backburner
 status: tasked
 created: 2026-11-16T19:10:47+0100
-updated: 2026-11-16T20:14:14+0100
+updated: 2026-11-16T20:28:10+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -34,6 +34,7 @@ The owner ordered the vault (quote above) and told the agent to decide the open 
 - 2026-11-16T20:04:07+0100 main-agent: owner 2026-11-16 (verbatim): "no, you misunderstood: no protection or encryption at all. the sqlite db is open annd readable by all. why? because there is no way to protect those secrets if the mod must access to it in my absence. it should work without my presence, so any password or key should be saved somewhere, and any process can use it emulating the mod." Encryption, keys and the Keychain design are dropped; the 19:52:56, 19:59:03 and 20:00:42 lines are superseded.
 - 2026-11-16T20:12:45+0100 main-agent: owner 2026-11-16 (verbatim): "those secrets where redacted to avoid them being exfiltrated (by git push with tracked files or by llm api requests with the transcripts jsonl). but to protect them inside the computer locally it's impossible." and (verbatim): "so no keychain or any other method. just a plain sqlite db open to all." The restricted file mode (0700 folder, 0600 file) is dropped as well. The 20:04:07 line superseded only the encryption, passphrase and Keychain parts: (b) transcript:<session-id> and (d) the single vault path stand. The 19:59:03 test design (HOME set to a temporary folder) is withdrawn, because the helper reads the home folder from the account database. Restore is human-only (agent decision). The mod passes values in a request file because the mods docs show no stdin for $.process.run.
 - 2026-11-16T20:14:14+0100 main-agent: correction to the previous line: no mods doc chapter shows a stdin option for $.process.run or $.process.spawn (searched 2026-11-16), which does not prove there is none; the request-file route and the account-database home lookup are both still to be verified in the probe.
+- 2026-11-16T20:28:08+0100 main-agent: the "no environment override" of the 19:52:56 line means nothing can point the vault at another path; the one exception is the test-only setting described under Decisions (d), which refuses any path outside the system temp folder.
 
 ## Design
 
@@ -51,7 +52,7 @@ The owner ordered the vault (quote above) and told the agent to decide the open 
 
 - (b) Origin for text that is not a file (Bash output, transcript rows): transcript:<session-id> (agent decision, on the owner's order to decide).
 - (c) Restore (writing a stored value back into its file) is a human-only command: the agent guard refuses it from an agent, because a restored secret in a tracked file can leave by git push (agent decision, on the owner's order to decide).
-- (d) Decided by the owner 2026-11-16: one vault file for every tool at ~/.secrets_shield/vault.db (the owner explicit order overrides the standing rule against new dot folders); nothing can point the vault at another path. The one exception is a test-only setting that refuses any path outside the system temp folder; tests use it and never HOME (the helper ignores HOME, see Security limit), and one test checks that the real vault is untouched.
+- (d) Decided by the owner 2026-11-16: one vault file for every tool at ~/.secrets_shield/vault.db (the owner's explicit order overrides the standing rule against new dot folders); nothing can point the vault at another path. The one exception is a test-only setting that refuses any path outside the system temp folder; tests use it and never HOME (the helper ignores HOME, see Security limit), and one test checks that the real vault is untouched.
 
 ## Acceptance checklist
 
