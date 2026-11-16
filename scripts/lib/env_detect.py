@@ -81,7 +81,7 @@ def env_present(env: Mapping[str, str], key: str) -> bool:
 def mask_proxy(url: str) -> str:
     """Return `url` with any `user:pass@` credentials stripped (scheme://host:port/path).
 
-    A proxy env var routinely embeds `http://user:password@host:3128`; the
+    A proxy env var routinely embeds `http://<user>:<password>@host:3128`; the
     credentials must never reach a report. Non-URL values are returned unchanged
     except that a bare `user:pass@host` form is also stripped.
     """

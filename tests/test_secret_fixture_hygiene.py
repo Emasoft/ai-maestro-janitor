@@ -76,7 +76,7 @@ _PLACEHOLDER_PW = frozenset({
 })
 
 # Generic (un-prefixed) secret literal: a secret-NAMED variable assigned a
-# realistic high-entropy value, e.g. `CLIENT_SECRET = "xK9mP2qR7nL4vB8w"`.
+# realistic high-entropy value, e.g. `CLIENT_SECRET = "<20 random letters and digits>"`.
 # Neither TruffleHog (no structure) nor the prefix markers catch these.
 # No leading word-boundary: the secret keyword is often the SUFFIX of a longer
 # identifier (LOOKER_CLIENT_SECRET, VERCEL_…_SECRET, wgDBpassword, STRIPE_SECRET).

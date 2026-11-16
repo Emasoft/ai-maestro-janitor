@@ -334,7 +334,7 @@ def test_lambda_env_var_sk_ant_fires() -> None:
         '    Properties:\n'
         '      Environment:\n'
         '        Variables:\n'
-        '          ANTHROPIC: sk-ant-abcdef0123456789abcdef0123456789abcdef0123456789ab\n'
+        '          ANTHROPIC: ' + secret("sk-ant-", "srvl-anthropic-key", 50) + '\n'
     )
     assert _hits("srvless-lambda-env-vars-secret-shape", src)
 

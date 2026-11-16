@@ -275,7 +275,7 @@ def test_n7_negative_other_domain() -> None:
 
 def test_n8_positive_bearer_token_literal() -> None:
     """HIGH: Authorization Bearer with literal token triggers N8."""
-    src = "Authorization = 'Bearer sk-proj-abcdefghijklmnop1234'"
+    src = "Authorization = 'Bearer sk-proj-" + b62("ncp-bearer", 20) + "'"
     ids = {f.rule_id for f in ncp.scan_text(src)}
     assert "no-code-zapier-action-http-plaintext-secret" in ids
 

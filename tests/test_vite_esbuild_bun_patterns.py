@@ -148,7 +148,7 @@ def test_veb01_stripe_secret_key_fires_critical() -> None:
 
 def test_veb01_openai_api_key_fires() -> None:
     """NEXT_PUBLIC_OPENAI_API_KEY with real-shaped value fires."""
-    src = "NEXT_PUBLIC_OPENAI_API_KEY=sk-proj-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"
+    src = "NEXT_PUBLIC_OPENAI_API_KEY=sk-proj-" + "X" * 32 + "\n"
     assert _hits("veb-01-next-public-secret-in-env-file", src)
 
 

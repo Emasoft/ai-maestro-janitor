@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import env_detect as ed  # noqa: E402
+from _fake_secrets import b62  # noqa: E402
 
 
 def _no(*_: object) -> bool:
@@ -65,13 +66,13 @@ def test_env_value_safe_value_and_absent_none():
 
 
 def test_mask_proxy_strips_scheme_credentials():
-    """http://user:pass@host:3128 has its embedded credentials stripped."""
-    assert ed.mask_proxy("http://alice:secret@host:3128") == "http://host:3128"
+    """A scheme://<user>:<password>@host:3128 URL has its embedded credentials stripped."""
+    assert ed.mask_proxy("http://alice:" + b62("env-proxy-1", 12) + "@host:3128") == "http://host:3128"
 
 
 def test_mask_proxy_strips_bare_credentials():
     """A bare user:pass@host form (no scheme) is also credential-stripped."""
-    assert ed.mask_proxy("alice:s3cr3t@host") == "host"
+    assert ed.mask_proxy("alice:" + b62("env-proxy-2", 12) + "@host") == "host"
 
 
 def test_mask_proxy_plain_url_unchanged():
@@ -260,13 +261,14 @@ def test_detect_execution_context_headless_and_worktree():
 
 def test_detect_proxies_masks_and_no_proxy():
     """HTTPS_PROXY credentials are masked; NO_PROXY (a host list) passes through."""
+    pw = b62("env-proxy-3", 12)
     out = ed.detect_proxies({
-        "HTTPS_PROXY": "http://alice:secret@proxy:8443",
+        "HTTPS_PROXY": "http://alice:" + pw + "@proxy:8443",
         "NO_PROXY": "localhost,127.0.0.1",
     })
     assert out["HTTPS_PROXY"] == "http://proxy:8443"
     assert out["NO_PROXY"] == "localhost,127.0.0.1"
-    assert "s3cr3t" not in json.dumps(out)
+    assert pw not in json.dumps(out)
 
 
 # --- parse_interfaces -------------------------------------------------------

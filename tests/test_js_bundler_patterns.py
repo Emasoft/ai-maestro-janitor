@@ -530,7 +530,7 @@ def test_h8_next_hardcoded_anthropic_token_flags() -> None:
         "/** @type {import('next').NextConfig} */\n"
         "module.exports = {\n"
         "  env: {\n"
-        "    ANTHROPIC_KEY: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890',\n"
+        "    ANTHROPIC_KEY: '" + secret("sk-ant-api03-", "jsb-anthropic-key", 36) + "',\n"
         "  },\n"
         "};\n"
     )
