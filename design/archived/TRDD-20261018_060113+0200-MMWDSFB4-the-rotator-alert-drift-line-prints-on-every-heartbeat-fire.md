@@ -1,10 +1,10 @@
 ---
 trdd-id: MMWDSFB4
 title: The rotator alert drift line prints on every heartbeat fire
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T07:39:35+0200
+updated: 2026-11-16T15:03:09+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -57,3 +57,5 @@ Evidence 2026-10-18 (2e75ea93): box 1 by tests/test_rotator_alert.py test_adviso
 - 2026-10-18T07:20:33+0200 — column → todo by main-agent@ai-maestro-janitor. revision-2 design passed its two review rounds
 - 2026-10-18T07:20:33+0200 — column → dev by main-agent@ai-maestro-janitor. revision-2 design passed its two review rounds
 - 2026-10-18T07:39:35+0200 — column → testing by main-agent@ai-maestro-janitor. built and gated at 2e75ea93; unreleased
+- 2026-11-16T15:03:07+0100 — CLOSED by main-agent@ai-maestro-janitor after the 2026-11-16 testing triage: delivered in 2e75ea93 (first release tag ai-maestro-janitor--v3.8.12): the advisory rotator line prints once per notification cadence, urgent lines every fire; the 'unreleased' note above is superseded by that tag.
+- 2026-11-16T15:03:09+0100 — COMPLETE by main-agent@ai-maestro-janitor. testing triage 2026-11-16: delivered and released.

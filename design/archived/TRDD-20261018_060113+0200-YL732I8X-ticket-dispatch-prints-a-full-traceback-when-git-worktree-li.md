@@ -1,10 +1,10 @@
 ---
 trdd-id: YL732I8X
 title: ticket-dispatch prints a full traceback when git worktree list times out
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-18T06:01:13+0200
-updated: 2026-10-18T06:27:40+0200
+updated: 2026-11-16T15:03:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,3 +45,5 @@ Evidence 2026-10-18 (c7b73d86): boxes 1-2 by tests/test_ticket_dispatch.py::test
 
 - 2026-10-18T06:01:13+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-18T06:26:31+0200 — column → testing. built and gated at c7b73d86 (18,617 passed); unreleased, so testing until a release carries it
+- 2026-11-16T15:03:10+0100 — CLOSED by main-agent@ai-maestro-janitor after the 2026-11-16 testing triage: delivered in c7b73d86 (first release tag ai-maestro-janitor--v3.8.12): a hung git worktree list makes ticket-dispatch exit 1 with one stderr line, no Traceback. Known uncovered callers (trdd-drift, trdd-reminder and others, listed in the card body) are NOT covered by this card.
+- 2026-11-16T15:03:12+0100 — COMPLETE by main-agent@ai-maestro-janitor. testing triage 2026-11-16: delivered and released.
