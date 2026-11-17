@@ -284,6 +284,6 @@ Test: KNOWN MISS url-userinfo-quote-backtick-bracket: a URL password holding a d
 
 Reason: (a) the bare Bearer rule (hooks/secret-shield/rules/key-material.ts, bearerBare) takes only spaces and tabs between the word and the value, because a whitespace run that crossed a line break masked a path or a variable name at the start of the next line, and the found-value propagation then hid that name everywhere in the file. Measured 2026-11-16: 43 newline-crossing matches in the code tree and 0 in the plugin cache; all 43 were one identifier after a blank line, 0 were real tokens.
 Shape: the word Bearer, a line break (with or without further blank lines) or any other whitespace that is not a space or a tab (form feed, vertical tab, a non-breaking or Unicode space), then 8 or more characters of letters, digits and . _ ~ + / = - holding a digit.
-Hidden instead: the same value after Bearer and a space or a tab on the same line, and after Authorization: Bearer on one line (hidden with the bearer-token marker).
+Hidden instead: the same value after Bearer and a space or a tab on the same line, and after the Authorization header name and Bearer on one line (hidden with the bearer-token marker).
 Card: none
 Test: KNOWN MISS bearer-value-on-next-line: a token wrapped onto the next line after Bearer stays visible, on the same line it is hidden
