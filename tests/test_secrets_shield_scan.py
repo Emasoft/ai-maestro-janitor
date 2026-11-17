@@ -536,19 +536,3 @@ def test_repo_two_levels_below_an_ignored_folder_is_not_counted(box: Box) -> Non
     result = box.scan(root=proj)
     assert result.code == 0 and result.findings == []
     assert result.summary["gitignored_entries"] == 1 and result.summary["ignored_repos"] == 0
-
-
-
-def test_dot_slash_entry_of_the_ignored_listing_does_not_count_the_root_repo(box: Box) -> None:
-    """With .gitignore proj/* above the root, git prints ./ in the ignored-directory listing of proj: that entry must not count proj itself or its children twice."""
-    ancestor = box.base / "ancestor"
-    box.put(ancestor / ".gitignore", "proj/*\n")
-    box.put(ancestor / "proj" / "tracked.txt", "clean\n")
-    box.repo(ancestor, ".gitignore", "proj/tracked.txt")
-    proj = ancestor / "proj"
-    box.put(proj / "inner" / "b.txt", _line())
-    box.repo(proj / "inner", "b.txt")
-    result = box.scan(root=proj)
-    assert result.code == 0 and result.findings == []
-    assert result.summary["repos"] == 1 and result.summary["ancestor_rules_skipped"] is False
-    assert result.summary["ignored_repos"] == 1

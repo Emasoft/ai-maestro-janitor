@@ -137,7 +137,7 @@ async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats, alread
   for (const entry of ignoredEntries) {
     if (!entry.endsWith('/')) continue
     const dir = join(repo, entry.slice(0, -1))
-    // WHY: git 2.56.0 prints ./ in the ignored-directory listing (probed: .gitignore proj/* above the root proj gives ./, group/, inner/, notes.txt). Without this guard the repo folder would count its own direct children, and a child listed again as inner/ would count twice.
+    // WHY: a guard against a ./ entry in this listing. git 2.56.0 printed one in layout B (ancestor .gitignore proj/*, nothing tracked or unignored under proj), where the root probe is empty and walkRepo does not run, and printed none in layout G (the same with a tracked file under proj); no layout tried reaches this guard and it has no test. Without it, a ./ entry would count the repo itself when it holds a .git, or, for a root without one, count its direct child repos a second time.
     if (dir === repo) continue
     if (probeGitEntry(dir) === 'present') {
       stats.ignoredRepos++
@@ -154,7 +154,7 @@ async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats, alread
   // A path can be listed more than once (an unmerged path has one entry per stage).
   for (const entry of new Set(splitZ(listed))) {
     const abs = join(repo, entry.endsWith('/') ? entry.slice(0, -1) : entry)
-    // WHY: a guard against a ./ entry in this listing (git 2.56.0 was not seen printing one in ls-files -co, which this loop reads; it does print one in the ignored-directory listing, see the count above); such an entry would walk the repo again as a tree of its own.
+    // WHY: a guard against a ./ entry that some git version might print in this listing (git 2.56.0 was not seen printing one in ls-files -co, which this loop reads); such an entry would walk the repo again as a tree of its own.
     if (abs === repo) continue
     if (opts.exclude.has(abs)) continue
     const st = inspect(abs)
