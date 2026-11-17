@@ -37,7 +37,7 @@ the plugin DATA dir**; regeneratable caches are safe to remove.
 | `reports_dev/` | raw, intermediate and private agent output (machine, harness, memory-corpus state, local config) — **gitignored** | **NO** — never purged by the janitor (only UI-test screenshots under `reports_dev/<component>/screenshots/` are auto-purged) |
 | `.trashcan/` | `/janitor-safe-delete` staging — gitignored, purged after ~90d | recover here; else auto-purged |
 
-## Global (under `~/.claude/`)
+## Global (under `~/.claude/`, plus `~/.secrets_shield/`)
 
 | Path | What it is | Safe to delete? |
 |---|---|---|
@@ -48,6 +48,7 @@ the plugin DATA dir**; regeneratable caches are safe to remove.
 | `~/.claude/ai-maestro-janitor-memory/` | **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9); SessionStart syncs it and restores after a data-dir loss | **NO** — real knowledge |
 | `~/.claude/plugins/data/…/global-state/` | machine-wide daemon singleton (pid/flock/locks/timestamps) — CANONICAL since TRDD-2U8AH82F | no — daemon recreates what it needs |
 | `~/.claude/janitor-global-state/` | LEGACY daemon-state dir — **RETIRED (TRDD-ULEGRT01)**: no resolver rung, no reads; the daemon copies leftovers to DATA on first run (README-MOVED.txt) | yes, once `DATA/global-state/migrated-from-legacy.ts` exists |
+| `~/.secrets_shield/scans/` | findings files of `/janitor-secrets-shield-scan`: paths, kinds and line numbers of found secrets, never their values; mode 0600 | yes, once read |
 
 **Rule of thumb:** any `…/memory/…` dir and the plugin **DATA** dir hold real
 state — never delete them (`reports/` and `reports_dev/` included). `.janitor/state`, `.janitor/logs`, and

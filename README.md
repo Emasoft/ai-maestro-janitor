@@ -491,6 +491,9 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   channel or directly via
   `bash $CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py -- <path>...` for agents
   whose tool surface excludes Skill but includes Bash.
+- `/janitor-secrets-shield-scan [path] [--all]` — scans a project or a folder
+  tree for secrets with the shield rules, writes the findings file outside any
+  repo, never prints a secret value. Scan only, no git history yet.
 - `/janitor-supply-chain-watcher` — audits installed dependencies for
   newly-published HIGH/CRITICAL security advisories (Shai-Hulud-class
   npm/PyPI/pnpm worm patterns). Walks every lock file in the project
