@@ -219,6 +219,12 @@
       ]
     },
     {
+      "filename": "design/tasks/TRDD-20261116_191047+0100-QM8YRCZ5-*.md",
+      "ignoreWords": [
+        "ccommands"
+      ]
+    },
+    {
       "filename": [
         "**/tests/**"
       ],

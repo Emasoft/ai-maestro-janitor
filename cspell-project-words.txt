@@ -618,7 +618,6 @@ cbtns
 cccompat
 ccgauge
 ccgauge's
-ccommands
 ccpa
 ccpm
 ccri
