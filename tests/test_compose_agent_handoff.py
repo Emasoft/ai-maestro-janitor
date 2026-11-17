@@ -82,3 +82,43 @@ def test_a_composed_handoff_is_stamped_and_passes_the_size_exemption(
     assert ok, (
         f"a marker-stamped composer handoff must clear the size/reference exemption: {reasons}"
     )
+
+
+def test_compose_hands_the_project_state_folder_to_the_summarizer(tmp_path, monkeypatch) -> None:
+    """main() must pass `state_dir=<project-root>/.janitor/state` to summarize_with_retry: the
+    redacted transcript copy llm-ext reads lives in a per-run folder under it (TRDD-TKQ274RE). The
+    fake in the test above swallows every argument, so a dropped `state_dir=` would go unseen."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(root))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "c0ffee00-abcd-4abc-8abc-abcdefabcdef")
+
+    transcript = tmp_path / "s.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cold_cache_compact, "newest_transcript", lambda _root: transcript
+    )
+
+    class _FakeAttempt:
+        text = "a short summary"
+        outcome = "ok"
+        detail = ""
+
+    seen: dict[str, object] = {}
+
+    def _capture(*args: object, **kwargs: object) -> _FakeAttempt:
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return _FakeAttempt()
+
+    monkeypatch.setattr(compose_agent_handoff.les, "summarize_with_retry", _capture)
+    monkeypatch.setattr(
+        sys, "argv", ["compose_agent_handoff.py", "--project-root", str(root), "--dry-run"]
+    )
+
+    assert compose_agent_handoff.main() == 0
+
+    assert seen["args"] == (str(transcript),)
+    kwargs = seen["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("state_dir") == root.resolve() / ".janitor" / "state"

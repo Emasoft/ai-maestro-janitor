@@ -4,7 +4,7 @@ title: The handoff summarizer sends the session transcript to a free remote mode
 column: dev
 status: tasked
 created: 2026-11-17T03:35:40+0100
-updated: 2026-11-17T06:20:42+0100
+updated: 2026-11-17T06:40:21+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -39,7 +39,10 @@ Before any transcript leaves the machine, write a redacted copy (secret-shield c
 - Increment B, failure and scope: a redaction failure of any kind (bun missing, a bridge error, a line or JSON mismatch, a timeout, a workspace-creation or sidecar error) gives a PERMANENT result (the one exception: a failure to REMOVE a finished run folder or an old stale folder does not change the result; it prints one fixed-text line to stderr and the 24 h sweep retries; a leftover holds only redacted text), llm-ext is never run and nothing is sent; the manual handoff and the fallback then degrade to the template. Wired through llm_ext_summary.redaction_workspace, attempt_llm_ext_summary(redact_dir=...), summarize_with_retry(state_dir=...), llm_ext_compact.py --state-dir and jev_compaction_lane._run_llm_ext_fallback(state_dir=...). Increment C (the Jev lane items and digest) is still open.
 - Unverified: with --transcript, llm-ext reads only that file and its checkpoint (by grep of the llm-ext repo source, not traced; the running 14.5.0 build was not compared).
 - Increment B, known limit: no production caller passes progress_fn to summarize_with_retry (grep of scripts, hooks and tests, 2026-11-17), so the stuck-timeout gate is not engaged today. llm_ext_progress_fn watches llm-ext's default checkpoint folder; llm-ext now writes its checkpoint under the explicit --checkpoint path in the per-run folder, so wiring that function later would need it pointed at the run folder.
-- Increment B, guarantee: llm-ext is never given the original transcript path, only the redacted copy (the argv carries the copy and the checkpoint, tested), so the guarantee does not depend on what else llm-ext reads. A run folder that cannot be removed does not discard a finished summary: one fixed-text line goes to stderr and the 24 h sweep removes the leftover redacted files.
+- Increment B, guarantee: llm-ext is never given the original transcript path, only the redacted copy (the argv carries the copy and the checkpoint, tested), so the guarantee does not depend on what else llm-ext reads. A run folder that cannot be removed does not discard a finished summary: one fixed-text line goes to stderr and the next run's 24 h-age sweep removes the leftover redacted files.
+- Increment B, accepted cost (main agent, 2026-11-17): llm-ext checkpoint resume across separate runs is lost; each run's folder, checkpoint included, is removed when the run ends. Before this change the default checkpoint was keyed on the original transcript path and outlived the run. Accepted because a checkpoint left beside a copy that a later run rebuilds is the stale pair that makes llm-ext refuse on every later run; resume inside one run still works while the source transcript is unchanged.
+- Increment B, accepted cost (main agent, 2026-11-17): within one run a source transcript that changes between attempts (the manual handoff reads the live session transcript) gets a new copy, a new digest and a new checkpoint each attempt, so each attempt can redo the whole redaction from the shared deadline (up to about 207 s on the largest local transcript, by the timing line above). Not measured on a live session.
+- Increment B, known limit (main agent, 2026-11-17): a run folder or stale folder that cannot be removed is reported only by one fixed-text stderr line, and the automatic lane's stderr may never reach a person; the leftover holds only redacted text in the gitignored state folder (mode 0700) and the next run's 24 h-age sweep removes it (the sweep runs only when a later run opens a workspace). A findings-ledger alert for a leftover older than the sweep age is not built.
 
 ## Acceptance
 A test feeds a transcript holding a fake secret and a fake home path to the summarizer's input step and proves the text handed to llm-ext holds neither.

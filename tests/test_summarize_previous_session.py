@@ -1105,6 +1105,74 @@ def test_llm_ext_fallback_budget_is_capped_at_600s_when_hold_outlasts_jev(tmp_pa
     assert argv[argv.index("--timeout-s") + 1] == "600", argv
 
 
+def test_llm_ext_fallback_passes_the_state_folder_to_the_script(tmp_path):
+    """TRDD-TKQ274RE: `_run_llm_ext_fallback` must put `--state-dir <state_dir>` on the exec'd
+    script's argv -- llm_ext_compact.py makes its redacted transcript copy under that folder and
+    refuses to run without it. A stub script logs the argv it really received."""
+    plugin_root = tmp_path / "plugin"
+    llm_ext_argv = tmp_path / "llm-ext-argv.txt"
+    _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary", argv_log=llm_ext_argv)
+    run_state = tmp_path / "the-state-folder"
+
+    ok, payload = jcl._run_llm_ext_fallback(
+        plugin_root, transcript="/tmp/x.jsonl", timeout_s=60.0, state_dir=run_state,
+    )
+
+    assert ok is True, payload
+    argv = llm_ext_argv.read_text(encoding="utf-8").split()
+    assert argv.count("--state-dir") == 1, argv
+    assert argv[argv.index("--state-dir") + 1] == str(run_state), argv
+
+
+def test_run_compact_with_fallback_hands_its_state_folder_to_the_llm_ext_fallback(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-TKQ274RE: `run_compact_with_fallback` must call `_run_llm_ext_fallback` with
+    `state_dir=` its own `sd`. The fakes elsewhere swallow every argument, so a dropped
+    `state_dir=` would go unseen; here the replacement records what it was given."""
+    prev = _make_prev_transcript(_isolated_env)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact_appending(plugin_root, tmp_path / "argv.jsonl", exit_code=jcl.EXIT_JEV_ERROR)
+    _write_probe_stamp(kind="auth", reason="401 invalid key")  # non-retryable: falls back at once
+    seen: dict[str, object] = {}
+
+    def _capture(*args: object, **kwargs: object) -> tuple[bool, str]:
+        seen["kwargs"] = kwargs
+        return True, "captured summary"
+
+    monkeypatch.setattr(jcl, "_run_llm_ext_fallback", _capture)
+    clock = _FakeClock(start=0.0)
+    sd = tmp_path / "the-lane-state-folder"
+
+    source, text, _detail = jcl.run_compact_with_fallback(
+        plugin_root, transcript=str(prev), out_path=tmp_path / "compacted.md",
+        session_key="k", heads_args=[], sd=sd, deadline=300.0,
+        hold_expires=900.0, now_fn=clock.time, sleep_fn=clock.sleep,
+    )
+
+    assert source == jcl.SOURCE_LLM_EXT, (source, text)
+    kwargs = seen["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("state_dir") == sd
+
+
+def test_llm_ext_compact_refuses_to_run_without_state_dir(tmp_path):
+    """TRDD-TKQ274RE: `llm_ext_compact.py` requires `--state-dir` -- without it there is nowhere
+    to make the redacted copy, and it must exit 2 (argparse) before any attempt, never fall back to
+    sending the transcript itself. Runs the real script; argparse rejects the call first, so
+    llm-ext is never reached."""
+    transcript = _make_prev_transcript(tmp_path)
+
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "llm_ext_compact.py"), "--transcript", str(transcript)],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert proc.returncode == 2, (proc.returncode, proc.stderr)
+    assert "--state-dir" in proc.stderr, proc.stderr
+    assert proc.stdout == ""
+
+
 # --- STATE heads: a stub trddgrep on PATH, and its absence ---------------------------------
 
 _TRDDGREP_STUB = """#!/usr/bin/env python3
