@@ -53,8 +53,17 @@ describe('home rewrite: Unix and Git Bash', () => {
     const url = 'https://example.com/home/user/x'
     expect(h(url)).toEqual({ text: url, hits: {} })
   })
-  test('a slash after a name character, ~, } or ) never starts a home', () => {
-    for (const s of ['/usr/Users/user', '~/Users/user', '${HOME}/Users/user', '$(pwd)/home/user']) expect(h(s).text).toBe(s)
+  test('a slash after a name character or ~ never starts a home', () => {
+    for (const s of ['/usr/Users/user', '~/Users/user']) expect(h(s).text).toBe(s)
+  })
+  test('a slash after } or ) starts a home: the name after a variable or a command substitution is hidden (parity with the report sanitizer)', () => {
+    // Built from pieces (made-up name, see the note above the helpers): the privacy scan has no allow marker.
+    expect(h('${HOME}' + unix('', 'Users', 'runner', 'p')).text).toBe('${HOME}~/p')
+    expect(h('$(pwd)' + unix('', 'home', 'runner', 'p')).text).toBe('$(pwd)~/p')
+  })
+  test('a slash after ~ still never starts a home (idempotence: a second run must not match what a first run left)', () => {
+    const tilde = '~' + unix('', 'Users', 'runner', 'x')
+    expect(h(tilde)).toEqual({ text: tilde, hits: {} })
   })
   test('/Users/Shared is not a person, /Users/Shared-x is', () => {
     expect(h('/Users/Shared/x').text).toBe('/Users/Shared/x')
@@ -230,9 +239,14 @@ describe('home rewrite: known misses, pinned as they are today', () => {
   test('home known miss relative-parent: a relative ../Users/name is not rewritten', () => {
     expect(h('../Users/runner/x').text).toBe('../Users/runner/x')
   })
-  test('home known miss after-variable: a name after a shell variable or a command substitution is not rewritten', () => {
-    expect(h('${ROOT}/Users/runner/x').text).toBe('${ROOT}/Users/runner/x')
-    expect(h('$(pwd)/Users/runner/x').text).toBe('$(pwd)/Users/runner/x')
+  test('home known miss windows-name-special-chars: a Windows name holding & ! # % ~ { } ^ keeps the tail from that character', () => {
+    // Built from pieces (made-up name, see the note above the helpers): Windows allows these characters in a name, WIN_N does not.
+    expect(h(win('C:', 'Users', 'Aa&Bb', 'x')).text).toBe(raw`%USERPROFILE%&Bb\x`)
+  })
+  test('home known miss windows-drive-glued: a drive letter glued to a name character, a dot or a backslash is not a token start, so the path stays unchanged', () => {
+    // Built from pieces (made-up name, see the note above the helpers).
+    const glued = 'dir-' + win('C:', 'Users', 'runner', 'x')
+    expect(h(glued)).toEqual({ text: glued, hits: {} })
   })
   test('home known miss url-encoded: a URL-encoded %2FUsers%2Fname is not rewritten', () => {
     expect(h('%2FUsers%2Frunner%2Fx').text).toBe('%2FUsers%2Frunner%2Fx')
