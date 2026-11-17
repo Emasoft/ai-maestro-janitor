@@ -350,6 +350,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
     scope: opts.all ? 'all' : 'default',
     repos: stats.repos,
     non_repo_dirs: stats.nonRepoDirs,
+    ancestor_rules_skipped: stats.ancestorRulesSkipped,
     files_scanned: filesScanned,
     bytes_scanned: bytesScanned,
     skipped,

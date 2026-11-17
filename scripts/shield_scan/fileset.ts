@@ -20,9 +20,9 @@ export interface SetStats {
   repos: number
   nonRepoDirs: number
   gitignoredEntries: number
+  /** True when the root has no .git of its own, sits under an ancestor repo, and is walked plain because that repo tracks nothing under it. */
+  ancestorRulesSkipped: boolean
   skipRecords: SkipRecord[]
-  /** The repos already listed with git (by path), so none is scanned twice. */
-  seenRepos: Set<string>
   skipped: Record<SkipReason, number>
 }
 
@@ -44,7 +44,7 @@ export interface SetOptions {
 export function newStats(): SetStats {
   const skipped = {} as Record<SkipReason, number>
   for (const reason of SKIP_REASONS) skipped[reason] = 0
-  return { repos: 0, nonRepoDirs: 0, gitignoredEntries: 0, skipRecords: [], skipped, seenRepos: new Set() }
+  return { repos: 0, nonRepoDirs: 0, gitignoredEntries: 0, ancestorRulesSkipped: false, skipRecords: [], skipped }
 }
 
 export function relOf(root: string, abs: string): string {
@@ -69,15 +69,6 @@ function runGit(repo: string, args: string[]): Promise<Buffer | null> {
   })
 }
 
-// Like runGit, for a query answered by the exit code alone (git check-ignore): resolves the exit code, or null when git was killed by a signal. Same rules: no shell, fsmonitor off, no stderr read.
-function gitExitCode(repo: string, args: string[]): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('git', ['-c', 'core.fsmonitor=false', '-C', repo, ...args], { stdio: 'ignore' })
-    child.on('error', reject)
-    child.on('close', (code) => resolve(code))
-  })
-}
-
 const splitZ = (data: Buffer): string[] => data.toString('utf8').split('\0').filter((entry) => entry.length > 0)
 
 function inspect(abs: string): Stats | 'missing' | 'error' {
@@ -87,7 +78,6 @@ function inspect(abs: string): Stats | 'missing' | 'error' {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'error'
   }
 }
-
 
 type GitEntry = 'present' | 'absent' | 'unreadable'
 
@@ -131,9 +121,6 @@ function classify(abs: string, st: Stats | 'missing' | 'error', opts: SetOptions
 }
 
 async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats): AsyncGenerator<FileItem> {
-  // WHY the guard: git can list a repo as an ignored directory entry more than once (the search of an ignored folder and the entry of the repo itself), and a repo scanned twice would double its findings.
-  if (stats.seenRepos.has(repo)) return
-  stats.seenRepos.add(repo)
   stats.repos++
   const listed = await runGit(repo, ['ls-files', '-co', '--exclude-standard', '-z'])
   const ignored = listed === null ? null : await runGit(repo, ['ls-files', '-oi', '--exclude-standard', '--directory', '-z'])
@@ -141,11 +128,12 @@ async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats): Async
     noteSkip(stats, opts.root, repo, 'git-error')
     return
   }
-  const ignoredEntries = splitZ(ignored)
-  stats.gitignoredEntries += ignoredEntries.length
+  stats.gitignoredEntries += splitZ(ignored).length
   // A path can be listed more than once (an unmerged path has one entry per stage).
   for (const entry of new Set(splitZ(listed))) {
     const abs = join(repo, entry.endsWith('/') ? entry.slice(0, -1) : entry)
+    // WHY: an entry that resolves to the repo folder itself (git printed "./" in the ignored-directory listing; not seen in ls-files -co) would walk the repo again as a tree of its own.
+    if (abs === repo) continue
     if (opts.exclude.has(abs)) continue
     const st = inspect(abs)
     // A directory in the listing is a submodule (gitlink) or an untracked nested repo or linked worktree (listed as a directory entry): it is scanned as a tree of its own, which is a repo of its own when it holds a .git.
@@ -155,28 +143,6 @@ async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats): Async
     }
     const item = classify(abs, st, opts, stats)
     if (item !== null) yield item
-  }
-  // WHY the ignored folders are searched for repos: an ignore rule that hides a folder (vendor/, or Code/* above a project) also hides the repos inside it, which git does not list, so they would never be scanned and the run would still look complete. Each repo found is scanned under its own rules; the ignored files themselves are never read or counted.
-  for (const entry of ignoredEntries) if (entry.endsWith('/')) yield* findIgnoredRepos(join(repo, entry.slice(0, -1)), opts, stats)
-}
-
-// Searches an ignored folder for repo roots: a folder holding a .git entry is scanned with walkRepo and the search stops there; any other folder is searched in turn. Types come from lstat, so a symlink is never followed; a file is never read or counted. A folder that cannot be listed is an unreadable-dir skip.
-async function* findIgnoredRepos(dir: string, opts: SetOptions, stats: SetStats): AsyncGenerator<FileItem> {
-  if (hasGitEntry(dir)) {
-    yield* walkRepo(dir, opts, stats)
-    return
-  }
-  let names: string[]
-  try {
-    names = await readdir(dir)
-  } catch {
-    noteSkip(stats, opts.root, dir, 'unreadable-dir')
-    return
-  }
-  for (const name of names) {
-    const abs = join(dir, name)
-    const st = inspect(abs)
-    if (typeof st !== 'string' && st.isDirectory()) yield* findIgnoredRepos(abs, opts, stats)
   }
 }
 
@@ -225,18 +191,20 @@ async function* walkTree(dir: string, opts: SetOptions, stats: SetStats): AsyncG
 /** Every file the scan reads, in no particular order; what is not read is counted in `stats` as the walk goes. */
 export async function* walkFiles(opts: SetOptions, stats: SetStats): AsyncGenerator<FileItem> {
   if (!opts.all && !hasGitEntry(opts.root)) {
-    // WHY: a root with no .git of its own inside a repo (a subfolder) is listed by git, so the ignore rules of the whole repo apply and git lists only the paths under the root. But a root that the repo ignores (the root or a parent of it matches an ignore rule) would list nothing, and the nested repos under it would never be found: such a root is walked as a folder outside any repo, and each repo under it is scanned under its own rules. git check-ignore: exit 0 ignored, 1 not ignored, anything else is an error, which is a git-error skip of the root and never a whole walk.
+    // WHY: a root with no .git of its own, under an ancestor repo, is listed by that repo only when the repo tracks content under the root: then its ignore rules apply (walkRepo). A repo that tracks nothing under the root has no say over it, and the root is walked as a folder outside any repo; the repos nested under it keep their own rules. WHY emptiness and failure stay apart: an empty listing (exit 0, no output) is a normal answer and means a plain walk; a git failure (null) is a git-error skip of the root, the run is incomplete, and it is never turned into a walk.
     const top = findGitTop(opts.root)
     if (top !== null) {
-      const code = await gitExitCode(top.dir, ['check-ignore', '-q', '--', relative(top.dir, opts.root)])
-      if (code === 1) {
-        yield* walkRepo(opts.root, opts, stats)
-        return
-      }
-      if (code !== 0) {
+      const tracked = await runGit(opts.root, ['ls-files', '-z'])
+      if (tracked === null) {
         noteSkip(stats, opts.root, opts.root, 'git-error')
         return
       }
+      if (tracked.length > 0) {
+        yield* walkRepo(opts.root, opts, stats)
+        return
+      }
+      // WHY the flag: the only signal in the summary that an ancestor repo's ignore rules did not apply to this root (it is walked plain because that repo tracks nothing under it).
+      stats.ancestorRulesSkipped = true
     }
   }
   yield* walkTree(opts.root, opts, stats)

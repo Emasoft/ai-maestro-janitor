@@ -137,7 +137,7 @@ def test_tracked_file_with_token_gives_located_finding_and_exit_1(box: Box) -> N
     result = box.scan()
     assert result.code == 1
     assert result.findings == [("a.txt", "github-token", 3, 1)]
-    assert result.summary["complete"] is True and result.summary["files_with_findings"] == 1
+    assert result.summary["complete"] is True and result.summary["files_with_findings"] == 1 and result.summary["ancestor_rules_skipped"] is False
     body = TOKEN[4:]
     for text in (result.out.read_text(encoding="utf-8"), result.stdout, result.stderr):
         assert TOKEN not in text and body not in text
@@ -154,7 +154,7 @@ def test_gitignored_env_is_skipped_by_default_and_scanned_with_all(box: Box) -> 
     assert default.summary["gitignored_entries"] == 1 and default.summary["scope"] == "default"
     everything = box.scan("--all")
     assert everything.code == 1 and everything.findings == [(".env", "github-token", 1, 1)]
-    assert everything.summary["scope"] == "all"
+    assert everything.summary["scope"] == "all" and everything.summary["ancestor_rules_skipped"] is False
 
 
 def test_tracked_hidden_file_is_scanned_by_default(box: Box) -> None:
@@ -416,6 +416,7 @@ def test_root_that_is_a_subfolder_of_a_repo_respects_the_repo_ignore_rules(box: 
     assert result.code == 1
     assert result.findings == [("a.txt", "github-token", 1, 1)]
     assert result.summary["gitignored_entries"] == 1 and result.summary["repos"] == 1 and result.summary["non_repo_dirs"] == 0
+    assert result.summary["ancestor_rules_skipped"] is False
 
 
 def test_root_that_the_ancestor_repo_ignores_is_walked_plain_and_nested_repos_are_found(box: Box) -> None:
@@ -430,31 +431,33 @@ def test_root_that_the_ancestor_repo_ignores_is_walked_plain_and_nested_repos_ar
     result = box.scan(root=proj)
     assert result.code == 1
     assert result.findings == [("inner/b.txt", "github-token", 1, 1), ("tok.txt", "github-token", 1, 1)]
-    assert result.summary["non_repo_dirs"] == 1 and result.summary["repos"] == 1
+    assert result.summary["non_repo_dirs"] == 1 and result.summary["repos"] == 1 and result.summary["ancestor_rules_skipped"] is True
     # The root is ignored through its parent folder: the same.
     box.put(ancestor / ".gitignore", "proj/\n")
     box.put(proj / "deep" / "t2.txt", _line())
     deep = box.scan(root=proj / "deep")
     assert deep.code == 1 and deep.findings == [("t2.txt", "github-token", 1, 1)]
-    assert deep.summary["non_repo_dirs"] == 1
+    assert deep.summary["non_repo_dirs"] == 1 and deep.summary["ancestor_rules_skipped"] is True
 
 
-def test_repo_inside_an_ignored_folder_is_found_and_loose_ignored_files_are_not_scanned(box: Box) -> None:
-    """A repo that ignores vendor/ still has the repo under vendor/lib scanned under its own rules, while a loose file with a token in vendor/ is not scanned."""
+def test_clone_under_an_ignored_folder_is_not_scanned_by_default_and_is_scanned_with_all(box: Box) -> None:
+    """Ignored folders are not scanned by default, a clone under vendor/ included (gitignored_entries counts vendor/); --all scans them."""
     box.put(box.root / ".gitignore", "vendor/\n")
     box.put(box.root / "clean.txt", "x\n")
     box.repo(box.root, ".gitignore", "clean.txt")
     box.put(box.root / "vendor" / "loose.txt", _line())
     box.put(box.root / "vendor" / "lib" / "t.txt", _line())
     box.repo(box.root / "vendor" / "lib", "t.txt")
-    result = box.scan()
-    assert result.code == 1
-    assert result.findings == [("vendor/lib/t.txt", "github-token", 1, 1)]
-    assert result.summary["repos"] == 2
+    default = box.scan()
+    assert default.code == 0 and default.findings == []
+    assert default.summary["gitignored_entries"] == 1 and default.summary["repos"] == 1
+    everything = box.scan("--all")
+    assert everything.code == 1
+    assert everything.paths() == {"vendor/lib/t.txt", "vendor/loose.txt"}
 
 
 def test_root_whose_children_the_ancestor_repo_ignores_still_finds_its_nested_repos(box: Box) -> None:
-    """An ancestor repo with .gitignore proj/* hides every child of the root, but the repo nested under the root is still found and scanned."""
+    """An ancestor repo that tracks nothing under the root (.gitignore proj/*) has no say over it: the root is walked as a plain folder and the repo nested under it is found and scanned."""
     ancestor = box.base / "ancestor"
     box.put(ancestor / ".gitignore", "proj/*\n")
     box.repo(ancestor, ".gitignore")
@@ -464,7 +467,10 @@ def test_root_whose_children_the_ancestor_repo_ignores_still_finds_its_nested_re
     result = box.scan(root=proj)
     assert result.code == 1
     assert result.findings == [("inner/b.txt", "github-token", 1, 1)]
-    assert result.summary["repos"] == 2
+    assert result.summary["repos"] == 1 and result.summary["non_repo_dirs"] == 1 and result.summary["ancestor_rules_skipped"] is True
+
+
+def test_subfolder_root_under_a_repo_that_git_refuses_gives_git_error_and_no_plain_walk(box: Box) -> None:
     """A root under an ancestor .git that git cannot use gives a git-error skip of "." and exit 3, never a plain walk of the folder."""
     parent = box.base / "broken-parent"
     box.put(parent / ".git", f"gitdir: {box.base}/does-not-exist\n")
