@@ -1,22 +1,26 @@
-// secrets-shield redact, increment 3 step 3a-2 (TRDD-BAQB9SYO; spec design/specs/TRDD-BAQB9SYO-increment-3-redact.md R2, R3, R5b): the pure part of redacting a text file. No fs, no env, no process: the worker (worker.ts) does the vault and the file writes around it.
-// Flow of one file: planRedaction() cuts out the markers already in the text, runs the core passes on each stretch between them, and aligns each output with its input to recover the exact text every core marker replaced. The worker vaults those stretches, then finalText() writes the new text with [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>] markers, and restoreCheck() proves that the vault rows put the original back before anything is written.
+// secrets-shield redact, increment 3 steps 3a-2 and 3a-3 (TRDD-BAQB9SYO; spec design/specs/TRDD-BAQB9SYO-increment-3-redact.md R2, R3, R5, R5b): the pure part of redacting a text file. No fs, no env, no process: the worker (worker.ts) does the vault and the file writes around it.
+// Flow of one file: planRedaction() cuts out the markers already in the text, runs the core passes on each stretch between them, and aligns each output with its input to recover the exact text every core marker replaced. sweepPlan() then replaces the copies of those values that no pass matched (R5). The worker vaults the stretches, then finalText() writes the new text with [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>] markers, restoreCheck() proves that the vault rows put the original back before anything is written, and residualHits() runs the passes again over what lies between the markers of the final text.
 // A value never leaves this module except inside the plan it returns; nothing here prints or throws one. A text the alignment cannot explain gives plan null (the worker skips the file as align-error); it never throws.
 
 import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
-import { addHits, type Hits } from '../../hooks/secret-shield/patterns.ts'
+import { addHits, propagates, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import type { VaultEntry } from './vault.ts'
 
-// The grammar of the core marker is not exported by the core (and the core is not changed in this step), so it is rebuilt here from `mark(kind)` = [JANITOR-REDACTED:<kind>]; the unit test pins the two against each other.
+// The grammar of the core marker is not exported by the core (the only core change of increment 3 is the export of propagates), so it is rebuilt here from `mark(kind)` = [JANITOR-REDACTED:<kind>]; the unit test pins the two against each other.
 export const CORE_MARKER = String.raw`\[JANITOR-REDACTED:([A-Za-z0-9_-]+)\]`
 const UUID_V4 = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`
 // The marker this module writes: [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>].
 export const SHIELD_MARKER = String.raw`\[REDACTED-BY-SECRET-SHIELD\. Type: ([A-Za-z0-9_-]+)\. ID: (${UUID_V4})\]`
 
 // Why a file with findings was not written (spec R7), in the order the worker checks them. Each is a skip record of the findings file and the file's findings count as findings_not_redacted.
-export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'changed-during-redact', 'write-error'] as const
+export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'not-regular-at-write', 'outside-root', 'changed-during-redact', 'write-error'] as const
 export type WriteSkipReason = (typeof WRITE_SKIP_REASONS)[number]
-// The worker's last reply for a file with findings when the job asks for redact (the protocol is in worker.ts): written, left as it was and why, or a vault failure (fixed text) that ends the run.
-export type RedactReply = { t: 'redact'; outcome: 'written'; values: number } | { t: 'redact'; outcome: 'skip'; reason: WriteSkipReason } | { t: 'redact'; outcome: 'vault-error'; message: string }
+
+// What the driver sends with a job that redacts: the age limit for a recent file and the scan root the write target must stay inside (writeguard.ts).
+export type RedactJob = { minAgeMs: number; root: string }
+
+// The worker's last reply for a file with findings when the job asks for redact (the protocol is in worker.ts): written (with the kinds and counts of what the re-scan of the final text still found, never any text), left as it was and why, or a vault failure (fixed text) that ends the run.
+export type RedactReply = { t: 'redact'; outcome: 'written'; values: number; residual: Hits } | { t: 'redact'; outcome: 'skip'; reason: WriteSkipReason } | { t: 'redact'; outcome: 'vault-error'; message: string }
 
 export const shieldMarker = (kind: string, uuid: string): string => `[REDACTED-BY-SECRET-SHIELD. Type: ${kind}. ID: ${uuid}]`
 
@@ -131,6 +135,43 @@ export function planRedaction(text: string, homes: readonly string[], passes: Re
   return { hits, plan: ok ? { parts, stretches } : null }
 }
 
+/**
+ * The sweep (spec R5): every distinct stretch value of the plan that the core's propagates() accepts is searched again in the literal parts that came from the text (never in an old shield marker), raw form only, and each copy found becomes a new stretch with the same value and kind, so vaultEntries gives it the same uuid as the original.
+ * WHY: hideKnown spreads a found value only within one redactAll call, so a copy left in another stretch (one cut off by an old marker, or in a text that was redacted in several calls) matches no rule and would stay in the file. propagates() is the floor: a value under 10 characters, a number, an identifier, a slug, a path, a URL, an email or a host:port is never swept, because such a value is usually a name or a location and sweeping it would rewrite unrelated text.
+ * WHY longer values first: a value that lies inside a longer one is then never split out of it, as in hideKnown. The new stretches are appended after the original ones, so the first stretch of a value (the one whose kind the vault row keeps) is still an original.
+ * Pure: the plan given is not changed. The sweep runs before vaultEntries, finalText and restoreCheck, so the restore check covers it.
+ */
+export function sweepPlan(plan: Plan): Plan {
+  const kinds = new Map<string, string>()
+  for (const s of plan.stretches) if (!kinds.has(s.value) && propagates(s.value)) kinds.set(s.value, s.kind)
+  if (kinds.size === 0) return plan
+  const stretches = [...plan.stretches]
+  let parts = plan.parts
+  for (const [value, kind] of [...kinds].sort((a, b) => b[0].length - a[0].length)) {
+    const next: Part[] = []
+    for (const part of parts) {
+      if (part.t !== 'lit') {
+        next.push(part)
+        continue
+      }
+      const bits = part.text.split(value)
+      if (bits.length === 1) {
+        next.push(part)
+        continue
+      }
+      bits.forEach((bit, i) => {
+        if (i > 0) {
+          next.push({ t: 'new', stretch: stretches.length })
+          stretches.push({ value, kind })
+        }
+        if (bit !== '') next.push({ t: 'lit', text: bit })
+      })
+    }
+    parts = next
+  }
+  return { parts, stretches }
+}
+
 /** The vault entries of a plan: one per distinct value (a value twice in a file has one uuid), and for each stretch the index of its entry. The row keeps the kind of the first stretch with that value. */
 export function vaultEntries(plan: Plan): { entries: VaultEntry[]; slot: number[] } {
   const entries: VaultEntry[] = []
@@ -178,4 +219,14 @@ export function restoreCheck(plan: Plan, final: string, uuids: readonly string[]
   }
   restored += final.slice(at)
   return restored === original
+}
+
+/**
+ * The re-scan (spec R5): the core passes run again over every stretch of the final text between markers (old and new alike). A hit there is a residual finding: something the first run left in a file it did write. Returns kinds and counts only, never text.
+ * WHY: the sweep finds copies of values the passes already found; this finds what neither the passes nor the sweep took out of the stretches, and it is the only check of the output itself (the restore check proves the file can be restored, not that it is clean).
+ */
+export function residualHits(final: string, homes: readonly string[], passes: ReadonlySet<Pass>): Hits {
+  const hits: Hits = {}
+  for (const item of cutMarkers(final)) if ('seg' in item) addHits(hits, redactAll(item.seg, homes, passes).hits)
+  return hits
 }

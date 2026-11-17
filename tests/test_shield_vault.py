@@ -23,7 +23,7 @@ _SHIELD_SCAN = Path(__file__).resolve().parents[1] / "scripts" / "shield_scan"
 _TEST_FILE = _SHIELD_SCAN / "tests" / "vault.test.ts"
 _TIMEOUT_S = 180.0
 # The number of tests in vault.test.ts: a run that reports fewer passes ran less than the suite.
-_EXPECTED_TESTS = 12
+_EXPECTED_TESTS = 13
 
 
 def test_vault_bun_suite_passes() -> None:

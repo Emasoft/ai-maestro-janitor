@@ -54,6 +54,20 @@ function sqliteCode(error: unknown): string {
   return typeof code === 'string' && /^SQLITE_[A-Z0-9_]+$/.test(code) ? ` (${code})` : ''
 }
 
+// WHY the setup statements of a first open are retried here and busy_timeout alone is not enough. Measured on 2026-11-18, 8 bun processes opening a NEW vault folder at once: the statement that returned SQLITE_BUSY was PRAGMA journal_mode = WAL (62 of 480 runs of a probe that repeated the setup statements one by one; 35 of 160 openVault calls failed in the same setup), and it failed after 0 to 1 ms although busy_timeout was 10000 ms, so SQLite did not wait for it. Why the busy handler is not called for that statement was not isolated. CREATE TABLE was never seen to fail in that measurement; it is retried too because it belongs to the same first-open setup. An open of a vault that already exists was measured at 0 failures in 160. Only SQLITE_BUSY is retried, until BUSY_TIMEOUT_MS has passed in total; any other error, and the last busy one, goes on to the fixed-text error of openVault. The jitter keeps several workers from retrying in step.
+function retryBusy<T>(step: () => T): T {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS
+  for (;;) {
+    try {
+      return step()
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code !== 'SQLITE_BUSY' || Date.now() >= deadline) throw error
+      // Atomics.wait is a synchronous sleep that needs no Bun type declaration (tsc has none for the Bun global here).
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 + Math.random() * 10)
+    }
+  }
+}
+
 // Absolute path of `path` with every symlink resolved, also when the last components do not exist yet: the nearest existing ancestor is resolved and the missing tail is appended. WHY: the test-only folder is checked BEFORE it is created, and a plain realpathSync would throw on a folder that does not exist yet.
 function realpathOfMissing(path: string): string {
   const tail: string[] = []
@@ -127,14 +141,16 @@ export function openVault(): Vault {
     // WHY no explicit mode: the owner dropped the restricted 0700 and 0600 modes on 2026-11-16 (card QM8YRCZ5). The vault must work unattended and local protection is impossible, so the folder takes the umask default (0777 minus the umask) and vault.db takes SQLite's default creation mode (0644 minus the umask).
     mkdirSync(dir, { recursive: true })
     if (!statSync(dir).isDirectory()) throw new VaultError('the vault folder is not a folder')
-    db = new Database(file)
-    // WHY busy_timeout before journal_mode: every redact worker opens the vault, and the first open switches the file to WAL, which needs a lock another worker may hold at that moment.
+    const opened = new Database(file)
+    db = opened
+    // WHY busy_timeout before journal_mode: every redact worker opens the vault, and the first open switches the file to WAL while another worker may be doing the same. It covers the statements that wait for a lock; the two setup statements below are also retried (see retryBusy).
     db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`)
-    const mode = db.query('PRAGMA journal_mode = WAL').get() as { journal_mode?: string } | null
+    const mode = retryBusy(() => opened.query('PRAGMA journal_mode = WAL').get()) as { journal_mode?: string } | null
     // WHY a hard check: some filesystems refuse WAL and SQLite silently keeps the old mode; concurrent workers then fail unpredictably, so stop here.
     if (mode?.journal_mode?.toLowerCase() !== 'wal') throw new VaultError('the vault could not be put in WAL mode')
     // WHY the UNIQUE key is (origin, value, encoding): the same secret in the same file reuses its uuid and another file gets its own (owner order). encoding separates the raw text from its JSON-string form, whose restore writes the escaped text.
-    db.exec(`CREATE TABLE IF NOT EXISTS secrets (
+    retryBusy(() =>
+      opened.exec(`CREATE TABLE IF NOT EXISTS secrets (
       uuid TEXT PRIMARY KEY,
       type TEXT NOT NULL,
       origin TEXT NOT NULL,
@@ -144,7 +160,8 @@ export function openVault(): Vault {
       last_seen TEXT NOT NULL,
       count INTEGER NOT NULL,
       UNIQUE (origin, value, encoding)
-    )`)
+    )`),
+    )
   } catch (error) {
     db?.close()
     if (error instanceof VaultError) throw error

@@ -166,8 +166,8 @@ def test_redact_then_restore_is_byte_identical(box: Box) -> None:
     assert result.code == 0, result.stderr
     summary = result.summary
     assert summary["files_redacted"] == 2 and summary["values_vaulted"] == 2 and summary["findings_not_redacted"] == 0 and summary["redact"] is True
-    # WHY the field is asserted: step 3a-3 (sweep and re-scan) does not exist yet, so no run may claim that no copy is left.
-    assert summary["residual_check"] == "not-run" and summary["complete"] is True
+    # WHY the fields are asserted: a --redact run reports that the re-scan ran and how many residual hits it found.
+    assert summary["residual_check"] == "run" and summary["residual"] == 0 and summary["complete"] is True
     for path, original in ((a, original_a), (b, original_b)):
         text = _read(path)
         assert TOKEN not in text and TOKEN2 not in text and "REDACTED-BY-SECRET-SHIELD. Type: github-token. ID: " in text
@@ -391,3 +391,130 @@ def test_plan_keeps_old_markers_and_the_restore_check_works_by_position(box: Box
     assert got["check"] is True and got["wrong"] is False
     nothing = box.bun_json(_PLAN, {"text": f"a {_OLD}\n", "uuids": []})
     assert nothing["hits"] == {} and nothing["stretches"] == 0 and nothing["final"] == f"a {_OLD}\n" and nothing["check"] is True
+
+
+# A value that propagates() accepts (16 characters with upper case, lower case, digits and punctuation) and that no rule matches bare; the assignment rule fires on it only beside its key.
+SWEEP_VALUE = "Zq9!kT3#vR8$mW2x"
+
+
+def test_a_copy_left_by_the_marker_cut_is_swept_and_shares_the_uuid(box: Box) -> None:
+    """A pair "password":"<value>" is redacted, an old shield marker follows, then the bare value (which no rule matches alone): the sweep turns both copies into markers with one uuid, the run exits 0 with no residual, and restore (which also puts back the old marker) gives the file with the old marker replaced by its token."""
+    a = box.put(box.root / "a.txt", f"k = {TOKEN}\n")
+    assert box.run().code == 0
+    old_line = _read(a)
+    assert MARKER_RE.search(old_line) is not None
+    original = f'{{"password":"{SWEEP_VALUE}"}}\n{old_line}note {SWEEP_VALUE} end\n'
+    box.put(a, original)
+    result = box.run()
+    assert result.code == 0 and result.summary["residual"] == 0 and result.summary["files_redacted"] == 1, result.stderr
+    text = _read(a)
+    assert SWEEP_VALUE not in text
+    ids = [m.group(2) for m in MARKER_RE.finditer(text)]
+    assert len(ids) == 3
+    assert ids[0] == ids[2] and ids[0] != ids[1]
+    # Restore puts back every marker, the old one too: its value is the token of the first run.
+    assert box.restore(text) == f'{{"password":"{SWEEP_VALUE}"}}\nk = {TOKEN}\nnote {SWEEP_VALUE} end\n'
+    assert result.summary["values_vaulted"] == 1
+    assert SWEEP_VALUE not in result.streams()
+
+
+_SWEEP = f"""
+import {{ sweepPlan, vaultEntries }} from {json.dumps(str(REDACT))}
+const plan = JSON.parse(await Bun.stdin.text())
+const swept = sweepPlan(plan)
+const entries = vaultEntries(swept)
+console.log(JSON.stringify({{ swept, slot: entries.slot, distinct: entries.entries.length }}))
+"""
+
+
+def test_sweep_skips_a_short_value_and_never_splits_a_value_out_of_a_longer_one(box: Box) -> None:
+    """sweepPlan: a value under 10 characters is not swept; a longer value is swept first so a shorter one inside it is not split out; a shield marker part is never searched; every copy shares the row of its value."""
+    short = {"parts": [{"t": "new", "stretch": 0}, {"t": "lit", "text": " ab1 ab1 "}], "stretches": [{"value": "ab1", "kind": "k"}]}
+    got_short = box.bun_json(_SWEEP, short)
+    assert got_short["swept"] == short and got_short["distinct"] == 1
+    inner = "kT3#vR8$mW2x"
+    assert SWEEP_VALUE.endswith(inner) and len(inner) >= 10
+    old = f"x{SWEEP_VALUE}x"
+    plan = {
+        "parts": [{"t": "new", "stretch": 0}, {"t": "lit", "text": f" {SWEEP_VALUE} / {inner} "}, {"t": "new", "stretch": 1}, {"t": "old", "text": old}],
+        "stretches": [{"value": inner, "kind": "ki"}, {"value": SWEEP_VALUE, "kind": "kl"}],
+    }
+    got = box.bun_json(_SWEEP, plan)
+    assert got["swept"]["parts"] == [
+        {"t": "new", "stretch": 0},
+        {"t": "lit", "text": " "},
+        {"t": "new", "stretch": 2},
+        {"t": "lit", "text": " / "},
+        {"t": "new", "stretch": 3},
+        {"t": "lit", "text": " "},
+        {"t": "new", "stretch": 1},
+        {"t": "old", "text": old},
+    ]
+    assert got["swept"]["stretches"][2:] == [{"value": SWEEP_VALUE, "kind": "kl"}, {"value": inner, "kind": "ki"}]
+    assert got["distinct"] == 2 and got["slot"] == [0, 1, 1, 0]
+
+
+def test_a_residual_hit_is_reported_by_kind_and_count_and_makes_the_run_exit_1(box: Box) -> None:
+    """Two assignments on one line: the first run hides the first pair, the second is left (the re-scan finds it), so the file is written, one residual record of kind assignment is reported, the summary says residual 1, the exit is 1 and no value is printed; a second run redacts the rest and exits 0."""
+    original = '"password":"abc12345"password: abc12345\n'
+    a = box.put(box.root / "a.txt", original)
+    first = box.run()
+    assert first.code == 1, first.stderr
+    assert [r for r in first.records if r["type"] == "residual"] == [{"type": "residual", "path": "a.txt", "kind": "assignment", "count": 1}]
+    assert first.summary["residual"] == 1 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1 and first.summary["findings_not_redacted"] == 0
+    assert MARKER_RE.search(_read(a)) is not None and box.restore(_read(a)) == original
+    assert "abc12345" not in first.streams()
+    second = box.run()
+    assert second.code == 0 and second.summary["residual"] == 0, second.stderr
+    assert "abc12345" not in _read(a) and box.restore(_read(a)) == original
+
+
+def test_linked_worktree_with_its_own_merge_head_is_untouched_while_the_main_worktree_is_redacted(box: Box) -> None:
+    """A linked worktree whose own git dir holds MERGE_HEAD keeps its file (git-operation skip, counted), while the same file in the main worktree, whose git dir has none, is redacted."""
+    main = box.root / "main"
+    box.put(main / "a.txt", f"k = {TOKEN}\n")
+    box.repo(main, "a.txt")
+    linked = box.root / "wt"
+    box.git(main, "worktree", "add", "-q", "-b", "wtbranch", str(linked))
+    linked_file = linked / "a.txt"
+    assert _read(linked_file) == f"k = {TOKEN}\n"
+    git_dir = Path(box.git(linked, "rev-parse", "--absolute-git-dir").strip())
+    assert git_dir != main / ".git"
+    (git_dir / "MERGE_HEAD").write_text(box.git(linked, "rev-parse", "HEAD"), encoding="utf-8")
+    result = box.run()
+    assert result.code == 1, result.stderr
+    assert _read(linked_file) == f"k = {TOKEN}\n"
+    assert ("wt/a.txt", "git-operation") in result.skips
+    assert TOKEN not in _read(main / "a.txt") and box.restore(_read(main / "a.txt")) == f"k = {TOKEN}\n"
+    assert result.summary["files_redacted"] == 1 and result.summary["findings_not_redacted"] == 1
+
+
+_GUARD = f"""
+import {{ checkWriteTarget }} from {json.dumps(str(_SHIELD / "writeguard.ts"))}
+const input = JSON.parse(await Bun.stdin.text())
+console.log(JSON.stringify(input.map(([path, root]) => checkWriteTarget(path, root))))
+"""
+
+
+def test_write_target_guard_refuses_a_symlink_a_missing_file_a_directory_and_a_path_outside_the_root(box: Box) -> None:
+    """checkWriteTarget: a regular file inside the root (also behind a symlinked folder that stays inside) is ok; a symlink to a file outside, a missing path and a folder are not regular; a file outside the root, also behind a symlinked folder, is outside-root."""
+    outside = box.put(box.base / "outside" / "f.txt", "x\n")
+    inside = box.put(box.root / "inside.txt", "x\n")
+    (box.root / "link.txt").symlink_to(outside)
+    (box.root / "dirlink").symlink_to(outside.parent, target_is_directory=True)
+    real_dir = box.root / "real_dir"
+    box.put(real_dir / "x.txt", "x\n")
+    (box.root / "alias").symlink_to(real_dir, target_is_directory=True)
+    (box.root / "sub").mkdir()
+    root = str(box.root)
+    cases = [
+        [str(inside), root],
+        [str(box.root / "alias" / "x.txt"), root],
+        [str(box.root / "link.txt"), root],
+        [str(box.root / "missing.txt"), root],
+        [str(box.root / "sub"), root],
+        [str(outside), root],
+        [str(box.root / "dirlink" / "f.txt"), root],
+    ]
+    got = box.bun_json(_GUARD, cases)
+    assert got == ["ok", "ok", "not-regular-at-write", "not-regular-at-write", "not-regular-at-write", "outside-root", "outside-root"]

@@ -236,6 +236,21 @@ describe('command line', () => {
   })
 })
 
+describe('first open', () => {
+  // The race of several workers creating the same vault at once (step 3a-3a): each round is a NEW folder, so every round exercises the first open (create file, switch to WAL, create table).
+  test('8 processes opening a new vault folder at the same time, 20 rounds, never fail', async () => {
+    const script = `import { openVault } from ${JSON.stringify(VAULT_TS)}; try { openVault().close() } catch (error) { console.error(error.message); process.exit(1) }`
+    const started = performance.now()
+    for (let round = 0; round < 20; round++) {
+      const fresh = join(dirname(dir), `race-${round}`)
+      const children = Array.from({ length: 8 }, () => Bun.spawn(['bun', '-e', script], { env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, [VAULT_DIR_ENV]: fresh }, stdout: 'ignore', stderr: 'pipe' }))
+      const results = await Promise.all(children.map(async (child) => ({ err: await new Response(child.stderr).text(), code: await child.exited })))
+      expect(results.filter((result) => result.code !== 0)).toEqual([])
+    }
+    console.log(`first-open race: 20 rounds x 8 processes in ${Math.round(performance.now() - started)} ms`)
+  }, 180_000)
+})
+
 describe('where the vault lives', () => {
   test('a setting outside the system temp folder is refused: relative, outside, .. escape and a symlink out of tmp', async () => {
     const tmp = realpathSync(tmpdir())

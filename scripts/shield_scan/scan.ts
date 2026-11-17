@@ -1,9 +1,9 @@
 // secrets-shield scan, increment 1a (TRDD-BAQB9SYO; redact mode, increment 3 step 3a-2): scans a project folder for secrets with the shield core and writes one JSON line per finding; with --redact it also replaces each secret in the files with a marker and keeps the value in the vault (vault.ts).
 // Run: bun run <plugin root>/scripts/shield_scan/scan.ts [options] [root]
 // Options: --all (gitignored and hidden files too, plus each repo .git/config) · --passes secrets,cards (default; email and home are opt-in; --redact accepts secrets, cards and email, the home pass with --redact comes in a later step) · --jobs N · --out PATH · --max-file-mb N (64) · --file-timeout-base S (30) · --file-timeout-per-mb S (5) · --redact · --min-age-minutes N (10; with --redact a file modified within N minutes is not written).
-// Records (never a matched value or any text of a scanned file): {"type":"finding","path","kind","line"|null,"count"} · {"type":"skip","path","reason"} · {"type":"summary",...} last.
-// Exit: 0 complete with no findings (with --redact: complete and every finding redacted) · 1 complete with findings (with --redact: findings_not_redacted above 0) · 3 incomplete (a timeout, read-error, crash, git-error or unreadable-dir skip) · 2 usage or fatal error (with --redact also a vault failure).
-// Residual copies of a vaulted value (a copy the passes did not match) are NOT checked yet: that sweep and re-scan come in step 3a-3, so a --redact summary says residual_check "not-run" and exit 0 is not a proof that no copy is left.
+// Records (never a matched value or any text of a scanned file): {"type":"finding","path","kind","line"|null,"count"} · {"type":"skip","path","reason"} · with --redact {"type":"residual","path","kind","count"} (what the passes still find between the markers of a file that was written) · {"type":"summary",...} last.
+// Exit: 0 complete with no findings (with --redact: complete and every finding redacted, no residual) · 1 complete with findings (with --redact: findings_not_redacted or residual above 0) · 3 incomplete (a timeout, read-error, crash, git-error or unreadable-dir skip) · 2 usage or fatal error (with --redact also a vault failure).
+// With --redact the worker sweeps the plan for copies of each redacted value that no pass matched, and runs the passes again over the text between the markers of the new file (redact.ts: sweepPlan, residualHits); the summary then says residual_check "run" and holds the residual total. A residual hit does not stop the write (the restore check passed); it makes the run exit 1.
 // stdout: the summary line and the findings file path, nothing else. stderr: fixed text only. The pass order is the core's (hooks/secret-shield/pipeline.ts); this file carries none of its own.
 
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process'
@@ -15,7 +15,7 @@ import type { Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { isPass, PASS_ORDER, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { findGitTop, newStats, noteSkip, SKIP_REASONS, walkFiles, type FileItem, type SetStats, type SkipReason } from './fileset.ts'
-import { WRITE_SKIP_REASONS, type RedactReply, type WriteSkipReason } from './redact.ts'
+import { WRITE_SKIP_REASONS, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 
 const MB = 1048576
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -233,7 +233,7 @@ class WorkerProc {
     })
   }
 
-  send(job: { path: string; passes: Pass[]; redact: { minAgeMs: number } | null }): void {
+  send(job: { path: string; passes: Pass[]; redact: RedactJob | null }): void {
     this.child.stdin.write(JSON.stringify(job) + '\n')
   }
 
@@ -256,14 +256,14 @@ type Outcome =
 const sumOf = (hits: Hits): number => Object.values(hits).reduce((sum, n) => sum + n, 0)
 
 // One file through one worker, under one timer armed when the job is sent (the worker is already running). Whole-file reply by the limit and no line reply: the file keeps its whole-file counts, unlocated. No whole-file reply: a timeout skip. Either kill ends the worker. With redact, the worker's last reply (written or why not) is part of the same limit: a kill before it is a timeout skip, and a vault failure ends the run with exit 2.
-async function runFile(worker: WorkerProc, item: FileItem, passes: Pass[], limitMs: number, redactMinAgeMs: number | null): Promise<Outcome> {
+async function runFile(worker: WorkerProc, item: FileItem, passes: Pass[], limitMs: number, redactJob: RedactJob | null): Promise<Outcome> {
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
     worker.kill()
   }, limitMs)
   try {
-    worker.send({ path: item.abs, passes, redact: redactMinAgeMs === null ? null : { minAgeMs: redactMinAgeMs } })
+    worker.send({ path: item.abs, passes, redact: redactJob })
     const first = await worker.next()
     if (timedOut) return { kind: 'timeout' }
     if (first === null) return { kind: 'crash' }
@@ -273,7 +273,7 @@ async function runFile(worker: WorkerProc, item: FileItem, passes: Pass[], limit
     const second = await worker.next()
     if (timedOut) return { kind: 'locate-timeout', bytes: first.bytes, whole: first.hits }
     if (second === null || second.t !== 'lines') return { kind: 'crash' }
-    if (redactMinAgeMs === null) return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: second.hits, redact: null }
+    if (redactJob === null) return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: second.hits, redact: null }
     const third = await worker.next()
     if (timedOut) return { kind: 'timeout' }
     if (third === null || third.t !== 'redact') return { kind: 'crash' }
@@ -305,7 +305,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
   const realOut = join(realpathSync(dirname(outFile)), basename(outFile))
   const exclude = new Set([realOut, `${realOut}.tmp`])
   if (opts.redact) {
-    // WHY the vault is opened once here, before any worker starts: measured on 2026-11-18 with 8 bun processes calling openVault() at once on a NEW vault folder (no scan.ts involved): 10 of 160 opens failed with SQLITE_BUSY, and 0 of 160 when the vault already existed. So the first open (create file, switch to WAL) races in vault.ts (step 3a-1); this pre-open only avoids it here and does not fix it. It also fails fast: an unusable vault ends the run with exit 2 before any file is touched.
+    // WHY the vault is opened once here, before any worker starts: an unusable vault ends the run with exit 2 before any file is touched (fail fast). The race of several workers opening a new vault at once is fixed in openVault itself (vault.ts), not here.
     const { openVault, VaultError } = await import('./vault.ts')
     try {
       openVault().close()
@@ -328,6 +328,8 @@ async function main(): Promise<{ code: number; stdout: string }> {
   const writeSkipped = {} as Record<WriteSkipReason, number>
   for (const reason of WRITE_SKIP_REASONS) writeSkipped[reason] = 0
   const writeSkipRecords: Array<{ path: string; reason: WriteSkipReason }> = []
+  let residualTotal = 0
+  const residualRecords: Array<{ path: string; kind: string; count: number }> = []
 
   const account = (item: FileItem, outcome: Outcome): void => {
     if (outcome.kind === 'skip') return noteSkip(stats, opts.root, item.abs, outcome.reason)
@@ -356,6 +358,11 @@ async function main(): Promise<{ code: number; stdout: string }> {
     if (reply?.outcome === 'written') {
       filesRedacted++
       valuesVaulted += reply.values
+      // WHY a residual is counted only for a written file: the worker runs the re-scan on the final text, and a file that was not written is already counted in findings_not_redacted.
+      for (const [kind, count] of Object.entries(reply.residual)) {
+        residualTotal += count
+        residualRecords.push({ path: item.rel, kind, count })
+      }
       return
     }
     findingsNotRedacted += found
@@ -372,7 +379,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
       const item = next.value
       worker ??= await WorkerProc.start()
       const limitMs = (opts.timeoutBase + opts.timeoutPerMb * (item.size / MB)) * 1000
-      const outcome = await runFile(worker, item, opts.passes, limitMs, opts.redact ? opts.minAgeMinutes * 60_000 : null)
+      const outcome = await runFile(worker, item, opts.passes, limitMs, opts.redact ? { minAgeMs: opts.minAgeMinutes * 60_000, root: opts.root } : null)
       account(item, outcome)
       if (outcome.kind === 'timeout' || outcome.kind === 'crash' || outcome.kind === 'locate-timeout') worker = null
     }
@@ -380,11 +387,12 @@ async function main(): Promise<{ code: number; stdout: string }> {
   }
   await Promise.all(Array.from({ length: opts.jobs }, () => slot()))
 
-  // Canonical order: path in UTF-8 byte order, findings before skips, line ascending with null last, then kind.
+  // Canonical order: path in UTF-8 byte order, findings before skips before residual records, line ascending with null last, then kind.
   const rows: Array<{ path: string; rank: number; line: number; kind: string; json: string }> = []
   for (const f of findings) rows.push({ path: f.path, rank: 0, line: f.line ?? Number.POSITIVE_INFINITY, kind: f.kind, json: JSON.stringify({ type: 'finding', path: f.path, kind: f.kind, line: f.line, count: f.count }) })
   for (const s of stats.skipRecords) rows.push({ path: s.path, rank: 1, line: 0, kind: s.reason, json: JSON.stringify({ type: 'skip', path: s.path, reason: s.reason }) })
   for (const s of writeSkipRecords) rows.push({ path: s.path, rank: 1, line: 0, kind: s.reason, json: JSON.stringify({ type: 'skip', path: s.path, reason: s.reason }) })
+  for (const r of residualRecords) rows.push({ path: r.path, rank: 2, line: 0, kind: r.kind, json: JSON.stringify({ type: 'residual', path: r.path, kind: r.kind, count: r.count }) })
   rows.sort((a, b) => utf8Compare(a.path, b.path) || a.rank - b.rank || (a.line === b.line ? 0 : a.line < b.line ? -1 : 1) || utf8Compare(a.kind, b.kind))
 
   const incomplete = (['timeout', 'read-error', 'crash', 'git-error', 'unreadable-dir'] as SkipReason[]).some((reason) => stats.skipped[reason] > 0)
@@ -414,14 +422,14 @@ async function main(): Promise<{ code: number; stdout: string }> {
     elapsed_s: Math.round(elapsed * 1000) / 1000,
     mb_per_s: elapsed > 0 ? Math.round((bytesScanned / MB / elapsed) * 100) / 100 : 0,
     jobs: opts.jobs,
-    // WHY residual_check is a fixed value: the sweep and re-scan of step 3a-3 do not exist yet, so no --redact run can claim that no copy of a vaulted value is left.
-    ...(opts.redact ? { redact: true, min_age_minutes: opts.minAgeMinutes, files_redacted: filesRedacted, values_vaulted: valuesVaulted, findings_not_redacted: findingsNotRedacted, residual_check: 'not-run' } : {}),
+    // WHY residual is the total the re-scan found in the files that were written; residual_check says the re-scan ran (it never runs without --redact).
+    ...(opts.redact ? { redact: true, min_age_minutes: opts.minAgeMinutes, files_redacted: filesRedacted, values_vaulted: valuesVaulted, findings_not_redacted: findingsNotRedacted, residual: residualTotal, residual_check: 'run' } : {}),
   })
   // The findings file is private to its owner (it says where the secrets are) and is renamed into place, so a reader never sees a half-written one.
   writeFileSync(`${realOut}.tmp`, [...rows.map((row) => row.json), summary].join('\n') + '\n', { mode: 0o600 })
   renameSync(`${realOut}.tmp`, realOut)
-  // With --redact the exit code is about what is left unredacted: findings in files that were not written (a write skip reason, or a locate kill before the write) give 1; a timeout is a skip that makes the run incomplete (3). The residual copy check does not exist yet (step 3a-3), so 0 means complete and nothing the passes found was left, not that no copy is left.
-  const code = incomplete ? 3 : (opts.redact ? findingsNotRedacted : total) > 0 ? 1 : 0
+  // With --redact the exit code is about what is left unredacted: findings in files that were not written (a write skip reason, or a locate kill before the write) or a residual hit in a file that was written give 1; a timeout is a skip that makes the run incomplete (3).
+  const code = incomplete ? 3 : (opts.redact ? findingsNotRedacted + residualTotal : total) > 0 ? 1 : 0
   return { code, stdout: `${summary}\n${realOut}\n` }
 }
 

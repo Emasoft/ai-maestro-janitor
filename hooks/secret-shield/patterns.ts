@@ -193,7 +193,7 @@ export function isDottedName(value: string): boolean {
 // of real credentials that are knowingly refused too: a diceware-style lowercase passphrase (slug rule), a password
 // shaped like an email (email rule), user:12345 (host:port rule), base64 with a slash but no digit (slash rule).
 // The defining line of such a value is always hidden by the passes that found it; only the spreading is refused.
-function propagates(value: string): boolean {
+export function propagates(value: string): boolean {
   // Marker text is never a value to hunt for: hideKnown skips markers, and a value that holds one is not a secret.
   if (value.replace(MARKS, '') !== value || value.includes('JANITOR-REDACTED')) return false
   if (PLACEHOLDER.test(value) || value.length < 10) return false

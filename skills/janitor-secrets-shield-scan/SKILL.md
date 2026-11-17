@@ -62,7 +62,7 @@ changed in the scanned tree. Git history is not scanned yet (a later version).
   past it is skipped as a timeout, unless its whole-file pass had finished:
   then its findings are kept with line null.
 - `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
-- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`; the `home` pass with `--redact` exits 2). Default: off, scan only.
+- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`; the `home` pass with `--redact` exits 2). No restore command exists until step 3a-4 (restore.ts), so do not run `--redact` on real data before then. Default: off, scan only.
 - `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
 
 ## Exit codes

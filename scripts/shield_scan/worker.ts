@@ -1,11 +1,11 @@
 // Child process of the secrets-shield scan (TRDD-BAQB9SYO increment 1a, redact step 3a-2): reads one file at a time, counts what the shield core finds in it and, when the job asks for it, redacts it.
 // WHY a child process and not a thread or an in-process loop: the core passes are synchronous regexes, so a pathological file cannot be interrupted from inside its own thread; the driver (scan.ts) kills this process with SIGKILL at the per-file limit and starts a new one.
-// Protocol, one JSON object per line. Driver to worker: {"path": <absolute path>, "passes": [<pass>, ...], "redact": null | {"minAgeMs": n}}, one job at a time. Worker to driver:
+// Protocol, one JSON object per line. Driver to worker: {"path": <absolute path>, "passes": [<pass>, ...], "redact": null | {"minAgeMs": n, "root": <real path of the scan root>}}, one job at a time. Worker to driver:
 //   {"t":"ready"}                                  once, after start-up (the driver arms no timer before it)
 //   {"t":"skip","reason":"binary"|"read-error"}   the file was not scanned
 //   {"t":"whole","bytes":n,"hits":{kind:count}}  the whole-file result; when it holds no hit the job ends here
 //   {"t":"lines","hits":[[kind,line,count],...]} the per-line result of a file whose whole-file result holds a hit; with "redact" the job goes on:
-//   {"t":"redact","outcome":"written","values":n}                  the file was replaced; n values are in the vault
+//   {"t":"redact","outcome":"written","values":n,"residual":{kind:count}}  the file was replaced; n values are in the vault; residual holds the kinds and counts the passes still find between the markers of the new text (empty when none)
 //   {"t":"redact","outcome":"skip","reason":<write skip reason>}   the file was left as it was
 //   {"t":"redact","outcome":"vault-error","message":<fixed text>}  the vault failed: the file was left as it was and the run ends with exit 2
 // With "redact" the redaction runs HERE and the values never leave this process: not on stdout, not on stderr, not in a message.
@@ -19,8 +19,9 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { countOf, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import { isPass, redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { findGitTop } from './fileset.ts'
-import { finalText, planRedaction, restoreCheck, vaultEntries, type Plan, type RedactReply, type WriteSkipReason } from './redact.ts'
+import { finalText, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 import type { Vault } from './vault.ts'
+import { checkWriteTarget } from './writeguard.ts'
 
 const BINARY_PROBE_BYTES = 8192
 const homes: readonly string[] = [homedir()]
@@ -90,7 +91,7 @@ function writeAtomic(real: string, bytes: Buffer, before: BigIntStats): 'written
 }
 
 // Redacts one file that has findings, or says why not. The skips come first and cost no vault write; the vault rows of the file are committed (one transaction) before the file is replaced, so a crash in between leaves rows with no marker, never a marker with no row. A vault failure is a typed reply, never a crash.
-async function redactFile(path: string, data: Buffer, before: BigIntStats, text: string, plan: Plan | null, minAgeMs: number): Promise<RedactReply> {
+async function redactFile(path: string, data: Buffer, before: BigIntStats, text: string, plan: Plan | null, passes: ReadonlySet<Pass>, job: RedactJob): Promise<RedactReply> {
   const { openVault, resolveVaultDir, VaultError } = await import('./vault.ts')
   try {
     let real: string
@@ -106,21 +107,28 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
     if (real.startsWith(vaultReal + sep)) return skipReply('vault-folder')
     if (before.nlink > 1n) return skipReply('hardlinked')
     // WHY minAgeMs > 0: with 0 no file is recent, even one whose mtime is a few milliseconds ahead of this clock.
-    if (minAgeMs > 0 && Date.now() - Number(before.mtimeMs) < minAgeMs) return skipReply('recent')
+    if (job.minAgeMs > 0 && Date.now() - Number(before.mtimeMs) < job.minAgeMs) return skipReply('recent')
     if (!Buffer.from(text, 'utf8').equals(data)) return skipReply('not-utf8')
     const operation = gitOperation(real)
     if (operation === 'operation') return skipReply('git-operation')
     if (operation === 'failed') return skipReply('git-check-failed')
     if (plan === null || plan.stretches.length === 0) return skipReply('align-error')
-    const { entries, slot } = vaultEntries(plan)
+    // WHY the sweep runs here, after every skip and before the vault: the copies it finds are vaulted with the same rows, finalText writes them and restoreCheck covers them (spec R5).
+    const swept = sweepPlan(plan)
+    const { entries, slot } = vaultEntries(swept)
     vault ??= openVault()
     const rows = vault.lookupOrInsert(real, entries)
     const uuids = slot.map((index) => rows[index])
-    const final = finalText(plan, uuids)
+    const final = finalText(swept, uuids)
     const open = vault
-    if (!restoreCheck(plan, final, uuids, (uuid) => open.byUuid(uuid)?.value ?? null, text)) return skipReply('align-error')
+    if (!restoreCheck(swept, final, uuids, (uuid) => open.byUuid(uuid)?.value ?? null, text)) return skipReply('align-error')
+    // WHY the re-scan does not stop the write: the restore check passed, so the file loses nothing, and a residual hit is reported (kinds and counts) for the run to count and exit 1 on, never silently dropped.
+    const residual = residualHits(final, homes, passes)
+    // WHY the target is checked again here and not only when the walker listed the file: see writeguard.ts.
+    const target = checkWriteTarget(path, job.root)
+    if (target !== 'ok') return skipReply(target)
     const written = writeAtomic(real, Buffer.from(final, 'utf8'), before)
-    return written === 'written' ? { t: 'redact', outcome: 'written', values: entries.length } : skipReply(written)
+    return written === 'written' ? { t: 'redact', outcome: 'written', values: entries.length, residual } : skipReply(written)
   } catch (error) {
     if (error instanceof VaultError) return { t: 'redact', outcome: 'vault-error', message: error.message }
     throw error
@@ -128,7 +136,7 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
 }
 
 async function handle(line: string): Promise<void> {
-  const job = JSON.parse(line) as { path: string; passes: string[]; redact: { minAgeMs: number } | null }
+  const job = JSON.parse(line) as { path: string; passes: string[]; redact: RedactJob | null }
   const passes = new Set<Pass>()
   for (const pass of job.passes) {
     if (!isPass(pass)) throw new Error('worker: not a pass')
@@ -178,7 +186,7 @@ async function handle(line: string): Promise<void> {
     for (const [kind, count] of Object.entries(redactAll(one, homes, passes).hits)) located.push([kind, index + 1, count])
   }
   await send({ t: 'lines', hits: located })
-  if (job.redact !== null && before !== null) await send(await redactFile(job.path, data, before, text, plan, job.redact.minAgeMs))
+  if (job.redact !== null && before !== null) await send(await redactFile(job.path, data, before, text, plan, passes, job.redact))
 }
 
 let buffer = ''
