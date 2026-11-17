@@ -355,6 +355,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
     bytes_scanned: bytesScanned,
     skipped,
     gitignored_entries: stats.gitignoredEntries,
+    ignored_repos: stats.ignoredRepos,
     findings: total,
     files_with_findings: filesWithFindings,
     unlocated_timeout: unlocatedTimeout,

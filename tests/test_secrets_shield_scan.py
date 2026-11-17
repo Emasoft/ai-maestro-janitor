@@ -450,14 +450,15 @@ def test_clone_under_an_ignored_folder_is_not_scanned_by_default_and_is_scanned_
     box.repo(box.root / "vendor" / "lib", "t.txt")
     default = box.scan()
     assert default.code == 0 and default.findings == []
-    assert default.summary["gitignored_entries"] == 1 and default.summary["repos"] == 1
+    # vendor/lib is a direct subfolder of the ignored vendor/, so it is counted: ignored_repos is 1.
+    assert default.summary["gitignored_entries"] == 1 and default.summary["repos"] == 1 and default.summary["ignored_repos"] == 1
     everything = box.scan("--all")
     assert everything.code == 1
     assert everything.paths() == {"vendor/lib/t.txt", "vendor/loose.txt"}
 
 
 def test_root_whose_children_the_ancestor_repo_ignores_still_finds_its_nested_repos(box: Box) -> None:
-    """An ancestor repo that tracks nothing under the root (.gitignore proj/*) has no say over it: the root is walked as a plain folder and the repo nested under it is found and scanned."""
+    """An ancestor repo that lists nothing under the root (all of it is ignored: .gitignore proj/*) has no say over it: the root is walked as a plain folder and the repo nested under it is found and scanned."""
     ancestor = box.base / "ancestor"
     box.put(ancestor / ".gitignore", "proj/*\n")
     box.repo(ancestor, ".gitignore")
@@ -479,3 +480,75 @@ def test_subfolder_root_under_a_repo_that_git_refuses_gives_git_error_and_no_pla
     assert result.code == 3
     assert result.skips == [(".", "git-error")]
     assert result.findings == [] and result.summary["files_scanned"] == 0 and result.summary["complete"] is False
+
+
+def test_untracked_subfolder_root_gets_the_repo_ignore_rules(box: Box) -> None:
+    """A root that is a new subfolder of a repo with no tracked file under it is still listed by the repo: its ignored node_modules is not scanned and is counted."""
+    repo = box.base / "repo"
+    box.put(repo / ".gitignore", "node_modules/\n")
+    box.put(repo / "top.txt", "x\n")
+    box.repo(repo, ".gitignore", "top.txt")
+    box.put(repo / "sub" / "a.txt", _line())
+    box.put(repo / "sub" / "node_modules" / "x.txt", _line())
+    result = box.scan(root=repo / "sub")
+    assert result.code == 1
+    assert result.findings == [("a.txt", "github-token", 1, 1)]
+    assert result.summary["repos"] == 1 and result.summary["non_repo_dirs"] == 0
+    assert result.summary["gitignored_entries"] == 1 and result.summary["ancestor_rules_skipped"] is False
+
+
+def test_ancestor_that_ignores_the_subfolders_of_the_root_hides_nested_repos_by_default(box: Box) -> None:
+    """Layout E: an ancestor ignoring the subfolders of the root hides nested repos by default (ignored_repos counts them); --all scans them.
+
+    The principle: the ancestor rules apply when they leave anything under the root listed; when they hide everything under it, the root is the explicit choice of the user and is walked plain.
+    Cost, stated plainly: the probe (git ls-files -co --exclude-standard) scans less than a tracked-only probe in this layout (.gitignore proj/*/, an untracked proj/notes.txt, a nested repo proj/inner).
+    The tracked-only probe is empty there (0 bytes: measured by the main agent with raw git 2.56.0; not measured by this test), so the root was walked plain and inner was scanned; the -co probe lists notes.txt, so the ancestor rules apply and inner is skipped.
+    So whether nested repos in ignored folders are scanned depends on whether one other path under the root stays listed. ignored_repos counts a repo only when it is the ignored folder itself or a direct subfolder of it (a repo two or more levels below is skipped and not counted; an ignored folder that cannot be listed adds nothing), and --all scans them.
+    proj/group/deep is a repo one level below the ignored folder entry group/, and is counted too.
+    """
+    ancestor = box.base / "ancestor"
+    box.put(ancestor / ".gitignore", "proj/*/\n")
+    box.repo(ancestor, ".gitignore")
+    proj = ancestor / "proj"
+    box.put(proj / "notes.txt", "clean\n")
+    box.put(proj / "inner" / "b.txt", _line())
+    box.repo(proj / "inner", "b.txt")
+    box.put(proj / "group" / "deep" / "c.txt", _line())
+    box.repo(proj / "group" / "deep", "c.txt")
+    default = box.scan(root=proj)
+    assert default.code == 0 and default.findings == []
+    assert default.summary["gitignored_entries"] == 2 and default.summary["ignored_repos"] == 2
+    assert default.summary["repos"] == 1 and default.summary["ancestor_rules_skipped"] is False
+    everything = box.scan("--all", root=proj)
+    assert everything.code == 1
+    assert everything.findings == [("group/deep/c.txt", "github-token", 1, 1), ("inner/b.txt", "github-token", 1, 1)]
+
+
+def test_repo_two_levels_below_an_ignored_folder_is_not_counted(box: Box) -> None:
+    """A repo two levels below an ignored folder entry (proj/a/b/deep under the ignored a/) is skipped and not counted: ignored_repos looks at the entry and its direct children only (pins the depth limit)."""
+    ancestor = box.base / "ancestor"
+    box.put(ancestor / ".gitignore", "proj/*/\n")
+    box.repo(ancestor, ".gitignore")
+    proj = ancestor / "proj"
+    box.put(proj / "notes.txt", "clean\n")
+    box.put(proj / "a" / "b" / "deep" / "d.txt", _line())
+    box.repo(proj / "a" / "b" / "deep", "d.txt")
+    result = box.scan(root=proj)
+    assert result.code == 0 and result.findings == []
+    assert result.summary["gitignored_entries"] == 1 and result.summary["ignored_repos"] == 0
+
+
+
+def test_dot_slash_entry_of_the_ignored_listing_does_not_count_the_root_repo(box: Box) -> None:
+    """With .gitignore proj/* above the root, git prints ./ in the ignored-directory listing of proj: that entry must not count proj itself or its children twice."""
+    ancestor = box.base / "ancestor"
+    box.put(ancestor / ".gitignore", "proj/*\n")
+    box.put(ancestor / "proj" / "tracked.txt", "clean\n")
+    box.repo(ancestor, ".gitignore", "proj/tracked.txt")
+    proj = ancestor / "proj"
+    box.put(proj / "inner" / "b.txt", _line())
+    box.repo(proj / "inner", "b.txt")
+    result = box.scan(root=proj)
+    assert result.code == 0 and result.findings == []
+    assert result.summary["repos"] == 1 and result.summary["ancestor_rules_skipped"] is False
+    assert result.summary["ignored_repos"] == 1
