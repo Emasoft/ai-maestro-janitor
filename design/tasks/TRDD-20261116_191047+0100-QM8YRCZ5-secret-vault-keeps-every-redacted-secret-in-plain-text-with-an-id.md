@@ -4,7 +4,7 @@ title: Secret vault keeps every redacted secret stored in plain text with an id 
 column: backburner
 status: tasked
 created: 2026-11-16T19:10:47+0100
-updated: 2026-11-17T23:29:51+0100
+updated: 2026-11-17T23:34:19+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -54,6 +54,7 @@ The owner ordered the vault (quote above) and told the agent to decide the open 
 - (c) Restore (writing a stored value back into its file) is a human-only command: the agent guard refuses it from an agent, because a restored secret in a tracked file can leave by git push (agent decision, on the owner's order to decide).
 - (d) Decided by the owner 2026-11-16: one vault file for every tool at ~/.secrets_shield/vault.db (the owner's explicit order overrides the standing rule against new dot folders); nothing can point the vault at another path. The one exception is a test-only setting that refuses any path outside the system temp folder; tests use it and never HOME (the helper ignores HOME, see Security limit), and one test checks that the real vault is untouched.
 - Schema change, 2026-11-17T23:29:50+0100, by main-agent, from the increment 3 spec (design/specs/TRDD-BAQB9SYO-increment-3-redact.md, R4 and R9): the row key becomes (origin, value, encoding), with a new encoding column (raw or json-string), because a value found inside a JSON string must be restored re-escaped or its line stops parsing; restore looks a row up by its uuid alone and reports a moved origin, because uuid v4 already identifies the row and projects get moved after redaction.
+- Restore by origin, 2026-11-17T23:34:19+0100, by main-agent (supersedes the restore part of the Schema change line of 2026-11-17T23:29:50+0100; spec v4 R9): restore.ts restores a row whose origin is the file's current path; a row from another origin is restored only with --any-origin and is otherwise reported as moved and left as a marker, because without the flag a marker copied into another file would write the secret there.
 
 ## Acceptance checklist
 
