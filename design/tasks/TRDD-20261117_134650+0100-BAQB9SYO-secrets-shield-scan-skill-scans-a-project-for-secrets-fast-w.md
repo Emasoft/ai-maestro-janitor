@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: dev
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-17T23:23:02+0100
+updated: 2026-11-17T23:29:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -57,7 +57,7 @@ approval-datetime: 2026-11-17T13:46:50+0100
 - NEXT ACTION, 2026-11-17T23:16:22+0100, by main-agent (supersedes the NEXT ACTION line of 2026-11-17T20:45:06+0100, per the owner directive line of 2026-11-17T23:11:16+0100): increment 3, redact mode with the plain SQLite vault of TRDD-QM8YRCZ5, for plain files and JSONL, in git repos the working tree only and never git history; its spec follows in design/specs/TRDD-BAQB9SYO-increment-3-redact.md. Queued behind it, in order: C4 read timing, 1b history scan, increment 2 (Rust). Release 3.9.9 still waits on CPV PR 278.
 - Landed, 2026-11-17, by main-agent: 2e55afce (spec of increment 1c) and a221ceb1 (1c: the /janitor-secrets-shield-scan skill, the README and footprint rows, 2 doc-drift tests). The order 1c before 1b was the main agent's decision under the owner's decide-yourself directive; the owner was asked and has not answered. C4 (read timing) of the 1c spec is not done.
 - Corrections, 2026-11-17T23:16:22+0100, by main-agent, from the harness review of the 1c commit: the a221ceb1 message gives as the reason for PLUGIN_SKIP_GITHUB_INTEGRITY=1 that the pinned CPV copy is not the GitHub release build; that reason was not checked, the only observation is that the CPV run fails its own integrity check without the variable. The 2 doc-drift tests were seen passing (a pytest run of 68 tests passed) and were never seen failing. The cmp gate of that commit compared the staged diff with a snapshot taken just before staging, not with a diff the main agent read. The committed SKILL.md was read whole after the commit; nothing in it contradicts what scan.ts was seen to do.
-Correction, 2026-11-17T23:23:01+0100, by main-agent: the SKILL.md timeout note (findings kept with line null when the per-line pass is killed) was checked against the code: scan.ts lines 245, 261 and 314 (outcome locate-timeout keeps the whole-file counts with line null); worker.ts holds no timeout logic. Spec of increment 3 written: design/specs/TRDD-BAQB9SYO-increment-3-redact.md (v2).
+- Correction, 2026-11-17T23:23:01+0100, by main-agent: the SKILL.md timeout note (findings kept with line null when the per-line pass is killed) was checked against the code: scan.ts lines 261 and 314 (the comment at line 245 states it) (outcome locate-timeout keeps the whole-file counts with line null); worker.ts holds no timeout logic. Spec of increment 3 written: design/specs/TRDD-BAQB9SYO-increment-3-redact.md (v2; v3 replaces it in the next commit).
 
 ## Owner request and decisions (verbatim, 2026-11-17)
 - Request: "i need to scan 2 terabytes of projects and i need the secrets-shield scanner to be very very fast (better if rust optimized)"
