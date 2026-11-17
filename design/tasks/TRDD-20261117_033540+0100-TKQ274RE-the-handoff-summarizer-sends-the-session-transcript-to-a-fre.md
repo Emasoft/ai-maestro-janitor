@@ -1,10 +1,10 @@
 ---
 trdd-id: TKQ274RE
 title: The handoff summarizer sends the session transcript to a free remote model with no secret or home redaction
-column: todo
+column: dev
 status: tasked
 created: 2026-11-17T03:35:40+0100
-updated: 2026-11-17T04:34:33+0100
+updated: 2026-11-17T05:10:35+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -27,8 +27,13 @@ Measured 2026-11-17: a manual /janitor-write-handoff run (scripts/compose_agent_
 ## Scope to check
 The automatic lane (scripts/summarize_previous_session.py through scripts/lib/jev_compaction_lane.py, jev_compact.py, and its llm_ext_compact.py fallback) also hands a transcript to a remote model. Measured 2026-11-17 from .janitor/logs/session-summary.log: it runs on every SessionStart, compaction included (scripts/hooks/on-session-start.py, after the compact branch, not gated by source), and compacts the PREVIOUS session transcript; on 2026-11-16 it compacted two earlier transcripts of this project 8 times, every time with source=llm-ext (the fallback after Jev failed), and its "a handoff already exists" skip did not stop repeat runs (that day 46a3bf7f ran 3 times and e05195b8 5 times). It does not redact: the original transcript path reaches llm-ext session-summary --transcript unchanged and with no --profile, and the llm-ext checkpoints of both transcripts name inclusionai/ling-3.2-flash:free. The same fix applies to this lane.
 
-## Fix direction (to decide)
+## Fix direction (decided 2026-11-17)
 Before any transcript leaves the machine, write a redacted copy (secret-shield core: redact() from hooks/secret-shield/patterns.ts and redactHome() from hooks/secret-shield/home.ts, or `sanitize-reports --stdin`) and pass that copy's path instead; fail closed (no summary, template handoff) when redaction cannot run. A local profile is the other option.
+- Decided by the main agent after consulting the advisor: redact with the shield core itself, run by bun through a new stdlib-only helper scripts/lib/transcript_redact.py and a bridge hooks/secret-shield/redact_bridge.ts (secret rules first, then the home rewrite). Fail closed on every failure (bun not found, a bridge error, a line-count or JSON check mismatch, a timeout): nothing is sent and the template handoff is written.
+- Jev lane: redact each item text and the digest inside jev_compaction.score_items_via_llm_ext, before items.jsonl and the llm-ext argv are written. The Jev lane sends the full text of tool results, the last 3 human and 2 assistant messages and the TRDD STATE heads, so it is the larger leak.
+- llm-ext lanes (the fallback and the manual handoff): llm_ext_summary.attempt_llm_ext_summary hands llm-ext a redacted copy at a stable path under the project's .janitor/state, reused while the source size and mtime are unchanged; the redaction time comes out of the call's budget.
+- Timing (main agent, report-sanitizer's bridge on the same core, janitor 2b72f4f6, two whole-file passes, load average 40 to 62, so an upper bound): the largest local transcript, 217 MB and 58,433 lines, took 77 s for the secret rules and 130 s for the home rewrite, with a 2 GB peak because the probe held the whole file (the helper must stream). 0 bridge errors and 0 lines left invalid JSON; the rules matched 643 strings of 3 kinds (assignment, pypi-token, url-password) and 13,451 home paths in 5,049 changed lines. Whether the matched strings are live secrets was not checked.
+- Increments: A the helper, the bridge and their tests; B the llm-ext lanes; C the Jev lane, timed per item against the post-clear hook's single 60 s Jev attempt.
 
 ## Acceptance
 A test feeds a transcript holding a fake secret and a fake home path to the summarizer's input step and proves the text handed to llm-ext holds neither.
