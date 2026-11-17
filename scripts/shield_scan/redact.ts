@@ -20,7 +20,7 @@ export type WriteSkipReason = (typeof WRITE_SKIP_REASONS)[number]
 export type RedactJob = { minAgeMs: number; root: string }
 
 // The worker's last reply for a file with findings when the job asks for redact (the protocol is in worker.ts): written (with the kinds and counts of what the re-scan of the final text still found, never any text), left as it was and why, or a vault failure (fixed text) that ends the run.
-export type RedactReply = { t: 'redact'; outcome: 'written'; values: number; residual: Hits } | { t: 'redact'; outcome: 'skip'; reason: WriteSkipReason } | { t: 'redact'; outcome: 'vault-error'; message: string }
+export type RedactReply = { t: 'redact'; outcome: 'written'; values: number; residual: Hits; homeRewrites: number; rounds: number } | { t: 'redact'; outcome: 'skip'; reason: WriteSkipReason } | { t: 'redact'; outcome: 'vault-error'; message: string }
 
 export const shieldMarker = (kind: string, uuid: string): string => `[REDACTED-BY-SECRET-SHIELD. Type: ${kind}. ID: ${uuid}]`
 
@@ -89,6 +89,11 @@ export interface Plan {
 }
 
 const CUT = new RegExp(`(${SHIELD_MARKER})|(${CORE_MARKER})`, 'g')
+export const HOME_ONLY: ReadonlySet<Pass> = new Set<Pass>(['home'])
+// The kind redactHome (hooks/secret-shield/home.ts) gives its hits. It is a hit kind, not a pass name: the pass is 'home', its findings are 'home-path'. A test pins it against the core.
+export const HOME_KIND = 'home-path'
+/** The passes that write markers: the given set without the home pass. WHY: a home rewrite (/Users/x becomes ~) leaves no marker for the alignment to find, is never vaulted and is not restorable, so it must stay out of the plan, the sweep and the re-scan; the worker runs it last on the final text (spec R1). */
+export const withoutHome = (passes: ReadonlySet<Pass>): ReadonlySet<Pass> => new Set([...passes].filter((pass) => pass !== 'home'))
 
 /**
  * Cuts a text at the markers it already holds (spec R3): shield markers (kept, and counted as old by the restore check) and core markers (kept as text).
@@ -106,8 +111,10 @@ export function cutMarkers(text: string): Array<{ seg: string } | { old: string 
   return out
 }
 
-/** Runs the core passes on each stretch between the markers already in the text and aligns each output. `hits` counts what the passes found in the stretches (the same count the whole-file scan gives, with the markers left out). `plan` is null when any stretch could not be aligned. */
+/** Runs the core marker passes (never the home pass, see withoutHome) on each stretch between the markers already in the text and aligns each output. `hits` counts what the passes found in the stretches (the same count the whole-file scan gives, with the markers left out), and with the home pass named also the home paths that the worker will rewrite last. `plan` is null when any stretch could not be aligned. */
 export function planRedaction(text: string, homes: readonly string[], passes: ReadonlySet<Pass>): { hits: Hits; plan: Plan | null } {
+  const marker = withoutHome(passes)
+  const wantHome = passes.has('home')
   const hits: Hits = {}
   const parts: Part[] = []
   const stretches: Stretch[] = []
@@ -116,7 +123,9 @@ export function planRedaction(text: string, homes: readonly string[], passes: Re
     if ('old' in item) parts.push({ t: 'old', text: item.old })
     else if ('lit' in item) parts.push({ t: 'lit', text: item.lit })
     else {
-      const result = redactAll(item.seg, homes, passes)
+      const result = redactAll(item.seg, homes, marker)
+      // WHY the home pass runs on the marker output and is only counted here: a home rewrite is not a marker, so it cannot be aligned and is never vaulted; the worker applies it last, on the final text (spec R1).
+      if (wantHome) addHits(hits, redactAll(result.text, homes, HOME_ONLY).hits)
       addHits(hits, result.hits)
       const pieces = alignStretches(item.seg, result.text)
       if (pieces === null) {

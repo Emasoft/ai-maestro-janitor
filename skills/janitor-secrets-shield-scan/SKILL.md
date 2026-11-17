@@ -55,14 +55,20 @@ changed in the scanned tree. Git history is not scanned yet (a later version).
   count minus 1, at least 1.
 - `--out` path of the findings file. Default:
   `~/.secrets_shield/scans/<root name>-<timestamp>.jsonl`.
-- `--max-file-mb` files larger than this many MB are skipped as over-size.
-  Default: 64.
+- `--max-file-mb` files larger than this many MB are skipped as over-size
+  (with `--redact`, text files over it go to the large lane, see
+  `--max-large-mb`). Default: 64.
+- `--max-large-mb` with `--redact`, text files over `--max-file-mb` and up to
+  this many MB are redacted one at a time in a large lane; a text file over it
+  is neither scanned nor redacted, is reported as `not-scanned-too-large`, and
+  makes the run incomplete (exit 3). A binary file over `--max-file-mb` is an
+  ordinary binary skip. Must be at least `--max-file-mb`. Default: 1024.
 - `--file-timeout-base` fixed seconds of the per-file time limit. Default: 30.
   The limit is base plus per-MB times the file size in MB; a file that runs
   past it is skipped as a timeout, unless its whole-file pass had finished:
   then its findings are kept with line null.
 - `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
-- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`; the `home` pass with `--redact` exits 2). No restore command exists until step 3a-4 (restore.ts), so do not run `--redact` on real data before then. Default: off, scan only.
+- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. No restore command exists yet, so do not run `--redact` on real data until a restore command ships. Default: off, scan only.
 - `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
 
 ## Exit codes

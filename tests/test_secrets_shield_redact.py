@@ -316,12 +316,117 @@ def test_vault_write_failure_in_a_worker_ends_the_run_with_exit_2_and_keeps_the_
     assert TOKEN not in result.streams()
 
 
-def test_redact_with_the_home_pass_exits_2(box: Box) -> None:
-    """--redact with --passes secrets,home exits 2 with the fixed text that the home pass comes in a later step, and changes nothing."""
-    a = box.put(box.root / "a.txt", f"k = {TOKEN}\n")
-    result = box.run("--passes", "secrets,home")
-    assert result.code == 2 and "home pass with --redact" in result.stderr
-    assert a.read_bytes() == f"k = {TOKEN}\n".encode()
+def test_home_pass_with_redact_rewrites_home_paths_last_and_they_are_not_restorable(box: Box) -> None:
+    """--passes secrets,cards,home with --redact: the token becomes a restorable marker and the home path becomes ~ (not vaulted, so restore gives back the ~); a file whose only hit is a home path is still written; home_rewrites counts the rewrites, findings_not_redacted is 0, and the home findings are reported with the kind home-path."""
+    home = str(box.home_dir)
+    a = box.put(box.root / "a.txt", f"dir = {home}/proj/x\nk = {TOKEN}\n")
+    b = box.put(box.root / "b.txt", f"cfg = {home}/y\n")
+    result = box.run("--passes", "secrets,cards,home")
+    assert result.code == 0, result.stderr
+    assert _read(b) == "cfg = ~/y\n"
+    text = _read(a)
+    assert text.startswith("dir = ~/proj/x\nk = [REDACTED-BY-SECRET-SHIELD. Type: github-token. ID: ") and TOKEN not in text
+    assert box.restore(text) == f"dir = ~/proj/x\nk = {TOKEN}\n"
+    summary = result.summary
+    assert summary["home_rewrites"] == 2 and summary["findings_not_redacted"] == 0 and summary["files_redacted"] == 2 and summary["skipped"]["align-error"] == 0
+    assert sorted(r["path"] for r in result.records if r["type"] == "finding" and r["kind"] == "home-path") == ["a.txt", "b.txt"]
+    assert len(box.vault_rows()) == 1
+    assert TOKEN not in result.streams() and home not in result.streams()
+
+
+def test_a_home_only_file_skipped_as_recent_adds_nothing_to_findings_not_redacted(box: Box) -> None:
+    """A file whose only hit is a home path and that is skipped as recent stays unchanged, the skip is recorded, the home hit is still a finding of kind home-path, and findings_not_redacted is 0 (a home path is not a secret left in the file)."""
+    a = box.put(box.root / "a.txt", f"cfg = {box.home_dir}/y\n")
+    result = box.run("--passes", "secrets,home", min_age=None)
+    assert result.code == 0, result.stderr
+    assert _read(a) == f"cfg = {box.home_dir}/y\n"
+    assert ("a.txt", "recent") in result.skips
+    assert result.summary["findings_not_redacted"] == 0 and result.summary["files_redacted"] == 0 and result.summary["home_rewrites"] == 0
+    assert [(r["kind"], r["count"]) for r in result.records if r["type"] == "finding"] == [("home-path", 1)]
+
+
+# A text file of about 67 KB: over --max-file-mb 0.01 (10485 bytes), under --max-large-mb 0.1 (104857 bytes).
+_FILLER = "lorem ipsum dolor sit amet\n" * 2500
+
+
+def test_text_over_max_file_mb_is_redacted_through_the_large_lane(box: Box) -> None:
+    """With --max-file-mb 0.01 a 67 KB text file is redacted through the large lane (counted in large_lane_files, restore byte-identical) while a small file in the same run goes through the ordinary slots and does not count."""
+    original = f"{_FILLER}k = {TOKEN}\n"
+    big = box.put(box.root / "big.txt", original)
+    small = box.put(box.root / "small.txt", f"k = {TOKEN2}\n")
+    result = box.run("--max-file-mb", "0.01")
+    assert result.code == 0, result.stderr
+    assert result.summary["large_lane_files"] == 1 and result.summary["files_redacted"] == 2 and result.summary["files_not_scanned"] == 0
+    assert TOKEN not in _read(big) and TOKEN2 not in _read(small)
+    assert box.restore(_read(big)) == original
+    assert TOKEN not in result.streams()
+
+
+def test_text_over_max_large_mb_is_not_scanned_and_makes_the_run_incomplete(box: Box) -> None:
+    """A 67 KB text file over --max-large-mb 0.02 is neither scanned nor redacted: a not-scanned-too-large skip record, files_not_scanned 1, complete false, exit 3, the file unchanged; a small file in the same run is still redacted."""
+    original = f"{_FILLER}k = {TOKEN}\n"
+    big = box.put(box.root / "big.txt", original)
+    small = box.put(box.root / "small.txt", f"k = {TOKEN2}\n")
+    result = box.run("--max-file-mb", "0.01", "--max-large-mb", "0.02")
+    assert result.code == 3, result.stderr
+    assert ("big.txt", "not-scanned-too-large") in result.skips
+    summary = result.summary
+    assert summary["files_not_scanned"] == 1 and summary["complete"] is False and summary["large_lane_files"] == 0 and summary["files_scanned"] == 1
+    assert big.read_bytes() == original.encode() and TOKEN2 not in _read(small)
+    assert [r for r in result.records if r["type"] == "finding" and r["path"] == "big.txt"] == []
+
+
+def test_an_over_size_binary_file_is_an_ordinary_binary_skip(box: Box) -> None:
+    """A 50 KB file with a NUL byte and a token in it, over --max-file-mb 0.01 and also over --max-large-mb 0.02, is counted as a binary skip (no record, not over-size, not a large-lane or not-scanned file) and left unchanged, exit 0."""
+    blob = b"\x00" + b"x" * 50_000 + TOKEN.encode()
+    path = box.put(box.root / "blob.bin", blob)
+    for extra in ([], ["--max-large-mb", "0.02"]):
+        result = box.run("--max-file-mb", "0.01", *extra)
+        assert result.code == 0, result.stderr
+        summary = result.summary
+        assert summary["skipped"]["binary"] == 1 and summary["skipped"]["over-size"] == 0 and summary["files_not_scanned"] == 0 and summary["large_lane_files"] == 0
+        assert result.skips == [] and path.read_bytes() == blob
+
+
+def test_max_large_mb_below_max_file_mb_exits_2(box: Box) -> None:
+    """--max-large-mb smaller than --max-file-mb with --redact exits 2 with fixed text."""
+    result = box.run("--max-file-mb", "2", "--max-large-mb", "1")
+    assert result.code == 2 and "--max-large-mb must be at least --max-file-mb" in result.stderr
+
+
+_LANE_DELAY_S = 3.0
+
+
+def _lane_delay() -> dict[str, str]:
+    """The test-only worker hook: every worker sleeps this long, in milliseconds, after its whole-file reply of a file with findings."""
+    return {"SHIELD_SCAN_TEST_LOCATE_DELAY_MS": str(int(_LANE_DELAY_S * 1000))}
+
+
+def test_large_files_run_one_at_a_time_even_with_four_jobs(box: Box) -> None:
+    """Two large files that each hold the worker for 3 s (the test hook) take at least 6 s with --jobs 4, because the large lane runs one file at a time; both are redacted."""
+    box.put(box.root / "big1.txt", f"{_FILLER}k = {TOKEN}\n")
+    box.put(box.root / "big2.txt", f"{_FILLER}k = {TOKEN2}\n")
+    started = time.monotonic()
+    result = box.run("--max-file-mb", "0.01", "--jobs", "4", env_extra=_lane_delay())
+    elapsed = time.monotonic() - started
+    print(f"large lane, 2 files, delay {_LANE_DELAY_S} s each, jobs 4: {elapsed:.2f} s")
+    assert result.code == 0, result.stderr
+    assert result.summary["large_lane_files"] == 2 and result.summary["files_redacted"] == 2
+    assert elapsed >= 2 * _LANE_DELAY_S
+
+
+def test_ordinary_slots_keep_working_while_a_large_file_runs(box: Box) -> None:
+    """One large file and three small ones, each held 3 s by the test hook, with --jobs 4: the small ones run in the ordinary slots beside the large lane, so the run takes well under the 12 s of one after another (under 9 s here)."""
+    box.put(box.root / "big.txt", f"{_FILLER}k = {TOKEN}\n")
+    for index in range(3):
+        box.put(box.root / f"s{index}.txt", f"k = {secret('gh' + 'p_', f'lane-{index}', 36)}\n")
+    started = time.monotonic()
+    result = box.run("--max-file-mb", "0.01", "--jobs", "4", env_extra=_lane_delay())
+    elapsed = time.monotonic() - started
+    print(f"large lane plus 3 ordinary files, delay {_LANE_DELAY_S} s each, jobs 4: {elapsed:.2f} s")
+    assert result.code == 0, result.stderr
+    assert result.summary["large_lane_files"] == 1 and result.summary["files_redacted"] == 4
+    assert elapsed < 3 * _LANE_DELAY_S
 
 
 _ALIGN = f"""
@@ -454,19 +559,36 @@ def test_sweep_skips_a_short_value_and_never_splits_a_value_out_of_a_longer_one(
     assert got["distinct"] == 2 and got["slot"] == [0, 1, 1, 0]
 
 
-def test_a_residual_hit_is_reported_by_kind_and_count_and_makes_the_run_exit_1(box: Box) -> None:
-    """Two assignments on one line: the first run hides the first pair, the second is left (the re-scan finds it), so the file is written, one residual record of kind assignment is reported, the summary says residual 1, the exit is 1 and no value is printed; a second run redacts the rest and exits 0."""
+def test_a_residual_hit_is_redacted_by_a_further_round_in_the_same_run(box: Box) -> None:
+    """Two assignments on one line: round 1 hides the first pair and the re-scan finds the second, so a second round hides it in the same run: the file is written once, the run exits 0 with no residual record, rounds_used_max is 2, no value is printed, restore gives the original and a second run changes nothing."""
     original = '"password":"abc12345"password: abc12345\n'
     a = box.put(box.root / "a.txt", original)
     first = box.run()
-    assert first.code == 1, first.stderr
-    assert [r for r in first.records if r["type"] == "residual"] == [{"type": "residual", "path": "a.txt", "kind": "assignment", "count": 1}]
-    assert first.summary["residual"] == 1 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1 and first.summary["findings_not_redacted"] == 0
-    assert MARKER_RE.search(_read(a)) is not None and box.restore(_read(a)) == original
-    assert "abc12345" not in first.streams()
-    second = box.run()
-    assert second.code == 0 and second.summary["residual"] == 0, second.stderr
+    assert first.code == 0, first.stderr
+    assert [r for r in first.records if r["type"] == "residual"] == []
+    assert first.summary["residual"] == 0 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1 and first.summary["findings_not_redacted"] == 0
+    assert first.summary["rounds_used_max"] == 2
     assert "abc12345" not in _read(a) and box.restore(_read(a)) == original
+    assert "abc12345" not in first.streams()
+    after = a.read_bytes()
+    second = box.run()
+    assert second.code == 0 and second.summary["files_redacted"] == 0 and second.summary["rounds_used_max"] == 0
+    assert a.read_bytes() == after
+
+
+_RESIDUAL = f"""
+import {{ HOME_KIND, residualHits }} from {json.dumps(str(REDACT))}
+import {{ redactHome }} from {json.dumps(str(_SHIELD.parents[1] / "hooks" / "secret-shield" / "home.ts"))}
+const input = JSON.parse(await Bun.stdin.text())
+console.log(JSON.stringify({{ residual: residualHits(input.text, [], new Set(['secrets'])), clean: residualHits(input.clean, [], new Set(['secrets'])), homeKind: Object.keys(redactHome('/a/b/x', ['/a/b']).hits), pinned: HOME_KIND }}))
+"""
+
+
+def test_the_re_scan_reports_kinds_and_counts_between_markers_and_the_home_kind_matches_the_core(box: Box) -> None:
+    """residualHits (a unit test: no real input makes a run still find something after its 3 rounds) gives only kind and count for a hit between markers and nothing for marker-only text; HOME_KIND equals the kind redactHome gives its hits."""
+    got = box.bun_json(_RESIDUAL, {"text": f"a {_OLD}\npassword: abc12345\n", "clean": f"a {_OLD}\nb {_OLD}\n"})
+    assert got["residual"] == {"assignment": 1} and got["clean"] == {}
+    assert got["homeKind"] == [got["pinned"]]
 
 
 def test_linked_worktree_with_its_own_merge_head_is_untouched_while_the_main_worktree_is_redacted(box: Box) -> None:

@@ -1,9 +1,10 @@
 // secrets-shield scan, increment 1a (TRDD-BAQB9SYO; redact mode, increment 3 step 3a-2): scans a project folder for secrets with the shield core and writes one JSON line per finding; with --redact it also replaces each secret in the files with a marker and keeps the value in the vault (vault.ts).
 // Run: bun run <plugin root>/scripts/shield_scan/scan.ts [options] [root]
-// Options: --all (gitignored and hidden files too, plus each repo .git/config) · --passes secrets,cards (default; email and home are opt-in; --redact accepts secrets, cards and email, the home pass with --redact comes in a later step) · --jobs N · --out PATH · --max-file-mb N (64) · --file-timeout-base S (30) · --file-timeout-per-mb S (5) · --redact · --min-age-minutes N (10; with --redact a file modified within N minutes is not written).
+// Options: --all (gitignored and hidden files too, plus each repo .git/config) · --passes secrets,cards (default; email and home are opt-in; with --redact the home pass rewrites paths to ~ and is not restorable) · --jobs N · --out PATH · --max-file-mb N (64) · --max-large-mb N (1024, at least --max-file-mb; with --redact only) · --file-timeout-base S (30) · --file-timeout-per-mb S (5) · --redact · --min-age-minutes N (10; with --redact a file modified within N minutes is not written).
 // Records (never a matched value or any text of a scanned file): {"type":"finding","path","kind","line"|null,"count"} · {"type":"skip","path","reason"} · with --redact {"type":"residual","path","kind","count"} (what the passes still find between the markers of a file that was written) · {"type":"summary",...} last.
 // Exit: 0 complete with no findings (with --redact: complete and every finding redacted, no residual) · 1 complete with findings (with --redact: findings_not_redacted or residual above 0) · 3 incomplete (a timeout, read-error, crash, git-error or unreadable-dir skip) · 2 usage or fatal error (with --redact also a vault failure).
-// With --redact the worker sweeps the plan for copies of each redacted value that no pass matched, and runs the passes again over the text between the markers of the new file (redact.ts: sweepPlan, residualHits); the summary then says residual_check "run" and holds the residual total. A residual hit does not stop the write (the restore check passed); it makes the run exit 1.
+// With --redact the worker sweeps the plan for copies of each redacted value that no pass matched, and runs the passes again over the text between the markers of the new file (redact.ts: sweepPlan, residualHits); while that re-scan finds something it runs another round (at most 3, summary rounds_used_max) and writes once after the last one. The summary then says residual_check "run" and holds the residual total of what is still found after the last round. A residual hit does not stop the write (the restore check passed); it makes the run exit 1.
+// With --redact a text file over --max-file-mb and up to --max-large-mb goes to the large lane (one such file at a time, one dedicated worker; summary large_lane_files); a text file over --max-large-mb is neither scanned nor redacted: a skip record not-scanned-too-large, counted in files_not_scanned, and the run is incomplete (exit 3). A binary file over --max-file-mb stays an ordinary binary skip. The home pass with --redact runs last on the final text and its rewrites are neither vaulted nor restorable (summary home_rewrites); home hits are findings of kind home and never count as findings_not_redacted.
 // stdout: the summary line and the findings file path, nothing else. stderr: fixed text only. The pass order is the core's (hooks/secret-shield/pipeline.ts); this file carries none of its own.
 
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process'
@@ -15,12 +16,14 @@ import type { Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { isPass, PASS_ORDER, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { findGitTop, newStats, noteSkip, SKIP_REASONS, walkFiles, type FileItem, type SetStats, type SkipReason } from './fileset.ts'
-import { WRITE_SKIP_REASONS, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
+import { HOME_KIND, WRITE_SKIP_REASONS, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 
 const MB = 1048576
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ROOT = resolve(HERE, '..', '..')
 const WORKER = join(HERE, 'worker.ts')
+// The skip reason of a text file over --max-large-mb (spec R8): a record of the findings file, counted in files_not_scanned.
+const NOT_SCANNED = 'not-scanned-too-large'
 
 // A fixed-text error of the scan: its message is shown to the user and never holds the text of a file.
 class ScanError extends Error {
@@ -43,6 +46,7 @@ interface Options {
   jobs: number
   out: string | null
   maxFileMb: number
+  maxLargeMb: number
   timeoutBase: number
   timeoutPerMb: number
   redact: boolean
@@ -50,7 +54,7 @@ interface Options {
 }
 
 function parseArgs(argv: string[]): Options {
-  const opts: Options = { root: '', all: false, passes: ['secrets', 'cards'], jobs: Math.max(1, Math.min(8, cpus().length - 1)), out: null, maxFileMb: 64, timeoutBase: 30, timeoutPerMb: 5, redact: false, minAgeMinutes: 10 }
+  const opts: Options = { root: '', all: false, passes: ['secrets', 'cards'], jobs: Math.max(1, Math.min(8, cpus().length - 1)), out: null, maxFileMb: 64, maxLargeMb: 1024, timeoutBase: 30, timeoutPerMb: 5, redact: false, minAgeMinutes: 10 }
   let rootArg: string | null = null
   const number = (flag: string, value: string | undefined, min: number, integer: boolean): number => {
     if (value === undefined) return fatal(`${flag} needs a value`)
@@ -89,6 +93,10 @@ function parseArgs(argv: string[]): Options {
         opts.maxFileMb = number(arg, value, 0, false)
         i++
         break
+      case '--max-large-mb':
+        opts.maxLargeMb = number(arg, value, 0, false)
+        i++
+        break
       case '--file-timeout-base':
         opts.timeoutBase = number(arg, value, 0, false)
         i++
@@ -109,8 +117,8 @@ function parseArgs(argv: string[]): Options {
         rootArg = arg
     }
   }
-  // WHY the home pass is refused here and not left to run: with --redact its rewrites would be neither vaulted nor restorable (spec R1), and that part is built in a later step; running it silently would redact less than the user asked for.
-  if (opts.redact && opts.passes.includes('home')) return fatal('the home pass with --redact comes in a later step; use --passes secrets,cards,email')
+  // WHY the large limit is checked here: a limit below the ordinary one would make the large lane smaller than the ordinary lane. It matters only with --redact, the only run that has a large lane.
+  if (opts.redact && opts.maxLargeMb < opts.maxFileMb) return fatal('--max-large-mb must be at least --max-file-mb')
   try {
     opts.root = realpathSync(resolve(rootArg ?? process.cwd()))
     if (!statSync(opts.root).isDirectory()) return fatal('the root is not a directory')
@@ -305,7 +313,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
   const realOut = join(realpathSync(dirname(outFile)), basename(outFile))
   const exclude = new Set([realOut, `${realOut}.tmp`])
   if (opts.redact) {
-    // WHY the vault is opened once here, before any worker starts: an unusable vault ends the run with exit 2 before any file is touched (fail fast). The race of several workers opening a new vault at once is fixed in openVault itself (vault.ts), not here.
+    // WHY the vault is opened once here, before any worker starts: an unusable vault ends the run with exit 2 before any file is touched (fail fast). The race of several workers opening a new vault at once is mitigated by a retry in openVault (vault.ts retryBusy), not here; its cause was never isolated.
     const { openVault, VaultError } = await import('./vault.ts')
     try {
       openVault().close()
@@ -315,7 +323,8 @@ async function main(): Promise<{ code: number; stdout: string }> {
   }
 
   const stats: SetStats = newStats()
-  const setOptions = { root: opts.root, all: opts.all, maxBytes: Math.floor(opts.maxFileMb * MB), exclude }
+  // WHY the large lane exists only with --redact: a scan keeps its over-size skip (it reads every file whole within the limit); the owner's case is redacting huge text files (spec R8). largeBytes null means no lane.
+  const setOptions = { root: opts.root, all: opts.all, maxBytes: Math.floor(opts.maxFileMb * MB), largeBytes: opts.redact ? Math.floor(opts.maxLargeMb * MB) : null, exclude }
   const files = walkFiles(setOptions, stats)
   const findings: Finding[] = []
   let filesScanned = 0
@@ -330,6 +339,11 @@ async function main(): Promise<{ code: number; stdout: string }> {
   const writeSkipRecords: Array<{ path: string; reason: WriteSkipReason }> = []
   let residualTotal = 0
   const residualRecords: Array<{ path: string; kind: string; count: number }> = []
+  let filesNotScanned = 0
+  const notScannedPaths: string[] = []
+  let largeLaneFiles = 0
+  let homeRewrites = 0
+  let roundsUsedMax = 0
 
   const account = (item: FileItem, outcome: Outcome): void => {
     if (outcome.kind === 'skip') return noteSkip(stats, opts.root, item.abs, outcome.reason)
@@ -352,12 +366,15 @@ async function main(): Promise<{ code: number; stdout: string }> {
     if (findings.length > before) filesWithFindings++
     if (!opts.redact) return
     // WHY a file with findings and no written reply counts as not redacted whatever the cause (a skip, a timeout before the write, a locate kill): the count is derived here, from what the worker confirmed, and never from a list of causes.
-    const found = sumOf(outcome.whole)
-    if (found === 0) return
+    // WHY the home hits are left out of the not-redacted count: the home pass is opt-in, writes no marker and is not restorable (spec R1); a home path is reported as a finding of kind home and rewritten last, it is not a secret left in the file. A file whose only hits are home paths still gets its reply (written or why not).
+    if (sumOf(outcome.whole) === 0) return
+    const found = sumOf(outcome.whole) - (outcome.whole[HOME_KIND] ?? 0)
     const reply = outcome.kind === 'scanned' ? outcome.redact : null
     if (reply?.outcome === 'written') {
       filesRedacted++
       valuesVaulted += reply.values
+      homeRewrites += reply.homeRewrites
+      roundsUsedMax = Math.max(roundsUsedMax, reply.rounds)
       // WHY a residual is counted only for a written file: the worker runs the re-scan on the final text, and a file that was not written is already counted in findings_not_redacted.
       for (const [kind, count] of Object.entries(reply.residual)) {
         residualTotal += count
@@ -373,29 +390,73 @@ async function main(): Promise<{ code: number; stdout: string }> {
   }
 
   // Each slot owns one worker process at a time and pulls the next file from the shared walk; a killed or crashed worker is replaced when the next file arrives.
+  // WHY the large lane is one dedicated worker that the slots feed through a queue, and not a lock the slots wait on: the worker holds the whole file several times over (the buffer, the decoded string and the redacted copy), so several large files at once could exhaust the host memory (it froze once, spec R8). A queue lets the ordinary slots keep going while a large file runs; with a lock, slots that picked a large file would sit idle.
+  const largeQueue: FileItem[] = []
+  let walkDone = false
+  let wakeLane: (() => void) | null = null
+  const runLimitMs = (item: FileItem): number => (opts.timeoutBase + opts.timeoutPerMb * (item.size / MB)) * 1000
+  const redactJob = (): RedactJob | null => (opts.redact ? { minAgeMs: opts.minAgeMinutes * 60_000, root: opts.root } : null)
   const slot = async (): Promise<void> => {
     let worker: WorkerProc | null = null
     for (let next = await files.next(); next.done !== true; next = await files.next()) {
       const item = next.value
+      if (item.lane === 'too-large') {
+        // Neither scanned nor redacted: reported, and the run is incomplete.
+        filesNotScanned++
+        notScannedPaths.push(item.rel)
+        continue
+      }
+      if (item.lane === 'large') {
+        largeQueue.push(item)
+        wakeLane?.()
+        wakeLane = null
+        continue
+      }
       worker ??= await WorkerProc.start()
-      const limitMs = (opts.timeoutBase + opts.timeoutPerMb * (item.size / MB)) * 1000
-      const outcome = await runFile(worker, item, opts.passes, limitMs, opts.redact ? { minAgeMs: opts.minAgeMinutes * 60_000, root: opts.root } : null)
+      const outcome = await runFile(worker, item, opts.passes, runLimitMs(item), redactJob())
       account(item, outcome)
       if (outcome.kind === 'timeout' || outcome.kind === 'crash' || outcome.kind === 'locate-timeout') worker = null
     }
     worker?.close()
   }
-  await Promise.all(Array.from({ length: opts.jobs }, () => slot()))
+  // The large lane: its worker starts on the first large file and the lane ends when the walk is done and the queue is empty. Nothing awaits between the queue check and the wait below, so a wake-up cannot be lost.
+  const lane = async (): Promise<void> => {
+    let worker: WorkerProc | null = null
+    for (;;) {
+      const item = largeQueue.shift()
+      if (item === undefined) {
+        if (walkDone) break
+        await new Promise<void>((resolve) => {
+          wakeLane = resolve
+        })
+        continue
+      }
+      worker ??= await WorkerProc.start()
+      largeLaneFiles++
+      const outcome = await runFile(worker, item, opts.passes, runLimitMs(item), redactJob())
+      account(item, outcome)
+      if (outcome.kind === 'timeout' || outcome.kind === 'crash' || outcome.kind === 'locate-timeout') worker = null
+    }
+    worker?.close()
+  }
+  const slotsDone = Promise.all(Array.from({ length: opts.jobs }, () => slot())).then(() => {
+    walkDone = true
+    wakeLane?.()
+    wakeLane = null
+  })
+  await Promise.all([slotsDone, lane()])
 
   // Canonical order: path in UTF-8 byte order, findings before skips before residual records, line ascending with null last, then kind.
   const rows: Array<{ path: string; rank: number; line: number; kind: string; json: string }> = []
   for (const f of findings) rows.push({ path: f.path, rank: 0, line: f.line ?? Number.POSITIVE_INFINITY, kind: f.kind, json: JSON.stringify({ type: 'finding', path: f.path, kind: f.kind, line: f.line, count: f.count }) })
   for (const s of stats.skipRecords) rows.push({ path: s.path, rank: 1, line: 0, kind: s.reason, json: JSON.stringify({ type: 'skip', path: s.path, reason: s.reason }) })
   for (const s of writeSkipRecords) rows.push({ path: s.path, rank: 1, line: 0, kind: s.reason, json: JSON.stringify({ type: 'skip', path: s.path, reason: s.reason }) })
+  for (const path of notScannedPaths) rows.push({ path, rank: 1, line: 0, kind: NOT_SCANNED, json: JSON.stringify({ type: 'skip', path, reason: NOT_SCANNED }) })
   for (const r of residualRecords) rows.push({ path: r.path, rank: 2, line: 0, kind: r.kind, json: JSON.stringify({ type: 'residual', path: r.path, kind: r.kind, count: r.count }) })
   rows.sort((a, b) => utf8Compare(a.path, b.path) || a.rank - b.rank || (a.line === b.line ? 0 : a.line < b.line ? -1 : 1) || utf8Compare(a.kind, b.kind))
 
-  const incomplete = (['timeout', 'read-error', 'crash', 'git-error', 'unreadable-dir'] as SkipReason[]).some((reason) => stats.skipped[reason] > 0)
+  // WHY files not scanned make the run incomplete: a text file over --max-large-mb was neither scanned nor redacted, so the run cannot say the tree is clean.
+  const incomplete = filesNotScanned > 0 || (['timeout', 'read-error', 'crash', 'git-error', 'unreadable-dir'] as SkipReason[]).some((reason) => stats.skipped[reason] > 0)
   const elapsed = (performance.now() - started) / 1000
   const skipped: Record<string, number> = {}
   for (const reason of SKIP_REASONS) skipped[reason] = stats.skipped[reason]
@@ -423,7 +484,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
     mb_per_s: elapsed > 0 ? Math.round((bytesScanned / MB / elapsed) * 100) / 100 : 0,
     jobs: opts.jobs,
     // WHY residual is the total the re-scan found in the files that were written; residual_check says the re-scan ran (it never runs without --redact).
-    ...(opts.redact ? { redact: true, min_age_minutes: opts.minAgeMinutes, files_redacted: filesRedacted, values_vaulted: valuesVaulted, findings_not_redacted: findingsNotRedacted, residual: residualTotal, residual_check: 'run' } : {}),
+    ...(opts.redact ? { redact: true, min_age_minutes: opts.minAgeMinutes, files_redacted: filesRedacted, values_vaulted: valuesVaulted, findings_not_redacted: findingsNotRedacted, residual: residualTotal, residual_check: 'run', rounds_used_max: roundsUsedMax, files_not_scanned: filesNotScanned, large_lane_files: largeLaneFiles, home_rewrites: homeRewrites } : {}),
   })
   // The findings file is private to its owner (it says where the secrets are) and is renamed into place, so a reader never sees a half-written one.
   writeFileSync(`${realOut}.tmp`, [...rows.map((row) => row.json), summary].join('\n') + '\n', { mode: 0o600 })

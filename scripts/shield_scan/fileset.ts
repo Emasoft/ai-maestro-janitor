@@ -2,7 +2,7 @@
 // Default scope: inside a git repo, the files `git ls-files -co --exclude-standard` lists (tracked files, plus untracked files no ignore rule hides); outside a repo, every file. Scope all: every file of the filesystem walk, plus each repo `.git/config` (it can hold a token in a remote URL) and no other `.git` content.
 
 import { spawn } from 'node:child_process'
-import { lstatSync, type Stats } from 'node:fs'
+import { closeSync, lstatSync, openSync, readSync, type Stats } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
@@ -32,6 +32,8 @@ export interface FileItem {
   rel: string
   abs: string
   size: number
+  /** normal: the ordinary slots; large: the large lane (one such file at a time); too-large: neither scanned nor redacted, the driver reports it. */
+  lane: 'normal' | 'large' | 'too-large'
 }
 
 export interface SetOptions {
@@ -41,6 +43,8 @@ export interface SetOptions {
   maxBytes: number
   /** Absolute paths never scanned (the findings file and its temporary file). */
   exclude: ReadonlySet<string>
+  /** With --redact: a text file over maxBytes and up to this many bytes goes to the large lane, one over it is yielded as too-large. null: a file over maxBytes is an over-size skip. */
+  largeBytes: number | null
 }
 
 export function newStats(): SetStats {
@@ -72,6 +76,24 @@ function runGit(repo: string, args: string[]): Promise<Buffer | null> {
 }
 
 const splitZ = (data: Buffer): string[] => data.toString('utf8').split('\0').filter((entry) => entry.length > 0)
+
+// The first bytes the binary test looks at (a NUL byte among them means binary); the worker uses the same number.
+export const BINARY_PROBE_BYTES = 8192
+
+// The binary probe of a file over the size limit: the same test as the worker's, on the first bytes only, so a big file is never read whole here.
+function probeBinary(abs: string): 'binary' | 'text' | 'error' {
+  let fd: number | null = null
+  try {
+    fd = openSync(abs, 'r')
+    const head = Buffer.alloc(BINARY_PROBE_BYTES)
+    const got = readSync(fd, head, 0, BINARY_PROBE_BYTES, 0)
+    return head.subarray(0, got).includes(0) ? 'binary' : 'text'
+  } catch {
+    return 'error'
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
 
 function inspect(abs: string): Stats | 'missing' | 'error' {
   try {
@@ -118,8 +140,12 @@ function classify(abs: string, st: Stats | 'missing' | 'error', opts: SetOptions
   if (st === 'error') return skip('read-error')
   if (st.isSymbolicLink()) return skip('symlink')
   if (!st.isFile()) return skip('special')
-  if (st.size > opts.maxBytes) return skip('over-size')
-  return { rel: relOf(opts.root, abs), abs, size: st.size }
+  if (st.size <= opts.maxBytes) return { rel: relOf(opts.root, abs), abs, size: st.size, lane: 'normal' }
+  // Over the size limit: without the large lane (a scan, or no --redact) it is skipped. With it, the file is probed for a NUL in its first 8192 bytes like the worker does (so a big binary stays an ordinary binary skip and is never read whole), and text goes to the large lane, or is marked too-large when it is over the large limit (the driver reports it as not scanned).
+  if (opts.largeBytes === null) return skip('over-size')
+  const probe = probeBinary(abs)
+  if (probe !== 'text') return skip(probe === 'binary' ? 'binary' : 'read-error')
+  return { rel: relOf(opts.root, abs), abs, size: st.size, lane: st.size > opts.largeBytes ? 'too-large' : 'large' }
 }
 
 async function* walkRepo(repo: string, opts: SetOptions, stats: SetStats, alreadyListed?: Buffer): AsyncGenerator<FileItem> {

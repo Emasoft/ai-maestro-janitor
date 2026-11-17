@@ -5,7 +5,7 @@
 //   {"t":"skip","reason":"binary"|"read-error"}   the file was not scanned
 //   {"t":"whole","bytes":n,"hits":{kind:count}}  the whole-file result; when it holds no hit the job ends here
 //   {"t":"lines","hits":[[kind,line,count],...]} the per-line result of a file whose whole-file result holds a hit; with "redact" the job goes on:
-//   {"t":"redact","outcome":"written","values":n,"residual":{kind:count}}  the file was replaced; n values are in the vault; residual holds the kinds and counts the passes still find between the markers of the new text (empty when none)
+//   {"t":"redact","outcome":"written","values":n,"residual":{kind:count},"homeRewrites":n,"rounds":n}  the file was replaced; n values are in the vault; residual holds the kinds and counts the passes still find between the markers of the new text after the last round (empty when none); homeRewrites counts the home paths rewritten last (not vaulted); rounds is how many redaction rounds ran (1 to 3)
 //   {"t":"redact","outcome":"skip","reason":<write skip reason>}   the file was left as it was
 //   {"t":"redact","outcome":"vault-error","message":<fixed text>}  the vault failed: the file was left as it was and the run ends with exit 2
 // With "redact" the redaction runs HERE and the values never leave this process: not on stdout, not on stderr, not in a message.
@@ -18,12 +18,13 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { countOf, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import { isPass, redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
-import { findGitTop } from './fileset.ts'
-import { finalText, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
+import { BINARY_PROBE_BYTES, findGitTop } from './fileset.ts'
+import { finalText, HOME_KIND, HOME_ONLY, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, withoutHome, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 import type { Vault } from './vault.ts'
 import { checkWriteTarget } from './writeguard.ts'
 
-const BINARY_PROBE_BYTES = 8192
+// WHY a cap: each round plans, vaults and re-scans the whole text again, and a value that survives three rounds is a rule gap, which the run reports as residual and does not chase.
+const MAX_ROUNDS = 3
 const homes: readonly string[] = [homedir()]
 // ignoreBOM keeps a byte order mark in the text, so the text is the file and nothing else; invalid UTF-8 becomes U+FFFD (the decoder is not fatal).
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -112,23 +113,55 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
     const operation = gitOperation(real)
     if (operation === 'operation') return skipReply('git-operation')
     if (operation === 'failed') return skipReply('git-check-failed')
-    if (plan === null || plan.stretches.length === 0) return skipReply('align-error')
-    // WHY the sweep runs here, after every skip and before the vault: the copies it finds are vaulted with the same rows, finalText writes them and restoreCheck covers them (spec R5).
-    const swept = sweepPlan(plan)
-    const { entries, slot } = vaultEntries(swept)
-    vault ??= openVault()
-    const rows = vault.lookupOrInsert(real, entries)
-    const uuids = slot.map((index) => rows[index])
-    const final = finalText(swept, uuids)
-    const open = vault
-    if (!restoreCheck(swept, final, uuids, (uuid) => open.byUuid(uuid)?.value ?? null, text)) return skipReply('align-error')
-    // WHY the re-scan does not stop the write: the restore check passed, so the file loses nothing, and a residual hit is reported (kinds and counts) for the run to count and exit 1 on, never silently dropped.
-    const residual = residualHits(final, homes, passes)
-    // WHY the target is checked again here and not only when the walker listed the file: see writeguard.ts.
+    if (plan === null) return skipReply('align-error')
+    // The marker passes only: the home pass writes no marker, so it stays out of the plan, the sweep and the re-scan and runs last (below).
+    const markers = withoutHome(passes)
+    // WHY rounds: one run over the text can leave a copy that no rule matched in that call (two assignments on one line: the first hides, the second is left). Each round plans again on the final text of the round before (its markers are cut out like old markers), sweeps, vaults, builds the next final text and checks its restore against the text of the round before; the file is written once, after the last round. At most MAX_ROUNDS: what is still found after the last round is reported as residual.
+    let current = text
+    let round: Plan = plan
+    let rounds = 0
+    let final = text
+    let residual: Hits = {}
+    const distinct = new Set<string>()
+    for (;;) {
+      rounds++
+      // WHY the sweep runs here, after every skip and before the vault: the copies it finds are vaulted with the same rows, finalText writes them and restoreCheck covers them (spec R5).
+      const swept = sweepPlan(round)
+      const { entries, slot } = vaultEntries(swept)
+      let uuids: string[] = []
+      // A round with nothing to vault (a file whose only hits are home paths) never opens the vault.
+      if (entries.length > 0) {
+        vault ??= openVault()
+        const rows = vault.lookupOrInsert(real, entries)
+        uuids = slot.map((index) => rows[index])
+        for (const uuid of rows) distinct.add(uuid)
+      }
+      final = finalText(swept, uuids)
+      const open = vault
+      if (!restoreCheck(swept, final, uuids, (uuid) => open?.byUuid(uuid)?.value ?? null, current)) return skipReply('align-error')
+      // WHY the re-scan does not stop the write: the restore check passed, so the file loses nothing, and a residual hit is reported (kinds and counts) for the run to count and exit 1 on, never silently dropped.
+      residual = residualHits(final, homes, markers)
+      if (countOf(residual) === 0 || rounds === MAX_ROUNDS) break
+      const next = planRedaction(final, homes, markers)
+      if (next.plan === null) return skipReply('align-error')
+      current = final
+      round = next.plan
+    }
+    // WHY the home pass runs here, last, on the final text, after the vault step, the sweep, the re-scan and the restore check: its rewrites (/Users/x becomes ~) are neither vaulted nor restorable, and rewriting home paths in configs, scripts and virtualenvs changes what they point to, so it is opt-in (--passes home, spec R1).
+    let out = final
+    let homeRewrites = 0
+    if (passes.has('home')) {
+      const homed = redactAll(final, homes, HOME_ONLY)
+      out = homed.text
+      homeRewrites = homed.hits[HOME_KIND] ?? 0
+    }
+    // Nothing to vault and nothing to rewrite: the hits the walker counted cannot be explained, so the file is left alone.
+    if (distinct.size === 0 && homeRewrites === 0) return skipReply('align-error')
+    // WHY the target is checked again here and not only when the walker listed the file, and after the home pass: see writeguard.ts.
     const target = checkWriteTarget(path, job.root)
     if (target !== 'ok') return skipReply(target)
-    const written = writeAtomic(real, Buffer.from(final, 'utf8'), before)
-    return written === 'written' ? { t: 'redact', outcome: 'written', values: entries.length, residual } : skipReply(written)
+    const written = writeAtomic(real, Buffer.from(out, 'utf8'), before)
+    return written === 'written' ? { t: 'redact', outcome: 'written', values: distinct.size, residual, homeRewrites, rounds } : skipReply(written)
   } catch (error) {
     if (error instanceof VaultError) return { t: 'redact', outcome: 'vault-error', message: error.message }
     throw error
