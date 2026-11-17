@@ -287,3 +287,59 @@ Shape: the word Bearer, a line break (with or without further blank lines) or an
 Hidden instead: the same value after Bearer and a space or a tab on the same line, and after the Authorization header name and Bearer on one line (hidden with the bearer-token marker).
 Card: none
 Test: KNOWN MISS bearer-value-on-next-line: a token wrapped onto the next line after Bearer stays visible, on the same line it is hidden
+
+## card-bare-run-17-to-19-without-card-word
+
+Reason: (a) a standalone rule for a bare run of 17 to 19 digits that passes the issuer prefix and Luhn checks hid ordinary text: in the 2026-11-16 measurement of the old report-sanitizer card rule on 50,487 text files, 183 of its 240 hidden matches were runs of 17 to 19 digits and 180 of those were cargo build hashes, not cards (figures recorded in TRDD-L1I0FP5T). The shield's card pass (hooks/secret-shield/cards.ts) therefore asks for a card word before such a run.
+Shape: one run of 17, 18 or 19 digits that starts with an issuer prefix (a Visa of 19 digits, or a Discover, JCB or Diners Club number of 17 to 19) and passes Luhn, with none of the words card, credit, debit, visa, mastercard or amex standing whole within the 32 characters before it on the same line.
+Hidden instead: the same run with one of those words before it on the same line, and a 19-digit Visa written in the 4-4-4-4-3 grouping.
+Card: none
+Test: KNOWN MISS card-bare-run-17-to-19-without-card-word: a bare 17 to 19 digit card number with no card word near it is not hidden, with a card word it is
+
+## card-non-standard-grouping
+
+Reason: (a) the old report-sanitizer card rule took one space or dash between any two digits, and in the same measurement 2 of its 190 false matches were a process listing (pid, parent pid, elapsed time) read as one 14-digit number across three columns. The shield's card pass reads only the groupings 4-4-4-4, 4-6-5, 4-6-4 and 4-4-4-4-3, each with one separator kind throughout.
+Shape: a card number whose digits are split by single spaces or dashes in any other grouping, for example 4-4-5 (a 13-digit Visa) or groups of 3 or 5, or by two kinds of separator, and that passes the issuer prefix and Luhn checks.
+Hidden instead: the same number as one bare run of 13 to 16 digits, or in one of the four groupings.
+Card: none
+Test: KNOWN MISS card-non-standard-grouping: a card number grouped 4-4-5 is not hidden, in a standard grouping or as a bare run it is
+
+## card-word-too-far-or-not-listed
+
+Reason: (c) a bound kept for a stated reason: a bare run of 17 to 19 digits is hidden only when a card word stands near it, because the 180 cargo build hashes of the 2026-11-16 measurement had no such word (figures recorded in TRDD-L1I0FP5T). The word list is card, credit, debit, visa, mastercard and amex, each whole (no letter or digit touching it, except that a literal backslash escape, a backslash and n, r or t, before it counts as a boundary, as in a JSON or Python string dump), within the 32 characters before the run on the same line. A wider window or a longer list would admit more ordinary text near a hash.
+Shape: a bare run of 17 to 19 digits that starts with an issuer prefix and passes Luhn, whose card word stands more than 32 characters before it, on an earlier line, inside a longer word (cardinal, discard, or the word with an n right before it and no backslash before that n), or is another word (payment, pan, ccn).
+Hidden instead: the same run with one of the six words within 32 characters before it on the same line.
+Card: none
+Test: KNOWN MISS card-word-too-far-or-not-listed: a 19-digit card number with its card word 40 characters before it, or with a word that is not in the list, is not hidden, with the word within 32 characters it is
+
+## card-after-digit-and-separator
+
+Reason: (a) the card pass refuses a start that follows a digit and one space or dash, as the old report-sanitizer lookbehind did, so that the tail of a longer chain of digit groups is not read as a card; the 2 process-listing false matches of the 2026-11-16 measurement (pid, parent pid, elapsed time) were such chains. The cost is that a real card with a number or a date before it, one separator apart, is not hidden.
+Shape: a digit group, one space or dash, then a card number (a bare run of 13 to 16 digits, or a grouped number), for example a number or a date before the card with one separator between them: 7777 then a space then a 16-digit card.
+Hidden instead: the same card after a comma, a colon, a letter and a space, or at the start of the line.
+Card: none
+Test: KNOWN MISS card-after-digit-and-separator: a card number that follows a digit group and a separator is not hidden, on its own it is
+
+## card-after-dot
+
+Reason: (a) the digits after a decimal point are a float fraction, not a number of their own: 8 of the 190 false matches of the 2026-11-16 measurement were fractions printed by a probe. The pass refuses a start whose previous character is a dot, so a sentence that ends in a dot and runs straight into a card number, with no space, is not hidden either.
+Shape: a dot, then at once a card number (a bare run of 13 to 19 digits or a grouped number), with no space after the dot.
+Hidden instead: the same card after a space, a comma or any other character that is not a letter, a digit, an underscore or a dot.
+Card: none
+Test: KNOWN MISS card-after-dot: a card number right after a dot is not hidden, after a comma it is
+
+## card-grouped-followed-by-two-groups
+
+Reason: (a) a grouped card followed by the same separator, a group of 4 or more digits and then one more group is read as a longer grouped number (six groups of 4, or more), not as a card with something after it. The old report-sanitizer rule refused any trailing separator and digit, and the 2 process-listing false matches of the 2026-11-16 measurement were chains of digit groups; the shield's card pass refuses only this longer shape. A card followed by one group of 4 (an expiry written as month and year with no slash), by a group of 1 to 3 digits (a CVV) or by a different separator is hidden and its tail stays visible.
+Shape: a card number in one of the four groupings, with its separator, then a group of 4 or more digits, then the same separator and a digit, for example a 4-4-4-4 card followed by two more groups of 4.
+Hidden instead: the same card followed by one group of 4 digits, by a CVV, or by an expiry with a slash.
+Card: none
+Test: KNOWN MISS card-grouped-followed-by-two-groups: a 4-4-4-4 card number followed by two more groups of 4 digits is not hidden, followed by one group it is
+
+## card-glued-to-letter-or-underscore
+
+Reason: (a) a run of digits that touches a letter or an underscore is part of a word or an identifier (a hash with a prefix, a build id, a file name), and the old rule's lookaround refused it for the same reason; the shield's card pass keeps that. The cost is a card with a letter or an underscore right before or after it, and the n of a JSON-escaped line break (a backslash and an n) right before a number.
+Shape: a card number whose first digit follows a letter, a digit or an underscore, or whose last digit is followed by a letter or an underscore, for example 16 digits then the letter x, or the two characters backslash and n then 16 digits.
+Hidden instead: the same card after or before a space, a comma, a colon, an equals sign or a quote.
+Card: none
+Test: KNOWN MISS card-glued-to-letter-or-underscore: a card number glued to a letter or an underscore, or after the n of a JSON-escaped line break, is not hidden, after a space it is
