@@ -4,7 +4,7 @@ title: LOCAL design moves to the project slug folder beside LOCAL memory
 column: backburner
 status: tasked
 created: 2026-10-23T16:12:04+0200
-updated: 2026-10-24T00:10:29+0200
+updated: 2026-11-17T23:13:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -40,6 +40,7 @@ ORDER (our reading of the reviews, not an owner ruling): (1) release a janitor v
 RISK, INFERRED from the resolve_local_design_mirror_dir docstring (scripts/lib/memory_scopes.py:668), not measured: Claude Code's cleanupPeriodDays sweep covers ~/.claude/projects/<slug>/ and 2.1.228 exempted the memory folder but not design/; verify before step 3.
 
 PARKED in backburner: its NPT TRDD-KQULEGL2 is complete (spec F22: Claude Code's cleanup never deletes a non-empty <slug>/design/; an empty one can be rmdir-ed, so the migration must leave at least one file in it; further obligations, subfolder names and a disappearance guard, are in the Approval log of 2026-10-24); the earlier blocker 78GMFJB4 (VERIFY-7) is complete and found that trddgrep has no input carrying the launch path (spec F20). This card owns which input step 2 adds; that is step 2's own work, not a gate. DECISION REQUIRED BEFORE STEP 3 (G26 on measured facts, unless choosing the main checkout contradicts golden G24 or G15, which would make it the owner's; first check whether those rules reach LOCAL design cards, since WL-5 marks the design extension as a D decision, not golden text): the proposed rule in the ORDER paragraph (design keys on the main checkout) conflicts with spec WL-5 (a worktree session writes its LOCAL cards to its own worktree slug); resolve and amend one of them. The current-layout worktree question was answered by TRDD-Q6UOJR8G (spec F21): trddgrep reaches LOCAL design only through an explicit --design-dir, from any checkout, so a caller that computes the slug folder can already pass it; whether that is enough is part of step 2. Step 1 could possibly share a release with TRDD-KLT5F93P, which is itself on hold. The launch-path question is ANSWERED (PRRD G24.1, 2026-10-23): the slug follows Claude Code's rule, the launch path as the session sees it, symlinks not resolved (observed 2026-10-23: this repo has one slug folder per launch path; not yet proven by launching once from each path, and this desktop-app session got the resolved form), so a project started from both /Volumes/EmaUITEK4TBSSD/Code/... and ~/Code/... gets two slug folders and two LOCAL design corpora, just as Claude Code gets two memory folders. Now waits on the spec design/specs/wikimem-layout-spec.md (WL-2, WL-5) and its VERIFY items, above all whether Claude Code's cleanup ever touches <slug>/design/ (measured: trddgrep has no launch-path input today, F20; adding one is step 2's work); and still on ai-maestro's resolver (lib/pillar/kinds.ts:367) adopting the same rule.
+- 2026-11-17 by main-agent@ai-maestro-janitor: GitHub issue https://github.com/Emasoft/ai-maestro-janitor/issues/348 item 5 (LOCAL design back to the project slug folder) is scoped to this card; written now, handled later.
 
 ## Approval log
 
