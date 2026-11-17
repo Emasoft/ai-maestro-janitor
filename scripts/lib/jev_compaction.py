@@ -36,6 +36,7 @@ if str(_LIB_DIR) not in sys.path:
 
 import jsonl_walk  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared byte-safe JSONL walk (TRDD-DQXMND59 stage 3)
 import llm_ext_summary as _les  # noqa: E402  -- needs the sys.path line above; resolve_llm_ext for the TRDD-Q3SR1ZK2 llm-ext classify filter adapter (sibling lib)
+import transcript_redact  # noqa: E402  -- needs the sys.path line above; stdlib-only, the fail-closed shield-core redaction every text sent to llm-ext passes through (TRDD-TKQ274RE)
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
 from jev_expand import attachment_item_text, tool_result_text  # noqa: E402  -- needs the sys.path line above; stdlib-only, the ONE attachment-text / tool-result-text rule, shared with `expand` and the cross-/clear verifier (TRDD-I40IKPWU)
 from jevctx import scorer as _scorer  # noqa: E402
@@ -1191,6 +1192,10 @@ def _llm_ext_reachable_tmp_root(tempdir: str, home: str) -> str | None:
     return tmp_root if os.path.isdir(tmp_root) else None
 
 
+# WHY the cap (TRDD-TKQ274RE): Measured 2026-11-17: the scored set of four real transcripts, 1 GB the largest, was at most 196 KB and redacted in 0.1-0.3 s (one sample each); a 217 MB whole-transcript pass ran at about 1 MB/s under load 40-62. The lane kills one attempt at 60 s (post-clear hook) or min(120 s, what is left), so this cap only bounds a stuck bridge; a redaction cut short raises and nothing is sent.
+_REDACT_TIMEOUT_S = 45.0
+
+
 def score_items_via_llm_ext(
     items: list[Item],
     digest: str,
@@ -1207,13 +1212,43 @@ def score_items_via_llm_ext(
     CLI, not a client object) and runs ONE classification over all items rather than fanning
     batches out on a thread pool: `llm-ext` does its own request planning/chunking internally.
 
-    FAIL-CLOSED, matching `score_items` (never fails open like the library's own default): any
+    REDACTED FIRST (TRDD-TKQ274RE): every item text and the digest go through the shield core
+    (`transcript_redact.redact_texts`) before anything is written or put on the command line, because
+    llm-ext sends both to a remote classifier with no redaction of its own. The caller's `Item.text`
+    and digest are never modified: compose and the shadow log are local and keep the originals.
+
+    FAIL-CLOSED, matching `score_items` (never fails open like the library's own default): redaction
+    unavailable (no bun, a bridge error or timeout) raises `JevValidationError` and nothing is sent; any
     failure -- llm-ext absent, a non-zero subprocess exit (a 402, an outage, a bad profile), or
     a missing/malformed report -- raises `JevError` so the one caller (`scripts/jev_compact.py
     compact`) falls back to `llm_ext_compact.py`, never silently keeps everything.
     """
     if not items:
         return {}
+
+    # WHY redact before resolve_llm_ext and mkdtemp (TRDD-TKQ274RE): llm-ext sends items.jsonl and the
+    # digest (human and assistant messages, TRDD STATE heads, full tool-result text) to a remote
+    # classifier with no redaction of its own, so nothing may be written or put on argv unredacted.
+    # ONE call covers every item plus the digest (last element): one bun start for the whole set.
+    # WHY JevValidationError: it maps to stamp kind "invalid" (jev_compact.py _stamp_kind_for_error).
+    # The lane (jev_compaction_lane.run_compact_with_fallback) passes --no-decline on every attempt and
+    # breaks out of its retry loop on a kind in _NON_RETRYABLE_KINDS, which holds "invalid", then runs
+    # llm_ext_compact.py once; that script redacts its own transcript copy, and if it fails too the lane
+    # degrades to the mechanical handoff. Retrying here could not change a missing bun.
+    # RedactionUnavailable messages are fixed text by design (no transcript content), so they are
+    # safe to carry in the stamp.
+    try:
+        redacted = transcript_redact.redact_texts(
+            [*(it.text for it in items), digest], timeout_s=_REDACT_TIMEOUT_S
+        )
+    except transcript_redact.RedactionUnavailable as exc:
+        raise JevValidationError(f"redaction unavailable, nothing sent: {exc}") from None
+    # WHY the length check: the redactor is a subprocess bridge; a short or long answer would
+    # misassign the starred unpack below (or raise a bare ValueError, which `jev_compact.py compact`'s
+    # `except JevError` does not catch), so treat it like any other unavailable redaction: nothing is sent.
+    if len(redacted) != len(items) + 1:
+        raise JevValidationError("redaction unavailable, nothing sent: the redactor returned the wrong number of texts")
+    *redacted_texts, redacted_digest = redacted
 
     cli = _les.resolve_llm_ext()
     if not cli:
@@ -1234,13 +1269,13 @@ def score_items_via_llm_ext(
     try:
         items_path = Path(tmp_dir) / "items.jsonl"
         with items_path.open("w", encoding="utf-8") as fh:
-            for it in items:
-                fh.write(json.dumps({"id": it.id, "text": it.text}, ensure_ascii=False) + "\n")
+            for it, redacted_text in zip(items, redacted_texts, strict=True):
+                fh.write(json.dumps({"id": it.id, "text": redacted_text}, ensure_ascii=False) + "\n")
 
         profile = os.environ.get("JEV_EXT_CLASSIFY_PROFILE", "or-jev")
         report_dir = Path(tmp_dir) / "reports"
         argv = [
-            cli, "classify", "filter", f"{RETRIEVE_QUESTION.instructions}\n\nTask context:\n{digest}",
+            cli, "classify", "filter", f"{RETRIEVE_QUESTION.instructions}\n\nTask context:\n{redacted_digest}",
             "--items", str(items_path),
             "--threshold", str(relevance_threshold),
             "--profile", profile,

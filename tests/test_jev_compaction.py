@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib
 
 import jev_compaction as jc  # noqa: E402
 import pytest  # noqa: E402
+from _fake_secrets import secret  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402
 from jevctx.pipeline import find_pointers, parse_pointer  # noqa: E402
 from jevctx.segments import detect_kind  # noqa: E402  -- card 6, TRDD-88DOI824
@@ -3474,6 +3475,7 @@ def test_tmp_root_under_home_keeps_default(tmp_path: Path) -> None:
     assert jc._llm_ext_reachable_tmp_root(str(home / "tmpdir"), str(home)) is None
 
 
+@pytest.mark.real_subprocess("bun")
 def test_scoring_temp_dir_is_placed_where_llm_ext_will_accept_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3543,6 +3545,7 @@ def _stand_in_llm_ext_exiting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, c
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
+@pytest.mark.real_subprocess("bun")
 def test_llm_ext_exit_1_raises_validation_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Exit 1 (a refusal that cannot change between attempts) raises JevValidationError (TRDD-7XDBJZCZ)."""
     line = "llm-ext: Path traversal blocked: /x resolves outside allowed directories"
@@ -3551,6 +3554,7 @@ def test_llm_ext_exit_1_raises_validation_error(tmp_path: Path, monkeypatch: pyt
         jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
 
 
+@pytest.mark.real_subprocess("bun")
 def test_llm_ext_exit_3_raises_auth_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Exit 3 (key/credits) raises JevAuthError (TRDD-7XDBJZCZ), whose message starts with the
     prefix `jev_compaction_lane.record_once_per_reason` keys its llm-ext remedy on (TRDD-M0LAC49Q)."""
@@ -3562,6 +3566,7 @@ def test_llm_ext_exit_3_raises_auth_error(tmp_path: Path, monkeypatch: pytest.Mo
     assert str(excinfo.value).startswith("llm-ext classify filter failed:")
 
 
+@pytest.mark.real_subprocess("bun")
 @pytest.mark.parametrize("code", [4, 5])
 def test_llm_ext_exit_4_and_5_raise_plain_jeverror(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
@@ -3571,3 +3576,126 @@ def test_llm_ext_exit_4_and_5_raise_plain_jeverror(
     with pytest.raises(JevError, match="request failed") as excinfo:
         jc.score_items_via_llm_ext([_item("i0:0", "tool", "the build is green", 0)], "digest")
     assert not isinstance(excinfo.value, (JevValidationError, JevAuthError))
+
+
+_REDACT_HOME = "/Users/runner"
+_REDACT_KEY = secret("gh" + "p_", "tkq-inc-c", 36)
+_REDACT_KEY_MARK = "[JANITOR-REDACTED:github-token]"
+
+
+def _stand_in_llm_ext_recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put a stand-in llm-ext on PATH that records its argv and the content of its --items file
+    (the scoring temp dir is removed after the call) to a JSON file, and answers p=0.9 for every item.
+    Returns the record path."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record = tmp_path / "record.json"
+    stand_in = bin_dir / "llm-ext"
+    stand_in.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "argv = sys.argv[1:]\n"
+        "items = argv[argv.index(\"--items\") + 1]\n"
+        "out = argv[argv.index(\"--output_dir\") + 1]\n"
+        "raw = open(items, encoding=\"utf-8\").read()\n"
+        "json.dump({\"argv\": argv, \"items\": raw}, open(os.environ[\"LLM_EXT_STANDIN_RECORD\"], \"w\"))\n"
+        "os.makedirs(out, exist_ok=True)\n"
+        "rows = [{\"id\": json.loads(line)[\"id\"], \"p\": 0.9} for line in raw.splitlines()]\n"
+        "json.dump({\"decision\": {\"rows\": rows}}, open(os.path.join(out, \"r.json\"), \"w\"))\n",
+        encoding="utf-8",
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("LLM_EXT_STANDIN_RECORD", str(record))
+    return record
+
+
+@pytest.mark.real_subprocess("bun")
+def test_llm_ext_scoring_sends_only_redacted_items_and_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-TKQ274RE: neither items.jsonl nor the argv holds the secret or the home path; ids are unchanged and the caller's texts are not rewritten."""
+    monkeypatch.setenv("HOME", _REDACT_HOME)
+    record = _stand_in_llm_ext_recording(tmp_path, monkeypatch)
+    items = [
+        _item("i0:0", "tool", f"token {_REDACT_KEY} at {_REDACT_HOME}/proj/a.py", 0),
+        _item("i1:0", "tool", "the build is green", 1),
+    ]
+    original_texts = [it.text for it in items]
+    digest = f"digest holds {_REDACT_KEY} and {_REDACT_HOME}/proj/b.py"
+
+    scores = jc.score_items_via_llm_ext(items, digest)
+
+    assert set(scores) == {"i0:0", "i1:0"}
+    assert scores["i0:0"].kept is True and scores["i1:0"].kept is True
+    sent = json.loads(record.read_text(encoding="utf-8"))
+    for blob in (sent["items"], json.dumps(sent["argv"])):
+        assert _REDACT_KEY not in blob
+        assert _REDACT_HOME not in blob
+    sent_items = [json.loads(line) for line in sent["items"].splitlines()]
+    assert [row["id"] for row in sent_items] == ["i0:0", "i1:0"]
+    assert _REDACT_KEY_MARK in sent_items[0]["text"] and "~/proj/a.py" in sent_items[0]["text"]
+    assert sent_items[1]["text"] == "the build is green"
+    task_context = next(a for a in sent["argv"] if "Task context:" in a)
+    assert _REDACT_KEY_MARK in task_context and "~/proj/b.py" in task_context
+    assert [it.text for it in items] == original_texts
+
+
+def test_llm_ext_scoring_with_redaction_unavailable_sends_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-TKQ274RE: with bun unresolvable the call raises JevValidationError, never runs llm-ext and never creates the temp dir."""
+    monkeypatch.setattr(jc.transcript_redact, "_BUN_FALLBACKS", (str(tmp_path / "no" / "bun"),))
+    record = _stand_in_llm_ext_recording(tmp_path, monkeypatch)
+    # PATH holds only the stand-in dir (no bun), so the real `resolve_bun` finds nothing; no global shutil patch.
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    real_mkdtemp = tempfile.mkdtemp
+    mkdtemp_calls: list[str] = []
+
+    def _counting_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        mkdtemp_calls.append("called")
+        return real_mkdtemp(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _counting_mkdtemp)
+
+    with pytest.raises(JevValidationError, match="redaction unavailable, nothing sent"):
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", f"token {_REDACT_KEY}", 0)], "digest")
+
+    assert not record.exists()
+    assert mkdtemp_calls == []
+
+
+@pytest.mark.real_subprocess("bun")
+def test_llm_ext_scoring_redaction_timeout_raises_and_sends_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-TKQ274RE: a real bridge cut short by the timeout raises JevValidationError and llm-ext never runs."""
+    monkeypatch.setattr(jc, "_REDACT_TIMEOUT_S", 0.001)
+    record = _stand_in_llm_ext_recording(tmp_path, monkeypatch)
+    items = [_item(f"i{n}:0", "tool", f"text {n}", n) for n in range(50)]
+
+    with pytest.raises(JevValidationError, match="redaction unavailable, nothing sent: .*timed out"):
+        jc.score_items_via_llm_ext(items, "digest")
+
+    assert not record.exists()
+
+
+@pytest.mark.parametrize("wrong_count", [0, 1, 3])
+def test_llm_ext_scoring_redactor_wrong_length_raises_and_sends_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wrong_count: int) -> None:
+    """TRDD-TKQ274RE: a redactor answer that does not hold one text per item plus the digest raises JevValidationError, not a bare ValueError."""
+    monkeypatch.setattr(jc.transcript_redact, "redact_texts", lambda texts, **_k: ["x"] * wrong_count)
+    record = _stand_in_llm_ext_recording(tmp_path, monkeypatch)
+
+    with pytest.raises(JevValidationError, match="wrong number of texts"):
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", "one", 0)], "digest")
+
+    assert not record.exists()
+
+
+def test_llm_ext_scoring_bridge_error_raises_and_sends_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-TKQ274RE: a bridge error (RedactionUnavailable raised by the redactor) becomes JevValidationError and nothing is sent."""
+
+    def _failing(*_a: Any, **_k: Any) -> list[str]:
+        raise jc.transcript_redact.RedactionUnavailable("the redaction bridge reported an error")
+
+    monkeypatch.setattr(jc.transcript_redact, "redact_texts", _failing)
+    record = _stand_in_llm_ext_recording(tmp_path, monkeypatch)
+
+    with pytest.raises(JevValidationError, match="redaction bridge reported an error"):
+        jc.score_items_via_llm_ext([_item("i0:0", "tool", "one", 0)], "digest")
+
+    assert not record.exists()

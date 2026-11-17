@@ -939,6 +939,8 @@ def test_compact_scorer_error_writes_failure_stamp(
     assert "simulated 503" in stamp["reason"]
     assert stamp["kind"] == "unavailable"
 
+
+@pytest.mark.real_subprocess("bun")
 def test_llm_ext_exit_3_stamp_reaches_the_lane_remedy(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

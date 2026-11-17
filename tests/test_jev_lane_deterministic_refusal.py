@@ -129,6 +129,8 @@ def _run_lane(
     return result, calls, clock
 
 
+# real bun: secret-shield redaction runs before the stand-in llm-ext
+@pytest.mark.real_subprocess("bun")
 def test_path_refusal_makes_one_jev_attempt_then_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,6 +146,8 @@ def test_path_refusal_makes_one_jev_attempt_then_falls_back(
     assert (source, text) == (jcl.SOURCE_LLM_EXT, _FALLBACK_TEXT)
 
 
+# real bun: secret-shield redaction runs before the stand-in llm-ext
+@pytest.mark.real_subprocess("bun")
 def test_transient_llm_ext_failure_is_retried_before_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
