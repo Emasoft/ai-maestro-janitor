@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-17T10:31:35+0100
+updated: 2026-11-17T10:33:31+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,7 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-16T19:10:40+0100
-implementation-commits: [90aabbf0, 0e0d8b41, c611d3e7, 49a9d171, 9c9a2b30, 4516b88d, 09d5d5e6, 5edc66b3, 2b72f4f6]
+implementation-commits: [90aabbf0, 0e0d8b41, c611d3e7, 49a9d171, 9c9a2b30, 4516b88d, 09d5d5e6, 5edc66b3, 2b72f4f6, b2217fc6]
 ---
 
 # Shield and report-sanitizer share one rule core and never mask a path except the home prefix
