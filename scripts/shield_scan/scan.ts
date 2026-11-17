@@ -1,0 +1,373 @@
+// secrets-shield scan, increment 1a (TRDD-BAQB9SYO): scans a project folder for secrets with the shield core and writes one JSON line per finding.
+// Run: bun run <plugin root>/scripts/shield_scan/scan.ts [options] [root]
+// Options: --all (gitignored and hidden files too, plus each repo .git/config) · --passes secrets,cards (default; email and home are opt-in) · --jobs N · --out PATH · --max-file-mb N (64) · --file-timeout-base S (30) · --file-timeout-per-mb S (5).
+// Records (never a matched value or any text of a scanned file): {"type":"finding","path","kind","line"|null,"count"} · {"type":"skip","path","reason"} · {"type":"summary",...} last.
+// Exit: 0 complete with no findings · 1 complete with findings · 3 incomplete (a timeout, read-error, crash, git-error or unreadable-dir skip) · 2 usage or fatal error.
+// stdout: the summary line and the findings file path, nothing else. stderr: fixed text only. The pass order is the core's (hooks/secret-shield/pipeline.ts); this file carries none of its own.
+
+import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { cpus, homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
+import type { Readable, Writable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
+import { isPass, PASS_ORDER, type Pass } from '../../hooks/secret-shield/pipeline.ts'
+import { newStats, noteSkip, SKIP_REASONS, walkFiles, type FileItem, type SetStats, type SkipReason } from './fileset.ts'
+
+const MB = 1048576
+const HERE = dirname(fileURLToPath(import.meta.url))
+const PLUGIN_ROOT = resolve(HERE, '..', '..')
+const WORKER = join(HERE, 'worker.ts')
+
+class ScanError extends Error {
+  override name = 'ScanError'
+}
+
+function fatal(message: string): never {
+  process.stderr.write(`shield-scan: ${message}\n`)
+  return process.exit(2)
+}
+
+interface Options {
+  root: string
+  all: boolean
+  passes: Pass[]
+  jobs: number
+  out: string | null
+  maxFileMb: number
+  timeoutBase: number
+  timeoutPerMb: number
+}
+
+function parseArgs(argv: string[]): Options {
+  const opts: Options = { root: '', all: false, passes: ['secrets', 'cards'], jobs: Math.max(1, Math.min(8, cpus().length - 1)), out: null, maxFileMb: 64, timeoutBase: 30, timeoutPerMb: 5 }
+  let rootArg: string | null = null
+  const number = (flag: string, value: string | undefined, min: number, integer: boolean): number => {
+    if (value === undefined) return fatal(`${flag} needs a value`)
+    const parsed = Number(value)
+    if (value.trim() === '' || !Number.isFinite(parsed) || parsed < min || (integer && !Number.isInteger(parsed))) return fatal(`${flag} is not a valid number`)
+    return parsed
+  }
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    const value = argv[i + 1]
+    switch (arg) {
+      case '--all':
+        opts.all = true
+        break
+      case '--passes': {
+        if (value === undefined) return fatal('--passes needs a value')
+        i++
+        const wanted = new Set<Pass>()
+        for (const name of value.split(',')) {
+          if (!isPass(name)) return fatal('--passes holds a value that is not a pass (secrets, cards, email, home)')
+          wanted.add(name)
+        }
+        opts.passes = PASS_ORDER.filter((pass) => wanted.has(pass))
+        break
+      }
+      case '--jobs':
+        opts.jobs = number(arg, value, 1, true)
+        i++
+        break
+      case '--out':
+        if (value === undefined) return fatal('--out needs a value')
+        opts.out = value
+        i++
+        break
+      case '--max-file-mb':
+        opts.maxFileMb = number(arg, value, 0, false)
+        i++
+        break
+      case '--file-timeout-base':
+        opts.timeoutBase = number(arg, value, 0, false)
+        i++
+        break
+      case '--file-timeout-per-mb':
+        opts.timeoutPerMb = number(arg, value, 0, false)
+        i++
+        break
+      default:
+        if (arg.startsWith('-') || rootArg !== null) return fatal('unknown option or extra argument')
+        rootArg = arg
+    }
+  }
+  try {
+    opts.root = realpathSync(resolve(rootArg ?? process.cwd()))
+    if (!statSync(opts.root).isDirectory()) return fatal('the root is not a directory')
+  } catch {
+    return fatal('the root cannot be read')
+  }
+  return opts
+}
+
+const pad = (n: number, width = 2): string => String(n).padStart(width, '0')
+
+// <YYYYmmdd_HHMMSS+zzzz>, local time with the offset, like the report names of this project.
+function stamp(now: Date): string {
+  const offset = -now.getTimezoneOffset()
+  const sign = offset < 0 ? '-' : '+'
+  const abs = Math.abs(offset)
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}${sign}${pad(Math.floor(abs / 60))}${pad(abs % 60)}`
+}
+
+// WHY the walk up from the folder and a check for a `.git` entry: it is the same definition of a work tree as the file set (a directory, or a file in a linked worktree), it needs no git process, and it runs before any folder is created. A findings file in a work tree could be committed, which would publish where the secrets are.
+function insideWorkTree(outFile: string): boolean {
+  let base = dirname(outFile)
+  const tail: string[] = []
+  while (!existsSync(base)) {
+    tail.unshift(basename(base))
+    base = dirname(base)
+  }
+  for (let dir = join(realpathSync(base), ...tail); ; dir = dirname(dir)) {
+    try {
+      lstatSync(join(dir, '.git'))
+      return true
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return fatal('a folder on the findings path cannot be checked')
+    }
+    if (dirname(dir) === dir) return false
+  }
+}
+
+// sha256 over the files of the shield core (hooks/secret-shield/*.ts and rules/*.ts) in sorted order of relative path; per file: the relative path, a NUL byte, the bytes, a NUL byte.
+function coreSha256(): string {
+  const core = join(PLUGIN_ROOT, 'hooks', 'secret-shield')
+  const rels = [...readdirSync(core).filter((name) => name.endsWith('.ts')), ...readdirSync(join(core, 'rules')).filter((name) => name.endsWith('.ts')).map((name) => `rules/${name}`)]
+  rels.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+  const hash = createHash('sha256')
+  for (const rel of rels) {
+    hash.update(rel)
+    hash.update('\0')
+    hash.update(readFileSync(join(core, rel)))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+function pluginVersion(): string {
+  const version = (JSON.parse(readFileSync(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')) as { version?: unknown }).version
+  if (typeof version !== 'string') throw new ScanError('plugin.json holds no version')
+  return version
+}
+
+type Hits = Record<string, number>
+type LineHit = [string, number, number]
+type Message = { t: 'ready' } | { t: 'skip'; reason: 'binary' | 'read-error' } | { t: 'whole'; bytes: number; hits: Hits } | { t: 'lines'; hits: LineHit[] }
+
+// One child bun process running worker.ts. A message is read with next(); null means the process has exited.
+class WorkerProc {
+  private readonly child: ChildProcessByStdio<Writable, Readable, null>
+  private buffer = ''
+  private readonly queue: Message[] = []
+  private waiter: ((message: Message | null) => void) | null = null
+  private exited = false
+
+  private constructor() {
+    // WHY stderr is ignored: a stack trace of the worker prints source text, which can be a secret; a crash is recorded as a crash skip.
+    this.child = spawn(process.execPath, [WORKER], { stdio: ['pipe', 'pipe', 'ignore'] })
+    this.child.stdout.setEncoding('utf8')
+    this.child.stdout.on('data', (chunk: string) => {
+      this.buffer += chunk
+      for (let end = this.buffer.indexOf('\n'); end >= 0; end = this.buffer.indexOf('\n')) {
+        const line = this.buffer.slice(0, end)
+        this.buffer = this.buffer.slice(end + 1)
+        try {
+          this.deliver(JSON.parse(line) as Message)
+        } catch {
+          this.kill()
+        }
+      }
+    })
+    // WHY the stdin error handler does nothing: a write to a worker that just died raises EPIPE here; the close event below reports the death, and the run records it as a crash.
+    this.child.stdin.on('error', () => {})
+    this.child.on('close', () => {
+      this.exited = true
+      this.waiter?.(null)
+      this.waiter = null
+    })
+  }
+
+  static async start(): Promise<WorkerProc> {
+    const worker = new WorkerProc()
+    const first = await worker.next()
+    if (first === null || first.t !== 'ready') throw new ScanError('a worker process did not start')
+    return worker
+  }
+
+  private deliver(message: Message): void {
+    if (this.waiter !== null) {
+      const waiter = this.waiter
+      this.waiter = null
+      waiter(message)
+    } else this.queue.push(message)
+  }
+
+  next(): Promise<Message | null> {
+    const queued = this.queue.shift()
+    if (queued !== undefined) return Promise.resolve(queued)
+    if (this.exited) return Promise.resolve(null)
+    return new Promise((done) => {
+      this.waiter = done
+    })
+  }
+
+  send(job: { path: string; passes: Pass[] }): void {
+    this.child.stdin.write(JSON.stringify(job) + '\n')
+  }
+
+  kill(): void {
+    this.child.kill('SIGKILL')
+  }
+
+  close(): void {
+    this.child.stdin.end()
+  }
+}
+
+type Outcome =
+  | { kind: 'scanned'; bytes: number; whole: Hits; lines: LineHit[] }
+  | { kind: 'locate-timeout'; bytes: number; whole: Hits }
+  | { kind: 'skip'; reason: 'binary' | 'read-error' }
+  | { kind: 'timeout' }
+  | { kind: 'crash' }
+
+const sumOf = (hits: Hits): number => Object.values(hits).reduce((sum, n) => sum + n, 0)
+
+// One file through one worker, under one timer armed when the job is sent (the worker is already running). Whole-file reply by the limit and no line reply: the file keeps its whole-file counts, unlocated. No whole-file reply: a timeout skip. Either kill ends the worker.
+async function runFile(worker: WorkerProc, item: FileItem, passes: Pass[], limitMs: number): Promise<Outcome> {
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    worker.kill()
+  }, limitMs)
+  try {
+    worker.send({ path: item.abs, passes })
+    const first = await worker.next()
+    if (timedOut) return { kind: 'timeout' }
+    if (first === null) return { kind: 'crash' }
+    if (first.t === 'skip') return { kind: 'skip', reason: first.reason }
+    if (first.t !== 'whole') return { kind: 'crash' }
+    if (sumOf(first.hits) === 0) return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: [] }
+    const second = await worker.next()
+    if (timedOut) return { kind: 'locate-timeout', bytes: first.bytes, whole: first.hits }
+    if (second === null || second.t !== 'lines') return { kind: 'crash' }
+    return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: second.hits }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+interface Finding {
+  path: string
+  kind: string
+  line: number | null
+  count: number
+}
+
+const utf8Compare = (a: string, b: string): number => Buffer.compare(Buffer.from(a), Buffer.from(b))
+
+async function main(): Promise<{ code: number; stdout: string }> {
+  const started = performance.now()
+  const opts = parseArgs(process.argv.slice(2))
+  if (spawnSync('git', ['--version'], { stdio: 'ignore' }).status !== 0) return fatal('git is not installed or not on PATH')
+
+  const outFile = resolve(opts.out ?? join(homedir(), '.secrets_shield', 'scans', `${basename(opts.root) || 'root'}-${stamp(new Date())}.jsonl`))
+  if (insideWorkTree(outFile)) return fatal('the findings file would be inside a git work tree, where it could be committed; pass --out with a path outside any repo')
+  mkdirSync(dirname(outFile), { recursive: true, mode: 0o700 })
+  const realOut = join(realpathSync(dirname(outFile)), basename(outFile))
+  const exclude = new Set([realOut, `${realOut}.tmp`])
+
+  const stats: SetStats = newStats()
+  const setOptions = { root: opts.root, all: opts.all, maxBytes: Math.floor(opts.maxFileMb * MB), exclude }
+  const files = walkFiles(setOptions, stats)
+  const findings: Finding[] = []
+  let filesScanned = 0
+  let bytesScanned = 0
+  let filesWithFindings = 0
+  let unlocatedTimeout = 0
+
+  const account = (item: FileItem, outcome: Outcome): void => {
+    if (outcome.kind === 'skip') return noteSkip(stats, opts.root, item.abs, outcome.reason)
+    if (outcome.kind === 'timeout' || outcome.kind === 'crash') return noteSkip(stats, opts.root, item.abs, outcome.kind)
+    filesScanned++
+    bytesScanned += outcome.bytes
+    const before = findings.length
+    const located: Hits = {}
+    if (outcome.kind === 'scanned') {
+      for (const [kind, line, count] of outcome.lines) {
+        findings.push({ path: item.rel, kind, line, count })
+        located[kind] = (located[kind] ?? 0) + count
+      }
+    } else unlocatedTimeout++
+    // Per kind, what the whole-file result holds beyond the per-line counts has no line: a hit that only a window of several lines forms, or (after a locate kill) everything.
+    for (const [kind, count] of Object.entries(outcome.whole)) {
+      const extra = count - (located[kind] ?? 0)
+      if (extra > 0) findings.push({ path: item.rel, kind, line: null, count: extra })
+    }
+    if (findings.length > before) filesWithFindings++
+  }
+
+  // Each slot owns one worker process at a time and pulls the next file from the shared walk; a killed or crashed worker is replaced when the next file arrives.
+  const slot = async (): Promise<void> => {
+    let worker: WorkerProc | null = null
+    for (let next = await files.next(); next.done !== true; next = await files.next()) {
+      const item = next.value
+      worker ??= await WorkerProc.start()
+      const limitMs = (opts.timeoutBase + opts.timeoutPerMb * (item.size / MB)) * 1000
+      const outcome = await runFile(worker, item, opts.passes, limitMs)
+      account(item, outcome)
+      if (outcome.kind === 'timeout' || outcome.kind === 'crash' || outcome.kind === 'locate-timeout') worker = null
+    }
+    worker?.close()
+  }
+  await Promise.all(Array.from({ length: opts.jobs }, () => slot()))
+
+  // Canonical order: path in UTF-8 byte order, findings before skips, line ascending with null last, then kind.
+  const rows: Array<{ path: string; rank: number; line: number; kind: string; json: string }> = []
+  for (const f of findings) rows.push({ path: f.path, rank: 0, line: f.line ?? Number.POSITIVE_INFINITY, kind: f.kind, json: JSON.stringify({ type: 'finding', path: f.path, kind: f.kind, line: f.line, count: f.count }) })
+  for (const s of stats.skipRecords) rows.push({ path: s.path, rank: 1, line: 0, kind: s.reason, json: JSON.stringify({ type: 'skip', path: s.path, reason: s.reason }) })
+  rows.sort((a, b) => utf8Compare(a.path, b.path) || a.rank - b.rank || (a.line === b.line ? 0 : a.line < b.line ? -1 : 1) || utf8Compare(a.kind, b.kind))
+
+  const incomplete = (['timeout', 'read-error', 'crash', 'git-error', 'unreadable-dir'] as SkipReason[]).some((reason) => stats.skipped[reason] > 0)
+  const elapsed = (performance.now() - started) / 1000
+  const skipped: Record<string, number> = {}
+  for (const reason of SKIP_REASONS) skipped[reason] = stats.skipped[reason]
+  const total = findings.reduce((sum, f) => sum + f.count, 0)
+  const summary = JSON.stringify({
+    type: 'summary',
+    plugin_version: pluginVersion(),
+    core_sha256: coreSha256(),
+    passes: opts.passes,
+    scope: opts.all ? 'all' : 'default',
+    repos: stats.repos,
+    non_repo_dirs: stats.nonRepoDirs,
+    files_scanned: filesScanned,
+    bytes_scanned: bytesScanned,
+    skipped,
+    gitignored_entries: stats.gitignoredEntries,
+    findings: total,
+    files_with_findings: filesWithFindings,
+    unlocated_timeout: unlocatedTimeout,
+    complete: !incomplete,
+    elapsed_s: Math.round(elapsed * 1000) / 1000,
+    mb_per_s: elapsed > 0 ? Math.round((bytesScanned / MB / elapsed) * 100) / 100 : 0,
+    jobs: opts.jobs,
+  })
+  // The findings file is private to its owner (it says where the secrets are) and is renamed into place, so a reader never sees a half-written one.
+  writeFileSync(`${realOut}.tmp`, [...rows.map((row) => row.json), summary].join('\n') + '\n', { mode: 0o600 })
+  renameSync(`${realOut}.tmp`, realOut)
+  return { code: incomplete ? 3 : total > 0 ? 1 : 0, stdout: `${summary}\n${realOut}\n` }
+}
+
+main().then(
+  ({ code, stdout }) => {
+    process.stdout.write(stdout, () => process.exit(code))
+  },
+  (error: unknown) => {
+    // Only the fixed messages of this file are shown: any other error text could carry the text of a scanned file.
+    return fatal(error instanceof ScanError ? error.message : 'the scan stopped on an internal error')
+  },
+)
