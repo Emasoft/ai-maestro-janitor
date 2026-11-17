@@ -24,7 +24,10 @@ import type { Vault } from './vault.ts'
 import { checkWriteTarget } from './writeguard.ts'
 
 // WHY a cap: each round plans, vaults and re-scans the whole text again, and a value that survives three rounds is a rule gap, which the run reports as residual and does not chase.
-const MAX_ROUNDS = 3
+// WHY an env variable: a test-only hook like SHIELD_SCAN_TEST_LOCATE_DELAY_MS below, shipped in the code as that one is. No real input is known that survives 3 rounds, so a test lowers the cap to reach the residual path end to end. It can only lower the cap, never raise it; any other value throws when the module loads (fail fast, no fallback).
+const capEnv = process.env.SHIELD_SCAN_TEST_MAX_ROUNDS
+if (capEnv !== undefined && capEnv !== '1' && capEnv !== '2' && capEnv !== '3') throw new Error('SHIELD_SCAN_TEST_MAX_ROUNDS must be 1, 2 or 3')
+const MAX_ROUNDS = capEnv === undefined ? 3 : Number(capEnv)
 const homes: readonly string[] = [homedir()]
 // ignoreBOM keeps a byte order mark in the text, so the text is the file and nothing else; invalid UTF-8 becomes U+FFFD (the decoder is not fatal).
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true })

@@ -576,6 +576,33 @@ def test_a_residual_hit_is_redacted_by_a_further_round_in_the_same_run(box: Box)
     assert a.read_bytes() == after
 
 
+def test_round_cap_of_one_leaves_a_residual_that_the_run_reports_and_a_run_without_the_cap_redacts(box: Box) -> None:
+    """With the test-only cap at 1 round a residual is reported (exit 1), and a run without the cap redacts it (exit 0)."""
+    original = '"password":"abc12345"password: abc12345\n'
+    a = box.put(box.root / "a.txt", original)
+    first = box.run(env_extra={"SHIELD_SCAN_TEST_MAX_ROUNDS": "1"})
+    assert first.code == 1, first.stderr
+    assert [r for r in first.records if r["type"] == "residual"] == [{"type": "residual", "path": "a.txt", "kind": "assignment", "count": 1}]
+    assert first.summary["residual"] == 1 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1
+    assert first.summary["findings_not_redacted"] == 0 and first.summary["rounds_used_max"] == 1
+    assert MARKER_RE.search(_read(a)) is not None and box.restore(_read(a)) == original
+    assert "abc12345" not in first.streams()
+    second = box.run()
+    assert second.code == 0, second.stderr
+    assert "abc12345" not in _read(a) and box.restore(_read(a)) == original
+
+
+def test_round_cap_outside_one_to_three_ends_the_run_with_the_file_unchanged_and_no_value_printed(box: Box) -> None:
+    """A test-only cap of 7 makes the workers fail to start: exit 2, file unchanged, no value printed; the same file without the cap exits 0."""
+    original = f"k = {TOKEN}\n"
+    a = box.put(box.root / "a.txt", original)
+    result = box.run(env_extra={"SHIELD_SCAN_TEST_MAX_ROUNDS": "7"})
+    assert result.code == 2 and "a worker process did not start" in result.stderr
+    assert _read(a) == original
+    assert TOKEN not in result.streams()
+    assert box.run().code == 0
+
+
 _RESIDUAL = f"""
 import {{ HOME_KIND, residualHits }} from {json.dumps(str(REDACT))}
 import {{ redactHome }} from {json.dumps(str(_SHIELD.parents[1] / "hooks" / "secret-shield" / "home.ts"))}
