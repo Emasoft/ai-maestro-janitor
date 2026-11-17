@@ -149,6 +149,13 @@ describe('home rewrite: Windows', () => {
     expect(h(raw`p: "\\\\?\\C:\\Users\\runner\\x"`).text).toBe(raw`p: "\\\\?\\%USERPROFILE%\\x"`)
     expect(h(raw`\\\\?\\c:/Users/runner/x`).text).toBe(raw`\\\\?\\%USERPROFILE%/x`)
   })
+  test('a Windows home JSON-escaped twice or more is a home: a backslash run of any length separates it, and the long-path prefix is escaped the same way', () => {
+    expect(h(raw`C:\\\\Users\\\\runner\\\\x`).text).toBe(raw`%USERPROFILE%\\\\x`)
+    expect(h(raw`\\\\\\\\?\\\\C:\\\\Users\\\\runner\\\\x`).text).toBe(raw`\\\\\\\\?\\\\%USERPROFILE%\\\\x`)
+    expect(h(raw`C:\\\\Users\\\\app\\\\x`).text).toBe(raw`%USERPROFILE%\\\\x`)
+    expect(h(raw`x\\\\Users\\\\runner\\\\y`).text).toBe(raw`x\\\\Users\\\\runner\\\\y`)
+    expect(h(['C:', 'Users', 'runner', 'x'].join(BS.repeat(8))).text).toBe('%USERPROFILE%' + BS.repeat(8) + 'x')
+  })
   test('a PATH entry whose slash follows a name is not a drive', () => {
     const list = '/opt/x:/Users/runner'
     expect(h(list).text).toBe('/opt/x:~')
@@ -286,7 +293,11 @@ describe('home rewrite: timing', () => {
     const wordy = (raw`C:\Users` + BS + 'abcdefgh '.repeat(25000)).slice(0, 200000)
     // WHY a fourth input with mixed separators and @ or $ in the name: the Windows rule gained SEP and WIN_N (TRDD-L1I0FP5T), and the linear claim must be measured on them too.
     const mixed = (raw`C:\\Users/a@b$ a a a ` + 'C:/Users').repeat(Math.ceil(200000 / 20)).slice(0, 200000)
-    for (const input of [fragments, longRun, wordy, mixed]) {
+    // WHY these three inputs: SEP became a backslash run of any length, so long backslash runs must stay linear in the engine this file runs in. They do NOT pin the drive guard of DRIVE_START: without it the long-path lookbehind is superlinear, about quadratic, in bun 1.3.14 run standalone (5,000 / 10,000 / 20,000 backslashes took 1.2 / 3.7 / 8.9 s, 2026-11-17) but not in the runner of claude plugin test (the unguarded mutant passed the timing test in 61 ms, 2026-11-17), so the guard needs a timing test that runs the core in standalone bun; report-sanitizer runs it there, and TRDD-L1I0FP5T tracks adding that test.
+    const bsRun = BS.repeat(200000)
+    const bsRunDrive = BS.repeat(200000) + raw`C:\Users\runner\x`
+    const bsRunPrefix = (BS.repeat(50) + '?' + BS + 'C:').repeat(Math.ceil(200000 / 53)).slice(0, 200000)
+    for (const input of [fragments, longRun, wordy, mixed, bsRun, bsRunDrive, bsRunPrefix]) {
       expect(input.length).toBeGreaterThanOrEqual(200000)
       const start = performance.now()
       h(input, ['/opt/people/app'])
