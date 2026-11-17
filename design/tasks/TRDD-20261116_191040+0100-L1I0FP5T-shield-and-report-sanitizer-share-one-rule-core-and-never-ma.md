@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-17T14:41:43+0100
+updated: 2026-11-17T16:14:23+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -70,6 +70,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-17T12:48:12+0100 — Note to report-sanitizer 5cd08ff, whose message says a hook run during the non-atomic pull would exit non-zero and not write: main-agent read the code after the commit. A bridge that dies before answering (a truncated or empty patterns.ts that fails to load) makes Shield._request raise ShieldError, and main() and run_stdin return 4 before the current file is written; files sanitized earlier in the same run were written by a working bridge. Not ruled out: a half-written patterns.ts that still parses and exports everything the bridge imports, which needs a cut at a statement boundary. Whether any hook ran sanitize-reports during the pull was not checked.
 - 2026-11-17T14:41:08+0100 — Janitor 988720bb: the Windows spaced-name tail of hooks/secret-shield/home.ts is a hand loop (rewriteWindows); WINDOWS now matches the first word only. Why: CPV 5.16.2 flagged the repeated group as REGEX_DOS (a false positive: measured linear in standalone bun on 8 hostile shapes up to 80,000 characters, one run per size, reported on CPV issue 264), and the plugin engine has a silent group-loop ceiling. Checks: old-against-new differential over 440,000 cases with 0 mismatches, rerun by main-agent with the committed home.ts as the new side; shield runner 1165 pass, 0 fail (floor 800), by main-agent; the pinned CPV REGEX_DOS patterns and its provably-linear check on the new file, by the worker's run only; the full CPV validator has not run on it. report-sanitizer still vendors the old home.ts; its re-pin is pending.
 - 2026-11-17T14:41:35+0100 — Increment 4 measured, by the increment 4 worker's report (local, not in the repo: reports_dev/sonnet-worker/20261117_143746+0100-inc4-gap-list.md): of 159,219 listed files, 159,116 gave output equal to the real sanitizer through the instrumented replica, 6 hit the 30 s per-file alarm, and 97 were never processed (18 changed before the run reached them, 79 vanished from the live plugin cache). The key, bearer and ssh pre rules had no hit in the comparable files; that is absence of evidence only, so those rules are not to be dropped on this report alone. The cred and email gap buckets rest on heuristic shape classes and an unvalidated Python port of the core logic; no matched line was opened.
+- 2026-11-17T16:14:23+0100 — report-sanitizer ede330d re-pins its core to janitor 988720bb; only core/home.ts and core/UPSTREAM.json change. sync_core.py --check exit 0 and core/home.ts byte-equal to git show 988720bb:hooks/secret-shield/home.ts, by main-agent; test_core_pin 6 passed, test_shield_bridge 33 passed, core/tests/home.test.ts 71 pass under bun 1.3.14, by the worker's runs. This settles "report-sanitizer still vendors the old home.ts; its re-pin is pending" in the 14:41:08 line.
 
 ## Design
 
