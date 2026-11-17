@@ -1550,7 +1550,7 @@ def test_a_late_summary_waits_one_beat_when_keep_going_already_fired(env_isolati
 # post-clear hook records `clear-successor-<old key>.txt` (the full new session id); the phase
 # compares it with the firing session's own CLAUDE_CODE_SESSION_ID.
 _SUCC = "fedcbafe-abcd-4ef0-8abc-abcdefabcdef"
-_OTHER = "0ther000-abcd-4ef0-8abc-abcdefabcdee"
+_OTHER = "0ther000-abcd-4ef0-8abc-abcdefabcdee"  # cspell:disable-line
 
 
 def _set_successor(monkeypatch: pytest.MonkeyPatch, sd: Path, key: str, successor: str) -> None:
