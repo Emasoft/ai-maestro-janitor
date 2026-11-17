@@ -145,6 +145,10 @@ describe('home rewrite: Windows', () => {
     expect(h('//?/C:/Users/runner/x').text).toBe('//?/%USERPROFILE%/x')
     expect(h(raw`\\?\C:\Users\runner\x`).text).toBe(raw`\\?\%USERPROFILE%\x`)
   })
+  test('a long-path prefix in JSON text is a real drive: every backslash doubled, or a forward slash after the name', () => {
+    expect(h(raw`p: "\\\\?\\C:\\Users\\runner\\x"`).text).toBe(raw`p: "\\\\?\\%USERPROFILE%\\x"`)
+    expect(h(raw`\\\\?\\c:/Users/runner/x`).text).toBe(raw`\\\\?\\%USERPROFILE%/x`)
+  })
   test('a PATH entry whose slash follows a name is not a drive', () => {
     const list = '/opt/x:/Users/runner'
     expect(h(list).text).toBe('/opt/x:~')
