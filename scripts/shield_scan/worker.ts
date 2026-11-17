@@ -12,16 +12,15 @@
 // WHY no error text is ever written: a stack trace prints source text, and a scanned file can hold a secret. A failure exits the process; the driver records it as a crash.
 // Nothing here writes a matched value: replies hold kinds, counts, line numbers and fixed text only.
 
-import { spawnSync } from 'node:child_process'
-import { closeSync, existsSync, fchmodSync, fstatSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, realpathSync, type BigIntStats } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, sep } from 'node:path'
 import { countOf, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import { isPass, redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
-import { BINARY_PROBE_BYTES, findGitTop } from './fileset.ts'
+import { BINARY_PROBE_BYTES } from './fileset.ts'
 import { finalText, HOME_KIND, HOME_ONLY, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, withoutHome, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 import type { Vault } from './vault.ts'
-import { checkWriteTarget } from './writeguard.ts'
+import { checkWriteTarget, gitOperation, writeAtomic } from './writeguard.ts'
 
 // WHY a cap: each round plans, vaults and re-scans the whole text again, and a value that survives three rounds is a rule gap, which the run reports as residual and does not chase.
 // WHY an env variable: a test-only hook like SHIELD_SCAN_TEST_LOCATE_DELAY_MS below, shipped in the code as that one is. No real input is known that survives 3 rounds, so a test lowers the cap to reach the residual path end to end. It can only lower the cap, never raise it; any other value throws when the module loads (fail fast, no fallback).
@@ -42,57 +41,9 @@ const send = (message: object): Promise<void> =>
 
 const skipReply = (reason: WriteSkipReason): RedactReply => ({ t: 'redact', outcome: 'skip', reason })
 
-// The state of a git operation that rewrites the work tree, per repo (spec R7): the files of a repo in the middle of one are left alone.
-const GIT_OPERATION_PATHS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'BISECT_LOG']
-
-// WHY git rev-parse --git-path and not a look at <top>/.git: in a linked worktree .git is a file and the state lives in the worktree's own git dir, which only git can name. WHY a git failure is its own answer (no write) and not "no operation": a repo whose state cannot be read is not known to be idle. WHY no cache: this runs only for a file about to be written, and a cached answer could be stale by the time a merge starts during a long run.
-function gitOperation(real: string): 'none' | 'operation' | 'failed' {
-  const dir = dirname(real)
-  const top = findGitTop(dir)
-  if (top === null) return 'none'
-  if (!top.readable) return 'failed'
-  const args = ['-c', 'core.fsmonitor=false', '-C', dir, 'rev-parse']
-  for (const name of GIT_OPERATION_PATHS) args.push('--git-path', name)
-  const done = spawnSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  if (done.status !== 0) return 'failed'
-  const paths = done.stdout.split('\n').filter((line) => line !== '')
-  if (paths.length !== GIT_OPERATION_PATHS.length) return 'failed'
-  // The paths are relative to the folder git ran in (-C dir).
-  return paths.some((path) => existsSync(resolve(dir, path))) ? 'operation' : 'none'
-}
-
 // The vault is opened once per worker process, on the first file that needs it. Dynamic import: a scan without --redact never loads bun:sqlite.
 let vault: Vault | null = null
 let vaultDir: string | null = null
-
-// Temp file in the same folder (so the rename stays on one filesystem), the original mode, fsync, then a re-check of size, mtime and inode against the read, then the rename. WHY the re-check: a file that changed after it was read would lose that change; a re-run picks it up. The window between the re-check and the rename is not closed (stated). Owner, group and extended attributes are not copied.
-function writeAtomic(real: string, bytes: Buffer, before: BigIntStats): 'written' | 'changed-during-redact' | 'write-error' {
-  const tmp = join(dirname(real), `.shield-redact-${process.pid}.tmp`)
-  let fd: number | null = null
-  try {
-    fd = openSync(tmp, 'wx', 0o600)
-    fchmodSync(fd, Number(before.mode & 0o7777n))
-    writeFileSync(fd, bytes)
-    fsyncSync(fd)
-    closeSync(fd)
-    fd = null
-    const now = statSync(real, { bigint: true })
-    if (now.size !== before.size || now.mtimeNs !== before.mtimeNs || now.ino !== before.ino) {
-      unlinkSync(tmp)
-      return 'changed-during-redact'
-    }
-    renameSync(tmp, real)
-    return 'written'
-  } catch {
-    if (fd !== null) closeSync(fd)
-    try {
-      unlinkSync(tmp)
-    } catch {
-      // No temp file to remove: the open itself failed.
-    }
-    return 'write-error'
-  }
-}
 
 // Redacts one file that has findings, or says why not. The skips come first and cost no vault write; the vault rows of the file are committed (one transaction) before the file is replaced, so a crash in between leaves rows with no marker, never a marker with no row. A vault failure is a typed reply, never a crash.
 async function redactFile(path: string, data: Buffer, before: BigIntStats, text: string, plan: Plan | null, passes: ReadonlySet<Pass>, job: RedactJob): Promise<RedactReply> {
