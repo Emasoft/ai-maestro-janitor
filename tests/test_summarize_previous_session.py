@@ -2044,7 +2044,7 @@ def test_llm_ext_fallback_outer_timeout_kills_the_whole_process_group(tmp_path, 
     monkeypatch.setattr(jcl, "_LLM_EXT_OUTER_SLACK_S", 0.5)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0,
+        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
     )
     assert ok is False
     assert "timed out" in detail
@@ -2097,7 +2097,7 @@ def test_llm_ext_fallback_outer_timeout_reaps_the_group_leader(tmp_path, monkeyp
     monkeypatch.setattr(jcl.subprocess, "Popen", _capturing_popen)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0,
+        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
     )
     assert ok is False
     assert "timed out" in detail
@@ -2158,7 +2158,7 @@ def test_llm_ext_fallback_outer_timeout_on_windows_calls_proc_kill_not_killpg(
     monkeypatch.setattr(jcl.os, "killpg", _fake_killpg)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        tmp_path, transcript="/tmp/x.jsonl", timeout_s=60.0,
+        tmp_path, transcript="/tmp/x.jsonl", timeout_s=60.0, state_dir=tmp_path,
     )
 
     assert calls["kill"] == 1, "expected proc.kill() (TerminateProcess) on the win32 branch"

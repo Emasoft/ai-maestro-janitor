@@ -27,15 +27,21 @@ that really slept through a 300 s backoff would be untestable, and one that mock
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402 -- fleet-lease + the shared LLM_EXT_TIMEOUT_S stay there
 import llm_ext_summary as les  # noqa: E402
 import pytest  # noqa: E402
+import transcript_redact as tr  # noqa: E402 -- stdlib-only, the real redactor the attempt runs
+from _fake_secrets import secret  # noqa: E402
 
 
 class _Clock:
@@ -414,9 +420,9 @@ def test_a_real_failing_binary_is_classified_not_swallowed(tmp_path: Path) -> No
     ) == les.OUTCOME_TRANSIENT
 
 
-def test_an_install_time_precondition_is_permanent_not_transient() -> None:
+def test_an_install_time_precondition_is_permanent_not_transient(tmp_path: Path) -> None:
     """A precondition that cannot change between attempts must classify PERMANENT."""
-    got = les.attempt_llm_ext_summary("/definitely/not/a/file.jsonl")
+    got = les.attempt_llm_ext_summary("/definitely/not/a/file.jsonl", redact_dir=tmp_path)
 
     assert got.outcome == les.OUTCOME_PERMANENT
     assert got.text is None
@@ -426,9 +432,9 @@ def test_an_install_time_precondition_is_permanent_not_transient() -> None:
     }, got.detail
 
 
-def test_an_empty_transcript_path_is_permanent() -> None:
+def test_an_empty_transcript_path_is_permanent(tmp_path: Path) -> None:
     """The other install-time precondition, pinned without depending on the host's PATH."""
-    got = les.attempt_llm_ext_summary("")
+    got = les.attempt_llm_ext_summary("", redact_dir=tmp_path)
     assert got.outcome == les.OUTCOME_PERMANENT
 
 
@@ -503,13 +509,17 @@ class TestResolveLlmExt:
         transcript = tmp_path / "session.jsonl"
         transcript.write_text("{}\n", encoding="utf-8")
 
-        got = les.attempt_llm_ext_summary(str(transcript))
+        got = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd")
         assert got.outcome == les.OUTCOME_PERMANENT
         assert got.detail == "llm-ext is not installed"
 
+    @pytest.mark.real_subprocess("bun")
     def test_the_summary_attempt_no_longer_reports_not_on_path(self, tmp_path, monkeypatch) -> None:
         """The regression pin for D2: a plugin-cache-only install must produce a SUMMARY, not a
         permanent 'not on PATH' that skips every retry and degrades the handoff."""
+        # WHY resolved before PATH is emptied: this test needs an empty PATH for the llm-ext lookup, but the redaction still has to run the REAL bun.
+        real_bun = tr.resolve_bun()
+        monkeypatch.setattr(tr, "resolve_bun", lambda: real_bun)
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("PATH", "")
         self._install(tmp_path, "13.5.1")
@@ -524,7 +534,7 @@ class TestResolveLlmExt:
                 self.returncode, self.stdout, self.stderr = rc, out, err
 
         attempt = les.attempt_llm_ext_summary(
-            str(transcript), runner=lambda *a, **k: _Proc(0, "a real summary")
+            str(transcript), redact_dir=tmp_path / "rd", runner=lambda *a, **k: _Proc(0, "a real summary")
         )
         assert attempt.outcome == les.OUTCOME_OK
         assert attempt.text == "a real summary"
@@ -622,7 +632,8 @@ def test_ordinary_summary_is_untouched() -> None:
     assert les._looks_like_refusal(ordinary) is False
 
 
-def test_attempt_maps_a_refusal_to_unknown_with_a_constant_detail() -> None:
+@pytest.mark.real_subprocess("bun")
+def test_attempt_maps_a_refusal_to_unknown_with_a_constant_detail(tmp_path: Path) -> None:
     """A refusal is UNKNOWN (bounded retries), and its detail must be CONSTANT — the retry loop
     bounds UNKNOWN by counting IDENTICAL `detail` strings."""
 
@@ -632,7 +643,8 @@ def test_attempt_maps_a_refusal_to_unknown_with_a_constant_detail() -> None:
         def __init__(self, text: str) -> None:
             self.stdout = text
 
-    transcript = Path(__file__).resolve()  # any real file; the runner is stubbed
+    transcript = tmp_path / "t.jsonl"  # a tiny real file; the runner is stubbed
+    transcript.write_text("{}\n", encoding="utf-8")
 
     def _runner_a(*_a: object, **_k: object) -> _Proc:
         return _Proc(INCIDENT_REFUSAL)
@@ -640,15 +652,16 @@ def test_attempt_maps_a_refusal_to_unknown_with_a_constant_detail() -> None:
     def _runner_b(*_a: object, **_k: object) -> _Proc:
         return _Proc("I won't help with this. A completely different refusal body.")
 
-    a = les.attempt_llm_ext_summary(str(transcript), runner=_runner_a)
-    b = les.attempt_llm_ext_summary(str(transcript), runner=_runner_b)
+    a = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=_runner_a)
+    b = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=_runner_b)
 
     assert a.text is None
     assert a.outcome == les.OUTCOME_UNKNOWN
     assert a.detail == b.detail, "detail must not carry the prose, or the retry bound is lost"
 
 
-def test_a_refused_attempt_carries_forensic_evidence() -> None:
+@pytest.mark.real_subprocess("bun")
+def test_a_refused_attempt_carries_forensic_evidence(tmp_path: Path) -> None:
     """A failed compaction must record WHAT the process said, not just our verdict."""
 
     class _Proc:
@@ -656,8 +669,9 @@ def test_a_refused_attempt_carries_forensic_evidence() -> None:
         stdout = INCIDENT_REFUSAL
         stderr = "[llm-externalizer] Auth: token resolved"
 
-    transcript = Path(__file__).resolve()
-    got = les.attempt_llm_ext_summary(str(transcript), runner=lambda *a, **k: _Proc())
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    got = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=lambda *a, **k: _Proc())
 
     assert got.outcome == les.OUTCOME_UNKNOWN
     assert "rc=0" in got.evidence
@@ -699,3 +713,361 @@ def test_nonconforming_signature_is_constant_across_model_rotations() -> None:
     assert les.failure_signature(
         returncode=1, stderr=NONCONFORMING_STDERR
     ) == les.failure_signature(returncode=1, stderr=other)
+
+
+# ---------- the redacted copy: only redacted bytes reach llm-ext (TRDD-TKQ274RE increment B) ----------
+#
+# Real bun, real bridge. The seam is the llm-ext call itself (`runner=`, or `subprocess.run` where the
+# default attempt is under test): a real call would send data out. HOME is a fake so the home-path rule
+# has something to remove.
+
+_FAKE_HOME = "/Users/runner"
+_FAKE_KEY = secret("gh" + "p_", "tkq-inc-b", 36)
+
+
+class _Done:
+    """What a successful llm-ext run returns to `runner=`."""
+
+    returncode = 0
+    stdout = "a real summary"
+    stderr = ""
+
+
+class _Run:
+    """A `runner=` stand-in that records every call; with `raises` it fails like a dead network."""
+
+    def __init__(self, *, raises: BaseException | None = None) -> None:
+        self.calls: list[tuple[list[str], dict[str, Any]]] = []
+        self.raises = raises
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> _Done:
+        self.calls.append((argv, kwargs))
+        if self.raises is not None:
+            raise self.raises
+        return _Done()
+
+
+def _write_session(path: Path, records: int = 3) -> None:
+    """A transcript-shaped JSONL: every line holds the fake key and a path under the fake home."""
+    lines = [
+        json.dumps({"type": "user", "n": i, "message": {"content": f"token {_FAKE_KEY} at {_FAKE_HOME}/proj/f{i}.py"}})
+        for i in range(records)
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _argv_paths(argv: list[str]) -> tuple[Path, Path]:
+    """(the file given to --transcript, the file given to --checkpoint)."""
+    return Path(argv[argv.index("--transcript") + 1]), Path(argv[argv.index("--checkpoint") + 1])
+
+
+def _no_bun(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Make bun unresolvable (neither PATH nor a fallback location), as in test_transcript_redact."""
+    monkeypatch.setattr(tr.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(tr, "_BUN_FALLBACKS", (str(tmp_path / "no" / "bun"),))
+
+
+@pytest.mark.real_subprocess("bun")
+def test_the_runner_gets_a_redacted_copy_and_a_digest_named_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """llm-ext is given the redacted copy in redact_dir (no key, no home) and a checkpoint named by the copy's sidecar digest, never the original transcript."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    redact_dir = tmp_path / "rd"
+    run = _Run()
+
+    got = les.attempt_llm_ext_summary(str(transcript), redact_dir=redact_dir, runner=run)
+
+    assert got.outcome == les.OUTCOME_OK
+    argv, kwargs = run.calls[0]
+    copy, checkpoint = _argv_paths(argv)
+    assert copy == redact_dir / "s.jsonl"
+    assert checkpoint == redact_dir / f"s.jsonl.{tr.sidecar_digest(copy)}.llm-ext-checkpoint.json"
+    assert str(transcript) not in argv
+    raw = copy.read_text(encoding="utf-8")
+    assert _FAKE_KEY not in raw and _FAKE_HOME not in raw
+    assert 0 < kwargs["timeout"] <= les.ec.LLM_EXT_TIMEOUT_S
+
+
+@pytest.mark.real_subprocess("bun")
+def test_a_timeout_keeps_its_detail_and_the_evidence_names_the_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The retry loop keys on the 'timed out after' prefix, and the post-mortem must name the file that was really sent."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    run = _Run(raises=subprocess.TimeoutExpired(cmd="llm-ext", timeout=1))
+
+    got = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=run)
+
+    assert got.outcome == les.OUTCOME_TRANSIENT
+    assert got.detail == f"timed out after {les.ec.LLM_EXT_TIMEOUT_S}s"
+    copy, _checkpoint = _argv_paths(run.calls[0][0])
+    assert str(copy) in got.evidence and str(transcript) not in got.evidence
+
+
+@pytest.mark.real_subprocess("bun")
+def test_a_redaction_failure_is_permanent_and_nothing_is_sent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With bun unresolvable the attempt is PERMANENT, llm-ext is never run, and no copy is written."""
+    _no_bun(monkeypatch, tmp_path)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    redact_dir = tmp_path / "rd"
+    run = _Run()
+
+    got = les.attempt_llm_ext_summary(str(transcript), redact_dir=redact_dir, runner=run)
+
+    assert got.outcome == les.OUTCOME_PERMANENT and got.text is None
+    assert got.detail.startswith("redaction unavailable:")
+    assert run.calls == []
+    assert not redact_dir.exists()
+
+
+@pytest.mark.real_subprocess("bun")
+def test_a_budget_the_redaction_leaves_too_short_is_transient_and_sends_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the shared timeout leaves under the floor for the summary, the attempt is TRANSIENT and llm-ext is not run."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    run = _Run()
+
+    got = les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", timeout_s=10, runner=run)
+
+    assert got.outcome == les.OUTCOME_TRANSIENT
+    assert got.detail == "redaction left no time for the summary"
+    assert run.calls == []
+
+
+@pytest.mark.real_subprocess("bun")
+def test_an_unchanged_source_keeps_the_same_checkpoint_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second attempt on an unchanged source reuses the copy and its checkpoint name, so llm-ext may resume."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    run = _Run()
+
+    les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=run)
+    les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=run)
+
+    assert _argv_paths(run.calls[0][0]) == _argv_paths(run.calls[1][0])
+
+
+@pytest.mark.real_subprocess("bun")
+def test_a_changed_source_gets_a_different_checkpoint_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the source changes the copy is rebuilt and the checkpoint name changes with it, so an old checkpoint (which llm-ext would refuse on every run) is never paired with the new bytes."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript, records=3)
+    run = _Run()
+    les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=run)
+    copy, old_checkpoint = _argv_paths(run.calls[0][0])
+    old_checkpoint.write_text("checkpoint of the OLD copy", encoding="utf-8")
+    _write_session(transcript, records=5)
+
+    les.attempt_llm_ext_summary(str(transcript), redact_dir=tmp_path / "rd", runner=run)
+
+    new_copy, new_checkpoint = _argv_paths(run.calls[1][0])
+    assert len(new_copy.read_text(encoding="utf-8").splitlines()) == 5
+    assert new_checkpoint != old_checkpoint
+    assert not new_checkpoint.exists(), "the new checkpoint name must start empty, not inherit the old one"
+    assert old_checkpoint.read_text(encoding="utf-8") == "checkpoint of the OLD copy"
+
+
+@pytest.mark.real_subprocess("bun")
+def test_summarize_with_retry_removes_the_per_run_folder_on_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default attempt works in a per-run folder under state_dir, and nothing is left there after an OK result."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    state_dir = tmp_path / "state"
+    seen: list[Path] = []
+
+    def fake_llm_ext(argv: list[str], **_kwargs: Any) -> _Done:
+        copy, _checkpoint = _argv_paths(argv)
+        assert copy.is_file() and copy.parent.parent == tr.copy_dir(state_dir)
+        seen.append(copy.parent)
+        return _Done()
+
+    monkeypatch.setattr(les.subprocess, "run", fake_llm_ext)
+    clock = _Clock()
+
+    got = les.summarize_with_retry(
+        str(transcript), deadline=clock.now() + 540.0, now_fn=clock.now, sleeper=clock.sleep,
+        max_concurrent=0, jitter=lambda: 1.0, state_dir=state_dir,
+    )
+
+    assert got.outcome == les.OUTCOME_OK
+    assert len(seen) == 1 and not seen[0].exists()
+    assert list(tr.copy_dir(state_dir).iterdir()) == []
+
+
+@pytest.mark.real_subprocess("bun")
+def test_summarize_with_retry_removes_the_per_run_folder_on_a_transient_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deadline after transient failures also leaves nothing: the retries shared one copy inside the run, and the run's folder is gone."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    state_dir = tmp_path / "state"
+    seen: list[Path] = []
+
+    def dead_network(argv: list[str], **_kwargs: Any) -> _Done:
+        copy, _checkpoint = _argv_paths(argv)
+        assert copy.is_file()
+        seen.append(copy.parent)
+        raise subprocess.TimeoutExpired(cmd="llm-ext", timeout=1)
+
+    monkeypatch.setattr(les.subprocess, "run", dead_network)
+    clock = _Clock()
+
+    got = les.summarize_with_retry(
+        str(transcript), deadline=clock.now() + 12.0, now_fn=clock.now, sleeper=clock.sleep,
+        max_concurrent=0, jitter=lambda: 1.0, state_dir=state_dir,
+    )
+
+    assert got.outcome == les.OUTCOME_TRANSIENT
+    assert len(seen) >= 2 and len(set(seen)) == 1, "every retry of one run must share the one per-run folder"
+    assert not seen[0].exists()
+    assert list(tr.copy_dir(state_dir).iterdir()) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory write permission, so the removal cannot be made to fail")
+@pytest.mark.real_subprocess("bun")
+def test_a_workspace_that_cannot_be_removed_keeps_the_ok_result_and_warns_on_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A removal failure after a finished summary must not throw the summary away: the result stays OK and one fixed-text line goes to stderr (the 24 h sweep retries)."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    state_dir = tmp_path / "state"
+
+    def llm_ext_then_lock(argv: list[str], **_kwargs: Any) -> _Done:
+        # Contents of the run folder become undeletable: no write permission on the folder, so unlink fails.
+        _argv_copy, _checkpoint = _argv_paths(argv)
+        _argv_copy.parent.chmod(0o500)
+        return _Done()
+
+    monkeypatch.setattr(les.subprocess, "run", llm_ext_then_lock)
+    clock = _Clock()
+    try:
+        got = les.summarize_with_retry(
+            str(transcript), deadline=clock.now() + 540.0, now_fn=clock.now, sleeper=clock.sleep,
+            max_concurrent=0, jitter=lambda: 1.0, state_dir=state_dir,
+        )
+        err = capsys.readouterr().err
+        leftover_files = [p.name for run in tr.copy_dir(state_dir).iterdir() for p in run.iterdir()]
+    finally:
+        for leftover in tr.copy_dir(state_dir).iterdir():
+            leftover.chmod(0o700)
+
+    assert got.outcome == les.OUTCOME_OK and got.text == "a real summary"
+    assert "redaction workspace could not be removed; the 24 h sweep will retry" in err
+    assert "s.jsonl" in leftover_files, "the undeletable run folder must really still hold the redacted copy"
+
+
+@pytest.mark.real_subprocess("bun")
+def test_the_default_attempt_with_unavailable_redaction_is_final_and_leaves_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the default attempt, a redaction failure is PERMANENT, ends the loop at once, and leaves no folder behind."""
+    _no_bun(monkeypatch, tmp_path)
+    transcript = tmp_path / "s.jsonl"
+    _write_session(transcript)
+    state_dir = tmp_path / "state"
+    clock = _Clock()
+
+    got = les.summarize_with_retry(
+        str(transcript), deadline=clock.now() + 540.0, now_fn=clock.now, sleeper=clock.sleep,
+        max_concurrent=0, jitter=lambda: 1.0, state_dir=state_dir,
+    )
+
+    assert got.outcome == les.OUTCOME_PERMANENT
+    assert got.detail.startswith("redaction unavailable:")
+    assert clock.slept == []
+    assert list(tr.copy_dir(state_dir).iterdir()) == []
+
+
+def test_a_workspace_that_cannot_be_made_is_a_permanent_redaction_failure(tmp_path: Path) -> None:
+    """When the copy folder cannot even be listed (a file sits where it belongs), summarize_with_retry returns PERMANENT instead of raising."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    tr.copy_dir(state_dir).write_text("a file where the folder should be", encoding="utf-8")
+    clock = _Clock()
+
+    got = les.summarize_with_retry(
+        str(tmp_path / "s.jsonl"), deadline=clock.now() + 540.0, now_fn=clock.now, sleeper=clock.sleep,
+        max_concurrent=0, jitter=lambda: 1.0, state_dir=state_dir,
+    )
+
+    assert got.outcome == les.OUTCOME_PERMANENT
+    assert got.detail.startswith("redaction unavailable:")
+
+
+def test_summarize_with_retry_needs_a_state_dir_when_no_attempt_is_injected() -> None:
+    """Neither an attempt nor a state_dir is a programming error, not a quiet default folder."""
+    with pytest.raises(ValueError, match="state_dir"):
+        les.summarize_with_retry("/tmp/t.jsonl", deadline=1.0)
+
+
+def test_the_workspace_is_private_and_per_run_and_removed_even_on_error(tmp_path: Path) -> None:
+    """Each run gets its own 0700 folder under copy_dir, and the folder is removed when the block raises."""
+    with les.redaction_workspace(tmp_path) as first, les.redaction_workspace(tmp_path) as second:
+        assert first != second and first.parent == second.parent == tr.copy_dir(tmp_path)
+        assert stat.S_IMODE(first.stat().st_mode) == 0o700
+    assert not first.exists() and not second.exists()
+    made: list[Path] = []
+    with pytest.raises(RuntimeError):
+        with les.redaction_workspace(tmp_path) as third:
+            made.append(third)
+            (third / "copy.jsonl").write_text("x", encoding="utf-8")
+            raise RuntimeError("the run failed")
+    assert len(made) == 1 and not made[0].exists()
+
+
+def test_sweep_stale_removes_old_run_folders_and_stray_files_and_keeps_fresh_ones(tmp_path: Path) -> None:
+    """A run folder left by a killed run (with its contents) and an old stray file go; a fresh run folder stays."""
+    folder = tr.copy_dir(tmp_path)
+    old_run, fresh_run, stray = folder / "111-1", folder / "222-2", folder / ".redact-abc.tmp"
+    for run_dir in (old_run, fresh_run):
+        run_dir.mkdir(parents=True)
+        (run_dir / "s.jsonl").write_text("x", encoding="utf-8")
+    stray.write_text("x", encoding="utf-8")
+    long_ago = time.time() - 2 * 86400
+    for path in (old_run, stray):
+        os.utime(path, (long_ago, long_ago))
+
+    tr.sweep_stale(folder)
+
+    assert [p.name for p in folder.iterdir()] == ["222-2"]
+    assert (fresh_run / "s.jsonl").is_file()
+
+
+def test_sweep_stale_on_a_missing_folder_is_a_no_op(tmp_path: Path) -> None:
+    """A project that never made a copy has no folder; the sweep must not create it or fail."""
+    tr.sweep_stale(tmp_path / "nope")
+    assert not (tmp_path / "nope").exists()
+
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory write permission, so the removal cannot be made to fail")
+def test_an_undeletable_stale_run_folder_does_not_block_a_new_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """An old run folder that cannot be removed is reported on stderr and skipped; a new run still gets its workspace."""
+    state_dir = tmp_path / "state"
+    stale = tr.copy_dir(state_dir) / "111-1"
+    stale.mkdir(parents=True)
+    (stale / "s.jsonl").write_text("x", encoding="utf-8")
+    long_ago = time.time() - 2 * 86400
+    os.utime(stale, (long_ago, long_ago))
+    stale.chmod(0o500)  # no write permission on the folder, so its contents cannot be unlinked
+    try:
+        with les.redaction_workspace(state_dir) as run_dir:
+            assert run_dir.is_dir() and run_dir != stale
+        err = capsys.readouterr().err
+    finally:
+        stale.chmod(0o700)
+
+    assert "stale redaction folder could not be removed; will retry next run" in err
+    assert (stale / "s.jsonl").is_file()
+
+
+def test_sidecar_digest_is_unreadable_without_a_sidecar(tmp_path: Path) -> None:
+    """No sidecar means no way to pair a checkpoint with the copy: fail closed."""
+    with pytest.raises(tr.RedactionUnavailable):
+        tr.sidecar_digest(tmp_path / "s.jsonl")

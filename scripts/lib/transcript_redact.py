@@ -7,7 +7,9 @@ copy of the rules to drift.
 
 EVERY failure here raises `RedactionUnavailable`. There is deliberately no fallback, no "send it
 unredacted", no "skip the line": a skipped redaction is a secret sent out. The caller must abort the
-remote call. Exception messages are fixed text and never carry transcript content.
+remote call. Exception messages are fixed text and never carry transcript content. The one deliberate
+exception is `sweep_stale` failing to remove a single old entry: that is a stderr line, not a raise, because
+it concerns only already-redacted leftovers and must not block later runs (see its WHY).
 
 Stdlib only: this module is imported from hook-spawned processes that run under `uv run --script`
 without dependencies, so it must not import jevctx, httpx, jev_compaction or llm_ext_summary.
@@ -16,13 +18,17 @@ without dependencies, so it must not import jevctx, httpx, jev_compaction or llm
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import queue
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import threading
+import time
 from collections.abc import Generator, Iterable, Iterator
 from pathlib import Path
 
@@ -255,3 +261,62 @@ def redacted_transcript_copy(src: Path, dest_dir: Path, *, timeout_s: float, hom
     except OSError:
         raise RedactionUnavailable("redaction metadata could not be written; cannot redact") from None
     return dest
+
+
+def copy_dir(state_dir: Path) -> Path:
+    """The folder under the project state folder that holds per-run redaction workspaces.
+
+    WHY one function: the creator of a workspace (llm_ext_summary) and the sweep must agree on the location,
+    and redacted text must live under the project state folder (gitignored `.janitor/state`), never in a
+    shared temp folder, so the owner-only mode and the sweep cover everything that was written.
+    """
+    return state_dir / "redacted-transcripts"
+
+
+def sidecar_digest(dest: Path) -> str:
+    """sha256 hex[:16] of the sidecar bytes of the copy `dest`, or raise RedactionUnavailable.
+
+    WHY: the sidecar records the source size and mtime, the homes and the bridge code the copy was made
+    from, so its digest names those exact bytes. A caller that puts the digest in the name of anything
+    derived from the copy (an llm-ext checkpoint) pairs the two by construction: a rebuilt copy gets a
+    new digest and so a new name, and nothing ever has to be deleted.
+    """
+    try:
+        raw = (dest.with_name(dest.name + _SIDECAR_SUFFIX)).read_bytes()
+    except OSError:
+        raise RedactionUnavailable("redaction metadata could not be read; cannot pair a checkpoint") from None
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def sweep_stale(dest_dir: Path, *, max_age_s: float = 86400.0) -> None:
+    """Delete the entries of `dest_dir` older than `max_age_s`: per-run workspace folders (rmtree) and stray files.
+
+    WHY age-bounded and not "everything": sessions of one project share this folder, and a live run's
+    workspace is fresh, so only what a killed run left behind (a workspace its `finally` never reached)
+    is old. A missing folder is a no-op, and an entry another run already removed is skipped. A failure to
+    LIST the folder raises RedactionUnavailable (fixed text). A failure to remove one old entry does not
+    raise: it prints one fixed-text line to stderr and the sweep goes on (see the WHY below).
+    """
+    try:
+        entries = list(dest_dir.iterdir())
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise RedactionUnavailable("redacted transcript folder could not be listed; cannot sweep") from None
+    cutoff = time.time() - max_age_s
+    for entry in entries:
+        try:
+            info = entry.lstat()
+            if info.st_mtime >= cutoff:
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                shutil.rmtree(entry)
+            elif stat.S_ISREG(info.st_mode):
+                entry.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            # WHY this does NOT raise: one undeletable old entry must not make every later run fail for good
+            # (the caller treats a raise as "cannot redact"). What is left is only REDACTED text in the
+            # gitignored state folder, and the next run retries. Fixed text on stderr, no path.
+            print("stale redaction folder could not be removed; will retry next run", file=sys.stderr)

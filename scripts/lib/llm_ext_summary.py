@@ -19,16 +19,27 @@ Fleet-lease serialization (`acquire_fleet_lease`/`release_fleet_lease`/`await_fl
 `external_clear.py` — the brief keeps them there for a future automatic-lane consumer (card 3 C3
 renames them), so this module imports them rather than re-implementing its own copy of the
 machine-wide concurrency cap.
+
+REDACTED COPY ONLY (TRDD-TKQ274RE). The transcript is never sent as it is. `attempt_llm_ext_summary`
+makes a redacted copy with `transcript_redact` (secrets and home paths removed by the one shield rule
+set) inside a per-run folder from `redaction_workspace` (under the project state folder) and gives THAT
+file to `llm-ext session-summary --transcript`, with an explicit `--checkpoint` whose name carries the
+digest of the copy's sidecar, so a checkpoint is tied to the exact copy bytes. If the redaction fails
+for any reason the attempt is PERMANENT and llm-ext is never run: sending the original is the leak
+this change closes, so there is no unredacted fallback. The per-run folder is always removed when the
+run ends; a folder left by a killed run is swept after 24 h. Two sessions never share a copy.
 """
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import os
 import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +49,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import external_clear as ec  # noqa: E402 -- fleet-lease serialization stays there (card 3 C3)
+import transcript_redact as tr  # noqa: E402 -- stdlib-only; the redacted copy is the only thing sent to llm-ext (TRDD-TKQ274RE)
 
 
 def _version_key(name: str) -> tuple[int, ...]:
@@ -107,8 +119,10 @@ def llm_ext_progress_fn() -> Callable[[], float] | None:
 
     Deliberately NOT the retry loop's default: a default that auto-resolves the real binary
     would make `summarize_with_retry`'s tests depend on whether llm-ext happens to be installed
-    on the machine running them. Production wiring calls this explicitly; tests inject a fake
-    `progress_fn` instead.
+    on the machine running them. NO production caller uses this today (tests inject a fake
+    `progress_fn` instead). WARNING: it watches llm-ext's DEFAULT checkpoint folder, but the lanes
+    now pass an explicit `--checkpoint` inside the per-run redaction folder (TRDD-TKQ274RE), so
+    wiring this function later needs that per-run folder instead, or the gate sees no progress.
     """
     if not resolve_llm_ext():
         return None
@@ -321,9 +335,54 @@ def failure_signature(*, returncode: int, stderr: str) -> str:
     return f"{returncode}|{first}"
 
 
+# The least time the llm-ext call itself must have left once the redacted copy exists. WHY: redaction and
+# summary share one `timeout_s`, and a call started with only a few seconds would be killed mid-flight by
+# its own timeout after paying for a generation. Below this the attempt is TRANSIENT, and the retry reuses
+# the finished copy (same run folder) and gets the whole budget. Same floor as `jev_compaction_lane._MIN_JEV_ATTEMPT_S`.
+_MIN_SUMMARY_AFTER_REDACTION_S = 30.0
+
+
+@contextlib.contextmanager
+def redaction_workspace(state_dir: Path) -> Iterator[Path]:
+    """A fresh per-run folder for the redacted copy and its llm-ext checkpoint; removed when the block ends.
+
+    WHY a folder per run and not one shared by every session: two sessions never share a copy, so one run
+    can never delete or rewrite the file another is sending, and "remove my folder" is the whole cleanup,
+    on success, failure and exception alike (`finally`). A run killed before its `finally` leaves a folder
+    behind; `sweep_stale` removes it after 24 h. Only FileNotFoundError is ignored silently at removal. Any
+    other removal error does not raise (it would replace a finished result): it prints one fixed-text
+    line to stderr, and the leftover REDACTED copy is swept within 24 h. Raises RedactionUnavailable
+    when the sweep or the folder creation fails (fixed text).
+    """
+    root = tr.copy_dir(state_dir)
+    tr.sweep_stale(root)
+    run_dir = root / f"{os.getpid()}-{time.time_ns()}"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(mode=0o700)
+    except OSError:
+        raise tr.RedactionUnavailable("redaction workspace could not be created; cannot redact") from None
+    try:
+        yield run_dir
+    finally:
+        try:
+            shutil.rmtree(run_dir)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # WHY this does NOT raise: by now the block's own result (a finished summary) or its own
+            # exception is already decided, and raising here would replace it (a good summary would be
+            # thrown away as PERMANENT). What stays on disk is only the REDACTED copy, its sidecar and the
+            # checkpoint, in the gitignored project state folder, and `sweep_stale` removes the folder
+            # within 24 h. So the failure is reported on stderr (fixed text, no path) and the result goes
+            # through unchanged.
+            print("redaction workspace could not be removed; the 24 h sweep will retry", file=sys.stderr)
+
+
 def attempt_llm_ext_summary(
     transcript: str,
     *,
+    redact_dir: Path,
     timeout_s: int = ec.LLM_EXT_TIMEOUT_S,
     runner: Any = _default_runner,  # see _default_runner — never pass subprocess.run as a value
 ) -> SummaryAttempt:
@@ -333,6 +392,11 @@ def attempt_llm_ext_summary(
     failure to None makes an unplugged network indistinguishable from an uninstalled binary,
     and those want opposite responses. Default `timeout_s` is `external_clear.LLM_EXT_TIMEOUT_S`
     — the SAME per-attempt ceiling the fleet-lease TTL there was derived from.
+
+    WHY `redact_dir`: what is sent to the remote model is a REDACTED COPY of the transcript, never the
+    transcript (TRDD-TKQ274RE). The copy and llm-ext's checkpoint for it live in `redact_dir`, a per-run
+    folder from `redaction_workspace`. A redaction failure returns PERMANENT and the runner is never
+    called: there is no unredacted fallback. Redaction and summary share one `timeout_s`.
     """
     binary = resolve_llm_ext()
     if not binary:
@@ -349,29 +413,49 @@ def attempt_llm_ext_summary(
     # and the env var WINS over the launcher's derivation, so inheriting it would self-install
     # llm-ext's native module into the wrong plugin's store.
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_DATA"}
+    redaction_started = time.monotonic()
     try:
-        size = Path(transcript).stat().st_size
+        copy = tr.redacted_transcript_copy(Path(transcript), redact_dir, timeout_s=timeout_s)
+        # WHY the sidecar digest is part of the checkpoint name: llm-ext refuses a resumed checkpoint whose
+        # prefix hash no longer matches the transcript, on every later run. A rebuilt copy has a new sidecar,
+        # so it gets a new checkpoint name and never meets the old checkpoint; nothing is deleted, so there
+        # is no moment (a kill between the rebuild and a delete) where the pair can be wrong.
+        checkpoint = copy.with_name(f"{copy.name}.{tr.sidecar_digest(copy)}.llm-ext-checkpoint.json")
+    except tr.RedactionUnavailable as exc:
+        # WHY PERMANENT and the runner never called: without a redacted copy the only thing left to send is
+        # the original, which is exactly the leak this module exists to stop. The message is fixed text.
+        return SummaryAttempt(None, OUTCOME_PERMANENT, f"redaction unavailable: {exc}")
+    try:
+        size = copy.stat().st_size
     except OSError:
         size = -1
+    # The redaction and the summary share one `timeout_s`: the call gets what the redaction left.
+    remaining = timeout_s - (time.monotonic() - redaction_started)
+    if remaining < _MIN_SUMMARY_AFTER_REDACTION_S:
+        return SummaryAttempt(
+            None, OUTCOME_TRANSIENT, "redaction left no time for the summary",
+            evidence=f"transcript={copy} bytes={size} elapsed={time.monotonic() - redaction_started:.1f}s",
+        )
     started = time.monotonic()
     try:
         proc = runner(
-            [binary, "session-summary", "--stdout", "--transcript", transcript],
+            # WHY the COPY and a checkpoint named by the copy's digest: only redacted bytes may leave the machine, and llm-ext exits with an error on every later run when a resumed checkpoint no longer matches the transcript it names, so each checkpoint name is tied to the exact copy bytes.
+            [binary, "session-summary", "--stdout", "--transcript", str(copy), "--checkpoint", str(checkpoint)],
             capture_output=True,
             text=True,
-            timeout=timeout_s,
+            timeout=remaining,
             env=env,
             check=False,
         )
     except subprocess.TimeoutExpired:
         return SummaryAttempt(
             None, OUTCOME_TRANSIENT, f"timed out after {timeout_s}s",
-            evidence=f"transcript={transcript} bytes={size} elapsed={time.monotonic() - started:.1f}s",
+            evidence=f"transcript={copy} bytes={size} elapsed={time.monotonic() - started:.1f}s",
         )
     except Exception as exc:  # noqa: BLE001 - a handoff must survive ANY subprocess failure
         return SummaryAttempt(
             None, OUTCOME_TRANSIENT, f"spawn failed: {exc!r}",
-            evidence=f"transcript={transcript} bytes={size}",
+            evidence=f"transcript={copy} bytes={size}",
         )
     rc = int(getattr(proc, "returncode", 1) or 0)
     err = getattr(proc, "stderr", "") or ""
@@ -381,7 +465,7 @@ def attempt_llm_ext_summary(
     # default excerpt: llm-ext's stdout is the summary alone by contract, so every diagnostic
     # for a failed/empty attempt lives on stderr.
     evidence = (
-        f"transcript={transcript} bytes={size} rc={rc} "
+        f"transcript={copy} bytes={size} rc={rc} "
         f"elapsed={time.monotonic() - started:.1f}s "
         f"stdout[{len(out_raw)}]={_excerpt(out_raw)!r} "
         f"stderr[{len(err)}]={_excerpt(err, tail=2000)!r}"
@@ -422,6 +506,54 @@ def summarize_with_retry(
     log: Callable[[str], Any] | None = None,
     progress_fn: Callable[[], float] | None = None,
     lease_wait_budget_s: float | None = None,
+    state_dir: Path | None = None,
+) -> SummaryAttempt:
+    """Summarize `transcript` through llm-ext, retrying until it works, the deadline passes, or trying is pointless (the stopping rules are in `_retry_loop`).
+
+    `state_dir` is the project state folder. Unless a custom `attempt` is injected (tests), the default
+    attempt sends a REDACTED COPY of the transcript (TRDD-TKQ274RE) made inside a per-run folder under
+    `state_dir` (`redaction_workspace`), and that folder is removed when this function returns, whatever
+    the result. It is required in that case: without it the only place left for transcript text would be
+    a guess. A redaction failure is a PERMANENT result and nothing is sent. A custom `attempt` gets no
+    workspace.
+    """
+    def run(attempt_fn: Callable[[str], SummaryAttempt]) -> SummaryAttempt:
+        return _retry_loop(
+            transcript, attempt_fn, deadline=deadline, now_fn=now_fn, sleeper=sleeper,
+            cap=ec.fleet_max_concurrent() if max_concurrent is None else max_concurrent,
+            ttl=ec.fleet_lease_ttl_s() if lease_ttl_s is None else lease_ttl_s,
+            lane_dir=lane_dir, jitter=jitter,
+            say=log if log is not None else (lambda _msg: None),
+            progress_fn=progress_fn, lease_wait_budget_s=lease_wait_budget_s,
+        )
+
+    if attempt is not None:
+        return run(attempt)
+    if state_dir is None:
+        raise ValueError("summarize_with_retry needs state_dir when no attempt function is given")
+    # WHY the whole loop sits inside one workspace: the retries reuse the finished copy (one redaction per
+    # run), and the single `with` is the one exit point that removes the folder on every result.
+    try:
+        with redaction_workspace(state_dir) as redact_dir:
+            return run(functools.partial(attempt_llm_ext_summary, redact_dir=redact_dir))
+    except tr.RedactionUnavailable as exc:
+        return SummaryAttempt(None, OUTCOME_PERMANENT, f"redaction unavailable: {exc}")
+
+
+def _retry_loop(
+    transcript: str,
+    run_attempt: Callable[[str], SummaryAttempt],
+    *,
+    deadline: float,
+    now_fn: Callable[[], float],
+    sleeper: Callable[[float], Any],
+    cap: int,
+    ttl: int,
+    lane_dir: Path | None,
+    jitter: Callable[[], float] | None,
+    say: Callable[[str], Any],
+    progress_fn: Callable[[], float] | None,
+    lease_wait_budget_s: float | None,
 ) -> SummaryAttempt:
     """Keep trying to summarize until it works, the deadline passes, or trying is pointless.
 
@@ -438,7 +570,8 @@ def summarize_with_retry(
         reproducing byte-for-byte. Anything that keeps CHANGING keeps being retried.
       * TIMEOUT repeating `_NO_PROGRESS_TIMEOUT_GIVEUP` times with `progress_fn()` unchanged
         between them — a chunk provably stuck past `ec.LLM_EXT_TIMEOUT_S` (TRDD-YOZ9TS3W). Only
-        engaged when `progress_fn` is supplied; production wiring passes `llm_ext_progress_fn()`.
+        engaged when `progress_fn` is supplied; NO production caller supplies one today (only tests do),
+        and `llm_ext_progress_fn()` would need repointing before it could (see its docstring).
     TRANSIENT otherwise never stops on its own: it retries until the deadline, which is what
     "disconnected for hours" needs.
 
@@ -447,10 +580,6 @@ def summarize_with_retry(
     `max_concurrent` llm-ext calls exist machine-wide and N sessions recovering from one outage
     cannot re-form the herd on a shared backoff schedule.
     """
-    run_attempt = attempt or attempt_llm_ext_summary
-    cap = ec.fleet_max_concurrent() if max_concurrent is None else max_concurrent
-    ttl = ec.fleet_lease_ttl_s() if lease_ttl_s is None else lease_ttl_s
-    say: Callable[[str], Any] = log if log is not None else (lambda _msg: None)
     seen: dict[str, int] = {}
     last = SummaryAttempt(None, OUTCOME_TRANSIENT, "no attempt was made before the deadline")
     # `progress_fn` is opt-in (see its docstring). `stuck_timeouts` counts CONSECUTIVE timeouts

@@ -19,8 +19,11 @@ imported by the automatic lane. The automatic lane may EXEC this script, but mus
 THIS file is one of the two entries `_LLM_EXT_SUMMARY_ALLOWED` names as an allowed importer
 (the other is `compose_agent_handoff.py`, the pre-existing manual-lane composer).
 
-Contract: `--transcript PATH --timeout-s N`. Prints the summary text on stdout and exits 0 on
+Contract: `--transcript PATH --state-dir DIR --timeout-s N`. Prints the summary text on stdout and exits 0 on
 `llm_ext_summary.OUTCOME_OK`; otherwise prints `<outcome>: <detail>` on stderr and exits 1.
+`--state-dir` is the project state folder: llm-ext is given a REDACTED COPY of the transcript made
+in a per-run folder under it (TRDD-TKQ274RE), never the transcript itself, and a redaction failure is
+PERMANENT with nothing sent. The per-run folder is always removed when the process ends.
 ONE attempt, no retry loop in here — `jev_compaction_lane.run_compact_with_fallback` already
 owns the retry-vs-fallback decision, and retrying inside both layers would double the budget
 the summary hold's 15-minute ceiling was sized around.
@@ -41,10 +44,18 @@ import llm_ext_summary as les  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transcript", required=True)
+    parser.add_argument("--state-dir", required=True)
     parser.add_argument("--timeout-s", type=int, default=les.ec.LLM_EXT_TIMEOUT_S)
     args = parser.parse_args()
 
-    attempt = les.attempt_llm_ext_summary(args.transcript, timeout_s=args.timeout_s)
+    # WHY a per-run workspace: the redacted copy is transcript text on disk, so it lives in a folder that this
+    # `with` always removes, whatever the outcome (TRDD-TKQ274RE). A failure to make the workspace is the same
+    # PERMANENT "redaction unavailable" as any other redaction failure, and nothing is sent.
+    try:
+        with les.redaction_workspace(Path(args.state_dir)) as redact_dir:
+            attempt = les.attempt_llm_ext_summary(args.transcript, redact_dir=redact_dir, timeout_s=args.timeout_s)
+    except les.tr.RedactionUnavailable as exc:
+        attempt = les.SummaryAttempt(None, les.OUTCOME_PERMANENT, f"redaction unavailable: {exc}")
     if attempt.outcome == les.OUTCOME_OK and attempt.text:
         print(attempt.text)
         return 0

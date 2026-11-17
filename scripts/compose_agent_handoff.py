@@ -89,7 +89,8 @@ def main() -> int:
     if hold:
         handoff_files.compose_stamp_write(sd, key)
     try:
-        got = les.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S)
+        # `state_dir=sd`: the summary is made from a redacted copy in a per-run folder under the project state folder (TRDD-TKQ274RE), removed when this call returns.
+        got = les.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S, state_dir=sd)
         text = (got.text or "").strip()
         if not text:
             reason = f"{got.outcome}: {got.detail}"

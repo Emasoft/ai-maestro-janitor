@@ -1371,7 +1371,7 @@ def _sleep_for_kind_or_break(
 
 
 def _run_llm_ext_fallback(
-    plugin_root: Path, *, transcript: str, timeout_s: float,
+    plugin_root: Path, *, transcript: str, timeout_s: float, state_dir: Path,
 ) -> tuple[bool, str]:
     """EXEC (never import) `scripts/llm_ext_compact.py` -- the llm-ext equivalent of how this
     lane execs `jev_compact.py` BY PATH, for the same reason: `tests/test_jev_boundary.py`
@@ -1380,7 +1380,10 @@ def _run_llm_ext_fallback(
 
     `timeout_s + _LLM_EXT_OUTER_SLACK_S` bounds the whole subprocess -- `llm_ext_compact.py`
     already bounds its OWN internal attempt at `timeout_s`; the slack only guards against a
-    `uv`/launcher hang before that internal timer starts (advisor §4).
+    `uv`/launcher hang before that internal timer starts (advisor §4). The redaction of the
+    transcript happens INSIDE `llm_ext_compact.py` and shares that same `timeout_s`, so the fallback
+    budget now includes the redaction (TRDD-TKQ274RE); a redaction failure comes back as a failed
+    fallback and nothing is sent.
 
     Runs in ITS OWN process group (`start_new_session=True`) and, on the outer timeout, kills
     the WHOLE group (`os.killpg`), not just this one child (owner review finding #4,
@@ -1399,7 +1402,8 @@ def _run_llm_ext_fallback(
         # call almost certain to be killed mid-flight.
         return False, f"llm-ext fallback skipped: only {timeout_s:.0f}s left in the hold"
     script = plugin_root / "scripts" / "llm_ext_compact.py"
-    cmd = [str(script), "--transcript", transcript, "--timeout-s", str(int(timeout_s))]
+    # WHY `--state-dir`: llm_ext_compact.py sends a REDACTED COPY of the transcript, written under the project state folder, never the transcript itself (TRDD-TKQ274RE).
+    cmd = [str(script), "--transcript", transcript, "--timeout-s", str(int(timeout_s)), "--state-dir", str(state_dir)]
     try:
         proc = subprocess.Popen(  # noqa: S603 - explicit args, no shell
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -1447,7 +1451,9 @@ def run_compact_with_fallback(
     """Retry `jev_compact.py compact` (with `--no-decline`) until `deadline`, then fall back to
     `llm_ext_compact.py` once, with a budget of `hold_expires` (epoch seconds, same unit as
     `now_fn`) minus the clock reading when the fallback STARTS, minus `_LLM_EXT_T_SAFETY_MARGIN_S`,
-    capped at `_LLM_EXT_T_MAX_S` (TRDD-MVUJG3C4). Returns `(source, text, detail)`:
+    capped at `_LLM_EXT_T_MAX_S` (TRDD-MVUJG3C4). That budget now includes the redaction of the
+    transcript, which `llm_ext_compact.py` does under `sd` before llm-ext sees anything
+    (TRDD-TKQ274RE). Returns `(source, text, detail)`:
       * `(SOURCE_JEV, <compacted text>, "")` — a real Jev compose succeeded; `out_path` is
         already written (by `run_compact`/`jev_compact.py` itself). `text` is read from
         `inject_out_path` instead, when given and readable -- the size-bounded, priority-aware
@@ -1591,7 +1597,7 @@ def run_compact_with_fallback(
     timeout_s = max(
         0.0, min(hold_expires - float(now_fn()) - _LLM_EXT_T_SAFETY_MARGIN_S, _LLM_EXT_T_MAX_S),
     )
-    ok, payload = _run_llm_ext_fallback(plugin_root, transcript=transcript, timeout_s=timeout_s)
+    ok, payload = _run_llm_ext_fallback(plugin_root, transcript=transcript, timeout_s=timeout_s, state_dir=sd)
     if ok:
         return SOURCE_LLM_EXT, payload, ""
 
