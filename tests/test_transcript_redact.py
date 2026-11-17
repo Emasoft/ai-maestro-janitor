@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 
@@ -142,6 +143,43 @@ def test_error_response_from_the_bridge_raises(tmp_path: Path) -> None:
     with pytest.raises(tr.RedactionUnavailable):
         tr.redacted_transcript_copy(src, tmp_path / "out", timeout_s=TIMEOUT_S, homes=cast(Any, [123]))
     assert not any((tmp_path / "out").iterdir())
+
+
+def _bridge_one(request: dict[str, Any]) -> dict[str, Any]:
+    """Send one request line to the real bridge and return its one parsed response line."""
+    bridge = Path(__file__).resolve().parents[1] / "hooks" / "secret-shield" / "redact_bridge.ts"
+    done = subprocess.run([tr.resolve_bun(), str(bridge)], input=(json.dumps(request) + "\n").encode("utf-8"), capture_output=True, timeout=TIMEOUT_S, check=True)
+    lines = done.stdout.decode("utf-8").splitlines()
+    assert len(lines) == 1
+    return cast("dict[str, Any]", json.loads(lines[0]))
+
+
+def test_bridge_op_all_runs_every_pass_when_passes_is_absent() -> None:
+    """Op all with no passes hides the secret, the email and the home path, and merges the counts of the passes."""
+    text = f"key {FAKE_KEY} mail ada{chr(64)}mail.test at /Users/runner/proj/a.py"
+    out = _bridge_one({"op": "all", "t": text, "homes": HOMES})
+    assert KEY_MARK in out["t"] and "[JANITOR-REDACTED:email]" in out["t"]
+    assert "runner" not in out["t"] and "~/proj/a.py" in out["t"]
+    assert out["h"] == {"github-token": 1, "email": 1, "home-path": 1}
+
+
+def test_bridge_op_all_runs_only_the_named_passes() -> None:
+    """Op all with passes [secrets] hides the secret and leaves the email and the home path as written."""
+    text = f"key {FAKE_KEY} mail ada{chr(64)}mail.test at /Users/runner/proj/a.py"
+    out = _bridge_one({"op": "all", "t": text, "homes": HOMES, "passes": ["secrets"]})
+    assert out["t"] == text.replace(FAKE_KEY, KEY_MARK)
+    assert out["h"] == {"github-token": 1}
+
+
+def test_bridge_op_all_refuses_an_empty_pass_set() -> None:
+    """An empty pass set is refused with one error line and exit 2, so no text leaves unredacted."""
+    bridge = Path(__file__).resolve().parents[1] / "hooks" / "secret-shield" / "redact_bridge.ts"
+    request = {"op": "all", "t": "plain", "homes": HOMES, "passes": []}
+    done = subprocess.run([tr.resolve_bun(), str(bridge)], input=(json.dumps(request) + "\n").encode("utf-8"), capture_output=True, timeout=TIMEOUT_S, check=False)
+    lines = done.stdout.decode("utf-8").splitlines()
+    assert done.returncode == 2
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {"error": "passes is not a non-empty array of passes"}
 
 
 def test_timeout_kills_the_bridge_and_raises() -> None:

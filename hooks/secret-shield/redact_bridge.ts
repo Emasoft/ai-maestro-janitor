@@ -4,7 +4,8 @@
 //   {"t": s}                                   -> redact(s)
 //   {"op": "home", "t": s, "homes": [...]}     -> redactHome(s, homes)
 //   {"op": "both", "t": s, "homes": [...]}     -> redact(s) first, then redactHome on its output
-// Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both" the counts of the two passes are merged.
+//   {"op": "all", "t": s, "homes": [...], "passes": [...]} -> redactAll(s, homes, passes): every pass of the pipeline (pipeline.ts) in its own order; "passes" is optional (absent = all four) and, when present, a non-empty array of "secrets", "cards", "email", "home"
+// Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both" and "all" the counts of the passes are merged.
 // Any failure: ONE line {"error": "<fixed text>"}, exit 2. Nothing else is ever written to stdout.
 //
 // WHY the input is read as a byte stream and split on "\n" here, not with `for await (const line of console)`: one line is a whole transcript record, which can be several MB, and the line reader is not meant for that.
@@ -12,6 +13,7 @@
 
 import { redactHome } from "./home.ts"
 import { addHits, redact, type Hits } from "./patterns.ts"
+import { ALL_PASSES, isPass, redactAll, type Pass } from "./pipeline.ts"
 
 const decoder = new TextDecoder("utf-8")
 
@@ -27,17 +29,25 @@ const handle = async (line: string): Promise<void> => {
   } catch {
     return fail("request line is not valid JSON")
   }
-  const fields = request as { t?: unknown; op?: unknown; homes?: unknown } | null
+  const fields = request as { t?: unknown; op?: unknown; homes?: unknown; passes?: unknown } | null
   const text = fields?.t
   if (typeof text !== "string") return fail("request has no string field t")
   const op = fields?.op
-  if (op !== undefined && op !== "home" && op !== "both") return fail("unknown op")
+  if (op !== undefined && op !== "home" && op !== "both" && op !== "all") return fail("unknown op")
   const homes = fields?.homes
   if (op !== undefined && !(Array.isArray(homes) && homes.every((h) => typeof h === "string"))) return fail("homes is not an array of strings")
+  // passes belongs to op "all" only: the other ops take no pass set and ignore the field, as they always ignored unknown fields. An empty array is refused: it would return the text unredacted.
+  const rawPasses = fields?.passes
+  if (op === "all" && rawPasses !== undefined && !(Array.isArray(rawPasses) && rawPasses.length > 0 && rawPasses.every(isPass))) return fail("passes is not a non-empty array of passes")
   let out: string
   const hits: Hits = {}
   try {
-    if (op === "home") {
+    if (op === "all") {
+      const passes = rawPasses === undefined ? ALL_PASSES : new Set<Pass>(rawPasses as Pass[])
+      const r = redactAll(text, homes as string[], passes)
+      out = r.text
+      addHits(hits, r.hits)
+    } else if (op === "home") {
       const r = redactHome(text, homes as string[])
       out = r.text
       addHits(hits, r.hits)
