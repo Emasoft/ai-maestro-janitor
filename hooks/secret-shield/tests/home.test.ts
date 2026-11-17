@@ -208,6 +208,43 @@ describe('home rewrite: caller home literals', () => {
   })
 })
 
+describe('home rewrite: caller home literals, astral characters, surrogates and overlapping candidates', () => {
+  // WHY the literal lives under /opt: the built-in Unix rule would also rewrite a /Users/runner name that continues with an astral letter, which would hide what the literal search itself did.
+  const home = '/opt/people/app'
+  test('a literal followed by an astral letter (U+1D400) is a longer name and is not rewritten', () => {
+    const s = home + '\u{1D400}/x'
+    expect(h(s, [home])).toEqual({ text: s, hits: {} })
+  })
+  test('a literal followed by an astral emoji (U+1F600) is rewritten and the emoji stays', () => {
+    expect(h(home + '\u{1F600} x', [home])).toEqual({ text: '~\u{1F600} x', hits: { 'home-path': 1 } })
+  })
+  test('a literal ending in a lone high surrogate is not rewritten when a low surrogate follows, and is when anything else follows', () => {
+    const lone = home + '\uD835'
+    const pair = lone + '\uDC00/x'
+    expect(h(pair, [lone])).toEqual({ text: pair, hits: {} })
+    expect(h(lone + ' x', [lone])).toEqual({ text: '~ x', hits: { 'home-path': 1 } })
+  })
+  test('a literal starting with a lone low surrogate is not rewritten when a high surrogate stands before it, and is after anything else', () => {
+    const lone = '\uDC00' + home
+    const pair = '\uD835' + lone + '/x'
+    expect(h(pair, [lone])).toEqual({ text: pair, hits: {} })
+    expect(h('x' + lone + ' y', [lone])).toEqual({ text: 'x~ y', hits: { 'home-path': 1 } })
+  })
+  test('a refused candidate between two occurrences does not hide the second: only the second is rewritten and counted once', () => {
+    expect(h(home + 'x ' + home + '/a', [home])).toEqual({ text: home + 'x ~/a', hits: { 'home-path': 1 } })
+  })
+  test('overlapping candidates: a refused one at index 0 leaves the one at index 3 to match (aa/a in aa/aa/a gives aa/~, 1 hit)', () => {
+    expect(h('aa/aa/a', ['aa/a'])).toEqual({ text: 'aa/~', hits: { 'home-path': 1 } })
+  })
+  test('overlapping candidates: a hit at index 0 consumes the candidate that starts inside it (ab/ab in ab/ab/ab gives ~/ab, 1 hit)', () => {
+    expect(h('ab/ab/ab', ['ab/ab'])).toEqual({ text: '~/ab', hits: { 'home-path': 1 } })
+  })
+  // WHY shift 2 is the closest overlap: a shift-1 self-overlap needs a home of one repeated character, and usableHomes drops those (a home needs two non-empty segments, so it holds a separator plus a non-separator; probed: aaaa, //, a, /a and a/ are all ignored). The nearest self-overlap of a usable home is a shift of 2.
+  test('overlapping candidates: two hits at shift 2 with the separator between them kept (a/a in a/a/a/a gives ~/~, 2 hits)', () => {
+    expect(h('a/a/a/a', ['a/a'])).toEqual({ text: '~/~', hits: { 'home-path': 2 } })
+  })
+})
+
 describe('home rewrite: Claude project slug', () => {
   test('-Users-name becomes -Users-USER', () => {
     expect(h('/x/projects/-Users-runner-Code-proj/s.jsonl').text).toBe('/x/projects/-Users-USER-Code-proj/s.jsonl')
