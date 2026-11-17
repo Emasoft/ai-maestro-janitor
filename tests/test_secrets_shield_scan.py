@@ -402,3 +402,74 @@ def test_default_out_inside_a_home_that_is_a_git_repo_exits_2_and_names_out(box:
     assert result.code == 2
     assert "--out" in result.stderr
     assert not (box.home_dir / ".secrets_shield").exists()
+
+
+def test_root_that_is_a_subfolder_of_a_repo_respects_the_repo_ignore_rules(box: Box) -> None:
+    """A root with no .git of its own, inside a repo, is listed by git: its gitignored token file is skipped and counted, its tracked one is found, and files above the root are not scanned."""
+    repo = box.base / "repo"
+    box.put(repo / ".gitignore", ".env\n")
+    box.put(repo / "top.txt", _line())
+    box.put(repo / "sub" / "a.txt", _line())
+    box.put(repo / "sub" / ".env", _line())
+    box.repo(repo, ".gitignore", "top.txt", "sub/a.txt")
+    result = box.scan(root=repo / "sub")
+    assert result.code == 1
+    assert result.findings == [("a.txt", "github-token", 1, 1)]
+    assert result.summary["gitignored_entries"] == 1 and result.summary["repos"] == 1 and result.summary["non_repo_dirs"] == 0
+
+
+def test_root_that_the_ancestor_repo_ignores_is_walked_plain_and_nested_repos_are_found(box: Box) -> None:
+    """A root that the ancestor repo ignores (itself, or through a parent folder) is walked as a plain folder: its files and the nested repos under it are scanned, never an empty scan."""
+    ancestor = box.base / "ancestor"
+    box.put(ancestor / ".gitignore", "*\n")
+    box.repo(ancestor, ".gitignore")
+    proj = ancestor / "proj"
+    box.put(proj / "tok.txt", _line())
+    box.put(proj / "inner" / "b.txt", _line())
+    box.repo(proj / "inner", "b.txt")
+    result = box.scan(root=proj)
+    assert result.code == 1
+    assert result.findings == [("inner/b.txt", "github-token", 1, 1), ("tok.txt", "github-token", 1, 1)]
+    assert result.summary["non_repo_dirs"] == 1 and result.summary["repos"] == 1
+    # The root is ignored through its parent folder: the same.
+    box.put(ancestor / ".gitignore", "proj/\n")
+    box.put(proj / "deep" / "t2.txt", _line())
+    deep = box.scan(root=proj / "deep")
+    assert deep.code == 1 and deep.findings == [("t2.txt", "github-token", 1, 1)]
+    assert deep.summary["non_repo_dirs"] == 1
+
+
+def test_repo_inside_an_ignored_folder_is_found_and_loose_ignored_files_are_not_scanned(box: Box) -> None:
+    """A repo that ignores vendor/ still has the repo under vendor/lib scanned under its own rules, while a loose file with a token in vendor/ is not scanned."""
+    box.put(box.root / ".gitignore", "vendor/\n")
+    box.put(box.root / "clean.txt", "x\n")
+    box.repo(box.root, ".gitignore", "clean.txt")
+    box.put(box.root / "vendor" / "loose.txt", _line())
+    box.put(box.root / "vendor" / "lib" / "t.txt", _line())
+    box.repo(box.root / "vendor" / "lib", "t.txt")
+    result = box.scan()
+    assert result.code == 1
+    assert result.findings == [("vendor/lib/t.txt", "github-token", 1, 1)]
+    assert result.summary["repos"] == 2
+
+
+def test_root_whose_children_the_ancestor_repo_ignores_still_finds_its_nested_repos(box: Box) -> None:
+    """An ancestor repo with .gitignore proj/* hides every child of the root, but the repo nested under the root is still found and scanned."""
+    ancestor = box.base / "ancestor"
+    box.put(ancestor / ".gitignore", "proj/*\n")
+    box.repo(ancestor, ".gitignore")
+    proj = ancestor / "proj"
+    box.put(proj / "inner" / "b.txt", _line())
+    box.repo(proj / "inner", "b.txt")
+    result = box.scan(root=proj)
+    assert result.code == 1
+    assert result.findings == [("inner/b.txt", "github-token", 1, 1)]
+    assert result.summary["repos"] == 2
+    """A root under an ancestor .git that git cannot use gives a git-error skip of "." and exit 3, never a plain walk of the folder."""
+    parent = box.base / "broken-parent"
+    box.put(parent / ".git", f"gitdir: {box.base}/does-not-exist\n")
+    box.put(parent / "sub" / "a.txt", _line())
+    result = box.scan(root=parent / "sub")
+    assert result.code == 3
+    assert result.skips == [(".", "git-error")]
+    assert result.findings == [] and result.summary["files_scanned"] == 0 and result.summary["complete"] is False

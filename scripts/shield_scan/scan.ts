@@ -7,19 +7,20 @@
 
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { cpus, homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { isPass, PASS_ORDER, type Pass } from '../../hooks/secret-shield/pipeline.ts'
-import { newStats, noteSkip, SKIP_REASONS, walkFiles, type FileItem, type SetStats, type SkipReason } from './fileset.ts'
+import { findGitTop, newStats, noteSkip, SKIP_REASONS, walkFiles, type FileItem, type SetStats, type SkipReason } from './fileset.ts'
 
 const MB = 1048576
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ROOT = resolve(HERE, '..', '..')
 const WORKER = join(HERE, 'worker.ts')
 
+// A fixed-text error of the scan: its message is shown to the user and never holds the text of a file.
 class ScanError extends Error {
   override name = 'ScanError'
 }
@@ -28,6 +29,10 @@ function fatal(message: string): never {
   process.stderr.write(`shield-scan: ${message}\n`)
   return process.exit(2)
 }
+
+// WHY these handlers write fixed text and never the error: an error message or stack can carry the text of a scanned file, which can be a secret. A stray error must still end the run with exit 2, and never with a partial findings file.
+process.on('uncaughtException', () => fatal('the scan stopped on an internal error'))
+process.on('unhandledRejection', () => fatal('the scan stopped on an internal error'))
 
 interface Options {
   root: string
@@ -112,7 +117,7 @@ function stamp(now: Date): string {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}${sign}${pad(Math.floor(abs / 60))}${pad(abs % 60)}`
 }
 
-// WHY the walk up from the folder and a check for a `.git` entry: it is the same definition of a work tree as the file set (a directory, or a file in a linked worktree), it needs no git process, and it runs before any folder is created. A findings file in a work tree could be committed, which would publish where the secrets are.
+// WHY the walk up from the folder and a check for a `.git` entry: it uses the file set's .git probe (a directory, or a file in a linked worktree), it needs no git process, and it runs before any folder is created. A findings file in a work tree could be committed, which would publish where the secrets are. The file set reads an unreadable .git entry as a repo; this check does not (see below).
 function insideWorkTree(outFile: string): boolean {
   let base = dirname(outFile)
   const tail: string[] = []
@@ -120,15 +125,13 @@ function insideWorkTree(outFile: string): boolean {
     tail.unshift(basename(base))
     base = dirname(base)
   }
-  for (let dir = join(realpathSync(base), ...tail); ; dir = dirname(dir)) {
-    try {
-      lstatSync(join(dir, '.git'))
-      return true
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') return fatal('a folder on the findings path cannot be checked')
-    }
-    if (dirname(dir) === dir) return false
+  try {
+    const top = findGitTop(join(realpathSync(base), ...tail))
+    // WHY an unreadable .git entry stops the run here and does not count as a work tree: the file set reads it as a repo (so git fails visibly), but the findings-path check must not guess; the answer is exit 2, never a wrong yes or no.
+    if (top !== null && !top.readable) return fatal('a folder on the findings path cannot be checked')
+    return top !== null
+  } catch {
+    return fatal('a folder on the findings path cannot be checked')
   }
 }
 
@@ -183,11 +186,14 @@ class WorkerProc {
     })
     // WHY the stdin error handler does nothing: a write to a worker that just died raises EPIPE here; the close event below reports the death, and the run records it as a crash.
     this.child.stdin.on('error', () => {})
-    this.child.on('close', () => {
+    const markExited = (): void => {
       this.exited = true
       this.waiter?.(null)
       this.waiter = null
-    })
+    }
+    this.child.on('close', markExited)
+    // WHY an error listener: a worker that cannot be started (no executable, no memory) raises error and may never raise close; without this the run would wait for its ready message forever. start() then throws, and the run exits 2.
+    this.child.on('error', markExited)
   }
 
   static async start(): Promise<WorkerProc> {

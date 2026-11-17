@@ -4,7 +4,7 @@ Owning card: design/tasks/TRDD-20261117_134650+0100-BAQB9SYO-secrets-shield-scan
 
 Not in 1a: git history (1b); SKILL.md and the parallel-read timing (1c); Rust (2); redact mode (3). No change to hooks/secret-shield/ (the core): if the core needs a change, stop and report it.
 
-## Decisions (main-agent, 2026-11-17; v1 reviewed by the advisor, v2 applies its six findings; five later edits on top of v2 (D4 home-repo limit, tests 12, 19, 22, 25); not re-reviewed since)
+## Decisions (main-agent, 2026-11-17; v1 reviewed by the advisor, v2 applies its six findings; later edits on top of v2 (D4 home-repo limit, tests 12, 19, 22, 25, 26, 27, 28, 29, 30, the smoke --out); not re-reviewed since)
 
 D1 Name: the skill (1c) will be janitor-secrets-shield-scan, because all 64 skills carry the janitor- prefix and the janitor lists its capabilities as /janitor-* commands. 1a ships the CLI only.
 
@@ -63,7 +63,12 @@ pytest with real git and real bun, opted in the way tests/test_transcript_redact
 22 a whole-file surplus: a hit that only a window of several lines forms (build it from the gitlab session-cookie rule in hooks/secret-shield/patterns.ts, about lines 326 to 388; read the code to build the shape) gives an unlocated finding; if no such shape can be built from that code, report it and record the unlocated branch as untested on the card instead of writing the test;
 23 an --out inside a git work tree exits 2; with HOME pointed at tmp_path the default out path lands under tmp_path; the findings file never holds a token value;
 24 two runs give identical records apart from the timing fields of the summary.
-25 with HOME pointed at a temp git repo, a run with the default out path exits 2 and names --out on stderr.
+25 with HOME pointed at a temp git repo, a run with the default out path exits 2 and names --out on stderr;
+26 the root is a subfolder of a repo (no .git of its own) that the repo does not ignore: a gitignored file holding a token inside that subfolder is not scanned (gitignored_entries counts it), a tracked file with a token there is found, and files above the root are not scanned (the root is listed with git, so the ignore rules of the whole repo apply);
+27 the ancestor repo ignores the root (a .gitignore of "*", and a pattern that ignores a parent folder of the root): the root is walked as a plain folder (non_repo_dirs counts it), so its own files and the nested repo under it are scanned under their own rules, never an empty scan; decided by git check-ignore -q on the root relative to the ancestor (exit 0 ignored, 1 not, else a git-error skip of "." and an incomplete run);
+28 a repo that ignores a folder (vendor/): a repo nested under that folder is found and scanned under its own rules, and a loose file with a token in the ignored folder is not scanned (the ignored folders of a listed repo are searched for repo roots by lstat, never reading or counting their files; a folder that cannot be listed is an unreadable-dir skip);
+29 an ancestor repo with .gitignore "proj/*" and root = <ancestor>/proj: the repo nested under the root is found and scanned, exit 1, and no repo is scanned twice;
+30 the ancestor .git cannot be used by git (a .git file whose gitdir is missing): the root gets a git-error skip of "." and exit 3, never a plain walk.
 
 ## Checks (the worker runs these, saves each output and reads it whole)
 
@@ -71,5 +76,5 @@ pytest with real git and real bun, opted in the way tests/test_transcript_redact
 - uv run --directory <J> ruff check tests/test_secrets_shield_scan.py; uv run --directory <J> mypy tests/test_secrets_shield_scan.py --ignore-missing-imports; uvx --with pyright pyright tests/test_secrets_shield_scan.py.
 - tsc --noEmit --strict on the three .ts files with bun types if they are installed; else say so and give the errors that are only missing bun or node types.
 - ubs on each new file alone (ubs <file>), quoting each summary.
-- A smoke run of the scanner on the janitor repo itself, default scope, with --out under reports_dev: exit code, files_scanned, mb_per_s, skips.
+- A smoke run of the scanner on the janitor repo itself, default scope, with --out outside any git work tree (D4 refuses reports_dev, which is inside the janitor work tree): exit code, files_scanned, mb_per_s, skips.
 - No commit: the main agent commits.
