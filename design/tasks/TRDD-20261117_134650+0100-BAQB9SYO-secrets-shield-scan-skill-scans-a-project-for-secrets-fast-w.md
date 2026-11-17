@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: design
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-17T13:46:50+0100
+updated: 2026-11-17T13:50:35+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -67,3 +67,4 @@ approval-datetime: 2026-11-17T13:46:50+0100
 ## Approval log
 
 - 2026-11-17T13:46:50+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-17T13:51:00+0100 — Note to the MANDATE line, by main-agent@ai-maestro-janitor: approved true and the mandate are the standalone defaults of trddgrep new. The owner's approval covers the request and the plan order (answer 3 of 2026-11-17, "yes"); the Design and Increments details are main-agent's proposal, open to the owner's changes (see the STATE block).
