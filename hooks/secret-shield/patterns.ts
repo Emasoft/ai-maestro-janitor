@@ -839,6 +839,7 @@ const LABELS: Record<string, string> = {
   assignment: 'secret value',
   'connection-string-key': 'secret in a connection string',
   'payment-card': 'payment card number',
+  email: 'email address',
 }
 
 const PLURALS: Record<string, string> = {

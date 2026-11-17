@@ -343,3 +343,59 @@ Shape: a card number whose first digit follows a letter, a digit or an underscor
 Hidden instead: the same card after or before a space, a comma, a colon, an equals sign or a quote.
 Card: none
 Test: KNOWN MISS card-glued-to-letter-or-underscore: a card number glued to a letter or an underscore, or after the n of a JSON-escaped line break, is not hidden, after a space it is
+
+## email-git-local-part
+
+Reason: (c) a deliberate scope decided for TRDD-L1I0FP5T (increment 3): the email pass (hooks/secret-shield/email.ts) hides what the report-sanitizer EMAIL rule hides, span for span, except the address of a git clone over SSH. That address names a service account (git), not a person, and report-sanitizer's ssh_cmd_repl keeps it visible for the same reason. No false-positive count was measured for it.
+Shape: a local part equal to git in any letter case, at a host, when the character right after the matched domain is a colon followed by a letter, a digit, a slash, a tilde, an underscore or a hyphen (the scp-like clone form: git, at sign, host, colon, owner, slash, repository), or when the local part comes directly after ssh:// or git+ssh:// (the URL form; the scheme in any letter case).
+Hidden instead: a git local part anywhere else (alone, before a comma or a dot, before a colon followed by a space, a dot or nothing), a local part that only contains git (a letter before it, or git then a dot and more characters), and any other local part after ssh://.
+Card: none
+Test: KNOWN MISS email-git-local-part: a git clone address, in the scp-like form or after ssh://, is not hidden, a git address anywhere else is
+
+## email-non-ascii
+
+Reason: (c) a deliberate scope: the email pass reads the same ASCII character classes as the report-sanitizer EMAIL rule, so that the two rules give the same spans. No false-positive count was measured for a wider class.
+Shape: an address with a non-ASCII letter in the character right before the at sign (the local part is then empty), or inside the domain (the labels stop there). A non-ASCII letter earlier in the local part leaves the letter visible and hides only the ASCII characters after it.
+Hidden instead: the same address written with ASCII letters only.
+Card: none
+Test: KNOWN MISS email-non-ascii: an address with a non-ASCII letter right before the at sign or inside the domain is not hidden, an ASCII one is
+
+## email-quoted-local-part
+
+Reason: (c) a deliberate scope: the local-part class has no quote, as in the report-sanitizer EMAIL rule, so a quoted local part (allowed by the mail standard, rare in practice) is not read. No false-positive count was measured for a rule that reads quotes.
+Shape: a local part in double quotes, with or without spaces inside, followed by the at sign and a domain: the quote right before the at sign ends the local part before it starts.
+Hidden instead: the same words without the quotes (with spaces inside, the part after the last space is hidden).
+Card: none
+Test: KNOWN MISS email-quoted-local-part: an address whose local part is in double quotes is not hidden, the same words unquoted are
+
+## email-ip-literal-domain
+
+Reason: (c) a deliberate scope: a domain must end in a label that starts with two letters, as in the report-sanitizer EMAIL rule, so a domain that is an IP address is not read, in brackets or not. No false-positive count was measured for a rule that reads them.
+Shape: a local part, the at sign, then an IPv4 address with or without square brackets around it.
+Hidden instead: the same local part with a host name that has a label of two or more letters at the end.
+Card: none
+Test: KNOWN MISS email-ip-literal-domain: an address whose domain is an IP address, in brackets or not, is not hidden, a host name is
+
+## email-single-label-domain
+
+Reason: (c) a deliberate scope: the domain needs at least two labels, as in the report-sanitizer EMAIL rule (a single label such as a machine name is not a public address). No false-positive count was measured for a rule that reads them.
+Shape: a local part, the at sign, then one label with no dot, for example the name of a local machine.
+Hidden instead: the same local part with a domain of two or more labels.
+Card: none
+Test: KNOWN MISS email-single-label-domain: an address whose domain has one label is not hidden, with two labels it is
+
+## email-tld-without-two-leading-letters
+
+Reason: (c) a deliberate scope: the address ends after the leading letters of the last label that starts with two or more ASCII letters, as in the report-sanitizer EMAIL rule. A domain whose labels after the first all start with a digit or with a single letter has no such label. No false-positive count was measured for a wider rule.
+Shape: a local part, the at sign, a host, then a last label that starts with a digit (all digits, or digits then letters) or with one letter followed by a digit or a hyphen, or is one letter.
+Hidden instead: the same domain with a last label that starts with two or more letters.
+Card: none
+Test: KNOWN MISS email-tld-without-two-leading-letters: an address whose last label starts with a digit or with a single letter is not hidden, with two letters first it is
+
+## email-domain-tail-after-letter-run
+
+Reason: (c) a deliberate scope: the address ends after the leading letters of its last label, as in the report-sanitizer EMAIL rule, so what follows those letters inside the label stays visible. No false-positive count was measured for a rule that reads the whole label.
+Shape: an address whose last label is two or more letters followed by a digit or a hyphen (letters then digits, or an internationalized domain in its xn-- form): the letters are hidden, the rest of the label stays visible.
+Hidden instead: the same address with a last label of letters only (hidden whole).
+Card: none
+Test: KNOWN MISS email-domain-tail-after-letter-run: the digits, or the hyphen and digits, after the leading letters of the last label stay visible, a last label of letters is hidden whole
