@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: design
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-17T13:50:35+0100
+updated: 2026-11-17T14:41:48+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -27,6 +27,7 @@ approval-datetime: 2026-11-17T13:46:50+0100
 - NEXT ACTION: increment 0, measurement only (see Increments). No build before its numbers exist.
 - Prerequisite for increment 1: TRDD-L1I0FP5T increment 5 (one core entry point that owns the pass order). The skill must call that entry point and must not carry a pass order of its own.
 - Release path: the skill reaches the owner's other computer only through a janitor release. Release 3.9.9 is blocked by two CPV findings from the run of 2026-11-17 12:16 (local report reports_dev/opus-main/cpv-inc3-20261117_121651+0100.txt): MAJOR, an absolute path on line 42 of the archived card TRDD-7KPG2PCO; MINOR REGEX_DOS at hooks/secret-shield/home.ts:39. Both need an owner answer.
+- Release path update, 2026-11-17T14:41:48+0100: see the STATE line of the same time in TRDD-L1I0FP5T; the home.ts:39 blocker is addressed by janitor 988720bb, and the TRDD-7KPG2PCO line 42 blocker waits on CPV PR 278, a CPV release and a .cpv-version bump. This supersedes the release-path line above it.
 
 ## Owner request and decisions (verbatim, 2026-11-17)
 - Request: "i need to scan 2 terabytes of projects and i need the secrets-shield scanner to be very very fast (better if rust optimized)"

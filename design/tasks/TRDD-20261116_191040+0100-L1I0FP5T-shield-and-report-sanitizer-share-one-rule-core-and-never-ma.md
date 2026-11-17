@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-17T12:48:12+0100
+updated: 2026-11-17T14:41:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,7 @@ Owner 2026-11-16 (verbatim): then change both to never mask file paths. the only
 Owner 2026-11-16 (verbatim): do the same for windows users (is there a shorthand for it too i think, verify)
 
 Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W design point 2 (path and identity rules stay in Python). Related: TRDD-NRF7OJ5H, TRDD-QM8YRCZ5. The owner ordered this rule (quotes above); only the decisions under "Pending owner decisions" are open.
+- Release 3.9.9 blockers as of 2026-11-17T14:41:42+0100: the REGEX_DOS at home.ts:39 is addressed by janitor 988720bb (full CPV run pending); the absolute path on line 42 of the archived card TRDD-7KPG2PCO cannot be edited (trddgrep refused: archived cards are immutable, TRDD-MQE5D28T D8), so it waits on CPV PR 278 (opened by this project's Claude; its Validate check fails on an integrity-manifest hash mismatch of the 3 files it changes, cause not yet confirmed), then a CPV release and a bump of .cpv-version from v5.16.2. Also before publishing: one full CPV run, and the three dev cards (TRDD-FQVEILVK, TRDD-L1I0FP5T, TRDD-S6GX1DHN) closed or re-columned.
 
 ## Approval log
 
@@ -67,6 +68,8 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-17T12:43:33+0100 — Correction to report-sanitizer commit 1c5d0e5, which is not amended: its message says increment 2 showed the core rule hides only fixtures; outside the increment 1 scratch folder it hid only the 50 fixtures, and inside that scratch it also hid 4,579 digit runs that the increment 2 worker classified by shape as synthetic (see the decision (e) line).
 - 2026-11-17T12:48:12+0100 — report-sanitizer 5cd08ff re-pins its core to janitor f5f0e04a and vendors email.ts and tests/email.test.ts (added to the pinned list in core/UPSTREAM.json); nothing calls redactEmails, so the output is inferred unchanged (patterns.ts adds only a label, email.ts has no caller), not measured. sync_core.py --check exit 0 and the four changed files equal git show f5f0e04a, by main-agent; test_core_pin 6, test_shield_bridge 33, the vendored email test 40 pass under bun (twice) and core tsc with only TS2307 for bun:test, by the worker's runs.
 - 2026-11-17T12:48:12+0100 — Note to report-sanitizer 5cd08ff, whose message says a hook run during the non-atomic pull would exit non-zero and not write: main-agent read the code after the commit. A bridge that dies before answering (a truncated or empty patterns.ts that fails to load) makes Shield._request raise ShieldError, and main() and run_stdin return 4 before the current file is written; files sanitized earlier in the same run were written by a working bridge. Not ruled out: a half-written patterns.ts that still parses and exports everything the bridge imports, which needs a cut at a statement boundary. Whether any hook ran sanitize-reports during the pull was not checked.
+- 2026-11-17T14:41:08+0100 — Janitor 988720bb: the Windows spaced-name tail of hooks/secret-shield/home.ts is a hand loop (rewriteWindows); WINDOWS now matches the first word only. Why: CPV 5.16.2 flagged the repeated group as REGEX_DOS (a false positive: measured linear in standalone bun on 8 hostile shapes up to 80,000 characters, one run per size, reported on CPV issue 264), and the plugin engine has a silent group-loop ceiling. Checks: old-against-new differential over 440,000 cases with 0 mismatches, rerun by main-agent with the committed home.ts as the new side; shield runner 1165 pass, 0 fail (floor 800), by main-agent; the pinned CPV REGEX_DOS patterns and its provably-linear check on the new file, by the worker's run only; the full CPV validator has not run on it. report-sanitizer still vendors the old home.ts; its re-pin is pending.
+- 2026-11-17T14:41:35+0100 — Increment 4 measured, by the increment 4 worker's report (local, not in the repo: reports_dev/sonnet-worker/20261117_143746+0100-inc4-gap-list.md): of 159,219 listed files, 159,116 gave output equal to the real sanitizer through the instrumented replica, 6 hit the 30 s per-file alarm, and 97 were never processed (18 changed before the run reached them, 79 vanished from the live plugin cache). The key, bearer and ssh pre rules had no hit in the comparable files; that is absence of evidence only, so those rules are not to be dropped on this report alone. The cred and email gap buckets rest on heuristic shape classes and an unvalidated Python port of the core logic; no matched line was opened.
 
 ## Design
 
