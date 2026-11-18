@@ -3,7 +3,7 @@
 // The real vault (~/.secrets_shield) must never be touched: every test points SECRETS_SHIELD_VAULT_DIR at a fresh folder under tmp, and the last test checks the real file did not change.
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Database } from 'bun:sqlite'
@@ -303,6 +303,51 @@ describe('command line', () => {
     expect(again.code).toBe(1)
     expect(again.out).toBe('not found\n')
   })
+
+  // WHY the bytes and not a query: a query reads only live rows, while a free page or an old WAL frame keeps a value with no row pointing at it. The value must first reach vault.db (a clean close checkpoints the WAL into it), because that is the file secure_delete protects. The delete then runs on a new connection, as the CLI does, and the bytes are read before that connection closes.
+  test('a removed value is in neither vault.db nor vault.db-wal, read while the vault is still open', () => {
+    const v = open()
+    const deleted = ['fake-vault', 'removed-value', 'not-a-real-secret-0002'].join('-')
+    const [id] = v.lookupOrInsert(ORIGIN, [{ value: deleted, type: 'fake-kind', encoding: 'raw' }])
+    const needle = Buffer.from(deleted, 'utf8')
+    const holding = () => ['vault.db', 'vault.db-wal'].filter((name) => existsSync(join(dir, name)) && readFileSync(join(dir, name)).includes(needle))
+    v.close()
+    vault = null
+    expect(holding()).toEqual(['vault.db'])
+    const reopened = open()
+    expect(reopened.remove(id)).toBe(true)
+    expect(holding()).toEqual([])
+    reopened.close()
+    vault = null
+  })
+
+  // WHY a second connection holds a read transaction: its snapshot is older than the delete, so the TRUNCATE checkpoint cannot finish and returns busy. The DELETE has already committed by then, so the error tells the user to run the delete again; the re-run finds no row, and its checkpoint empties the WAL.
+  test('a busy WAL checkpoint fails the delete with the fixed text, is never reported as deleted, and a re-run empties the WAL', async () => {
+    const v = open()
+    const secret = ['fake-busy', 'checkpoint-value', 'not-a-real-secret-0005'].join('-')
+    const [id] = v.lookupOrInsert(ORIGIN, [{ value: secret, type: 'fake-kind', encoding: 'raw' }])
+    const needle = Buffer.from(secret, 'utf8')
+    const holding = () => ['vault.db', 'vault.db-wal'].filter((name) => existsSync(join(dir, name)) && readFileSync(join(dir, name)).includes(needle))
+    const busyText = 'the vault delete could not checkpoint the WAL; run it again with no scan running'
+    const reader = new Database(join(dir, 'vault.db'))
+    reader.exec('BEGIN')
+    reader.query('SELECT count(*) AS n FROM secrets').get()
+    try {
+      const busy = await cli(['delete', id], { [VAULT_DIR_ENV]: dir })
+      expect(busy.code).toBe(2)
+      expect(busy.out).toBe('')
+      expect(busy.err).toBe('shield-vault: ' + busyText + '\n')
+      expect(() => v.remove(id)).toThrow(busyText)
+      expect(holding()).not.toEqual([])
+    } finally {
+      reader.exec('COMMIT')
+      reader.close()
+    }
+    const rerun = await cli(['delete', id], { [VAULT_DIR_ENV]: dir })
+    expect(rerun.code).toBe(1)
+    expect(rerun.out).toBe('not found\n')
+    expect(holding()).toEqual([])
+  }, 60_000)
 
   test('a malformed delete argument and a bad command are refused with fixed text that does not echo the argument', async () => {
     const env = { [VAULT_DIR_ENV]: dir }

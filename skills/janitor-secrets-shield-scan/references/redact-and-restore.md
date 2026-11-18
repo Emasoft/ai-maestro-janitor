@@ -37,7 +37,9 @@ restore behaviour.
   text and its values stay in the vault as rows that no marker points at;
   restore never reads them. A later run on the same file reuses those rows (one
   row per file and value). `bun vault.ts list` shows them by origin (never the
-  value) and `bun vault.ts delete <uuid>` removes one.
+  value) and `bun vault.ts delete <uuid>` removes one. After a successful delete,
+  the deleted row's value is in neither vault.db nor vault.db-wal. Values deleted by earlier versions may remain in the files.
+  A busy WAL checkpoint fails the delete (exit 2): run it again.
 - Never written, still scanned and counted in `findings_not_redacted`; each is
   a `skip` record and a count under `skipped`: `git-internal` (anything inside
   a `.git` folder, or a `.git` pointer file; with `--all`, `.git/config` is

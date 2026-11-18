@@ -1,6 +1,6 @@
 // secrets-shield vault, increment 3 step 3a-1 (TRDD-BAQB9SYO; vault design TRDD-QM8YRCZ5): every redacted value is kept in plain text in one SQLite file, keyed by the uuid that goes into the redaction marker.
 // Library: openVault() -> { lookupOrInsert(origin, entries), lookup(origin, entries), insertPlanned(origin, entries, uuids), byUuid(uuid), list(), remove(uuid), close() }. The caller (the redact step) plans the uuids with lookup(), runs every check of the file, then commits all rows of the file with insertPlanned() and only then replaces the file; a skipped file leaves no row (TRDD-JYZAL6HW).
-// CLI (human and agent safe, never prints a value): bun vault.ts list  (TAB-separated, one row per line: uuid, type, origin, first_seen, last_seen, count) · bun vault.ts delete <uuid>  (exit 0 deleted, 1 not found).
+// CLI (human and agent safe, never prints a value): bun vault.ts list  (TAB-separated, one row per line: uuid, type, origin, first_seen, last_seen, count) · bun vault.ts delete <uuid>  (exit 0 deleted, 1 not found, 2 error such as a busy WAL checkpoint; after exit 0 the deleted row's value is in neither vault.db nor vault.db-wal; values removed by earlier versions may remain).
 // There is no restore command here: restore.ts (step 3a-4) is human-only and is the only reader of a value besides byUuid().
 // A value never reaches argv, stdout, stderr or an error message: every error is fixed text (plus a SQLITE_* code, which is fixed text of SQLite itself).
 // Exit: 0 ok · 1 delete found no such row · 2 usage or fatal error.
@@ -154,6 +154,10 @@ export function openVault(): Vault {
     const mode = retryBusy(() => opened.query('PRAGMA journal_mode = WAL').get()) as { journal_mode?: string } | null
     // WHY a hard check: some filesystems refuse WAL and SQLite silently keeps the old mode; concurrent workers then fail unpredictably, so stop here.
     if (mode?.journal_mode?.toLowerCase() !== 'wal') throw new VaultError('the vault could not be put in WAL mode')
+    // WHY secure_delete: the vault holds plaintext secrets, and without this SQLite leaves a deleted row's bytes in the free space of its page until that page is reused, so the value would stay readable in vault.db. ON overwrites the deleted cells with zeros. It is a setting of each connection, so every open sets it.
+    db.exec('PRAGMA secure_delete = ON')
+    // WHY the read back: the pragma is checked to take effect, not assumed. A pragma that did not apply would leave the deleted bytes in vault.db with no error, and this build defaults to 2 (FAST), not 1, so only the value 1 is accepted.
+    if ((db.query('PRAGMA secure_delete').get() as { secure_delete: number }).secure_delete !== 1) throw new VaultError('the vault could not turn on secure_delete')
     // WHY the UNIQUE key is (origin, value, encoding): the same secret in the same file reuses its uuid and another file gets its own (owner order).
     // WHY the CHECK accepts only raw: every vault value is written raw (spec v6) and no writer of any other encoding is left. A vault created before this change keeps its old CHECK, which still accepts raw, so it keeps working; no migration.
     retryBusy(() =>
@@ -203,6 +207,7 @@ function wrap(db: Database): Vault {
   // WHY list() never selects the value: the CLI process then never holds one, so no bug in its printing can leak it.
   const selectAll = db.prepare(`SELECT ${meta} FROM secrets ORDER BY first_seen, uuid`)
   const deleteOne = db.prepare('DELETE FROM secrets WHERE uuid = ?')
+  const checkpointWal = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)')
 
   return {
     lookupOrInsert(origin, entries) {
@@ -261,12 +266,19 @@ function wrap(db: Database): Vault {
     },
     remove(uuid) {
       try {
-        return deleteOne.run(uuid).changes > 0
+        const removed = deleteOne.run(uuid).changes > 0
+        // WHY the checkpoint runs even when no row changed: a delete leaves the old page, with the value, as a frame in vault.db-wal, and only a checkpoint copies the cleaned page into vault.db and empties the WAL file. If an earlier call deleted the row and its checkpoint came back busy, a re-run finds no row, so no row count may gate the checkpoint. TRUNCATE is what empties the file. busy is 1 when a reader or writer kept the checkpoint from finishing; the old frame would still hold the value, so that is an error, never a silent success.
+        if ((checkpointWal.get() as { busy: number }).busy !== 0) throw new VaultError('the vault delete could not checkpoint the WAL; run it again with no scan running')
+        return removed
       } catch (error) {
+        // WHY the check: the busy error above is already fixed text, and wrapping it again would replace it with the generic write error.
+        if (error instanceof VaultError) throw error
         throw new VaultError(`the vault write failed${sqliteCode(error)}`)
       }
     },
     close() {
+      // WHY the statements are finalized first: an open prepared statement keeps the connection open, so SQLite never runs its last-connection checkpoint and the rows stay in vault.db-wal instead of vault.db. Measured 2026-11-18 with a probe: a connection closed after prepared statements left the value in the WAL; the same connection closed after query-only use checkpointed it into vault.db.
+      for (const statement of [upsert, selectOne, selectKey, selectAll, deleteOne, checkpointWal]) statement.finalize()
       db.close()
     },
   }
@@ -296,7 +308,7 @@ function main(argv: string[]): void {
     // WHY the argument is checked and never echoed: a malformed argument could be pasted text that holds a secret.
     if (!UUID_RE.test(uuid)) return fatal('the argument is not a uuid')
     const vault = openOrFatal()
-    const removed = vault.remove(uuid)
+    const removed = removeOrFatal(vault, uuid)
     vault.close()
     process.stdout.write(removed ? 'deleted\n' : 'not found\n')
     process.exit(removed ? 0 : 1)
@@ -310,6 +322,15 @@ function openOrFatal(): Vault {
     return openVault()
   } catch (error) {
     return fatal(error instanceof VaultError ? error.message : 'the vault could not be opened')
+  }
+}
+
+// WHY the VaultError is printed here: an error thrown out of main() reaches the uncaughtException handler above, which replaces it with the generic text, so the fixed busy-checkpoint message would never reach the user.
+function removeOrFatal(vault: Vault, uuid: string): boolean {
+  try {
+    return vault.remove(uuid)
+  } catch (error) {
+    return fatal(error instanceof VaultError ? error.message : 'the vault delete stopped on an internal error')
   }
 }
 
