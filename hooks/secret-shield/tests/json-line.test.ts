@@ -71,6 +71,12 @@ function kinds(seed: string): Kind[] {
   ]
 }
 
+const kindNamed = (seed: string, name: string): Kind => {
+  const k = new Map(kinds(seed).map(x => [x.name, x] as const)).get(name)
+  if (k === undefined) throw new Error('no kind ' + name)
+  return k
+}
+
 const FORMS = ['1', '2n', '2t', '3', '4', '5a', '5b', '5c', '6', '7', '7b', 'C'] as const
 type Form = (typeof FORMS)[number]
 
@@ -174,11 +180,11 @@ describe('redactJsonLine hides a secret behind each escape form', () => {
   let n = 0
   for (const name of kinds('x').map(k => k.name)) {
     for (const form of FORMS) {
-      if (build(kinds('x').find(k => k.name === name)!, form) === null) continue
+      if (build(kindNamed('x', name), form) === null) continue
       const expected: Outcome = LEFT_WHOLE.has(`${name}|${form}`) ? 'fully left' : 'removed'
       test(`${name}, form ${form}: ${expected}`, () => {
         for (const seed of SEEDS) {
-          const k = kinds(seed).find(x => x.name === name)!
+          const k = kindNamed(seed, name)
           const line = lineFor(build(k, form)!, n++)
           JSON.parse(line)
           const out = redactJsonLine(line)
@@ -193,7 +199,7 @@ describe('redactJsonLine hides a secret behind each escape form', () => {
 describe('the detector of this file can see a leak', () => {
   test('the plain-text pass redact() leaves a github token whole after an escaped newline and when written as backslash-u escapes; redactJsonLine hides both', () => {
     for (const form of ['2n', '5b'] as const) {
-      const k = kinds('control').find(x => x.name === 'github-token')!
+      const k = kindNamed('control', 'github-token')
       const line = lineFor(build(k, form)!, 7000)
       expect(outcomeOf(k.units, redact(line).text)).toBe('fully left')
       expect(outcomeOf(k.units, redactJsonLine(line).text)).toBe('removed')
@@ -265,7 +271,7 @@ describe('redactJsonLine leaves a clean line alone', () => {
     texts.forEach((text, i) => {
       const line = lineFor(esc(text), 9000 + i)
       const out = redactJsonLine(line)
-      expect(out.text === line).toBe(true)
+      expect(out.text).toBe(line)
       expect(countOf(out.hits)).toBe(0)
     })
   })
@@ -289,7 +295,7 @@ describe('redactJsonLine leaves a clean line alone', () => {
 describe('redactJsonLine spreads a hidden value to its copies in the same line', () => {
   test('a bare copy in another string, before and after the member that names it, is hidden', () => {
     for (const seed of SEEDS) {
-      const value = kinds(seed).find(k => k.name === 'json-pair-password')!.s
+      const value = kindNamed(seed, 'json-pair-password').s
       expect(propagates(value)).toBe(true)
       const line = JSON.stringify({ first: `note ${value} here`, password: value, last: `again ${value}` })
       const out = redactJsonLine(line)
@@ -300,7 +306,7 @@ describe('redactJsonLine spreads a hidden value to its copies in the same line',
 
   test('a name-assignment right after an escaped newline is hidden, and its copy mid-line with it; one mid-line alone is not (state of the rule: anchored to a line start)', () => {
     for (const seed of SEEDS) {
-      const value = kinds(seed).find(k => k.name === 'name-assignment')!.s
+      const value = kindNamed(seed, 'name-assignment').s
       expect(propagates(value)).toBe(true)
       const both = redactJsonLine(JSON.stringify({ text: `first: password=${value}\ndone\npassword=${value}` }))
       expect(viewsOf(both.text).includes(value)).toBe(false)
