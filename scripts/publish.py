@@ -2668,6 +2668,99 @@ def detect_bump_type(root: Path) -> str:
     return "patch"
 
 
+def _run_secret_scan(root: Path, args: list[str], what: str) -> None:
+    """Run scripts/lib/staged_secret_scan.py in `root`; exit 1 unless it exits 0 (clean or inert).
+
+    TRDD-FNPDFZWU increment 2. OWNER ORDER 2026-11-18: no secret may reach the changelog, the GitHub release notes
+    or package metadata, so the scan runs BEFORE git-cliff and again on the release text. A scanner that could not run
+    (exit 2) blocks too: a scan that did not run is not a clean scan. It runs as a subprocess because the library
+    freezes its git environment at import. It prints commit, file, line and kind, never a value.
+    """
+    scanner = Path(__file__).resolve().parent / "lib" / "staged_secret_scan.py"
+    try:
+        r = subprocess.run([sys.executable, str(scanner), *args], cwd=str(root), capture_output=True, text=True, check=False, timeout=900)
+    except (OSError, subprocess.SubprocessError):
+        cprint(f"{RED}Secret scan of {what} could not be started or timed out — the publish is blocked.{NC}")
+        sys.exit(1)
+    if r.stdout.strip():
+        cprint(r.stdout.rstrip())
+    # Always forward stderr: it carries the exemption disclosure ("N finding(s) exempted by .janitor-secret-allow", "M of them by
+    # entries not present at the base"), which must be visible on a PASSING scan too, not only when the scan blocks.
+    if r.stderr.strip():
+        print(r.stderr.strip(), file=sys.stderr)
+    if r.returncode != 0:
+        cprint(f"{RED}Secret scan of {what} blocked the publish (exit {r.returncode}). Nothing was committed or pushed by this step.{NC}")
+        sys.exit(1)
+
+
+def _last_release_tag(root: Path, new_ver: str) -> str | None:
+    """The nearest release tag reachable from HEAD, skipping the tag of the version being released, or None.
+
+    git-cliff groups commits by `tag_pattern = "v[0-9].*"` (cliff.toml) and stage_changelog names no tag, so this
+    mirrors that pattern. The tag of `new_ver` is skipped because an interrupted publish can leave it local
+    (`_drop_unpublished_stale_tags` only runs inside stage_changelog). None on any failure: the caller then scans the
+    whole of HEAD, which is a superset, so a failing lookup can only widen the scan, never narrow it.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", f"v{new_ver}", "HEAD"],
+            capture_output=True, text=True, cwd=str(root), check=False, timeout=30, env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _preview_release_notes(root: Path, new_ver: str) -> str | None:
+    """The changelog section git-cliff would render for `v<new_ver>`, written to stdout (nothing on disk), or None when stage_changelog would skip.
+
+    WHY: stage_changelog writes CHANGELOG.md, and stage_bump has already rewritten files by then. Rendering the same section
+    to stdout lets the release-notes scan run before any file is touched. Exit 1 when git-cliff fails, like the scan itself:
+    a text that could not be produced is a text that was not scanned.
+    """
+    if not shutil.which("git-cliff") or not (root / "cliff.toml").is_file():
+        return None
+    try:
+        r = subprocess.run(
+            ["git-cliff", "--tag", f"v{new_ver}", "--unreleased", "--strip", "header"],
+            capture_output=True, text=True, cwd=str(root), check=False, timeout=120, env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        r = None
+    if r is None or r.returncode != 0:
+        cprint(f"{RED}git-cliff could not render the release notes preview — the secret scan of the notes did not run, the publish is blocked.{NC}")
+        sys.exit(1)
+    return r.stdout
+
+
+def stage_secret_scan(root: Path, new_ver: str) -> None:
+    """Scan every commit git-cliff will read (the last release tag..HEAD, or all of HEAD with no tag), and the release notes it would render, for secrets.
+
+    Called BEFORE stage_bump: both scans only read git (the preview is git-cliff writing to stdout), so a block leaves the
+    working tree exactly as it was. Also runs on a dry run. The notes are scanned again from the real CHANGELOG.md after
+    stage_changelog and from the text passed to `gh release create`; those later scans are a safety net only.
+    """
+    cprint(f"\n{BOLD}[secret scan] Scanning the commits git-cliff will read...{NC}")
+    tag = _last_release_tag(root, new_ver)
+    rev_range = f"{tag}..HEAD" if tag else "HEAD"
+    _run_secret_scan(root, ["--range", rev_range], f"the commits {rev_range}")
+    preview = _preview_release_notes(root, new_ver)
+    if preview is not None:
+        scan_release_text(root, "the release notes preview", preview)
+    cprint(f"  {GREEN}No secret in {rev_range}.{NC}")
+
+
+def scan_release_text(root: Path, label: str, text: str) -> None:
+    """Exit 1 if `text` (the new CHANGELOG section or the GitHub release notes) holds a secret; any finding blocks, there is no baseline."""
+    fd, tmp = tempfile.mkstemp(prefix="release-text-scan-", suffix=".md")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        _run_secret_scan(root, ["--message-file", tmp], label)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
 def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
 
@@ -3291,6 +3384,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     args = ["gh", "release", "create", tag, "--title", tag]
     if changelog_file.is_file():
         notes = _release_notes_for(root, new_ver)
+        scan_release_text(root, "the release notes", notes)
         fd, notes_tmp = tempfile.mkstemp(prefix="gh-release-notes-", suffix=".md")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(notes)
@@ -3783,9 +3877,15 @@ def main() -> int:
         stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
         stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
         stage_consistency(root)
+        # TRDD-FNPDFZWU: no secret may reach the changelog or the release notes. The scan only READS git (the range, and the
+        # notes git-cliff would render, to stdout), so it runs BEFORE stage_bump: a block leaves the tree untouched.
+        stage_secret_scan(root, new_ver)
         stage_bump(root, new_ver, args.dry_run)
         stage_update_badges(root, current, new_ver, args.dry_run)
         stage_changelog(root, new_ver, args.dry_run)
+        # Safety net on the real CHANGELOG.md section, before it is committed.
+        if not args.dry_run:
+            scan_release_text(root, "the new CHANGELOG.md section", _release_notes_for(root, new_ver))
         stage_commit_and_push(root, new_ver, args.dry_run)
         stage_gh_release(root, new_ver, args.dry_run)
 

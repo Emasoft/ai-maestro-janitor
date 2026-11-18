@@ -84,6 +84,20 @@ run_release_gate() {
     python3 scripts/publish.py --gate
 }
 
+# Range-scan the commits a pushed ref would add for secrets (TRDD-FNPDFZWU increment 2).
+#   $1 local sha   $2 remote sha
+# Existing ref: <remote>..<local>. New ref (remote sha all zeros), or a remote sha this clone does not have (a forced
+# push over history we never fetched): <local> --not --remotes, i.e. only commits no remote-tracking ref holds.
+# stdin is closed for the scan: it runs inside a `read` loop and must not swallow the remaining ref lines.
+# Inert (exit 0) when the janitor is not active; exit 1 (secret) and 2 (cannot run) both block.
+range_scan() {
+    if [ "$2" != "$ZERO" ] && git cat-file -e "$2^{commit}" 2>/dev/null; then
+        uv run python scripts/lib/staged_secret_scan.py --range "$2..$1" </dev/null >&2
+    else
+        uv run python scripts/lib/staged_secret_scan.py --range "$1" --not --remotes </dev/null >&2
+    fi
+}
+
 # Secret-scan ONLY the new commits of a feature-branch push.
 #   $1 local sha   $2 remote sha   $3 short branch name
 # Returns 0 (clean -> allow) or non-zero (secret found / cannot scan -> block).
@@ -116,7 +130,28 @@ release_push=0
 saw_feature=0
 scan_failed=0
 
-# git feeds "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin. Slurp them once: the range scan
+# below must cover EVERY pushed ref BEFORE any gate (trufflehog, release gate) runs, and piping into the loop would
+# run it in a subshell and lose release_push / saw_feature / scan_failed.
+pushed_refs="$(cat)"
+
+# TRDD-FNPDFZWU increment 2 — range secret scan of every commit each pushed ref would add. A commit made by
+# cherry-pick, rebase, `commit --no-verify`, a fast-forward merge or `am` never ran the commit-time hooks, so
+# this is the last point before the commits leave the machine. A blocked or cannot-run scan blocks the push.
+range_failed=0
+while read -r localref localsha remoteref remotesha; do
+    [ -z "$localref" ] && continue
+    [ "$localsha" = "$ZERO" ] && continue    # ref deletion — no commits to scan
+    range_scan "$localsha" "$remotesha" || range_failed=1
+done <<REFS
+$pushed_refs
+REFS
+if [ "$range_failed" -eq 1 ]; then
+    echo "BLOCKED: the secret scan of the pushed commits failed (see above); nothing was pushed." >&2
+    exit 1
+fi
+
+# Existing gates, unchanged: trufflehog on each feature-branch push, and the release gate for a default branch or tag.
 while read -r localref localsha remoteref remotesha; do
     [ -z "$localref" ] && continue
     [ "$localsha" = "$ZERO" ] && continue    # ref deletion — nothing to gate/scan
@@ -137,7 +172,9 @@ while read -r localref localsha remoteref remotesha; do
             release_push=1    # unknown ref shape — gate conservatively
             ;;
     esac
-done
+done <<REFS
+$pushed_refs
+REFS
 
 # A release ref is present, or nothing parsed -> enforce the full release gate.
 if [ "$release_push" -eq 1 ] || [ "$saw_feature" -eq 0 ]; then

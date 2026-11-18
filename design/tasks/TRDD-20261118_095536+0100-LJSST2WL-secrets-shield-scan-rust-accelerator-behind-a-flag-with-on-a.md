@@ -4,7 +4,7 @@ title: secrets-shield-scan Rust accelerator behind a flag with on and off parity
 column: todo
 status: tasked
 created: 2026-11-18T09:55:36+0100
-updated: 2026-11-18T09:55:36+0100
+updated: 2026-11-18T18:12:29+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -27,3 +27,7 @@ Increment 2 of TRDD-BAQB9SYO, split out on 2026-11-18. A Rust accelerator only f
 ## Approval log
 
 - 2026-11-18T09:55:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Owner orders
+
+2026-11-18 (verbatim): "you forgot that i told you that the secrets-shield must not only scan and redact the context and the jsonl transcripts in realtime, preventing agents to ever read or send via api a secret (like the installed mod partially does, but it is incomplete) but also to prevent committing secrets with executing the secrets-scanner on the committed files at each commit? before that git cliff will create the changelog (otherwise there is the risk of publishing secrets in the very release logs of github, or metadata of npm, bun or pypi packages!)? What are you doing now? implement those immediately. secrets-shield must be blazing fast (with its performance critical core routines optimized in rust) and always on when the janitor is armed!"

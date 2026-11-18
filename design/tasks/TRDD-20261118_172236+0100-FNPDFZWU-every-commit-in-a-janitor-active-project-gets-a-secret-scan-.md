@@ -1,10 +1,10 @@
 ---
 trdd-id: FNPDFZWU
 title: Every commit in a janitor-active project gets a secret scan of all staged files, Markdown included, chained with an existing hook
-column: backburner
+column: dev
 status: tasked
 created: 2026-11-18T17:22:36+0100
-updated: 2026-11-18T17:41:50+0100
+updated: 2026-11-18T18:44:11+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T17:22:36+0100
+implementation-commits: [a2628868]
 ---
 
 # Every commit in a janitor-active project gets a secret scan of all staged files, Markdown included, chained with an existing hook
@@ -55,3 +56,22 @@ Design question (a) is wrong: a PreToolUse guard cannot be the scan point. `git 
 - Exit codes: 0 clean, 1 block, 2 cannot run (blocks while the janitor is active); scan.ts exit 3 (incomplete) is cannot-run, never clean. Inert (exit 0, one line) when the janitor DATA dir is absent or the kill-switch file exists.
 - Plugin root is resolved from the script path (Path(__file__).resolve()), never from cwd.
 - Increment 1 files: scripts/lib/staged_secret_scan.py, git-hooks/pre-commit stage 0b, new git-hooks/commit-msg, publish.py install_hook installs commit-msg, tests/test_staged_secret_scan.py.
+
+## Progress 2026-11-18
+
+- Landed: increment 1 in a2628868 (staged_secret_scan.py, pre-commit stage 0b, commit-msg, pre-merge-commit, install_hook, 20 tests). a2628868 is in implementation-commits. Its commit message overstates the check scope: ruff ran on 3 files, pyright on 2, mypy on scripts/ (552 files).
+- Decision: git-hooks/pre-merge-commit runs the same index scan, because `git merge --no-ff` runs pre-merge-commit and commit-msg but not pre-commit (measured 2026-11-18 in a scratch repo with marker hooks).
+- Measured 2026-11-18, scratch repos with marker hooks for pre-commit, commit-msg, pre-merge-commit, prepare-commit-msg, pre-applypatch, applypatch-msg, pre-rebase, post-rewrite, post-merge, post-commit: plain commit runs pre-commit, prepare-commit-msg, commit-msg; merge --no-ff runs pre-merge-commit, prepare-commit-msg, commit-msg; merge --ff-only and a fast-forward pull run only post-merge (cannot block); rebase (merge backend) runs pre-rebase, prepare-commit-msg per pick, post-commit, post-rewrite; am runs applypatch-msg and pre-applypatch; cherry-pick and commit --no-verify run only prepare-commit-msg. A prepare-commit-msg that exits 1 aborts commit --no-verify (exit 1), cherry-pick (exit 1) and rebase (exit 1).
+- Increment 2b (decision by main-agent 2026-11-18; the owner may veto): move the index scan out of pre-commit stage 0b and pre-merge-commit into prepare-commit-msg, so every commit, merge --no-ff, cherry-pick, rebase pick and commit --no-verify is scanned once. Costs: --no-verify no longer skips the secret scan; commit --amend compares with the commit being amended, so a secret that came in through an earlier unscanned commit passes the amend (the push-time range scan catches it); stage 0b and pre-merge-commit shipped in a2628868 are retired. am needs pre-applypatch separately (the hook runs, measured; its abort is not measured).
+- Gaps no commit-time hook can close: fast-forward merges and pulls (commits made elsewhere). Increment 2 (range scan at pre-push and at publish, before git-cliff) covers them.
+- Open item, not dropped: the owner asked to detect AND redact at commit time. v1 meets detect only. Redact stays owed through the vault-backed path (peer llm-externalizer point 3).
+- The HEAD-baseline rule passes a real secret committed earlier. First install needs a one-time tree scan (triage done 2026-11-18 by main-agent: no real secret seen; 270 findings in 261 records; the values of 16 corpus lines could not be shape-checked, see the scanner and bridge gap card) and a history scan (TRDD-QWD53NHM, git history scan only).
+- Known limits of increment 1 (worker report): binary blobs are not scanned; a text file over 64 MB makes the scan incomplete and blocks the commit; a changed PEM body whose BEGIN line exists at HEAD counts as pre-existing; a line whose identical text exists elsewhere in the HEAD blob counts as pre-existing; inert only when the DATA dir is absent or the kill-switch is set (a per-project disarm does not make it inert).
+- Increment 3 (install on arm into every project via a DATA-dir stub; never overwrite an untracked hook; another repo adds the one-line call itself) is queued, not assigned. "Always on in every project" needs increment 3 plus a release.
+- llm-externalizer repo: core.hooksPath is its tracked .githooks folder; no commit-msg there today; that session adds the one-line call itself and runs a scratch test commit on a throwaway branch.
+- Correction to a2628868: its message overstates the checks. The main agent ran 7 single test files (119 passed), ruff on 3 files, mypy on scripts/ and pyright on 2 files; the full suite did not run.
+- Increment 2 (range scan): staged_secret_scan.py --range scans every commit of a rev-list range, its message plus the blobs it changes against its first parent. git-hooks/pre-push runs it on every pushed ref before trufflehog and the release gate. publish.py runs it on the last release tag..HEAD and on a git-cliff stdout preview of the notes before stage_bump, then again on the real CHANGELOG section and on the gh release notes.
+- Exemption list .janitor-secret-allow (spec reports_dev/main-agent/specs/fnpdfzwu-inc2c-exempt.md and its addendum): file findings only, never a message or release text; read from the index for a commit and from the tip commit of the range for a push or publish, never from the working tree; every run discloses how many findings were exempted and how many by entries new since the base.
+- Decision (main agent, 2026-11-18): a pushed commit may add its own exemption entry; it is disclosed, not refused. Reason: a refusal would need a bypass flag that an agent can set as easily as it writes the entry, so the disclosure in the push and publish output is the guard.
+- Open: the ai-maestro-janitor repo's own entries for its 17 range findings (shape-checked by the main agent, no real-looking value) wait until increment 3a of TRDD-DSXC9MP9 is committed, because a core change can change the findings. Until then the range scan blocks every push and publish of this repo.
+- Known gaps: the notes preview with a stale local v<new> tag has no test (the range scan still covers its commits); a first push with no remote-tracking refs scans the whole history under the 300 s scanner timeout (to settle in increment 3); a host without uv blocks every push (exit 127).
