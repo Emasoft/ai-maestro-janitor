@@ -72,7 +72,7 @@ def _log_top_cpu(load: float) -> None:
         # catch stays and the typed guard keeps a failed log write from escaping this handler.
         try:
             state.log_line(_LOG, "top-cpu snapshot failed; no process log for this episode")
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             pass
 
 

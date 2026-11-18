@@ -1156,7 +1156,7 @@ def _log_drift_printed(name: str, line: str) -> None:
     deliberately carries NO local day (unlike the seen-file key) so the same line printed on
     different days keeps the same key and repeats can be grouped across days; the log line's own
     timestamp carries the time. Bare action markers are not drift and are skipped. Logging must
-    never block or break the print, hence the broad guard. Only detector output that passes
+    never block or break the print, hence the typed guard. Only detector output that passes
     through `_dedupe_drift_text` is recorded; the dispatcher's own printed lines are not.
     Bounded by `state.log_line` -> `rotate_log_if_big` (1 MiB, one .log.1 level)."""
     stripped = line.strip()
@@ -1166,7 +1166,10 @@ def _log_drift_printed(name: str, line: str) -> None:
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
     try:
         state.log_line("dispatch", f"drift printed: detector={name} key={digest}")
-    except Exception:  # noqa: BLE001, S110 - logging must never break the print
+    except (OSError, RuntimeError, ValueError):
+        # why: logging must never break the print, so the handler names every type log_line can raise
+        # (RuntimeError from Path.expanduser in log_dir, OSError, and UnicodeEncodeError as a ValueError).
+        # The failed diagnostic write is not retried.
         pass
 
 
@@ -1399,7 +1402,7 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
                     # why: a ledger failure must never break the heartbeat, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
                     try:
                         state.log_line("dispatch", "memory-marker suppression record skipped")
-                    except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                    except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
                         pass
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
@@ -1873,7 +1876,7 @@ def _spend_pending_agent_nudges() -> None:
         # why: a manifest bug must never break a fire, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
         try:
             state.log_line("dispatch", "pending-agent nudge spend skipped")
-        except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+        except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
             pass
 
 

@@ -185,7 +185,7 @@ def record_outcome(outcome: str, now: int) -> None:
         # why: a breadcrumb must never crash the beat, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
         try:
             state.log_line(_LOG, "outcome breadcrumb skipped")
-        except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+        except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
             pass
 
 

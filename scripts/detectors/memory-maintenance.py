@@ -538,14 +538,16 @@ def main() -> int:
         return _run()
     except Exception as exc:  # noqa: BLE001 — deliberate fail-open catch-all
         try:
-            state.log_line("memory-maintenance", f"unexpected error (fail-open no-op): {exc}")
-        except Exception:
-            # why: the catch-all is the contract (exit 0, no output); a failed log write must not escape it,
-            # so the typed guard keeps that write failure from breaking exit 0.
-            try:
-                state.log_line("memory-maintenance", "log append failed; unexpected error not logged")
-            except (OSError, ValueError):
-                pass
+            detail = f"unexpected error (fail-open no-op): {exc}"
+        except Exception:  # noqa: BLE001 -- str(exc) can raise any type; fall back to the type name
+            detail = f"unexpected error (fail-open no-op): {type(exc).__name__}"
+        try:
+            state.log_line("memory-maintenance", detail)
+        except (OSError, RuntimeError, ValueError):
+            # why: the catch-all is the contract (exit 0, no output); the failed diagnostic write is not retried.
+            # The tuple names every type log_line can raise: RuntimeError (Path.expanduser in log_dir), OSError,
+            # and UnicodeEncodeError (a ValueError).
+            pass
         return 0
 
 
@@ -581,7 +583,7 @@ def _surface_mistiered(scopes: list[tuple[str, Path]], split_cap: int) -> None:
             # report, and the typed guard keeps a failed log write from escaping this handler.
             try:
                 state.log_line("memory-maintenance", "mis-tier log append failed; report not logged")
-            except (OSError, ValueError):
+            except (OSError, RuntimeError, ValueError):
                 pass
 
 
@@ -642,7 +644,7 @@ def _surface_scope_escapes(scopes: list[tuple[str, Path]]) -> None:
             # report, and the typed guard keeps a failed log write from escaping this handler.
             try:
                 state.log_line("memory-maintenance", "scope-escape log append failed; report not logged")
-            except (OSError, ValueError):
+            except (OSError, RuntimeError, ValueError):
                 pass
 
 

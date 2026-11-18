@@ -1843,14 +1843,15 @@ def main() -> int:
         return _run()
     except Exception as exc:  # noqa: BLE001 — deliberate fail-open catch-all
         try:
-            state.log_line("memory-librarian", f"unexpected error (fail-open no-op): {exc}")
-        except Exception:
-            # why: the catch-all already fails open; this retries the record on the same log, and the
-            # typed guard keeps a failed retry from escaping the handler.
-            try:
-                state.log_line("memory-librarian", "log append failed; fault not logged")
-            except (OSError, ValueError):
-                pass
+            detail = f"unexpected error (fail-open no-op): {exc}"
+        except Exception:  # noqa: BLE001 -- str(exc) can raise any type; fall back to the type name
+            detail = f"unexpected error (fail-open no-op): {type(exc).__name__}"
+        try:
+            state.log_line("memory-librarian", detail)
+        except (OSError, RuntimeError, ValueError):
+            # why: the failed diagnostic write is not retried. The tuple names every type log_line can raise:
+            # RuntimeError (Path.expanduser in log_dir), OSError, and UnicodeEncodeError (a ValueError).
+            pass
         return 0
 
 

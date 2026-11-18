@@ -141,7 +141,7 @@ def _record_completions(state_dir: Path, chores: list[str]) -> dict[str, int]:
             # escaping this handler.
             try:
                 state.log_line("claimed-chore-stale", "completion history not saved; roster bound used")
-            except (OSError, ValueError):
+            except (OSError, RuntimeError, ValueError):
                 pass
     return {c: ccw.observed_period(hist.get(c, [])) for c in chores}
 

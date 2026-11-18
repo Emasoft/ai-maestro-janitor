@@ -331,7 +331,7 @@ def main() -> int:
         # failed log write from escaping this handler.
         try:
             state.log_line(_LOG, "ledger write failed; fallback alarm printed, not recorded")
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             pass
 
     state.rotate_log_if_big(_LOG)

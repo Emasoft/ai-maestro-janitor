@@ -226,7 +226,7 @@ def main() -> int:
                 # why: reporting must never break the guard, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
                 try:
                     state.log_line("branch-protection-apply", "BRPROT-003 report skipped")
-                except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
                     pass
         return _decline("no-repo-slug")
 

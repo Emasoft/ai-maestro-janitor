@@ -318,7 +318,7 @@ def main() -> int:
                 # failed log write from escaping this handler.
                 try:
                     state.log_line("ci-status", "ledger write failed; CI failure printed, not recorded")
-                except (OSError, ValueError):
+                except (OSError, RuntimeError, ValueError):
                     pass
 
     if action == "success":
@@ -351,7 +351,7 @@ def main() -> int:
             # failed log write from escaping this handler.
             try:
                 state.log_line("ci-status", "ledger write failed; CI success printed, not recorded")
-            except (OSError, ValueError):
+            except (OSError, RuntimeError, ValueError):
                 pass
 
     # "resolved", "success", or a delivered failure → stamp so a future fire treats this SHA

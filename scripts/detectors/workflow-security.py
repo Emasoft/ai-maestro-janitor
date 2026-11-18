@@ -192,7 +192,7 @@ def main() -> int:
                 # why: one bad rule must not blind the rest, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
                 try:
                     state.log_line("workflow-security", "structural scanner rule skipped")
-                except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
                     pass
                 continue
             for finding in rule_findings:
@@ -210,7 +210,7 @@ def main() -> int:
             # why: repo-rule isolation keeps the broad catch; stderr reaches the agent every fire, so the skip goes to the log.
             try:
                 state.log_line("workflow-security", "repo-level scanner rule skipped")
-            except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+            except (OSError, RuntimeError, ValueError):  # why: log_line can raise RuntimeError (Path.expanduser in log_dir), OSError, or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
                 pass
             continue
 
