@@ -307,11 +307,85 @@ def test_an_unreadable_failure_is_unknown_not_permanent() -> None:
     ) == les.OUTCOME_UNKNOWN
 
 
-def test_the_signature_uses_only_the_first_stderr_line() -> None:
-    """Later lines routinely carry a timestamp or request id and must not defeat the give-up."""
-    a = les.failure_signature(returncode=2, stderr="boom\nreq-id: 111\nat 12:00:01")
-    b = les.failure_signature(returncode=2, stderr="boom\nreq-id: 222\nat 12:00:09")
-    assert a == b == "2|boom"
+def test_a_long_request_id_in_the_last_line_does_not_split_identical_failures() -> None:
+    """Long ids, hex ids and timestamps are masked, so identical failures keep one signature. The HTTP status asserts at the end are an over-masking guard: they pass on the old code, which masked nothing, so they are not a red proof."""
+    a = les.failure_signature(returncode=2, stderr="boom\nreq-id: 111\nrequest 4411223344")
+    b = les.failure_signature(returncode=2, stderr="boom\nreq-id: 222\nrequest 5566778899")
+    assert a == b == "2|request #"
+    run_a = "FAILED: session-summary: run 4411223344 trace 9f8e7d6c5b4a failed"
+    run_b = "FAILED: session-summary: run 5566778899 trace 0a1b2c3d4e5f failed"
+    assert les.failure_signature(returncode=1, stderr=run_a) == les.failure_signature(returncode=1, stderr=run_b)
+    assert les.failure_signature(returncode=1, stderr=run_a) == "1|FAILED: session-summary: run # trace # failed"
+    at_1 = "FAILED: session-summary: chunk 14 failed at 2026-11-18T15:49:46.123+01:00"
+    at_2 = "FAILED: session-summary: chunk 14 failed at 2026-11-18T16:02:11Z"
+    assert les.failure_signature(returncode=1, stderr=at_1) == les.failure_signature(returncode=1, stderr=at_2)
+    assert les.failure_signature(returncode=1, stderr=at_1) == "1|FAILED: session-summary: chunk 14 failed at <time>"
+    http_403 = "FAILED: session-summary: API error 403 (openrouter)"
+    http_429 = "FAILED: session-summary: API error 429 (openrouter)"
+    assert les.failure_signature(returncode=1, stderr=http_403) == "1|FAILED: session-summary: API error 403 (openrouter)"
+    assert les.failure_signature(returncode=1, stderr=http_429) == "1|FAILED: session-summary: API error 429 (openrouter)"
+
+
+def test_the_signature_names_the_FAILED_line_not_the_status_line(tmp_path: Path) -> None:
+    """Two different llm-ext failures behind the same startup status line get different signatures, each naming its FAILED line."""
+    status = "echo \"[llm-externalizer] Auth: token resolved (73 chars)\" >&2"
+    refused = _script(tmp_path, "refused.sh", status + "; echo \"FAILED: session-summary: chunk 14 failed: API error 403 (openrouter): model not available in your region.\" >&2; exit 1")
+    missing = _script(tmp_path, "missing.sh", status + "; echo \"FAILED: session-summary: --transcript path does not exist\" >&2; exit 1")
+    signatures = []
+    for fake in (refused, missing):
+        proc = subprocess.run(  # noqa: S603 - a script this test just wrote
+            [str(fake)], capture_output=True, text=True, timeout=10, check=False,
+        )
+        signatures.append(les.failure_signature(returncode=proc.returncode, stderr=proc.stderr))
+    assert signatures == [
+        "1|FAILED: session-summary: chunk 14 failed: API error 403 (openrouter): model not available in your region.",
+        "1|FAILED: session-summary: --transcript path does not exist",
+    ]
+
+
+def test_banner_only_stderr_gives_no_error_line() -> None:
+    """With no FAILED: line and only startup banner lines, the signature is the fixed text no error line."""
+    stderr = (
+        "[llm-externalizer] Auth: token resolved (73 chars)\n"
+        "LLM Externalizer — backend: OpenRouter (particle-ai/particle-1:free)\n"
+        "Settings: settings.yaml\n"
+        "Session log: session.jsonl\n"
+    )
+    assert les.failure_signature(returncode=1, stderr=stderr) == "1|no error line"
+
+
+# WHY the marker: the redaction runs real bun, and the sandbox guard denies a spawn unless the test opts in.
+@pytest.mark.real_subprocess("bun")
+def test_two_different_failures_are_not_given_up_as_repeated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each attempt fails with a different error line, so the loop keeps retrying to the deadline instead of giving up as repeated."""
+    monkeypatch.setenv("HOME", _FAKE_HOME)
+    count = tmp_path / "count.txt"
+    body = (
+        "n=$(cat \"%s\" 2>/dev/null || echo 0)\n"
+        "echo $((n + 1)) > \"%s\"\n"
+        "echo \"[llm-externalizer] Auth: token resolved (73 chars)\" >&2\n"
+        "echo \"FAILED: session-summary: chunk $n failed\" >&2\n"
+        "exit 1"
+    ) % (count, count)
+    fake = _script(tmp_path, "fake-llm-ext.sh", body)
+    transcript = tmp_path / "t.jsonl"
+    _write_session(transcript)
+    (tmp_path / "rd").mkdir()
+    monkeypatch.setattr(les, "resolve_llm_ext", lambda: str(fake))
+    clock = _Clock()
+    got = les.summarize_with_retry(
+        str(transcript),
+        deadline=clock.now() + 540.0,
+        now_fn=clock.now,
+        sleeper=clock.sleep,
+        attempt=lambda t: les.attempt_llm_ext_summary(t, redact_dir=tmp_path / "rd"),
+        max_concurrent=0,
+        jitter=lambda: 1.0,
+    )
+    attempts = int(count.read_text(encoding="utf-8"))
+    # WHY the module bound, not a literal: a literal lets a raised bound pass this test on a broken signature.
+    assert attempts > les._UNKNOWN_REPEAT_GIVEUP, f"gave up as repeated after {attempts} attempts"
+    assert got.detail.startswith("deadline:"), got.detail
 
 
 # ---------- the resume budgets (incident 2026-08-25) --------------------------------------
@@ -1043,7 +1117,6 @@ def test_sweep_stale_on_a_missing_folder_is_a_no_op(tmp_path: Path) -> None:
     """A project that never made a copy has no folder; the sweep must not create it or fail."""
     tr.sweep_stale(tmp_path / "nope")
     assert not (tmp_path / "nope").exists()
-
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory write permission, so the removal cannot be made to fail")

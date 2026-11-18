@@ -35,6 +35,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -317,22 +318,42 @@ def classify_llm_ext_failure(*, returncode: int, stderr: str, timed_out: bool) -
 
 
 def failure_signature(*, returncode: int, stderr: str) -> str:
-    """A stable identity for 'the same failure again' — exit code + the first stderr line.
+    """A stable identity for 'the same failure again': exit code + the error line, with times and long ids masked.
 
-    First LINE only, because a wrapper that stamps a timestamp or a request id into later lines
-    would otherwise make every identical failure look novel and defeat the give-up entirely.
+    The error line is the LAST `FAILED:` line llm-ext prints; without one, the last line that is not a startup
+    banner line; with neither, the fixed text no error line. Date-times and bare HH:MM:SS become <time>; hex runs of
+    8 or more and digit runs of 5 or more become #. So the same failure with other ids or times still collapses,
+    while short numbers such as HTTP status codes stay, so different errors stay different. ONE line only, so a
+    varying line cannot defeat the give-up.
     """
     if "(nonconforming)" in (stderr or ""):
         # Constant on purpose: the driver interpolates the model ids it tried into this message,
         # so a first-line signature would differ on every attempt and defeat the UNKNOWN
         # give-up — the same bound-loss the stdout refusal's constant detail guards against.
         return f"{returncode}|(nonconforming)"
-    first = ""
-    for line in (stderr or "").splitlines():
-        if line.strip():
-            first = line.strip()[:200]
-            break
-    return f"{returncode}|{first}"
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    # WHY the FAILED: line comes first: llm-ext prints a startup banner on EVERY run, so keying on the first stderr
+    # line gave every failure the same signature (issue 364). llm-ext ends a failed run with a `FAILED:` line naming
+    # the real error, so the last one wins.
+    failed = [line for line in lines if line.startswith("FAILED:")]
+    if failed:
+        line = failed[-1]
+    else:
+        # WHY these prefixes are skipped: they are the startup banner llm-ext prints before any error, the same on every
+        # run. The set comes from one probe, not from a documented format.
+        banner = ("[llm-externalizer]", "LLM Externalizer", "Settings:", "Session log:", "Auth:")
+        candidates = [line for line in lines if not line.startswith(banner)]
+        line = candidates[-1] if candidates else "no error line"
+    # WHY times are masked first: a per-attempt timestamp in the FAILED line would make identical failures look new and
+    # defeat the bounded give-up. ISO date-times are masked whole, then bare HH:MM:SS.
+    line = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?", "<time>", line)
+    line = re.sub(r"\b\d{2}:\d{2}:\d{2}\b", "<time>", line)
+    # WHY the hex run has no \b: an id such as req_abc123def456 has no word boundary after the underscore, so a
+    # boundary would leave it unmasked and it would vary per attempt. WHY 5+ digits only: a short number such as an
+    # HTTP status code (403 vs 429) is what tells two errors apart. The hex pass runs first, so a hex id is masked
+    # whole and the digit pass does not split it.
+    line = re.sub(r"\d{5,}", "#", re.sub(r"[0-9a-fA-F]{8,}", "#", line))
+    return f"{returncode}|{line[:200]}"
 
 
 # The least time the llm-ext call itself must have left once the redacted copy exists. WHY: redaction and
