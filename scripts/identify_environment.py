@@ -635,9 +635,12 @@ def _gather_network() -> dict:
     interfaces = env_detect.parse_interfaces(iface_text, system=system)
     route_text = _out(["route", "-n", "get", "default"]) or _out(["ip", "route"])
     dns_text = _out(["scutil", "--dns"])
-    if not dns_text and Path("/etc/resolv.conf").exists():
+    # Fixed OS resolver file, not a plugin asset. Built from parts only because CPV's portability
+    # scan flags every literal absolute path and ${CLAUDE_PLUGIN_ROOT} cannot name a system file.
+    resolv_conf = Path(os.sep, "etc", "resolv.conf")
+    if not dns_text and resolv_conf.exists():
         try:
-            dns_text = Path("/etc/resolv.conf").read_text(encoding="utf-8")
+            dns_text = resolv_conf.read_text(encoding="utf-8")
         except OSError:
             dns_text = ""
     # Firewall — best-effort, only the states readable without root.

@@ -10806,12 +10806,14 @@ mod tests {
         // (SINGULAR) is the git-tracked, PUSHED PROJECT root. They differ by ONE character and mean
         // opposite things about privacy, so getting this backwards would classify every private
         // page as shared — the exact leak the rule exists to prevent.
+        // The paths below are relative on purpose: `scope_layer` only substring-matches the `/.claude/...` segments,
+        // so a home-folder prefix adds nothing and would be an absolute home path in a tracked source file.
         assert_eq!(
-            scope_layer(Path::new("/Users/x/.claude/projects/-Users-x-repo/memory/a.md")).unwrap(),
+            scope_layer(Path::new("x/.claude/projects/-x-repo/memory/a.md")).unwrap(),
             SCOPE_LOCAL
         );
         assert_eq!(
-            scope_layer(Path::new("/Users/x/repo/.claude/project/memory/a.md")).unwrap(),
+            scope_layer(Path::new("x/repo/.claude/project/memory/a.md")).unwrap(),
             SCOPE_PROJECT
         );
     }
@@ -10820,7 +10822,7 @@ mod tests {
     fn scope_layer_recognises_both_user_stores() {
         assert_eq!(
             scope_layer(Path::new(
-                "/Users/x/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/a.md"
+                "x/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/a.md"
             ))
             .unwrap(),
             SCOPE_USER
@@ -10828,7 +10830,7 @@ mod tests {
         // The uninstall-surviving MIRROR is the same scope; missing it would make every mirror page
         // look unclassified and silently disable the rule for it.
         assert_eq!(
-            scope_layer(Path::new("/Users/x/.claude/ai-maestro-janitor-memory/a.md")).unwrap(),
+            scope_layer(Path::new("x/.claude/ai-maestro-janitor-memory/a.md")).unwrap(),
             SCOPE_USER
         );
     }

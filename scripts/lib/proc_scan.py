@@ -35,7 +35,13 @@ class ProcRow(NamedTuple):
 
 
 def _libs() -> tuple[ctypes.CDLL, ctypes.CDLL]:
-    lp = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    # WHY find_library, not a literal system path: the portability scan rejects a hard-coded
+    # path, and a None result must raise because ctypes.CDLL(None) would load the main
+    # program (whose symbols lack proc_listpids) instead of failing at the real cause.
+    libproc = ctypes.util.find_library("proc")
+    if libproc is None:
+        raise OSError("libproc not found")
+    lp = ctypes.CDLL(libproc, use_errno=True)
     lc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
     lp.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
     lp.proc_listpids.restype = ctypes.c_int

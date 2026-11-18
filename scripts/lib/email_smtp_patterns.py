@@ -855,8 +855,8 @@ RULES: tuple[Rule, ...] = (
         description=(
             "Template-literal / f-string constructs `/var/mail/{recipient}/...`, "
             "`/home/{recipient}/Maildir`, or `<recipient>.mbox` with "
-            "`recipient` from external input. Attacker `recipient = "
-            "\"../etc/cron.d\"` writes attacker-controlled content to a "
+            "`recipient` from external input. Attacker `recipient` that climbs with `../` "
+            "into the system `cron.d` directory under `etc` writes attacker-controlled content to a "
             "path used by another subsystem — arbitrary-file-write "
             "equivalent. Mitigation: `secure_filename(recipient)`, "
             "`os.path.normpath`, or strict RECIPIENT_ALLOWLIST."

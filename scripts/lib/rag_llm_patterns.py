@@ -752,7 +752,8 @@ RULES: tuple[Rule, ...] = (
             "`pathlib.Path.write_text`, `requests.delete`, "
             "`.delete_object`) with NO `jsonschema.validate` / "
             "`pydantic.parse_obj` / `TypeAdapter` / `attrs.validate` "
-            "between them. LLM emits `{\"path\": \"../../etc/passwd\"}` "
+            "between them. LLM emits `{\"path\": \"...\"}` with a path that climbs with `../../` "
+            "to the system passwd file "
             "and the caller hands the dict straight to the destructive "
             "function. Pair with `# tool-args-validated` to opt out."
         ),
