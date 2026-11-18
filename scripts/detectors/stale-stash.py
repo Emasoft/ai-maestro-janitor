@@ -10,10 +10,10 @@ recoverable but invisible to `git status` and `git log`, so it rarely
 surfaces until a stash conflict on `git pull` reminds the user it
 exists. Threshold default 30d; tune via `stash_stale_days` userConfig.
 
-Dedup uses (stash-ref, creation-timestamp) so dropping/reapplying a
-stash rotates the dedup key naturally, and `git stash list` reordering
-after a `git stash drop stash@{0}` doesn't false-trigger a re-emit on
-stashes that were already nudged.
+Dedup keys on the commit sha of each stash, not on the positional `stash@{N}` ref. A
+push or a drop shifts every positional index, but a stash commit sha never changes, so
+reordering `git stash list` does not re-emit a stash that was already nudged. The suggested
+commands name the sha for the same reason.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import os
 import subprocess
 import sys
 import time
-import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -52,10 +51,6 @@ def _parse_iso8601(ts: str) -> Optional[int]:
     return int(dt.timestamp())
 
 
-def _crc32(s: str) -> int:
-    return zlib.crc32(s.encode("utf-8")) & 0xFFFFFFFF
-
-
 def main() -> int:
     state.init_state()
 
@@ -78,12 +73,12 @@ def main() -> int:
         state.log_line("stale-stash", "not a git repo — skipping")
         return 0
 
-    # Stash list with one tab-separated row per entry: ref, ISO-8601
+    # Stash list with one tab-separated row per entry: ref, commit sha, ISO-8601
     # creation time (committer date — what the user expects), short
     # subject. `--format` uses %x09 for literal tab so subjects with
     # colons or whitespace parse cleanly downstream.
     proc = subprocess.run(
-        ["git", "stash", "list", "--format=%gd%x09%cI%x09%s"],
+        ["git", "stash", "list", "--format=%gd%x09%H%x09%cI%x09%s"],
         cwd=str(project_root),
         capture_output=True, text=True, check=False,
         env=git_env,
@@ -101,10 +96,10 @@ def main() -> int:
     for raw_line in proc.stdout.splitlines():
         if not raw_line.strip():
             continue
-        parts = raw_line.split("\t", 2)
-        if len(parts) < 3:
+        parts = raw_line.split("\t", 3)
+        if len(parts) < 4:
             continue
-        ref, iso_ts, subject = parts
+        ref, sha, iso_ts, subject = parts
 
         created = _parse_iso8601(iso_ts)
         if created is None:
@@ -127,17 +122,18 @@ def main() -> int:
         # gets a cue every 7d.
         week_bucket = age_sec // (7 * 86400)
 
-        # Use the ref together with the ISO timestamp as the entropy of
-        # the dedup key: `git stash drop` shifts higher refs down by one,
-        # but the timestamp of any given stash never changes once committed.
-        fp = _crc32(f"{ref}\t{iso_ts}")
-
+        # WHY the key is the commit sha and not the ref: the ref is the positional
+        # stash@{N} at emit time, and it shifts when a newer stash is pushed above
+        # this one or a stash is dropped, so keying on it re-emitted every older
+        # stash after each push. The commit sha of a stash never changes, so it is stable.
+        # The key moved from the crc32 form to the sha form, so each already-nudged stash is reported once more after the upgrade, by design.
         line = dedupe.emit_once(
             seen,
-            f"stash@{fp}@w{week_bucket}",
-            f"[stale-stash] {ref} '{clean_subject}' has been stashed for {age_days}d. "
-            f"Inspect with: git stash show -p {ref}. Then either reapply (git stash pop {ref}) "
-            f"or discard (git stash drop {ref}).",
+            f"stash@{sha}@w{week_bucket}",
+            f"[stale-stash] commit {sha} '{clean_subject}' has been stashed for {age_days}d. "
+            f"Inspect with: git stash show -p {sha}. To reapply and remove it, or to discard it, find the line of git stash list --format='%gd %H' whose hash is {sha}. "
+            f"Then run git stash pop <that stash@{{N}}> to reapply and remove it, or git stash drop <that stash@{{N}}> to discard it, where stash@{{N}} is the first field of that line. "
+            f"Indexes shift when stashes are pushed or dropped, so look the index up at the moment of use and never reuse one from an earlier advisory.",
         )
         if line is not None:
             print(line)
