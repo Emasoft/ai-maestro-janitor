@@ -14,7 +14,7 @@ import { Database } from 'bun:sqlite'
 
 // Test-only setting. It names the vault FOLDER (vault.db goes inside it). Nothing else can move the vault; see checkedTestDir for the rule.
 export const VAULT_DIR_ENV = 'SECRETS_SHIELD_VAULT_DIR'
-const VAULT_FILE = 'vault.db'
+export const VAULT_FILE = 'vault.db'
 const BUSY_TIMEOUT_MS = 10_000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 

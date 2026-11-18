@@ -68,8 +68,21 @@ changed in the scanned tree. Git history is not scanned yet (a later version).
   past it is skipped as a timeout, unless its whole-file pass had finished:
   then its findings are kept with line null.
 - `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
-- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. No restore command exists yet, so do not run `--redact` on real data until a restore command ships. Default: off, scan only.
+- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. To put the values back, see Restore below. Default: off, scan only.
 - `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
+
+## Restore
+
+`bun run <plugin root>/scripts/shield_scan/restore.ts [--any-origin] [--max-large-mb N] <file|root>` puts the value kept in the vault back in place of each marker. It is for a person at a terminal only: agents never run it. With the real vault it refuses to run unless stdin is a terminal; that stops an accidental run, it is not a boundary.
+
+- It reads every file under the root, gitignored files too, but never the content of a `.git` folder or the vault folder. Home paths rewritten to `~` are not restored.
+- A marker is restored only in the file it was redacted in. A marker in a moved or copied file is left and reported as `moved`, unless `--any-origin` is given. Another hard-link name of a redacted file is reported as `moved`, because its path is not the origin recorded in the vault; with `--any-origin` it reaches the hardlink guard and is skipped as `hardlinked`.
+- A hardlinked file, a file that is not lossless UTF-8, and a file in a repo with a merge, rebase, cherry-pick, revert or bisect in progress are left as they are and reported.
+- A binary file (a NUL in its first 8192 bytes) is left as it is and is not searched for markers, so a marker in one does not change the exit code; the summary counts it under `skipped` as `binary`.
+- A file that changes while it is being read is skipped as `changed-during-restore`; the exit code is 1 when the bytes read held a marker.
+- There is no `--min-age-minutes` guard: a recently changed file is restored too. A file open in an editor gets its markers back if the editor later saves its old buffer; close it and run restore again (the vault keeps the values).
+- `--max-large-mb` (default 1024): a text file over it is not read, and the run is incomplete.
+- Output: JSON lines on stdout (left, note and skip records, then a summary), never a value. Exit: 3 incomplete (it wins over 1); else 1 a marker was left or a file with markers was skipped; else 0 every marker found was restored; 2 usage, refused, or no vault.
 
 ## Exit codes
 
