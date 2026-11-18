@@ -37,9 +37,14 @@ restore behaviour.
   followed.
 - Large lane: a text file over `--max-file-mb` and up to `--max-large-mb` is
   redacted one at a time. A larger text file is neither scanned nor redacted
-  (`not-scanned-too-large`) and the run is incomplete. The large lane has been
-  tested only on files of tens of KB; peak memory and time on large files are
-  not measured.
+  (`not-scanned-too-large`) and the run is incomplete. Measured once per size
+  on generated text with about one secret per 100 KB (2026-11-18): 100 MB took
+  36 s and 300 MB took 592 s; the redact worker needed at least about 13 times
+  the file size in memory (a sampled lower bound) and restore about 4 times;
+  redact then restore gave back identical bytes. Time grew faster than size
+  between those two runs (cause not found yet), so a text file over about
+  300 MB with many secrets may run past its per-file time limit. On a machine
+  with little memory pass a lower `--max-large-mb`.
 - Rounds and residual: the scanner also replaces copies of a redacted value
   that no rule matched, then scans again. If that finds something it runs
   another round (at most 3) and writes the file once. What is still found

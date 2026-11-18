@@ -96,6 +96,8 @@ Facts that stay here:
   rewritten, so a token there makes the run exit 1.
 - What is still found after the last round is the residual: the file is still
   written and the run exits 1.
+- A text file in the large lane needs at least about 13 times its size in
+  memory: on a machine with little memory pass a lower `--max-large-mb`.
 - Agents never run `restore.ts` (see Restore).
 
 ### Git repositories
