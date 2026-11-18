@@ -4,7 +4,7 @@ title: a shield-scan redact skip after the vault step leaves the values of an un
 column: backburner
 status: tasked
 created: 2026-11-18T08:56:20+0100
-updated: 2026-11-18T08:56:20+0100
+updated: 2026-11-18T09:34:15+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
