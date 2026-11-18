@@ -3,7 +3,7 @@
 // Protocol: one JSON request per stdin line, one JSON response per stdout line, in the same order.
 //   {"t": s}                                   -> redact(s)
 //   {"op": "home", "t": s, "homes": [...]}     -> redactHome(s, homes)
-//   {"op": "both", "t": s, "homes": [...]}     -> redact(s) first, then redactHome on its output
+//   {"op": "both", "t": s, "homes": [...]}     -> redactText(s) first (the old plain walks, then the strings of each line that still is a JSON object or array read as redactJsonLine reads them), then redactHome on its output
 //   {"op": "jsonl", "t": s, "homes": [...]}    -> redactJsonLine(s) first (a secret behind a JSON escape too; a line that is not JSON goes through redact), then redactHome on each decoded string of its output (on the whole text when it is not JSON); the line stays valid JSON when it was
 //   {"op": "all", "t": s, "homes": [...], "passes": [...]} -> redactAll(s, homes, passes): every pass of the pipeline (pipeline.ts) in its own order; "passes" is optional (absent = all four) and, when present, a non-empty array of "secrets", "cards", "email", "home"
 // Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both", "jsonl" and "all" the counts of the passes are merged.
@@ -13,7 +13,7 @@
 // WHY every error message is fixed text and never the exception own message: JSON.parse quotes a fragment of the input in its message, and that message could carry a secret to the caller. The caller must fail closed on an error line (TRDD-TKQ274RE: a skipped redaction sends secrets out).
 
 import { redactHome } from "./home.ts"
-import { addHits, mapJsonLineStrings, redact, redactJsonLine, type Hits } from "./patterns.ts"
+import { addHits, mapJsonLineStrings, redact, redactJsonLine, redactText, type Hits } from "./patterns.ts"
 import { ALL_PASSES, isPass, redactAll, type Pass } from "./pipeline.ts"
 
 const decoder = new TextDecoder("utf-8")
@@ -78,7 +78,8 @@ const handle = async (line: string): Promise<void> => {
         addHits(hits, home.hits)
       }
     } else {
-      const secrets = redact(text)
+      // WHY redactText for "both" (TRDD-CAZIKQVH): its texts are decoded item texts (scripts/lib/transcript_redact.py redact_texts), and one can carry JSON lines whose secrets sit behind an escape; 16 bench lines came back unchanged under redact. The op without a name keeps redact, as its protocol line says.
+      const secrets = op === "both" ? redactText(text) : redact(text)
       out = secrets.text
       addHits(hits, secrets.hits)
       if (op === "both") {

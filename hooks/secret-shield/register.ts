@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { addHits, countOf, isSecretFile, label, redact, redactDeep, type Hits } from './patterns'
+import { addHits, countOf, isSecretFile, label, redactDeep, redactText, type Hits } from './patterns'
 import { shieldRow, withheldRow } from './rows'
 
 // This session's tally; a reload starts it over, the all-time totals are in $.store.
@@ -110,7 +110,8 @@ export const register: Register = (on, options) => {
     if (args.startsWith('test')) {
       const sample = args.slice(4).trim()
       if (sample === '') return { text: 'Usage: /janitor-secret-shield test <text to scan>' }
-      const { text, hits } = redact(sample)
+      // WHY redactText and not redact: the dry run must hide what the live hooks hide, and they read a JSON line of a text as JSON (TRDD-CAZIKQVH).
+      const { text, hits } = redactText(sample)
       return {
         text: countOf(hits) === 0
           ? 'secret-shield: nothing to hide in that text.'

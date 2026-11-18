@@ -633,6 +633,65 @@ function redactInto(text: string, hits: Hits, found: Map<string, string>): strin
   return out
 }
 
+/** The forms hideKnown looks for: the value, its JSON-escaped form and, when the value is well formed, its URL-encoded form. */
+function knownForms(secret: string): Set<string> {
+  const forms = new Set([secret, JSON.stringify(secret).slice(1, -1)])
+  // WHY: encodeURIComponent throws URIError on a lone surrogate, and redact must never throw. The raw and the
+  // JSON-escaped forms still hide such a value; only the URL-encoded form has no encoding to look for.
+  if (secret.isWellFormed()) forms.add(encodeURIComponent(secret))
+  return forms
+}
+
+/** `found` prepared once for many texts: the values longest first with their forms, and the values with a copy in a piece of text, by their place in that order. */
+type Known = { values: Array<{ kind: string; forms: string[] }>; present: (piece: string) => number[] }
+
+// WHY the values with a copy in a piece are picked before the piece is cut (TRDD-CAZIKQVH): cutting every piece by every form of every value grew with pieces times values; measured
+// 2026-11-18, 2,000 JSON lines carrying 4,000 values took 12 s in the JSON-line walks, over the 10 s a hook may take, and a hook that times out after next() leaves the raw result. A form that is
+// not in a piece is in none of the parts it is cut into, so leaving it out gives the same text. Past INDEX_FROM forms an index of the first `key` characters of each form finds them in one scan.
+// WHY `key` is the shortest form, at most KEY_MAX: every form is then indexed, so none can be missed, and a long key keeps values that share a prefix (every ghp_ token) in separate buckets.
+// WHY INDEX_FROM is 256 (measured 2026-11-18, redact() on 4 MB and redactDeep on 1.9 MB of JSON lines, 8 to 512 values): below about 256 forms one native includes() per form and piece
+// was faster than the index, which reads every position of the text in JavaScript; from 256 forms on the index was faster in both.
+const INDEX_FROM = 256
+const KEY_MAX = 12
+function prepareKnown(found: Map<string, string>): Known {
+  const values = [...found].sort((a, b) => b[0].length - a[0].length).map(([secret, kind]) => ({ kind, forms: [...knownForms(secret)] }))
+  const forms = values.flatMap((value, i) => value.forms.map(form => [i, form] as const))
+  if (forms.length <= INDEX_FROM) {
+    return { values, present: piece => values.flatMap((value, i) => (value.forms.some(form => piece.includes(form)) ? [i] : [])) }
+  }
+  // WHY reduce, not Math.min(...): spreading thousands of forms as arguments can exceed the engine's argument limit and throw.
+  const key = forms.reduce((n, [, form]) => Math.min(n, form.length), KEY_MAX)
+  // WHY each bucket is split by form length and then by the form itself: values that share their first `key` characters (measured 2026-11-18: 4,000 values with one 12-character prefix and
+  // 4,000 lookalikes took 4.1 s, growing with values times lookalikes) would otherwise be compared one by one at every position the prefix appears; this way a position costs one lookup per
+  // distinct length in its bucket.
+  const index = new Map<string, Map<number, Map<string, number[]>>>()
+  for (const [i, form] of forms) {
+    const head = form.slice(0, key)
+    let byLength = index.get(head)
+    if (byLength === undefined) index.set(head, (byLength = new Map()))
+    let byForm = byLength.get(form.length)
+    if (byForm === undefined) byLength.set(form.length, (byForm = new Map()))
+    const list = byForm.get(form)
+    if (list === undefined) byForm.set(form, [i])
+    else list.push(i)
+  }
+  const present = (piece: string): number[] => {
+    const hit = new Set<number>()
+    for (let at = 0; at + key <= piece.length; at++) {
+      const byLength = index.get(piece.slice(at, at + key))
+      if (byLength === undefined) continue
+      for (const [length, byForm] of byLength) {
+        if (at + length > piece.length) continue
+        const list = byForm.get(piece.slice(at, at + length))
+        if (list !== undefined) for (const i of list) hit.add(i)
+      }
+    }
+    // WHY sorted: hidePiece must take the values longest first, as hideKnown always did, so a value that contains another is hidden whole; the scan meets them in text order.
+    return [...hit].sort((a, b) => a - b)
+  }
+  return { values, present }
+}
+
 // Hides every copy of an already hidden value that no rule matched on its own (a password written in an assignment,
 // then typed again in a command). `found` holds raw secrets, so it never leaves this module: no function returns or
 // stores it. The longest value goes first so a value that contains another is hidden whole. Each value is also
@@ -646,14 +705,24 @@ function redactInto(text: string, hits: Hits, found: Map<string, string>): strin
 // Copies are not counted in `hits`: they are the same secret, already counted once.
 function hideKnown(text: string, found: Map<string, string>): string {
   if (found.size === 0) return text
+  return hideKnownWith(text, prepareKnown(found))
+}
+
+function hideKnownWith(text: string, known: Known): string {
+  if (known.values.length === 0) return text
   // Even entries are plain text, odd entries are whole markers (the capture group of the split keeps them).
-  let pieces = text.split(MARK_SPLIT).map((piece, i) => ({ piece, hidden: i % 2 === 1 }))
-  for (const [secret, kind] of [...found].sort((a, b) => b[0].length - a[0].length)) {
-    const variants = new Set([secret, JSON.stringify(secret).slice(1, -1)])
-    // WHY: encodeURIComponent throws URIError on a lone surrogate, and redact must never throw. The raw and the
-    // JSON-escaped forms still hide such a value; only the URL-encoded form has no encoding to look for.
-    if (secret.isWellFormed()) variants.add(encodeURIComponent(secret))
-    for (const variant of variants) {
+  return text
+    .split(MARK_SPLIT)
+    .map((piece, i) => (i % 2 === 1 ? piece : hidePiece(piece, known.present(piece).map(n => known.values[n]!))))
+    .join('')
+}
+
+/** One piece of plain text with every copy of `values` (longest first) hidden. */
+function hidePiece(piece: string, values: Known['values']): string {
+  if (values.length === 0) return piece
+  let pieces = [{ piece, hidden: false }]
+  for (const { kind, forms } of values) {
+    for (const variant of forms) {
       const next: typeof pieces = []
       for (const part of pieces) {
         const bits = part.hidden ? [part.piece] : part.piece.split(variant)
@@ -707,6 +776,7 @@ export const mapStrings = (value: unknown, f: (text: string) => string): unknown
  * Redacts every string inside a plain JSON value (a tool's structured result),
  * keeping its shape; the value itself comes back when nothing was hidden.
  * A value hidden in one string is hidden in every other string of the value too.
+ * Walks 3 and 4 then read each JSON line of a string as JSON (readJsonLines, TRDD-CAZIKQVH).
  */
 export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
   const hits: Hits = {}
@@ -718,9 +788,17 @@ export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
     addHits(hits, done)
     return out
   })
-  if (countOf(hits) === 0) return { value, hits }
   // The second walk covers every string, also the ones that had no hit of their own.
-  return { value: mapStrings(first, node => hideKnown(node, found)), hits }
+  const old = countOf(hits) === 0 ? first : mapStrings(first, node => hideKnown(node, found))
+  const before = countOf(hits)
+  const third = mapStrings(old, node => readJsonLines(node, hits, found))
+  if (countOf(hits) === 0) return { value, hits }
+  // WHY walk 4 runs whenever a value was found, also when walk 3 found nothing new: walk 2 hides copies as plain text only, so a copy of a value the old walks found, written behind an escape in a
+  // JSON line, is hidden by the decoded pass alone. When walk 3 found nothing new, walk 2 already did the plain pass, so only the decoded one runs.
+  // WHY one prepared index for the whole walk: preparing it sorts every value, and the walk calls the copy pass once per string.
+  const known = prepareKnown(found)
+  if (countOf(hits) === before) return { value: mapStrings(old, node => hideKnownDecoded(node, known)), hits }
+  return { value: mapStrings(third, node => hideKnownText(node, known)), hits }
 }
 
 // WHY this exists (TRDD-BAQB9SYO): the transcript lane runs a line of JSON through redact() as plain text, and the rules are written for decoded text, so a secret that
@@ -844,6 +922,74 @@ export function redactJsonLine(line: string): { text: string; hits: Hits } {
   return { text: parseable(out), hits }
 }
 
+// WHY JSON lines inside a text are read as JSON (TRDD-CAZIKQVH): the live shield (redactDeep on a tool result, redactBlocks on a row, the dry-run command) and the bridge op "both" ran a text through
+// the rules as plain text only, so a JSON line inside it (a Read of a .jsonl file, `cat` of JSON records, a transcript excerpt sent to a remote model) kept a secret written behind a JSON escape, such
+// as an assignment right after an escaped newline, where the rule anchored to a line start never sees a line start. 16 lines of tests/agent_context_bench came back unchanged from the bridge and
+// from redactDeep.
+// WHY after the old walks and not in redactJsonLine's order (its walk 1 first): measured 2026-11-18 over 200,000 generated mixed texts, the walk-1-first order showed part of a planted secret that the
+// old walks hid in 10,455 of them; two shapes pinned in tests/json-text.test.ts are a key block opened inside a JSON string and closed on a later line (the old rule hid it through its end line, the
+// decoded string ends at its quote) and two tokens glued after an escaped tab. In this order the count is 0: the old walks run first and unchanged, and walks 3 and 4 only add. Walk 3 reads the
+// decoded strings of each line that still parses, walk 4 hides the copies. A line whose JSON the old walks broke keeps the old walks only. The price: in 1,732 of the same texts the walk-1-first
+// order hid a planted secret that this order leaves. The rules are the same; only the order differs.
+
+/** The lines of `text` and, per line, whether it is a JSON object or array; undefined when no line is. */
+function jsonLines(text: string): { lines: string[]; json: boolean[] } | undefined {
+  const lines = text.split('\n')
+  const json = lines.map(isJsonDocument)
+  return json.includes(true) ? { lines, json } : undefined
+}
+
+/** Walk 3: the decoded strings of each line of `text` that is a JSON object or array through the rules (walk 1 of redactJsonLine); every other line as it is. */
+function readJsonLines(text: string, hits: Hits, found: Map<string, string>): string {
+  const split = jsonLines(text)
+  if (split === undefined) return text
+  return split.lines
+    .map((line, i) => {
+      if (!split.json[i]) return line
+      // WHY its own hits and found, merged only when it succeeds: the walk can throw its fixed error after it counted part of the line, and the line then stays as the old walks left it.
+      // WHY the fixed error is caught here, when redactJsonLine lets it throw: redact, redactDeep and redactBlocks are written not to throw, and the tool.call hook calls redactDeep after next()
+      // resolved, where a throw makes Claude Code skip the hook and keep the raw result. Measured 2026-11-18 over 300,000 generated JSON lines (230,587 distinct): redactJsonLine threw on 8;
+      // this walk, run on what the old walks left, threw on none, so no known input reaches this branch. Any other error is not caught.
+      const lineHits: Hits = {}
+      const lineFound = new Map<string, string>()
+      try {
+        const out = redactTokens(line, 0, lineHits, lineFound)
+        addHits(hits, lineHits)
+        for (const [value, kind] of lineFound) found.set(value, kind)
+        return out
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== JSON_LINE_BROKEN) throw error
+        return line
+      }
+    })
+    .join('\n')
+}
+
+/** The decoded strings of each JSON line of `text` with every copy of a known value hidden (a copy written behind an escape); the line stays JSON. Every other line as it is. */
+function hideKnownDecoded(text: string, known: Known): string {
+  if (known.values.length === 0) return text
+  const split = jsonLines(text)
+  if (split === undefined) return text
+  // WHY a line with no backslash is skipped: its decoded strings are its raw text, which the plain pass over the whole text covers.
+  return split.lines.map((line, i) => (split.json[i] && line.includes('\\') ? mapJsonStrings(line, 0, s => hideKnownWith(s, known)) : line)).join('\n')
+}
+
+/** Walk 4: every copy of a known value hidden, first in each decoded string of a JSON line, then in the whole text as plain text. */
+function hideKnownText(text: string, known: Known): string {
+  if (known.values.length === 0) return text
+  // WHY the plain pass runs after the decoded one, not instead of it: the plain pass hides every copy, also one outside a string (a number); the decoded pass adds the copies behind an escape.
+  return hideKnownWith(hideKnownDecoded(text, known), known)
+}
+
+/**
+ * Every secret in `text` replaced by its mark, and how many of each kind, as redactDeep hides a string: the old walks, then each JSON line read as JSON. The bridge op "both" and the dry-run command use
+ * it, so they hide what the live hooks hide. redact() stays the plain pass of the pipeline (pipeline.ts), which scripts/shield_scan uses to redact files in place.
+ */
+export function redactText(text: string): { text: string; hits: Hits } {
+  const done = redactDeep(text)
+  return { text: done.value as string, hits: done.hits }
+}
+
 /** `text` itself when it is valid JSON; else a fixed-message error (the message never carries input text, which could hold a secret). */
 function parseable(text: string): string {
   try {
@@ -877,6 +1023,7 @@ const mapBlockTexts = (content: readonly Block[], f: (text: string) => string): 
  * Redacts the text a row's blocks carry: text blocks and each tool_result's
  * content (a string or text blocks). Every other block is passed as it is.
  * A value hidden in one block is hidden in every other block of the row too.
+ * Walks 3 and 4 then read each JSON line of a text as JSON (readJsonLines, TRDD-CAZIKQVH).
  */
 export function redactBlocks(content: readonly Block[]): { content: Block[]; hits: Hits } {
   const hits: Hits = {}
@@ -888,8 +1035,14 @@ export function redactBlocks(content: readonly Block[]): { content: Block[]; hit
     return out
   })
   // Nothing propagates when nothing was recorded: skip the second walk, which would only copy every block again.
-  if (found.size === 0) return { content: first, hits }
-  return { content: mapBlockTexts(first, text => hideKnown(text, found)), hits }
+  const old = found.size === 0 ? first : mapBlockTexts(first, text => hideKnown(text, found))
+  const before = countOf(hits)
+  const third = mapBlockTexts(old, text => readJsonLines(text, hits, found))
+  if (found.size === 0) return { content: countOf(hits) === before ? old : third, hits }
+  // WHY walk 4 runs whenever a value was found, also when walk 3 found nothing new: see redactDeep.
+  const known = prepareKnown(found)
+  if (countOf(hits) === before) return { content: mapBlockTexts(old, text => hideKnownDecoded(text, known)), hits }
+  return { content: mapBlockTexts(third, text => hideKnownText(text, known)), hits }
 }
 
 /** The same blocks with every text they carry withheld: what a failed scan stores. */

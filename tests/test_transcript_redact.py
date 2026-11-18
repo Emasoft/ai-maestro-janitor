@@ -253,11 +253,14 @@ def _bridge_refusal(request: dict[str, Any]) -> tuple[int, list[str]]:
     return done.returncode, done.stdout.decode("utf-8").splitlines()
 
 
-def test_bridge_op_jsonl_hides_a_secret_behind_an_escaped_newline_that_op_both_leaves_whole() -> None:
-    """Op jsonl hides a key written right after an escaped newline in a JSON line, op both leaves it whole, and the jsonl output still parses."""
+def test_bridge_ops_jsonl_and_both_hide_a_secret_behind_an_escaped_newline_that_the_plain_op_leaves_whole() -> None:
+    """Ops jsonl and both hide a key written right after an escaped newline in a JSON line, the op with no name leaves it whole, and the jsonl output still parses."""
     line = json.dumps({"c": "first\n" + FAKE_KEY + " last"})
+    plain = _bridge_one({"t": line})
+    assert FAKE_KEY in plain["t"]
+    # WHY op both hides it too (TRDD-CAZIKQVH): a text redact_texts sends can carry JSON lines, so op both, after the plain walks, reads each line that still is a JSON object or array as JSON.
     both = _bridge_one({"op": "both", "t": line, "homes": HOMES})
-    assert FAKE_KEY in both["t"]
+    assert FAKE_KEY not in both["t"] and KEY_MARK in both["t"]
     out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
     assert FAKE_KEY not in out["t"] and KEY_MARK in out["t"]
     assert json.loads(out["t"]) == {"c": "first\n" + KEY_MARK + " last"}
