@@ -3,9 +3,8 @@
 WHY THIS EXISTS: the janitor sent session transcripts to remote models unredacted. The one redaction
 rule set is the TypeScript secret-shield core (`hooks/secret-shield/patterns.ts` + `home.ts`); this
 module reaches it through `hooks/secret-shield/redact_bridge.ts`, run by bun, so there is no second
-copy of the rules to drift. Two bridge ops are used: `redact_texts` runs op "both" over plain texts; the transcript copy runs
-op "jsonl" over each JSONL line, which decodes every JSON string first so a secret or a home behind a JSON escape is hidden (op "both" reads
-the raw line as text and misses it).
+copy of the rules to drift. Two bridge ops are used: `redact_texts` runs op "both" over decoded item texts, which reads the plain passes first and then each line of the text that is a JSON object or array as JSON (redactText, TRDD-CAZIKQVH); the transcript copy runs
+op "jsonl" over each JSONL line, which decodes every JSON string first so a secret or a home behind a JSON escape is hidden.
 
 EVERY failure here raises `RedactionUnavailable`. There is deliberately no fallback, no "send it
 unredacted", no "skip the line": a skipped redaction is a secret sent out. The caller must abort the
@@ -164,7 +163,7 @@ def redact_texts(texts: list[str], *, homes: list[str] | None = None, timeout_s:
     """Redact secrets, then home paths, in every text; same order, same length, or raise RedactionUnavailable."""
     bun = resolve_bun()
     home_list = [str(Path.home())] if homes is None else homes
-    # WHY op "both": these inputs are decoded item texts (from jev_compaction), not JSONL lines, so there is no JSON to decode.
+    # WHY op "both" (redactText, TRDD-CAZIKQVH): these inputs are decoded item texts (from jev_compaction), not JSONL lines, but one can carry JSON lines whose secret sits behind an escape; op "both" reads the plain passes first, then each JSON line of the text as JSON, so it needs no op "jsonl".
     out = list(_bridge_results(bun, texts, home_list, timeout_s, op="both"))
     if len(out) != len(texts):
         raise RedactionUnavailable("redaction returned a different number of texts than it was given")
