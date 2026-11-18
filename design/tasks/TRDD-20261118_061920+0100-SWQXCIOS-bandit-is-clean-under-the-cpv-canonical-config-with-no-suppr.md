@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: todo
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-18T07:06:56+0100
+updated: 2026-11-18T10:48:40+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -30,6 +30,7 @@ parent-trdd: BAQB9SYO
 - Correction and step 1 done, 2026-11-18T07:06:00+0100, by main-agent: c38eddcd adds .bandit.yml, byte-identical to gen_bandit_yml of the installed CPV 5.23.1 (cmp equal, sha256 0d0d65d6...289a2, checked by main-agent). Its commit message says that without the file "the local gate and CI judged different rule sets"; that is wrong for this repo: no workflow under .github/workflows runs Mega-Linter or bandit, and .mega-linter.yml states that it is dormant (TRDD-6SIY2VX2). What reads .bandit.yml here is the CPV ci-preflight that publish.py runs (cpv_ci_preflight.py:1134 passes -c .bandit.yml when the file exists) and the CPV canonical-pipeline drift check (validate_plugin.py:7675 lists the file). The commit stands; this line corrects its stated reason. NEXT ACTION: pilot the B607 helper in three contexts (a hyphen-named detector, a hook, a test file), measure the cost of one pilot unit, then fan out by lane.
 
 Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, skip or ignore marker; a site that cannot be fixed without one goes to the owner).
+2026-11-18T10:48:36+0100 by main-agent: re-measured on HEAD 0cc07209 with the canonical config over git ls-files '*.py' (1269 files, an approximation of the CPV file set, which this card measured as 1267): 778 findings in 268 files. 29 are in frozen rotator files (scripts/oauth_rotator/cascade.py, reauth.py, rotator.py, safe_storage.py, slot_capture_browser.py, tests/test_oauth_rotator.py, tests/test_daemon_rotator_thread.py), so exit 0 needs an owner ruling on the rotator freeze (asked 2026-11-18). Handled alone, outside the fan-out: scripts/daemon.py (14; its rotator-tick logging is under the freeze), scripts/publish.py (30), scripts/lib/jev_compaction.py (2) and tests/test_jev_compaction.py (43, classified against the nosec). NEXT ACTION: B607 pilot (scripts/detectors/repo-state.py, scripts/detectors/stale-index-lock.py, tests/test_branch_protection.py), then the B110/B112/B105/B108 lanes; the B607 mass replacement waits for the owner's ruling on the 06:25 disclosure.
 
 ## Lanes
 
@@ -43,6 +44,7 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 - Banned shapes, each measured to clear B110 or B112 without changing anything: except BaseException in place of except Exception; a tuple that holds Exception or BaseException; a body of ..., a string, del exc, or return None whose only purpose is to clear the rule. A narrowed except names the exceptions the try body can raise, read from the called code; a deliberate broad catch gets a body that does real work (a fixed-text stderr line, a counter, a re-raise).
 - After each batch, main-agent greps its diff for the banned shapes and for split /tmp literals. Commit per batch, so one ubs exit 2 blocks one batch.
 - Single test files only; the full suite runs once before the publish.
+2026-11-18T10:48:39+0100 by main-agent, change of the B607 rule above: the helper is scripts/lib/exe_path.py exe(name, env=None), returning shutil.which(name, path=os.pathsep.join(os.get_exec_path(env))) or name. WHY it departs from the canon shutil.which(name) or name: subprocess looks a bare name up in the PATH of the env= it is given, so a call that passes env= (such as a test's fake tool on PATH) must resolve under that env, or the canon helper would exec the real tool. Lanes: per the user's order of 2026-11-18 ("fan out subagents with haiku model"), every lane runs on Haiku workers, and the main agent reads every B110/B112 diff before commit. The partition is by file (one writer per file), from reports_dev/main-agent/bandit/partition.json.
 
 ## Known sites
 
