@@ -25,6 +25,13 @@ restore behaviour.
   restorable.
 - A file is replaced only after its vault rows are committed and a restore
   check shows the original comes back byte for byte (else `align-error`).
+- Known gap (TRDD-JYZAL6HW): the vault rows of a file are committed before the
+  last checks that can still skip it (the restore check, a broken JSON line, a
+  later round, the home pass, the write target, the write, or the per-file time
+  limit). A file skipped at one of those points keeps its original text, and
+  its values also stay in the vault as rows that no marker points at; restore
+  never reads them. `bun vault.ts list` shows them by origin (never the value)
+  and `bun vault.ts delete <uuid>` removes one.
 - Never written, still scanned and counted in `findings_not_redacted`; each is
   a `skip` record and a count under `skipped`: `git-internal` (anything inside
   a `.git` folder, or a `.git` pointer file; with `--all`, `.git/config` is
