@@ -20,7 +20,7 @@ const BUSY_TIMEOUT_MS = 10_000
 const BUSY_TIMEOUT_PRAGMA = `PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-export type Encoding = 'raw' | 'json-string'
+export type Encoding = 'raw'
 
 export interface VaultEntry {
   value: string
@@ -150,14 +150,15 @@ export function openVault(): Vault {
     const mode = retryBusy(() => opened.query('PRAGMA journal_mode = WAL').get()) as { journal_mode?: string } | null
     // WHY a hard check: some filesystems refuse WAL and SQLite silently keeps the old mode; concurrent workers then fail unpredictably, so stop here.
     if (mode?.journal_mode?.toLowerCase() !== 'wal') throw new VaultError('the vault could not be put in WAL mode')
-    // WHY the UNIQUE key is (origin, value, encoding): the same secret in the same file reuses its uuid and another file gets its own (owner order). encoding separates the raw text from its JSON-string form, whose restore writes the escaped text.
+    // WHY the UNIQUE key is (origin, value, encoding): the same secret in the same file reuses its uuid and another file gets its own (owner order).
+    // WHY the CHECK accepts only raw: every vault value is written raw (spec v6) and no writer of any other encoding is left. A vault created before this change keeps its old CHECK, which still accepts raw, so it keeps working; no migration.
     retryBusy(() =>
       opened.exec(`CREATE TABLE IF NOT EXISTS secrets (
       uuid TEXT PRIMARY KEY,
       type TEXT NOT NULL,
       origin TEXT NOT NULL,
       value TEXT NOT NULL,
-      encoding TEXT NOT NULL CHECK (encoding IN ('raw', 'json-string')),
+      encoding TEXT NOT NULL CHECK (encoding IN ('raw')),
       first_seen TEXT NOT NULL,
       last_seen TEXT NOT NULL,
       count INTEGER NOT NULL,
@@ -190,7 +191,7 @@ function wrap(db: Database): Vault {
       if (!isAbsolute(origin)) throw new VaultError('the origin of a vault entry must be an absolute path')
       for (const entry of entries) {
         if (entry.value === '') throw new VaultError('a vault entry has an empty value')
-        if (entry.encoding !== 'raw' && entry.encoding !== 'json-string') throw new VaultError('a vault entry has an unknown encoding')
+        if (entry.encoding !== 'raw') throw new VaultError('a vault entry has an unknown encoding')
         if (entry.type === '') throw new VaultError('a vault entry has an empty type')
       }
       const now = new Date().toISOString()

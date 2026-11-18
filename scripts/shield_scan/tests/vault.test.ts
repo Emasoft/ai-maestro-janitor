@@ -79,21 +79,20 @@ describe('uuid identity', () => {
     expect(d).toBe(a)
   })
 
-  test('another origin, another encoding or another value gives a new uuid', () => {
+  test('another origin or another value gives a new uuid', () => {
     const v = open()
     const [base] = v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'raw' }])
     const [otherOrigin] = v.lookupOrInsert('/tmp/fake-project/other.env', [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'raw' }])
-    const [otherEncoding] = v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'json-string' }])
     const [otherValue] = v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE + 'x', type: 'fake-kind', encoding: 'raw' }])
-    expect(new Set([base, otherOrigin, otherEncoding, otherValue]).size).toBe(4)
-    expect(v.list()).toHaveLength(4)
+    expect(new Set([base, otherOrigin, otherValue]).size).toBe(3)
+    expect(v.list()).toHaveLength(3)
   })
 
   test('byUuid returns the whole row, value included; an unknown uuid gives null', () => {
     const v = open()
-    const [id] = v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'json-string' }])
+    const [id] = v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'raw' }])
     const row = v.byUuid(id)
-    expect(row).toMatchObject({ uuid: id, type: 'fake-kind', origin: ORIGIN, value: FAKE_VALUE, encoding: 'json-string', count: 1 })
+    expect(row).toMatchObject({ uuid: id, type: 'fake-kind', origin: ORIGIN, value: FAKE_VALUE, encoding: 'raw', count: 1 })
     expect(v.byUuid('00000000-0000-4000-8000-000000000000')).toBeNull()
   })
 })
@@ -111,6 +110,14 @@ describe('bookkeeping', () => {
     expect(second.first_seen).toBe(first.first_seen)
     expect(second.last_seen > first.last_seen).toBe(true)
     expect(second.type).toBe('first-kind')
+  })
+
+  test('lookupOrInsert refuses the json-string encoding with the fixed text and writes no row', () => {
+    const v = open()
+    const attempt = () => v.lookupOrInsert(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'json-string' as never }])
+    expect(attempt).toThrow(VaultError)
+    expect(attempt).toThrow('a vault entry has an unknown encoding')
+    expect(v.list()).toHaveLength(0)
   })
 
   test('a failed entry rolls the whole call back and the error never holds a value', () => {
@@ -134,6 +141,18 @@ describe('bookkeeping', () => {
 })
 
 describe('storage', () => {
+  test('a new vault refuses a json-string row at the database level, so the CHECK says raw too', () => {
+    open().close()
+    vault = null
+    const writer = new Database(join(dir, 'vault.db'))
+    try {
+      const insert = 'INSERT INTO secrets (uuid, type, origin, value, encoding, first_seen, last_seen, count) VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+      expect(() => writer.query(insert).run('00000000-0000-4000-8000-0000000000aa', 'fake-kind', ORIGIN, FAKE_VALUE, 'json-string', 'now', 'now')).toThrow(/CHECK constraint failed/)
+    } finally {
+      writer.close()
+    }
+  })
+
   test('the database is in WAL mode', () => {
     open()
     const reader = new Database(join(dir, 'vault.db'), { readonly: true })
@@ -194,7 +213,7 @@ describe('command line', () => {
     const v = open()
     const [keep, drop] = v.lookupOrInsert(ORIGIN, [
       { value: FAKE_VALUE + 'keep', type: 'keep-kind', encoding: 'raw' },
-      { value: FAKE_VALUE + 'drop', type: 'drop-kind', encoding: 'json-string' },
+      { value: FAKE_VALUE + 'drop', type: 'drop-kind', encoding: 'raw' },
     ])
     v.close()
     vault = null

@@ -64,9 +64,9 @@ def restore_run(box: Box, *args: str, env_extra: dict[str, str] | None = None, e
 
 _INSERT = f"""
 import {{ openVault }} from {json.dumps(str(VAULT))}
-const [origin, value, encoding] = JSON.parse(await Bun.stdin.text())
+const [origin, value] = JSON.parse(await Bun.stdin.text())
 const v = openVault()
-const [uuid] = v.lookupOrInsert(origin, [{{ value, type: "github-token", encoding }}])
+const [uuid] = v.lookupOrInsert(origin, [{{ value, type: "github-token", encoding: "raw" }}])
 v.close()
 console.log(JSON.stringify(uuid))
 """
@@ -79,9 +79,9 @@ console.log(JSON.stringify({{ allowed: cases.map(([set, tty]) => restoreAllowed(
 """
 
 
-def vaulted(box: Box, origin: Path, value: str, encoding: str = "raw") -> str:
+def vaulted(box: Box, origin: Path, value: str) -> str:
     """Put one row into the box vault, for a file at origin, and return its uuid (the vault is created when missing)."""
-    uuid: str = box.bun_json(_INSERT, [str(origin), value, encoding])
+    uuid: str = box.bun_json(_INSERT, [str(origin), value])
     return uuid
 
 
@@ -229,11 +229,11 @@ def test_a_hardlinked_file_and_a_repo_with_a_merge_in_progress_are_skipped(box: 
     assert {p: p.read_bytes() for p in before} == before
 
 
-def test_a_json_string_row_is_restored_escaped_and_the_line_still_parses(box: Box) -> None:
-    """A json-string row whose value holds a quote, a backslash and a newline is written back escaped: the JSON line parses and decodes to the value."""
+def test_a_raw_row_holding_json_escapes_is_restored_as_written_and_the_line_still_parses(box: Box) -> None:
+    """A raw row whose value holds the escaped text of a quote, a backslash and a newline is written back unchanged: the JSON line parses and decodes to the value."""
     value = 'pre"quote\\back\nnl'
     f = box.put(box.root / "data.json", "{}\n")
-    uuid = vaulted(box, f, value, "json-string")
+    uuid = vaulted(box, f, json.dumps(value)[1:-1])
     box.put(f, json.dumps({"k": marker_of(uuid)}) + "\n")
     done = restore_run(box, str(f))
     assert done.code == 0, done.stderr
@@ -321,3 +321,52 @@ def test_a_text_file_over_max_large_mb_is_skipped_and_the_run_is_incomplete(box:
     assert [(r["path"], r["reason"]) for r in done.of("skip")] == [("big.txt", "too-large")]
     assert done.summary["complete"] is False and done.summary["skipped"] == {"too-large": 1}
     assert read_text(big) == big_text and read_text(a) == f"k = {TOKEN}\n"
+
+
+# A vault created before spec v6 has the old table, whose CHECK still accepts json-string; this creates such a vault holding one json-string row.
+_LEGACY_VAULT = """
+import { Database } from "bun:sqlite"
+const [file, origin, value] = JSON.parse(await Bun.stdin.text())
+const db = new Database(file)
+db.exec(`CREATE TABLE secrets (
+  uuid TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  value TEXT NOT NULL,
+  encoding TEXT NOT NULL CHECK (encoding IN ('raw', 'json-string')),
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  UNIQUE (origin, value, encoding)
+)`)
+const uuid = crypto.randomUUID()
+const now = new Date().toISOString()
+db.query("INSERT INTO secrets (uuid, type, origin, value, encoding, first_seen, last_seen, count) VALUES (?, 'github-token', ?, ?, 'json-string', ?, ?, 1)").run(uuid, origin, value, now, now)
+db.close()
+console.log(JSON.stringify(uuid))
+"""
+
+
+def legacy_json_string_row(box: Box, origin: Path, value: str) -> str:
+    """Create the box vault with the pre-v6 table holding one json-string row for origin, and return its uuid."""
+    box.vault_dir.mkdir(parents=True, exist_ok=True)
+    uuid: str = box.bun_json(_LEGACY_VAULT, [str(box.vault_dir / "vault.db"), str(origin), value])
+    return uuid
+
+
+def test_a_json_string_row_of_an_old_vault_is_left_and_the_run_goes_on(box: Box) -> None:
+    """A marker whose row is json-string (an old vault) is left as it is and reported as unknown-encoding, while a raw marker of another file is restored, the run exits 1, and the value appears in no output."""
+    value = "value-legacy-0123456789"
+    legacy = box.put(box.root / "legacy.txt", "{}\n")
+    legacy_uuid = legacy_json_string_row(box, legacy, value)
+    box.put(legacy, f"k = {marker_of(legacy_uuid)}\n")
+    raw = box.put(box.root / "raw.txt", "{}\n")
+    raw_uuid = vaulted(box, raw, "value-raw-0123456789")
+    box.put(raw, f"k = {marker_of(raw_uuid)}\n")
+    done = restore_run(box, str(box.root))
+    assert done.code == 1, done.stderr
+    assert read_text(raw) == "k = value-raw-0123456789\n"
+    assert read_text(legacy) == f"k = {marker_of(legacy_uuid)}\n"
+    assert done.of("left") == [{"type": "left", "path": "legacy.txt", "uuid": legacy_uuid, "reason": "unknown-encoding"}]
+    assert done.summary["markers_restored"] == 1 and done.summary["markers_left"] == 1
+    assert value not in done.streams()

@@ -1,6 +1,6 @@
 // secrets-shield restore, increment 3 step 3a-4b (TRDD-BAQB9SYO; spec design/specs/TRDD-BAQB9SYO-increment-3-redact.md R9): puts the vaulted value back in place of each [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>] marker of one file or of every file under a folder. For a person at a terminal only: the skill tells agents never to run it.
 // CLI: bun restore.ts [--any-origin] [--max-large-mb N] <file|root>   (--max-large-mb: a text file over N MB is not read, default 1024)
-// Output, stdout only, JSON lines, a value never, paths relative to the root: {"type":"left","path","uuid","reason":"unknown"|"moved"} · {"type":"note","path","uuid","reason":"type-mismatch"} · {"type":"skip","path","reason"} · last {"type":"summary", files_with_markers, files_restored, markers_restored, markers_moved_restored, markers_left, type_mismatch, skipped, complete}. markers_moved_restored is part of markers_restored.
+// Output, stdout only, JSON lines, a value never, paths relative to the root: {"type":"left","path","uuid","reason":"unknown"|"moved"|"unknown-encoding"} · {"type":"note","path","uuid","reason":"type-mismatch"} · {"type":"skip","path","reason"} · last {"type":"summary", files_with_markers, files_restored, markers_restored, markers_moved_restored, markers_left, type_mismatch, skipped, complete}. markers_moved_restored is part of markers_restored.
 // Exit: 3 incomplete (a read-error, unreadable-dir or too-large skip) · else 1 a marker was left or a file with markers was skipped · else 0 every marker found was restored (a binary file, or a changed file whose bytes held no marker, is skipped and keeps 0) · 2 usage, guard, missing or broken vault, or a fatal error.
 // A value never reaches argv, stderr or an error message: every error is fixed text. restore writes no vault row (the setup of openVault may still switch the journal of the vault file to WAL).
 
@@ -8,7 +8,7 @@ import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, rea
 import { dirname, join, resolve, sep } from 'node:path'
 import { BINARY_PROBE_BYTES, newStats, noteSkip, relOf, walkFiles, type FileItem, type SetOptions, type SetStats } from './fileset.ts'
 import { SHIELD_MARKER } from './redact.ts'
-import { VAULT_DIR_ENV, VAULT_FILE, VaultError, openVault, resolveVaultDir, type Vault, type VaultRow } from './vault.ts'
+import { VAULT_DIR_ENV, VAULT_FILE, VaultError, openVault, resolveVaultDir, type Vault } from './vault.ts'
 import { checkWriteTarget, gitOperation, writeAtomic } from './writeguard.ts'
 
 const USAGE = 'usage: bun restore.ts [--any-origin] [--max-large-mb N] <file|root>'
@@ -135,9 +135,6 @@ function readWithStat(abs: string): { state: 'binary' } | { state: 'changed'; da
   }
 }
 
-// WHY json-string is written as JSON.stringify without its quotes: the row holds the decoded value of a JSON string, and the file holds its escaped form, so a quote, a backslash or a newline must come back escaped.
-const textOf = (row: VaultRow): string => (row.encoding === 'json-string' ? JSON.stringify(row.value).slice(1, -1) : row.value)
-
 function restoreFile(ctx: Context, abs: string, rel: string): void {
   const { vault, totals } = ctx
   const skip = (reason: string, withMarkers: boolean): void => {
@@ -167,7 +164,7 @@ function restoreFile(ctx: Context, abs: string, rel: string): void {
   let restored = 0
   let moved = 0
   const mismatches: string[] = []
-  const left = (uuid: string, reason: 'unknown' | 'moved'): void => {
+  const left = (uuid: string, reason: 'unknown' | 'moved' | 'unknown-encoding'): void => {
     totals.markersLeft++
     emit({ type: 'left', path: rel, uuid, reason })
   }
@@ -179,6 +176,11 @@ function restoreFile(ctx: Context, abs: string, rel: string): void {
       left(uuid, 'unknown')
       continue
     }
+    // WHY a row that is not raw is left, not written back: a json-string row (a vault created before spec v6 can hold one) holds a decoded value that needs escaping, so writing it back raw would corrupt a JSON file silently. The marker stays and the run goes on, as it does for an unknown marker; exit 1 reports it.
+    if (row.encoding !== 'raw') {
+      left(uuid, 'unknown-encoding')
+      continue
+    }
     // WHY the origin check: a marker copied into another file would otherwise write the secret there (spec R9); a project moved or copied after the redaction needs --any-origin.
     const sameOrigin = row.origin === abs
     if (!sameOrigin && !ctx.anyOrigin) {
@@ -188,7 +190,7 @@ function restoreFile(ctx: Context, abs: string, rel: string): void {
     if (!sameOrigin) moved++
     // WHY restored by uuid alone (spec R9): a value found under two kinds shares one row, which keeps its first kind, so a marker whose Type differs from the row is still the right value; it is reported as a note.
     if (row.type !== m[1]) mismatches.push(uuid)
-    out += text.slice(at, m.index) + textOf(row)
+    out += text.slice(at, m.index) + row.value
     at = m.index + m[0].length
     restored++
   }
