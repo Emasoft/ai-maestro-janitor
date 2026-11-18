@@ -242,7 +242,15 @@ export function restoreCheck(plan: Plan, final: string, uuids: readonly string[]
  * WHY: the sweep finds copies of values the passes already found; this finds what neither the passes nor the sweep took out of the stretches, and it is the only check of the output itself (the restore check proves the file can be restored, not that it is clean).
  */
 export function residualHits(final: string, homes: readonly string[], passes: ReadonlySet<Pass>): Hits {
+  return markerFreeHits(final, homes, passes)
+}
+
+/**
+ * The hits of the core passes over a text, never inside a shield marker: each stretch between the markers the text holds (cutMarkers) is redacted alone and the hits are summed. Returns kinds and counts only, never text.
+ * WHY a marker is never read: it is the shield's own output, never a finding; reading inside it counted the first word of a marker as a password, so a re-scan of a redacted tree reported false findings.
+ */
+export function markerFreeHits(text: string, homes: readonly string[], passes: ReadonlySet<Pass>): Hits {
   const hits: Hits = {}
-  for (const item of cutMarkers(final)) if ('seg' in item) addHits(hits, redactAll(item.seg, homes, passes).hits)
+  for (const item of cutMarkers(text)) if ('seg' in item) addHits(hits, redactAll(item.seg, homes, passes).hits)
   return hits
 }

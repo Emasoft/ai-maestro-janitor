@@ -143,6 +143,7 @@ or when any of those three is set.
 The findings file is JSON lines: `finding` (path, kind, line or null, count),
 `skip` (path, reason), with `--redact` also `residual` (path, kind, count), and
 the summary last. It never holds a secret value.
+Text inside a shield marker (`[REDACTED-BY-SECRET-SHIELD. …]` or `[JANITOR-REDACTED:…]`) is never read, so a re-scan of a redacted tree does not count its markers, and a secret hidden inside text shaped like a marker is not found.
 A finding with line null was found in the whole file but not on one line (a
 secret split over lines, or, in a plain file, the per-line pass was killed by the time limit).
 A finding of kind `json-unredactable` is a JSON line (in a `.jsonl` or `.ndjson`

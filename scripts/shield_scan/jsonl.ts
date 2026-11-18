@@ -4,7 +4,7 @@
 
 import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { addHits, redactJsonLine, stringSpans, type Hits } from '../../hooks/secret-shield/patterns.ts'
-import { alignStretches, CORE_MARKER, cutMarkers, HOME_ONLY, planRedaction, SHIELD_MARKER, withoutHome, type Part, type Plan, type Stretch } from './redact.ts'
+import { alignStretches, CORE_MARKER, cutMarkers, HOME_ONLY, markerFreeHits, planRedaction, SHIELD_MARKER, withoutHome, type Part, type Plan, type Stretch } from './redact.ts'
 
 /** Why a line cannot be planned. One name per mechanism, so a dry run says what to design a fallback for. */
 export const JSONL_CAUSES = ['plain-align-null', 'redactJsonLine-threw', 'token-structure', 'marker-moved', 'decoded-align-null-nested', 'decoded-align-null-flat', 'stretch-overlaps-marker', 'escaped-marker', 'split-surrogate'] as const
@@ -161,7 +161,7 @@ const pushLineHits = (lineHits: LineHit[], hits: Hits, line: number): void => {
 function locateRun(run: LineRun, homes: readonly string[], passes: ReadonlySet<Pass>, lineHits: LineHit[]): void {
   run.lines.forEach((raw, k) => {
     if (raw.trim() === '') return
-    pushLineHits(lineHits, redactAll(raw.endsWith('\r') ? raw.slice(0, -1) : raw, homes, passes).hits, run.first + k + 1)
+    pushLineHits(lineHits, markerFreeHits(raw.endsWith('\r') ? raw.slice(0, -1) : raw, homes, passes), run.first + k + 1)
   })
 }
 
@@ -204,7 +204,7 @@ export function jsonlHits(text: string, homes: readonly string[], passes: Readon
       continue
     }
     for (const line of run.lines) if (line.trim() !== '') notJson++
-    addHits(hits, redactAll(run.lines.join('\n'), homes, passes).hits)
+    addHits(hits, markerFreeHits(run.lines.join('\n'), homes, passes))
     locateRun(run, homes, passes, lineHits)
   }
   return { hits, lineHits, notJson }

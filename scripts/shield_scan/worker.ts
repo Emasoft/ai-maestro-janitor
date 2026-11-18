@@ -19,7 +19,7 @@ import { basename, dirname, sep } from 'node:path'
 import { addHits, countOf, mapJsonLineStrings, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import { isPass, redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { BINARY_PROBE_BYTES } from './fileset.ts'
-import { finalText, finalTextAligned, HOME_KIND, HOME_ONLY, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, withoutHome, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
+import { finalText, finalTextAligned, HOME_KIND, HOME_ONLY, markerFreeHits, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, withoutHome, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 import { brokenLines, isJsonlPath, jsonlHits, newNonce, parses, planJsonl, skipReasonOf, type JsonlStats, type LineHit } from './jsonl.ts'
 import type { Vault } from './vault.ts'
 import { checkWriteTarget, gitOperation, writeAtomic } from './writeguard.ts'
@@ -177,7 +177,7 @@ function locateLines(text: string, passes: ReadonlySet<Pass>): LineHit[] {
     const raw = lines[index]
     if (raw.length === 0) continue
     const one = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    for (const [kind, count] of Object.entries(redactAll(one, homes, passes).hits)) located.push([kind, index + 1, count])
+    for (const [kind, count] of Object.entries(markerFreeHits(one, homes, passes))) located.push([kind, index + 1, count])
   }
   return located
 }
@@ -232,7 +232,7 @@ async function handle(line: string): Promise<void> {
     plan = planned.plan
     jsonl = planned.stats
     notJson = planned.stats.not_json
-  } else if (job.redact === null) whole = redactAll(text, homes, passes).hits
+  } else if (job.redact === null) whole = markerFreeHits(text, homes, passes)
   else {
     const planned = planRedaction(text, homes, passes)
     whole = planned.hits

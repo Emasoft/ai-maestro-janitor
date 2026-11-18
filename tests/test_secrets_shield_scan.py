@@ -536,3 +536,38 @@ def test_repo_two_levels_below_an_ignored_folder_is_not_counted(box: Box) -> Non
     result = box.scan(root=proj)
     assert result.code == 0 and result.findings == []
     assert result.summary["gitignored_entries"] == 1 and result.summary["ignored_repos"] == 0
+
+
+def test_text_inside_a_shield_marker_is_not_a_finding(box: Box) -> None:
+    """A scan of a redacted text does not count what lies inside its shield markers: only the real secret on line 3 is found."""
+    marker_id = "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f"
+    db = f"Server=db;User Id=u;Password=[REDACTED-BY-SECRET-SHIELD. Type: connection-string-key. ID: {marker_id}];Encrypt=true\n"
+    cookie = f"Cookie: _gitlab_session=[REDACTED-BY-SECRET-SHIELD. Type: gitlab-session-cookie. ID: {marker_id}]; other=1\n"
+    box.put(box.root / "note.txt", db + cookie + _line())
+    box.repo(box.root, "note.txt")
+    result = box.scan()
+    assert result.code == 1
+    assert result.findings == [("note.txt", "github-token", 3, 1)]
+
+
+def test_text_inside_a_shield_marker_is_not_a_finding_in_a_jsonl_file(box: Box) -> None:
+    """A .jsonl file whose non-JSON lines hold shield markers gives no finding for them; only the real secret line is found."""
+    marker_id = "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f"
+    db = f"Server=db;User Id=u;Password=[REDACTED-BY-SECRET-SHIELD. Type: connection-string-key. ID: {marker_id}];Encrypt=true\n"
+    cookie = f"Cookie: _gitlab_session=[REDACTED-BY-SECRET-SHIELD. Type: gitlab-session-cookie. ID: {marker_id}]; other=1\n"
+    box.put(box.root / "log.jsonl", db + cookie + _line())
+    box.repo(box.root, "log.jsonl")
+    result = box.scan()
+    assert result.code == 1
+    assert result.findings == [("log.jsonl", "github-token", 3, 1)]
+
+
+def test_a_token_inside_marker_shaped_text_is_not_found_known_limit(box: Box) -> None:
+    """Known limit (SKILL.md, Output): a token written inside text shaped like a shield marker or a core marker is not found, because marker text is never read."""
+    marker_id = "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f"
+    shield = f"[REDACTED-BY-SECRET-SHIELD. Type: {TOKEN}. ID: {marker_id}]\n"
+    core = f"[JANITOR-REDACTED:{TOKEN}]\n"
+    box.put(box.root / "shaped.txt", shield + core)
+    box.repo(box.root, "shaped.txt")
+    result = box.scan()
+    assert result.code == 0 and result.findings == []
