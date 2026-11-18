@@ -399,3 +399,11 @@ Shape: an address whose last label is two or more letters followed by a digit or
 Hidden instead: the same address with a last label of letters only (hidden whole).
 Card: none
 Test: KNOWN MISS email-domain-tail-after-letter-run: the digits, or the hyphen and digits, after the leading letters of the last label stay visible, a last label of letters is hidden whole
+
+## assignment-after-text-on-the-same-line
+
+Reason: (d) an open defect: the line pass of redactAssignments (hooks/secret-shield/patterns.ts:533) was written for .env, shell, YAML and TOML lines, and its regex is anchored to the whole line (^ and $ with the m flag), so a secret-name assignment is hidden only when it opens the line (after an optional export, a declaration word or a quote). After other text on the same line it is not read. A pass for the middle of a line needs a false-match measurement first (old against new on the plugin cache and the code tree, a sample of the new hits read, the time at 256 KB against the 100 ms limit), planned on TRDD-0UVFDPQP. Given up: a real password, token or key written in a command line, in prose after a colon or in a JSON string stays visible, in plain text and in transcript lines (redactJsonLine inherits it: 7 of the 8 whole cells of its table).
+Shape: a secret-name assignment after other text on its line: a CLI long flag with an equals sign (--password=<value>) or with a space (--password <value>), an environment prefix after other words (sudo API_KEY=<value> node app.js) or after a semicolon, an assignment after text and a colon (config: api_key=<value>), a quoted assignment after text (set token="<value>" now), two assignments on one line (user=bob password=<value>), and the same text inside a JSON string.
+Hidden instead: the same assignment as the whole line (password=<value>), and a JSON pair with the name as its key.
+Card: TRDD-0UVFDPQP
+Test: KNOWN DEFECT TRDD-0UVFDPQP assignment-after-text-on-the-same-line: a secret-name assignment after other text on the same line is not hidden, as the whole line it is

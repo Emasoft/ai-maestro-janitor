@@ -425,4 +425,21 @@ describe('known defects: secrets the shield misses by a bug with its own card', 
     expect(shown(`create_cookie(name='_gitlab_session', value='${upper}')`, upper)).toBe(true)
     check('the lower-case value is hidden', hiddenAs(`create_cookie(name='_gitlab_session', value='${upper.toLowerCase()}')`, upper.toLowerCase(), 'gitlab-session-cookie'))
   })
+
+  // WHY: redactAssignments (patterns.ts:533) anchors its line regex to the whole line, so a secret-name assignment is read only when it opens the line. This test is red the day TRDD-0UVFDPQP lands a mid-line pass: then move each shape below to a positive test in patterns.test.ts and delete the entry of ../KNOWN-MISSES.md in the SAME commit.
+  test('KNOWN DEFECT TRDD-0UVFDPQP assignment-after-text-on-the-same-line: a secret-name assignment after other text on the same line is not hidden, as the whole line it is', () => {
+    const control = fake('Hq7Wz3KfRm9XtLb2Vn')
+    check('the whole-line form is hidden', hidden(`password=${control}`, control))
+    const shapes: Array<[string, string, (v: string) => string]> = [
+      ['long flag with an equals sign', fake('Pd4Nv8YcJs2Gx6QwUa'), v => `--password=${v}`],
+      ['long flag with a space', fake('Rt5Lm9ZbKc3Hv7XdEf'), v => `--password ${v}`],
+      ['environment prefix after other words', fake('Wn6Bq2TsGh8Yp4MjCx'), v => `sudo API_KEY=${v} node app.js`],
+      ['environment prefix after a semicolon', fake('Vk3Dz7NrLu5Fa9SeHb'), v => `cd app; API_KEY=${v} node app.js`],
+      ['assignment after text and a colon', fake('Xj8Gc4PwQm2Ty6BnKs'), v => `config: api_key=${v}`],
+      ['quoted assignment after text', fake('Zf2Hs6VdRb9Lk4NtWe'), v => `set token="${v}" now`],
+      ['two assignments on one line', fake('Cm7Ya3QjXp5Ug8DrBv'), v => `user=bob password=${v}`],
+      ['inside a JSON string', fake('Ls9Ke5WhTn2Zc7FvMa'), v => JSON.stringify({ text: `sudo API_KEY=${v} node app.js` })],
+    ]
+    for (const [label, value, frame] of shapes) check(`${label} stays visible`, shown(frame(value), value))
+  })
 })
