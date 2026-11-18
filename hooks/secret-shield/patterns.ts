@@ -13,7 +13,8 @@ export type Hits = Record<string, number>
 /** What a redacted secret is replaced with. */
 export const mark = (kind: string): string => `[JANITOR-REDACTED:${kind}]`
 
-const MARK_BODY = String.raw`\[JANITOR-REDACTED:[A-Za-z0-9_-]+\]`
+// Exported for known.ts, which copies a marker already in a text and never searches inside it.
+export const MARK_BODY = String.raw`\[JANITOR-REDACTED:[A-Za-z0-9_-]+\]`
 /** A value that IS a marker, whole. Anchored: a value that only contains one is judged on the rest. */
 const MARK = new RegExp('^' + MARK_BODY + '$')
 const MARKS = new RegExp(MARK_BODY, 'g')
@@ -689,7 +690,8 @@ export function addHits(into: Hits, from: Hits): Hits {
 }
 
 // Maps every string of a plain JSON value through `f`, keeping its shape (nodes deeper than 12 levels are left as they are).
-const mapStrings = (value: unknown, f: (text: string) => string): unknown => {
+// Exported for known.ts, so both walks of a tool result treat every string the same way.
+export const mapStrings = (value: unknown, f: (text: string) => string): unknown => {
   const walk = (node: unknown, depth: number): unknown => {
     if (typeof node === 'string') return f(node)
     if (depth > 12 || node === null || typeof node !== 'object') return node

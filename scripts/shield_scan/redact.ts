@@ -4,13 +4,13 @@
 
 import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { addHits, propagates, type Hits } from '../../hooks/secret-shield/patterns.ts'
+import { SHIELD_MARKER, shieldMarker } from '../../hooks/secret-shield/marker.ts'
 import type { VaultEntry } from './vault.ts'
 
-// The grammar of the core marker is not exported by the core (increment 3 adds the propagates and stringSpans exports, redactJsonLine and mapJsonLineStrings to the core; spec R5 lists them), so it is rebuilt here from `mark(kind)` = [JANITOR-REDACTED:<kind>]; the unit test pins the two against each other.
+// The core exports the grammar of its own marker `mark(kind)` = [JANITOR-REDACTED:<kind>] only as MARK_BODY, with no capture group, so it is rebuilt here with the kind captured; the unit test pins the two against each other.
 export const CORE_MARKER = String.raw`\[JANITOR-REDACTED:([A-Za-z0-9_-]+)\]`
-const UUID_V4 = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`
-// The marker this module writes: [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>].
-export const SHIELD_MARKER = String.raw`\[REDACTED-BY-SECRET-SHIELD\. Type: ([A-Za-z0-9_-]+)\. ID: (${UUID_V4})\]`
+// The marker this module writes, [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>], comes from the core (hooks/secret-shield/marker.ts), so the live mod and this scan write and read one grammar (TRDD-DSXC9MP9). Re-exported for restore.ts, jsonl.ts and the tests.
+export { SHIELD_MARKER, shieldMarker }
 
 // Why a file with findings was not written (spec R7), in the order the worker checks them. Each is a skip record of the findings file and the file's findings count as findings_not_redacted.
 export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'json-broken', 'not-regular-at-write', 'outside-root', 'vault-conflict', 'changed-during-redact', 'write-error'] as const
@@ -22,7 +22,6 @@ export type RedactJob = { minAgeMs: number; root: string }
 // The worker's last reply for a file with findings when the job asks for redact (the protocol is in worker.ts): written (with the kinds and counts of what the re-scan of the final text still found, never any text), left as it was and why, or a vault failure (fixed text) that ends the run.
 export type RedactReply = { t: 'redact'; outcome: 'written'; values: number; residual: Hits; homeRewrites: number; rounds: number } | { t: 'redact'; outcome: 'skip'; reason: WriteSkipReason } | { t: 'redact'; outcome: 'vault-error'; message: string }
 
-export const shieldMarker = (kind: string, uuid: string): string => `[REDACTED-BY-SECRET-SHIELD. Type: ${kind}. ID: ${uuid}]`
 
 /** One thing the alignment found in a text: text kept as it is, or the exact stretch that one core marker (or a run of touching ones) replaced, with the kind of the first marker. */
 export type Piece = { lit: string } | { value: string; kind: string }
