@@ -4,7 +4,7 @@ title: Post-compact deferred resume recheck always fails, the child reuses a tem
 column: todo
 status: tasked
 created: 2026-11-18T01:25:43+0100
-updated: 2026-11-18T01:27:09+0100
+updated: 2026-11-18T16:38:09+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:43+0100
+implementation-commits: [486a7367]
 ---
 
 # Post-compact deferred resume recheck always fails, the child reuses a temporary uv Python that is gone
@@ -45,3 +46,4 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:43+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:38:09+0100 — progress, by cheap-worker for main-agent: implementation-commits set to [486a7367]. Per main-agent evidence: detached children start on realpath(sys.executable) via _stable_python, which raises when that is not an executable file. Files of 486a7367 (git show --stat): scripts/hooks/post-compact-resume.py, scripts/hooks/on-session-start-trdd-state.py, tests/test_post_compact_resume_hook.py, tests/test_trdd_state_hook.py. Card not moved: a GitHub issue answer (issue 368) comes first.

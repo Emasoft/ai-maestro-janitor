@@ -4,7 +4,7 @@ title: Handoff composer failure signature is the llm-ext status line, and handof
 column: todo
 status: tasked
 created: 2026-11-18T01:25:34+0100
-updated: 2026-11-18T01:38:48+0100
+updated: 2026-11-18T16:45:27+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:34+0100
+implementation-commits: [0c55d740]
 ---
 
 # Handoff composer failure signature is the llm-ext status line, and handoff size has no bound
@@ -46,3 +47,4 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:34+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:38:09+0100 — progress, by cheap-worker for main-agent: implementation-commits set to [0c55d740]. Per main-agent evidence: failure_signature keys on the last FAILED: line with times, hex ids and long numbers masked; part (b) is not shown resolved. Part (b) is the handoff size bound. The 0c55d740 commit message calls it held because _handoff_body caps the injected handoff at about 7.8 KB (not checked by cheap-worker). That cap is on the injection, not on the composer write, which the card says checks no size (issue claim, not checked here). Files of 0c55d740 (git show --stat): scripts/lib/llm_ext_summary.py, tests/test_llm_ext_summary.py. Card not moved: a GitHub issue answer (issue 364) comes first.

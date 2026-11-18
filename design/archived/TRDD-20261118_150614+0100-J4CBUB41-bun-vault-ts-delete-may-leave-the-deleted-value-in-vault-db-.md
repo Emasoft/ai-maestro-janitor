@@ -1,10 +1,10 @@
 ---
 trdd-id: J4CBUB41
 title: bun vault.ts delete may leave the deleted value in vault.db free pages or the WAL
-column: backburner
-status: tasked
+column: complete
+status: archived
 created: 2026-11-18T15:06:14+0100
-updated: 2026-11-18T16:32:41+0100
+updated: 2026-11-18T16:37:28+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -38,3 +38,12 @@ redact-and-restore.md tells the user to remove a leftover vault row with bun vau
 - 2026-11-18T16:28:16+0100 — move to complete pending: refused by trddgrep, exit 2, with the message: "trddgrep: J4CBUB41 has NO acceptance checklist, so archiving it as 'complete' would record a completion that proves nothing: nothing states what the card promised or whether it delivered. Write the checklist first, then archive". The card stays in backburner until an acceptance checklist is written by the main agent.
 - 2026-11-18T16:32:40+0100 — verification of the test claims in the closing line above, by cheap-worker: git show 3b77af8d -- scripts/shield_scan/tests/vault.test.ts (grep of added lines): the test 'a removed value is in neither vault.db nor vault.db-wal, read while the vault is still open' reads vault.db and vault.db-wal as bytes (readFileSync, includes the value). The busy test full name is 'a busy WAL checkpoint fails the delete with the fixed text, is never reported as deleted, and a re-run empties the WAL'; it expects exit 2 and the busy text 'the vault delete could not checkpoint the WAL; run it again with no scan running'. cheap-worker did not run these tests; the pass and fail counts remain per main-agent evidence.
 - 2026-11-18T16:32:40+0100 — current state of this card, superseding the move-to-complete PENDING line of 2026-11-18T16:24:13 and the retry note before the second refusal: no move to complete has succeeded. The retry with --approver main-agent@ai-maestro-janitor ran and was refused (exit 2) because the card has NO acceptance checklist; that refusal is the pending line of 2026-11-18T16:28:16. The card stays in backburner. implementation-commits is [3b77af8d]: grep-derived from git log --grep=TRDD-J4CBUB41, with bf6eacaa dropped as design-only; a grep match is a proxy, not a per-commit proof. The closing claims rest on the vault.ts and vault.test.ts diffs; the test counts are per main-agent evidence.
+- 2026-11-18T16:37:24+0100 — evidence for the acceptance boxes, by cheap-worker for main-agent: boxes 1 to 3 rest on the vault.ts and vault.test.ts diff of 3b77af8d, checked on this card at 16:24:13 and 16:32:40, and on the test counts (per main-agent evidence: 22 pass with the fix, 20 pass and 2 fail without it, in a clean HEAD worktree); box 4 was checked by cheap-worker on git show 3b77af8d -- skills/janitor-secrets-shield-scan/references/redact-and-restore.md: the added sentence reads 'Values deleted by earlier versions may remain in the files', and 'the files' are vault.db and vault.db-wal, named in the sentence before it. No test was run by cheap-worker.
+- 2026-11-18T16:37:28+0100 — COMPLETE by main-agent@ai-maestro-janitor. Fix in 3b77af8d; all four acceptance boxes checked.
+
+## Acceptance checklist
+
+- [x] bun vault.ts delete leaves the removed value in neither vault.db nor vault.db-wal (test 'a removed value is in neither vault.db nor vault.db-wal, read while the vault is still open', commit 3b77af8d)
+- [x] secure_delete is turned on at open and read back; a vault that cannot turn it on fails with a VaultError (vault.ts, 3b77af8d)
+- [x] a WAL checkpoint (TRUNCATE) runs after every delete; a busy checkpoint exits 2 and is never reported as deleted (test 'a busy WAL checkpoint fails the delete with the fixed text, is never reported as deleted, and a re-run empties the WAL')
+- [x] redact-and-restore.md states that values removed by earlier versions may remain in vault.db and vault.db-wal

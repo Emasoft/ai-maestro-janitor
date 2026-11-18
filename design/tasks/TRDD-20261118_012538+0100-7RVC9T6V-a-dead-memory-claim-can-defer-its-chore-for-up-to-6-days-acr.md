@@ -4,7 +4,7 @@ title: A dead memory claim can defer its chore for up to 6 days across scopes, a
 column: todo
 status: tasked
 created: 2026-11-18T01:25:38+0100
-updated: 2026-11-18T01:27:08+0100
+updated: 2026-11-18T16:38:10+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:38+0100
+implementation-commits: [6a316641]
 ---
 
 # A dead memory claim can defer its chore for up to 6 days across scopes, age is the only liveness test
@@ -45,3 +46,4 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:38+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:38:10+0100 — progress, by cheap-worker for main-agent: implementation-commits set to [6a316641]. Per main-agent evidence: a claim blocks only its own scope; a header-only dead claim expires after 6 h. Files of 6a316641 (git show --stat): scripts/dispatch.py, scripts/memory_dispatch_claim.py, tests/test_claimed_marker_deferral.py. Card not moved: a GitHub issue answer (issue 366) comes first.

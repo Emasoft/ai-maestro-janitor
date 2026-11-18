@@ -4,7 +4,7 @@ title: Post-compact resume and SessionStart TRDD injection ignore the linked wor
 column: todo
 status: tasked
 created: 2026-11-18T01:25:36+0100
-updated: 2026-11-18T01:27:08+0100
+updated: 2026-11-18T16:45:26+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:36+0100
+implementation-commits: [486a7367]
 ---
 
 # Post-compact resume and SessionStart TRDD injection ignore the linked worktree and treat human_review as in-flight
@@ -45,3 +46,13 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:38:21+0100 — progress, by cheap-worker for main-agent: implementation-commits set to [486a7367]. Per main-agent evidence: human_review removed from _INFLIGHT_COLUMNS (post-compact-resume.py) and from _ACTIVE_COLUMNS (on-session-start-trdd-state.py); updated values compared as datetimes (_updated_epoch). Files of 486a7367 (git show --stat): scripts/hooks/post-compact-resume.py, scripts/hooks/on-session-start-trdd-state.py, tests/test_post_compact_resume_hook.py, tests/test_trdd_state_hook.py. The worktree half of issue 365 stays open; the Measured section is the entry stamped 2026-11-18T16:43:47+0100 below, copied from reports_dev/main-agent/post1/issue365-worktree-half.md (local), per main-agent evidence, not checked by cheap-worker. Card not moved: a GitHub issue answer (issue 365) comes first.
+- 2026-11-18T16:43:47+0100 — copy, by cheap-worker for main-agent, of the Measured section of reports_dev/main-agent/post1/issue365-worktree-half.md (local), one entry; per main-agent evidence, not checked by cheap-worker. Measured 2026-11-18 by grep of the two hooks:
+  - scripts/hooks/on-session-start-trdd-state.py reads the hook stdin field cwd first (line 69), then CLAUDE_PROJECT_DIR, then os.getcwd (line 83). The SessionStart half therefore already reads the board of the hook-input cwd.
+  - scripts/hooks/post-compact-resume.py reads the payload cwd only as a fallback when CLAUDE_PROJECT_DIR is absent (lines 738-788).
+  Consequence: option A (read the board of the hook-input cwd) does not cover the case the issue reports. That session was launched in the main checkout and committed in a linked worktree; the Bash tool cwd does not persist, so the hook-input cwd stays the main checkout and option A reads the same main board as today.
+  Candidate signals still open:
+  - the worktree named by the session recent git -C or absolute-path commits, read from the transcript;
+  - the worktree holding the most recent commit made by this session;
+  - all worktrees of the repo, newest copy wins. Weak: about 40 .claude/worktrees/agent-* worktrees exist (many marked prunable), so abandoned cards would become resume targets.
+  Consistency follow-up, not changed by 486a7367: scripts/detectors/trdd-reminder.py:58 (_ACTIVE_COLUMNS) and scripts/hooks/pre-compact-handoff.py:121 still include human_review. The handoff may legitimately list cards waiting for the human; decide per module.
