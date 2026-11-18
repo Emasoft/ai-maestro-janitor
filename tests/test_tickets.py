@@ -147,6 +147,17 @@ def test_a_recurring_finding_is_ONE_ticket_not_a_flood(sdir: Path) -> None:
     assert _load_ok(first.id, sdir).seen_count == 21
 
 
+def test_a_recurrence_bumps_a_stuck_needs_human_ticket_instead_of_a_twin(sdir: Path) -> None:
+    """A recurrence of a needs_human finding bumps that ticket and opens no twin."""
+    first = _open_ok(sdir, dedupe_key="same-finding")
+    tickets.mark_needs_human(first, now=NOW, why="out of reach here")
+    tickets.save(first, sdir)
+    again, why = _open(sdir, dedupe_key="same-finding", now=NOW + 60)
+    assert again is not None and again.id == first.id, why
+    assert again.seen_count == 2
+    assert [t.id for t in tickets.load_all(sdir)] == [first.id]
+
+
 def test_critical_is_dispatched_before_a_flood_of_low(sdir: Path) -> None:
     """A flood of low-severity findings must never starve a critical one."""
     lows = [_open_ok(sdir, kind="state-corruption", severity="low", dedupe_key=f"l{i}", now=NOW - 900 + i) for i in range(5)]
@@ -210,6 +221,34 @@ def test_a_dead_agents_ticket_is_reclaimed(sdir: Path) -> None:
     assert tickets.reclaim_stale([t], now=NOW + 60, stale_s=3600) == []
     got = tickets.reclaim_stale([t], now=NOW + 3601, stale_s=3600)
     assert got and t.status == tickets.OPEN and t.attempts == 1
+
+
+def test_a_claimed_then_silent_ticket_keeps_its_own_diagnosis(sdir: Path) -> None:
+    """A ticket an agent claimed and then left silent is reported as silent, never as a dispatch nobody claimed."""
+    t = _open_ok(sdir)
+    t.max_attempts = 1
+    t.status = tickets.IN_PROGRESS
+    t.dispatched_at = NOW
+    tickets.reclaim_stale([t], now=NOW + 3601, stale_s=3600)
+    assert t.status == tickets.NEEDS_HUMAN
+    assert "claimed by an agent, then silent" in t.resolution
+    assert "never claimed" not in t.resolution
+
+
+def test_a_never_claimed_dispatch_is_re_dispatched_and_never_called_a_dead_agent(sdir: Path) -> None:
+    """A dispatch no agent ever claimed is re-dispatched, and both resolutions say it was never claimed; the words dead agent are never used."""
+    t = _open_ok(sdir)
+    t.max_attempts = 2
+    t.status = tickets.DISPATCHED
+    t.dispatched_at = NOW
+    tickets.reclaim_stale([t], now=NOW + 3601, stale_s=3600)
+    assert t.status == tickets.OPEN and t.attempts == 1
+    assert "never claimed" in t.resolution and "died" not in t.resolution
+    t.status = tickets.DISPATCHED  # the scheduler re-dispatches it, and again no agent claims it
+    t.dispatched_at = NOW + 3601
+    tickets.reclaim_stale([t], now=NOW + 7202, stale_s=3600)
+    assert t.status == tickets.NEEDS_HUMAN and t.attempts == 2
+    assert "never claimed" in t.resolution and "died" not in t.resolution
 
 
 def test_a_resolved_ticket_is_archived_not_deleted(sdir: Path) -> None:

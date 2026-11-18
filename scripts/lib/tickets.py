@@ -217,11 +217,19 @@ def from_json(data: dict) -> Ticket:
 
 
 def reclaim_stale(tickets: list[Ticket], *, now: int, stale_s: int) -> list[Ticket]:
-    """Return the in-flight tickets whose agent DIED, reset to `open` with attempts++.
+    """Return the in-flight tickets that went stale, reset to `open` with attempts++ (or `needs_human` at the limit).
+
+    Two stale states, each diagnosed by what was actually observed (TRDD-YRK51PGW):
+      - `dispatched`: the scheduler sent it and no agent ever claimed it (`ticket_cli start` moves it to
+        `in_progress`). Nobody died, so it must not be reported as a dead agent.
+      - `in_progress`: an agent claimed it and then went silent. Whether it died is not observable either.
+
+    Both still spend an attempt, and the counter bounds the retries: an unclaimed dispatch that counted for
+    nothing would re-enter the queue every stale window with no limit, and each re-dispatch spends the rolling
+    daily budget, starving every other ticket.
 
     Without this, an agent killed mid-work (the weekly rate cap did exactly that to a memory agent on
-    2026-07-14) strands its ticket in `dispatched` forever — the queue quietly stops working and
-    nothing says so.
+    2026-07-14) strands its ticket in `dispatched` forever, and the queue quietly stops working.
     """
     out: list[Ticket] = []
     for t in tickets:
@@ -229,14 +237,23 @@ def reclaim_stale(tickets: list[Ticket], *, now: int, stale_s: int) -> list[Tick
             continue
         if now - max(t.dispatched_at, t.updated_at) < stale_s:
             continue
+        # WHY two wordings: the resolution is the only record of what happened, so it must name the observed
+        # state. A never-claimed dispatch and a claimed-then-silent ticket need different fixes, and one shared
+        # "died" wording sent a human to look for a dead agent that was never there.
+        observed = (
+            "dispatched but never claimed by an agent"
+            if t.status == DISPATCHED
+            else "claimed by an agent, then silent"
+        )
         t.attempts += 1
         t.updated_at = now
         if t.attempts >= t.max_attempts:
             t.status = NEEDS_HUMAN
-            t.resolution = "its agent died repeatedly; a human must look"
+            t.resolution = f"{observed} after {t.attempts} attempts; a human must look"
         else:
             t.status = OPEN
-            t.not_before = now  # a dead agent is not a failed fix — retry promptly
+            t.not_before = now  # a stale ticket is not a failed fix, so retry promptly
+            t.resolution = f"{observed}; re-dispatching"
         out.append(t)
     return out
 
@@ -551,7 +568,11 @@ def open_ticket(
     key = _clean(dedupe_key or f"{kind}:{title}", 200)
 
     for existing in load_all(state_dir):
-        if existing.dedupe_key == key and existing.status not in TERMINAL:
+        # TRDD-YRK51PGW: needs_human is TERMINAL for the scheduler but still OPEN for a human (it stays on the
+        # live board), so a recurrence bumps it instead of opening a twin. Relative to `not in TERMINAL` the only
+        # state this adds is NEEDS_HUMAN (TERMINAL minus ARCHIVED); ARCHIVED is the predicate save() uses to pick
+        # the directory.
+        if existing.dedupe_key == key and existing.status not in ARCHIVED:
             existing.seen_count += 1
             existing.updated_at = ts
             save(existing, state_dir)
