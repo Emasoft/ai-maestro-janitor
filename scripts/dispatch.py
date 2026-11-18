@@ -1285,7 +1285,8 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     (findings, other markers) passes through unchanged.
 
     TRDD-7ZMQSXO6 (a): BEFORE the pending-pool check above, also drop the marker
-    while an UNEXPIRED CLAIMED record for the same chore already exists — the
+    while an UNEXPIRED CLAIMED record for the same chore already exists (same scope
+    and root as the oldest pending record; every scope when no pending record exists) — the
     scheduler re-dispatching a chore whose earlier claim (by this session or a peer)
     hasn't expired yet must not spawn a second agent onto the same in-flight work.
     "Unexpired" reuses the EXACT age/threshold math
@@ -1311,9 +1312,6 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     """
     if not text or "[janitor-memory-" not in text:
         return text
-    import math
-
-    import memory_settings
     import orphaned_memory_maint as omm
 
     state_dir = state.state_dir()
@@ -1333,16 +1331,32 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
             )
             continue
         deferred_age_s: int | None = None
-        for _dispatch_id, payload in memory_dispatch_claim._matching_records(
-            state_dir, memory_dispatch_claim.CLAIMED_PREFIX, chore, None
-        ):
+        # WHY (janitor#366 / TRDD-7RVC9T6V): a claim blocks only the (scope, root) its spawned
+        # agent would work, never the chore in every scope. The marker names only the chore, so
+        # the target is the record claim_one hands out next (peek_one: oldest first, drained
+        # records skipped). The marker carries no scope, so the target is inferred, and a peer may
+        # claim or supersede it between this read and the dispatch; the claim step remains the
+        # authority, not this target. The scope and root filter, and the expiry bound shared with
+        # expire_stale_claims, live in memory_dispatch_claim so that both paths agree.
+        target: dict | None = None
+        target_path = memory_dispatch_claim.peek_one(state_dir, chore, now)
+        if target_path is not None:
             try:
-                cadence_s = memory_settings.interval_s_for(chore)
-            except ValueError:
-                cadence_s = math.inf
-            factor = omm.factor_for_scope(str(payload.get("scope") or ""))
-            cadence_threshold = cadence_s * factor if math.isfinite(cadence_s) else math.inf
-            threshold = max(0.0, cadence_threshold, memory_dispatch_claim._STALE_CLAIM_FLOOR_S)
+                target = json.loads(target_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:  # json.JSONDecodeError is a ValueError
+                # WHY: a half-written or vanished pending file must not crash the heartbeat. The
+                # marker falls back to the any-scope match, and the claim step still decides.
+                state.log_line(
+                    "dispatch",
+                    f"memory-dispatch: pending record for {chore} unreadable ({exc}); matching claims of any scope",
+                )
+                target = None
+        target_scope = "" if target is None else str(target.get("scope") or "")
+        target_root = "" if target is None else str(target.get("root") or "")
+        for _dispatch_id, payload in memory_dispatch_claim.claims_blocking_marker(
+            state_dir, chore, target_scope, target_root
+        ):
+            threshold = memory_dispatch_claim.claim_threshold_s(state_dir, _dispatch_id, payload, now=now)
             age_s = omm.pending_age_s(payload, now=now)
             if age_s < threshold:
                 deferred_age_s = age_s

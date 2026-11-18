@@ -345,6 +345,106 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
     return None
 
 
+def _read_claim_record(path: Path) -> dict | None:
+    """The CLAIMED or EXPIRED record at `path`, or None when it is unreadable or lacks the
+    fields the age math needs. A missing or null `root` reads as "" (matches any root).
+
+    WHY (TRDD-7RVC9T6V, janitor#366): a dead claim is judged by its own age and report,
+    whatever root it names. `omm.read_record` requires `root`, so a claim with no root field
+    was dropped as malformed: never deferred and never expired, so it was immortal. The other
+    fields are still checked by the shared `omm._validate_record`."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("root") is None:
+        data["root"] = ""
+    return omm._validate_record(data)
+
+
+def _report_is_header_only(text: str) -> bool:
+    """True iff `text` is exactly the claim-step skeleton: the generated comment, the title
+    line and the `Claim:` line, with no other non-blank line.
+
+    WHY (TRDD-7RVC9T6V, janitor#366): `main` writes exactly this skeleton at claim time. A
+    claim still at this stage past the 6 h floor has produced no body, so it is dead. Any
+    extra non-blank line is a body, and that claim keeps its full cadence bound."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) != 3:
+        return False
+    comment, title, claim = lines
+    return (
+        comment.startswith("<!-- generated:")
+        and title.startswith("# ")
+        and claim.startswith("Claim: dispatch_id=")
+    )
+
+
+def _is_dead_header_only_claim(state_dir: Path, dispatch_id: str, stamped_at: int) -> bool:
+    """True iff the one report naming `dispatch_id` has no completion marker and holds only
+    the claim-step skeleton. An absent or ambiguous report, or one that cannot be read, is
+    False, so the claim keeps its cadence bound. The caller applies the 6 h floor."""
+    found = _find_completion_report(state_dir, dispatch_id, stamped_at)
+    if found is None:
+        return False
+    report_path, has_outcome = found
+    if has_outcome:
+        return False
+    try:
+        text = Path(report_path).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _report_is_header_only(text)
+
+
+def claim_threshold_s(state_dir: Path, dispatch_id: str, record: dict, *, now: int, max_age_s: float = 0.0) -> float:
+    """Seconds a CLAIMED record must age before it stops blocking its chore.
+
+    Expiry (expire_stale_claims) and the dispatch deferral both use this one bound, so the two
+    cannot drift apart (janitor#366 / TRDD-7RVC9T6V). The default is the cadence bound, never
+    less than the 6 h floor. A claim whose report is still only the claim-step skeleton, and
+    whose age is at least the floor, is dead: its bound drops to the floor. max_age_s is the
+    caller floor (0 in the only caller today)."""
+    try:
+        cadence_s = memory_settings.interval_s_for(str(record["intervention"]))
+    except ValueError:
+        cadence_s = math.inf
+    cadence_threshold = cadence_s * omm.factor_for_scope(str(record["scope"])) if math.isfinite(cadence_s) else math.inf
+    default_s = max(max_age_s, cadence_threshold, _STALE_CLAIM_FLOOR_S)
+    header_bound_s = max(max_age_s, _STALE_CLAIM_FLOOR_S)
+    if omm.pending_age_s(record, now=now) >= header_bound_s and _is_dead_header_only_claim(
+        state_dir, dispatch_id, int(record["stamped_at"])
+    ):
+        return header_bound_s
+    return default_s
+
+
+def claims_blocking_marker(state_dir: Path, chore: str, scope: str, root: str) -> list[tuple[str, dict]]:
+    """(dispatch_id, payload) for every CLAIMED record that can block a `chore` marker whose
+    pending target is (`scope`, `root`).
+
+    Dispatch path only (janitor#366 / TRDD-7RVC9T6V). An empty `scope` matches every scope, and
+    an empty `root` on either side matches any root, so a root-less claim still blocks. The
+    strict `_matching_records` is untouched: `_resolve_claim` and `complete` never see this
+    wildcard."""
+    out: list[tuple[str, dict]] = []
+    for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
+        payload = _read_claim_record(path)
+        if payload is None:
+            continue
+        if str(payload.get("intervention") or "") != chore:
+            continue
+        if scope and str(payload.get("scope") or "") != scope:
+            continue
+        claim_root = str(payload.get("root") or "")
+        if claim_root and root and claim_root != root:
+            continue
+        out.append((path.name[len(CLAIMED_PREFIX):-len(".json")], payload))
+    return out
+
+
 def _resolve_claim(
     state_dir: Path, cmd: str, chore: str | None, scope: str | None
 ) -> tuple[str, dict] | int:
@@ -607,6 +707,10 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     fast chore's threshold from expiring a different, slower chore's still-healthy claim;
     `max_age_s` is a caller-supplied additional floor (pass 0 to let each record's own
     chore decide).
+    janitor#366 / TRDD-7RVC9T6V: a claim whose report is still only the claim-step skeleton
+    (`_report_is_header_only`) and whose stamp is past the 6 h floor is dead, so it expires at
+    the floor instead of at its cadence x factor. This rule reads the age and report of the
+    claim itself, whatever root it names (`_read_claim_record`).
 
     # why: `_STALE_CLAIM_FLOOR_S` (6h) is a HARD MINIMUM regardless of the record's own
     # cadence x factor — a LOCAL scope's `LOCAL_FACTOR` of 1 means a chore cadence faster
@@ -633,8 +737,8 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     """
     acted: list[dict] = []
     for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
-        payload, malformed = omm.read_record(path)
-        if malformed or payload is None:
+        payload = _read_claim_record(path)
+        if payload is None:
             continue
         dispatch_id = path.name[len(CLAIMED_PREFIX):-len(".json")]
         chore = payload["intervention"]
@@ -653,9 +757,7 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
                 "never expiring it on cadence grounds",
             )
             cadence_s = math.inf
-        factor = omm.factor_for_scope(scope)
-        cadence_threshold = cadence_s * factor if math.isfinite(cadence_s) else math.inf
-        threshold = max(max_age_s, cadence_threshold, _STALE_CLAIM_FLOOR_S)
+        threshold = claim_threshold_s(state_dir, dispatch_id, payload, now=now, max_age_s=max_age_s)
 
         age_s = omm.pending_age_s(payload, now=now)
         if age_s < threshold:

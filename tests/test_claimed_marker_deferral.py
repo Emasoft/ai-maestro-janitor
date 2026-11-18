@@ -163,3 +163,133 @@ def test_repeated_deferral_line_is_deduped_across_fires(tmp_path, monkeypatch):
         assert "deferred" not in second
     finally:
         _clear_state_cache()
+
+
+def test_claim_in_other_scope_does_not_defer_marker(tmp_path, monkeypatch):
+    """(6) A USER-scope claim does not defer a marker whose next pending record is LOCAL (janitor#366)."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        now = int(time.time())
+        _write_claimed(sd, "100-abcd1234", CHORE, stamped_at=now - 100, scope="USER")
+        _write_pending(sd, "200-deadbeef", CHORE, stamped_at=now - 50, scope="LOCAL")
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert out == "[janitor-memory-split]\n"
+        assert "deferred" not in out
+    finally:
+        _clear_state_cache()
+
+
+def _write_report(project: Path, dispatch_id: str, body: str = "") -> Path:
+    reports = project / "reports_dev" / "janitor-memory-subconscious-agent"
+    reports.mkdir(parents=True, exist_ok=True)
+    path = reports / f"20261118_000000+0000-split-project-{dispatch_id}.md"
+    path.write_text(
+        "<!-- generated: 2026-11-18T00:00:00+0000 by memory_dispatch_claim (claim step) -->\n"
+        "# split pass — PROJECT scope\n"
+        f"Claim: dispatch_id={dispatch_id}, scope=PROJECT, root=/fake/project/memory\n\n" + body,
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_claimed_without_root(state_dir: Path, dispatch_id: str, chore: str, *, stamped_at: int) -> Path:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    p = state_dir / f"{mdc.CLAIMED_PREFIX}{dispatch_id}.json"
+    p.write_text(json.dumps({
+        "marker": f"[janitor-memory-{chore}]", "intervention": chore,
+        "scope": "PROJECT", "stamped_at": stamped_at, "dispatch_id": dispatch_id,
+    }), encoding="utf-8")
+    return p
+
+
+def test_seven_hour_header_only_claim_does_not_defer_and_is_expired(tmp_path, monkeypatch):
+    """(8) A 7 h header-only claim in the same scope and root does not defer the marker, and expire_stale_claims expires it."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        now = int(time.time())
+        seven_h = 7 * 3600
+        assert seven_h < _threshold_s(CHORE, "PROJECT")  # the cadence bound alone would not expire it
+        _write_claimed(sd, "100-abcd1234", CHORE, stamped_at=now - seven_h)
+        _write_report(tmp_path, "100-abcd1234")
+        _write_pending(sd, "200-deadbeef", CHORE, stamped_at=now - 10)
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert out == "[janitor-memory-split]\n"
+        acted = mdc.expire_stale_claims(sd, now, max_age_s=0)
+        assert [(entry["dispatch_id"], entry["status"]) for entry in acted] == [("100-abcd1234", "expired")]
+        assert (sd / f"{mdc.EXPIRED_PREFIX}100-abcd1234.json").exists()
+    finally:
+        _clear_state_cache()
+
+
+def test_header_only_claim_under_six_hours_still_defers(tmp_path, monkeypatch):
+    """(9) A 1 h header-only claim still defers the marker, because the 6 h floor has not passed."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        now = int(time.time())
+        _write_claimed(sd, "100-abcd1234", CHORE, stamped_at=now - 3600)
+        _write_report(tmp_path, "100-abcd1234")
+        _write_pending(sd, "200-deadbeef", CHORE, stamped_at=now - 10)
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert "[janitor-memory-split]\n" not in out
+        assert "deferred" in out
+        assert (sd / f"{mdc.CLAIMED_PREFIX}100-abcd1234.json").exists()
+    finally:
+        _clear_state_cache()
+
+
+def test_seven_hour_claim_with_body_past_header_still_defers(tmp_path, monkeypatch):
+    """(10) A 7 h claim whose report has content past the header keeps its cadence bound and still defers the marker."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        now = int(time.time())
+        seven_h = 7 * 3600
+        assert seven_h < _threshold_s(CHORE, "PROJECT")  # the cadence bound alone would not expire it
+        _write_claimed(sd, "100-abcd1234", CHORE, stamped_at=now - seven_h)
+        _write_report(tmp_path, "100-abcd1234", body="Pass in progress: 3 pages read.\n")
+        _write_pending(sd, "200-deadbeef", CHORE, stamped_at=now - 10)
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert "[janitor-memory-split]\n" not in out
+        assert "deferred" in out
+        assert (sd / f"{mdc.CLAIMED_PREFIX}100-abcd1234.json").exists()
+    finally:
+        _clear_state_cache()
+
+
+def test_claim_without_root_still_defers_the_marker(tmp_path, monkeypatch):
+    """(11) A fresh claim with no root field still defers the marker, because it matches any root."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        now = int(time.time())
+        _write_claimed_without_root(sd, "100-abcd1234", CHORE, stamped_at=now - 100)
+        _write_pending(sd, "200-deadbeef", CHORE, stamped_at=now - 50)
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert "[janitor-memory-split]\n" not in out
+        assert "deferred" in out
+    finally:
+        _clear_state_cache()
+
