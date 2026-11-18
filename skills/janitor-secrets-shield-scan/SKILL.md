@@ -1,6 +1,6 @@
 ---
 name: janitor-secrets-shield-scan
-description: Scans a project or a folder tree for secrets (API keys, tokens, private keys, card numbers) with the rules of the janitor secret shield (hooks/secret-shield), and writes the findings file outside any repo. Use when asked to scan for secrets, find leaked API keys or tokens, or audit a project or folder tree for credentials. Scan only, it redacts nothing and never prints a secret value. Trigger with /janitor-secrets-shield-scan [path] [--all].
+description: Scans a project or a folder tree for secrets (API keys, tokens, private keys, card numbers) with the rules of the janitor secret shield (hooks/secret-shield), and writes the findings file outside any repo. With --redact it replaces each secret with a marker and keeps the value in a local vault. It never prints a secret value. Use when asked to scan for secrets, find leaked API keys or tokens, audit a project or folder tree for credentials, or redact, mask or remove secrets from files. Trigger with /janitor-secrets-shield-scan [path] [--all] [--redact].
 ---
 
 # Janitor secrets-shield scan
@@ -10,8 +10,10 @@ description: Scans a project or a folder tree for secrets (API keys, tokens, pri
 Walks a project (or any folder tree), runs the secret shield rules over every
 file in scope, and writes one JSON line per finding to a findings file. The
 file holds paths, kinds and line numbers, never a secret value. The run prints
-the summary line and the findings file path. Scan only: nothing is redacted or
-changed in the scanned tree. Git history is not scanned yet (a later version).
+the summary line and the findings file path. By default nothing in the scanned
+tree is changed. With `--redact` the files in the working tree are rewritten:
+each secret is replaced by a marker and its value is kept in a local vault (see
+Redact). Git history is not scanned yet (a later version).
 
 ## Prerequisites
 
@@ -68,8 +70,66 @@ changed in the scanned tree. Git history is not scanned yet (a later version).
   past it is skipped as a timeout, unless its whole-file pass had finished:
   then its findings are kept with line null.
 - `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
-- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; passes `secrets`, `cards`, `email`). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. To put the values back, see Restore below. Default: off, scan only.
+- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; marker passes are those of `--passes`, default `secrets`, `cards`; `email` only when named). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. To put the values back, see Restore below. Default: off, scan only.
 - `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
+
+## Redact
+
+`--redact` rewrites files in the working tree. Run it only when the user asks
+for it, and first tell the user that it rewrites working-tree files and that
+the secret values go to a plain vault file (below). Run it first on a copy or a
+sample of the tree, not on the only copy.
+
+- Marker: each secret becomes `[REDACTED-BY-SECRET-SHIELD. Type: <type>. ID: <UUID>]`.
+  The same value in one file gets one ID. A second run changes nothing.
+- Vault: a plain SQLite file at `~/.secrets_shield/vault.db`, not encrypted.
+  Anyone who can read that account's files can read every value (owner
+  decision, TRDD-QM8YRCZ5). Values never reach stdout, stderr or the findings
+  file.
+- Passes: those of `--passes` (default `secrets,cards`; `email` only when
+  named). `home` runs last, rewrites home paths to `~`, is not vaulted and not
+  restorable.
+- A file is replaced only after its vault rows are committed and a restore
+  check shows the original comes back byte for byte (else `align-error`).
+- Never written, still scanned and counted in `findings_not_redacted`; each is
+  a `skip` record and a count under `skipped`: `git-internal` (anything inside
+  a `.git` folder, or a `.git` pointer file; with `--all`, `.git/config` is
+  scanned but never rewritten, so a token there makes the run exit 1),
+  `vault-folder`, `hardlinked`,
+  `recent` (modified within `--min-age-minutes`), `not-utf8` (not lossless
+  UTF-8), `git-operation` (merge, rebase, cherry-pick, revert or bisect in
+  progress), `git-check-failed`, `align-error`, `not-regular-at-write`,
+  `outside-root`, `changed-during-redact`, `write-error`. Symlinks are never
+  followed.
+- Large lane: a text file over `--max-file-mb` and up to `--max-large-mb` is
+  redacted one at a time. A larger text file is neither scanned nor redacted
+  (`not-scanned-too-large`) and the run is incomplete. The large lane has been
+  tested only on files of tens of KB; peak memory and time on large files are
+  not measured.
+- Rounds and residual: the scanner also replaces copies of a redacted value
+  that no rule matched, then scans again. If that finds something it runs
+  another round (at most 3) and writes the file once. What is still found
+  after the last round is the residual: the file is still written and the run
+  exits 1.
+- Agents never run `restore.ts` (see Restore).
+
+### Git repositories
+
+Redacting tracked files changes only the working tree. Every committed secret
+stays in the repo objects and the index, and `git checkout`, `git stash` or
+`git reset` brings it back. History is never rewritten (owner decision). A
+history scan is a later version. Tell the user this whenever a repo is
+redacted.
+
+### JSONL files
+
+A `.jsonl` or `.ndjson` file is redacted as plain text in this version: the
+scanner does not treat it differently and does not check that each line is
+still valid JSON. In one probe (a fake token in a JSON string on one line, a
+fake private key escaped in a JSON string on another) both secrets became
+markers and both lines still parsed.
+The JSON-aware mode is a later version. Do not run `--redact` on a tree with
+JSONL files you need intact yet.
 
 ## Restore
 
@@ -86,11 +146,15 @@ changed in the scanned tree. Git history is not scanned yet (a later version).
 
 ## Exit codes
 
-- 0: complete, no findings.
-- 1: complete, with findings.
+- 0: complete, no findings. With `--redact`: complete, and no finding was left
+  unredacted and `residual` is 0.
+- 1: complete, with findings. With `--redact`: `findings_not_redacted` or
+  `residual` is above 0.
 - 3: incomplete: a timeout, read-error, crash, git-error or unreadable-dir
-  skip, whatever the findings.
+  skip, whatever the findings. With `--redact` also a text file over
+  `--max-large-mb` (`files_not_scanned` above 0).
 - 2: usage or fatal error. The scanner writes a fixed text on stderr; show it.
+  With `--redact` also a vault that cannot be opened or written.
 
 ## Output
 
@@ -106,7 +170,8 @@ not scanned") and name `--all`. Never call a run clean when `complete` is false
 or when any of those three is set.
 
 The findings file is JSON lines: `finding` (path, kind, line or null, count),
-`skip` (path, reason), and the summary last. It never holds a secret value.
+`skip` (path, reason), with `--redact` also `residual` (path, kind, count), and
+the summary last. It never holds a secret value.
 A finding with line null was found in the whole file but not on one line (a
 secret split over lines, or the per-line pass was killed by the time limit).
 The file is private to the owner (mode 0600). A path inside any git work tree
@@ -115,6 +180,18 @@ is refused (exit 2), because the file says where the secrets are.
 On request, list files and kinds from the findings file (for example with
 `jq`). Never open or print the flagged lines of the scanned files: they hold
 the secrets.
+
+With `--redact` the summary also holds `redact`, `min_age_minutes`,
+`residual_check` and these counts. Report them in words: `files_redacted` (files
+rewritten), `values_vaulted` (distinct values in the vault, counted per file),
+`findings_not_redacted` (findings in files that were not written, reasons under
+`skipped`; home paths are never counted), `residual` (hits still found between
+the markers after the last round, one `residual` record each),
+`rounds_used_max` (1 to 3), `files_not_scanned` (text files over
+`--max-large-mb`), `large_lane_files` and `home_rewrites` (home paths rewritten
+to `~`, not restorable). `findings` and the `finding` records are what the scan
+found before redaction, not what is left. Never call a redact complete while
+`findings_not_redacted` or `residual` is above 0, or `complete` is false.
 
 ## Error Handling
 
@@ -145,9 +222,12 @@ User: audit the folder ~/work for credentials and list the files
   and not counted in `ignored_repos`.
 - `--all` scans every file including hidden and ignored ones and each
   repository's `.git/config`, never other `.git` content.
-- Symlinks are never followed. A file over `--max-file-mb` is skipped.
+- Symlinks are never followed. A file over `--max-file-mb` is skipped as
+  over-size; with `--redact`, a text file over it goes to the large lane (see
+  Redact).
 - Git history is not scanned yet (a later version).
-- Nothing is redacted: scan only.
+- Nothing in the scanned tree is changed unless `--redact` is given (see
+  Redact).
 
 ## Resources
 
@@ -164,3 +244,8 @@ Copy this checklist and track your progress:
 - [ ] Report counts, skips, completeness and the findings file path in words
 - [ ] Name what was not scanned (ignored entries, ignored repos, ancestor rules) and `--all`
 - [ ] Never print a secret value or the flagged lines of the scanned files
+- [ ] Add `--redact` only when asked, after telling the user it rewrites working-tree files and that the values go to a plain, unencrypted vault
+- [ ] For a git repo, say that committed secrets stay in the repo and checkout, stash or reset brings them back
+- [ ] Do not run `--redact` on a tree with JSONL files the user needs intact
+- [ ] Report the redact summary fields in words (see Output); never call a redact complete while `findings_not_redacted` or `residual` is above 0
+- [ ] Never run `restore.ts` (a person at a terminal only)
