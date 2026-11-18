@@ -267,9 +267,9 @@ def test_audit_chain_detects_truncation(tmp_path: Path) -> None:
     assert "prev_hmac" in reason or "hmac" in reason
 
 
-def test_audit_chain_requires_key() -> None:
+def test_audit_chain_requires_key(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        AuditChain(Path("/tmp/x"), b"")
+        AuditChain(tmp_path / "x", b"")
 
 
 # ---- trim with a key-signed anchor (S4, TRDD-7IUTRX29) -------------------------------

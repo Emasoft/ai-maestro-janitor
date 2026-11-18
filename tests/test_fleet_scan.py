@@ -801,33 +801,33 @@ def test_changed_probe_outcome_after_patches_still_rewrites_the_flag(
 # iTerm) AND the same scan's osascript enumeration came back empty. Unlike the
 # rearm-evidence downgrade, this has no "quiet fleet" innocent explanation.
 # ---------------------------------------------------------------------------
-def _mk_instance(*, diagnosis: str, terminal: dict[str, str]) -> "fs.Instance":
+def _mk_instance(*, diagnosis: str, terminal: dict[str, str], root: str) -> "fs.Instance":
     return fs.Instance(
-        pid=1, command="claude", tty="ttys001", project_root="/tmp/proj",
+        pid=1, command="claude", tty="ttys001", project_root=root,
         terminal=terminal, diagnosis=diagnosis, recovery=None, dispatch_age_s=None,
         active=False, transcript_age_s=None,
     )
 
 
-def test_rescue_warranted_true_when_cron_dead_has_no_other_channel() -> None:
+def test_rescue_warranted_true_when_cron_dead_has_no_other_channel(tmp_path: Path) -> None:
     """The ONLY channel a cron_dead instance could have used was iTerm (no tmux_pane,
     no aimaestro_session, no linux_gui_channel) — the exact "UNREACHABLE" case
     `fleet_scan._main` already prints."""
-    fleet = [_mk_instance(diagnosis="cron_dead", terminal={})]
+    fleet = [_mk_instance(diagnosis="cron_dead", terminal={}, root=str(tmp_path / "proj"))]
     assert fs.iterm_rescue_warranted(fleet) is True
 
 
-def test_rescue_warranted_false_when_cron_dead_had_a_working_channel() -> None:
+def test_rescue_warranted_false_when_cron_dead_had_a_working_channel(tmp_path: Path) -> None:
     """A cron_dead instance reachable via tmux does not implicate the iTerm channel at
     all — this must not false-positive the unconditional negative."""
-    fleet = [_mk_instance(diagnosis="cron_dead", terminal={"tmux_pane": "%3"})]
+    fleet = [_mk_instance(diagnosis="cron_dead", terminal={"tmux_pane": "%3"}, root=str(tmp_path / "proj"))]
     assert fs.iterm_rescue_warranted(fleet) is False
 
 
-def test_rescue_warranted_false_when_nothing_is_cron_dead() -> None:
+def test_rescue_warranted_false_when_nothing_is_cron_dead(tmp_path: Path) -> None:
     """A healthy fleet with an unreachable-but-not-cron_dead instance did not WARRANT
     a rescue this scan — no unconditional negative to report."""
-    fleet = [_mk_instance(diagnosis="healthy", terminal={})]
+    fleet = [_mk_instance(diagnosis="healthy", terminal={}, root=str(tmp_path / "proj"))]
     assert fs.iterm_rescue_warranted(fleet) is False
 
 
@@ -841,17 +841,17 @@ def test_rescue_warranted_false_on_an_empty_fleet() -> None:
 # just now", this one asks "how many are one stall away from being unrescuable",
 # which is what the run-under-tmux remedy actually acts on.
 # ---------------------------------------------------------------------------
-def test_exposure_counts_iterm_only_instances_regardless_of_diagnosis() -> None:
+def test_exposure_counts_iterm_only_instances_regardless_of_diagnosis(tmp_path: Path) -> None:
     """The distinction from `rescue_warranted`, made explicit: a HEALTHY instance with no
     other channel is still exposed. Counting only the cron_dead ones would report zero on a
     fully-exposed fleet right up until the first casualty — which is exactly the moment the
     guidance stops being preventive."""
     fleet = [
-        _mk_instance(diagnosis="healthy", terminal={}),                        # exposed
-        _mk_instance(diagnosis="cron_dead", terminal={}),                      # exposed
-        _mk_instance(diagnosis="healthy", terminal={"tmux_pane": "%3"}),       # safe
-        _mk_instance(diagnosis="healthy", terminal={"aimaestro_session": "a"}),  # safe
-        _mk_instance(diagnosis="cron_dead", terminal={"linux_gui_channel": "x"}),  # safe
+        _mk_instance(diagnosis="healthy", terminal={}, root=str(tmp_path / "proj")),  # exposed
+        _mk_instance(diagnosis="cron_dead", terminal={}, root=str(tmp_path / "proj")),  # exposed
+        _mk_instance(diagnosis="healthy", terminal={"tmux_pane": "%3"}, root=str(tmp_path / "proj")),  # safe
+        _mk_instance(diagnosis="healthy", terminal={"aimaestro_session": "a"}, root=str(tmp_path / "proj")),  # safe
+        _mk_instance(diagnosis="cron_dead", terminal={"linux_gui_channel": "x"}, root=str(tmp_path / "proj")),  # safe
     ]
     assert fs.iterm_only_exposure(fleet) == (2, 5)
     # Only ONE of those two is rescue-warranted — the predicates must not collapse.

@@ -129,15 +129,16 @@ def _run(project: Path, **extra_env: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_the_disable_knob_silences_it() -> None:
+def test_the_disable_knob_silences_it(tmp_path: Path) -> None:
     """ALWAYS ON, but the standard opt-out knob still works."""
-    # No fixture needed: the gate returns before anything else can run.
+    # init_state runs before the gate, so HOME and CLAUDE_PROJECT_DIR keep its state dirs in tmp_path.
     proc = subprocess.run(
         [sys.executable, str(_DETECTOR)],
         capture_output=True, text=True, check=False, timeout=120,
         env={
             "PATH": "/usr/bin:/bin",
-            "HOME": "/tmp",
+            "HOME": str(tmp_path),
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
             "CLAUDE_PLUGIN_OPTION_GH_REPLY_WATCH_ENABLED": "false",
         },
     )

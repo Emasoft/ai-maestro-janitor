@@ -127,7 +127,7 @@ def test_no_prompt_at_all_falls_back_to_substantive_age() -> None:
     assert human_age == sub_age
 
 
-def test_instance_defaults_human_active_true() -> None:
+def test_instance_defaults_human_active_true(tmp_path: Path) -> None:
     """`human_active` defaults to `True` (busy) so every pre-existing `Instance(...)` call site
     that predates this field stays valid AND conservative — a caller that never learns better
     must not accidentally treat an unscored instance as clear-eligible."""
@@ -135,7 +135,7 @@ def test_instance_defaults_human_active_true() -> None:
         pid=1,
         command="claude",
         tty="ttys000",
-        project_root="/tmp/proj",
+        project_root=str(tmp_path / "proj"),
         terminal={},
         diagnosis="ok",
         recovery=None,

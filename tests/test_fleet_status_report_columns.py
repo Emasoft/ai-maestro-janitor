@@ -39,7 +39,7 @@ import fleet_status as fstat  # type: ignore[import-not-found]  # noqa: E402
 class _Inst:
     """Only the Instance fields the reporting helpers read."""
     pid: int = 1
-    project_root: str = "/tmp/proj"
+    project_root: str | None = None
     diagnosis: str = "healthy"
     active: bool = False
     terminal: dict | None = None

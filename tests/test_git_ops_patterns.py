@@ -258,16 +258,17 @@ def test_lfs_older_variant_neg() -> None:
     assert not _hits("git-ops-lfs-custom-smudge", text, file_kind="git-config")
 
 
-def test_lfs_custom_smudge_pos() -> None:
+def test_lfs_custom_smudge_pos(tmp_path: Path) -> None:
     """A swapped smudge command is a finding."""
+    hostile = str(tmp_path / "evil")
     text = (
         '[filter "lfs"]\n'
-        '\tsmudge = /tmp/evil --steal\n'
+        f'\tsmudge = {hostile} --steal\n'
         '\tclean = git-lfs clean -- %f\n'
     )
     hits = _hits("git-ops-lfs-custom-smudge", text, file_kind="git-config")
     assert hits
-    assert "/tmp/evil" in hits[0].matched_text
+    assert hostile in hits[0].matched_text
 
 
 def test_lfs_custom_process_pos() -> None:
@@ -305,18 +306,20 @@ def test_lfs_rule_fires_only_inside_lfs_section_mixed() -> None:
     assert not _hits("git-ops-lfs-custom-smudge", text, file_kind="git-config")
 
 
-def test_lfs_rule_fires_when_custom_section_precedes_lfs() -> None:
+def test_lfs_rule_fires_when_custom_section_precedes_lfs(tmp_path: Path) -> None:
     """A hostile smudge INSIDE the lfs section still fires even when a
     decoy custom-filter section precedes it (span tracking is positional)."""
+    decoy = str(tmp_path / "decoy")
+    hostile = str(tmp_path / "evil")
     text = (
         '[filter "custom"]\n'
-        '\tsmudge = /tmp/decoy\n'                # NOT lfs → ignored by LFS rule
+        f'\tsmudge = {decoy}\n'                 # NOT lfs → ignored by LFS rule
         '[filter "lfs"]\n'
-        '\tsmudge = /tmp/evil --steal\n'         # inside lfs, non-canonical → fires
+        f'\tsmudge = {hostile} --steal\n'        # inside lfs, non-canonical → fires
     )
     hits = _hits("git-ops-lfs-custom-smudge", text, file_kind="git-config")
     assert hits
-    assert "/tmp/evil" in hits[0].matched_text
+    assert hostile in hits[0].matched_text
 
 
 def test_lfs_section_spans_helper() -> None:
@@ -413,8 +416,8 @@ def test_is_lfs_canonical_true() -> None:
     assert gop.is_lfs_canonical("git-lfs clean %f")
 
 
-def test_is_lfs_canonical_false() -> None:
-    assert not gop.is_lfs_canonical("/tmp/evil")
+def test_is_lfs_canonical_false(tmp_path: Path) -> None:
+    assert not gop.is_lfs_canonical(str(tmp_path / "evil"))
     assert not gop.is_lfs_canonical("git-lfs smudge --steal %f")
     assert not gop.is_lfs_canonical("")
 
@@ -443,7 +446,7 @@ def test_is_gitattributes_filter_allowed() -> None:
         assert not gop.is_gitattributes_filter_allowed(bad)
 
 
-def test_is_init_templatedir_safe() -> None:
+def test_is_init_templatedir_safe(tmp_path: Path) -> None:
     safe = (
         "/usr/share/git-core/templates",
         "/usr/local/share/git-core/templates",
@@ -453,7 +456,7 @@ def test_is_init_templatedir_safe() -> None:
         assert gop.is_init_templatedir_safe(s)
         assert gop.is_init_templatedir_safe(s + "/")
     assert not gop.is_init_templatedir_safe("~/.evil-template")
-    assert not gop.is_init_templatedir_safe("/tmp/templates")
+    assert not gop.is_init_templatedir_safe(str(tmp_path / "templates"))
 
 
 def test_has_canonical_sample_shebang() -> None:

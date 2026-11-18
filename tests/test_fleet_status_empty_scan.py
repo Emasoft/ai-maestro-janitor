@@ -75,12 +75,12 @@ def test_resolvable_processes_with_no_janitor_project_is_a_genuine_empty_fleet(
 
 
 def test_a_partially_resolvable_scan_is_not_called_a_failure(
-    monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Only a TOTAL cwd-resolution failure indicts the probe. One resolvable pid means the
     probe works and the empty result is about the fleet, not the measurement."""
     monkeypatch.setattr(fleet_scan, "_run", lambda *a, **k: "irrelevant")
     monkeypatch.setattr(fleet_scan, "parse_ps_claude", lambda _t: _PROCS)
-    monkeypatch.setattr(fleet_scan, "_cwd_of", lambda pid: "" if pid == 101 else "/tmp/proj")
+    monkeypatch.setattr(fleet_scan, "_cwd_of", lambda pid: "" if pid == 101 else str(tmp_path / "proj"))
 
     assert "SCAN FAILED" not in fstat._empty_fleet_reason()

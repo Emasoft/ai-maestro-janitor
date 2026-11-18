@@ -45,7 +45,7 @@ _EVENT = {
     "transcript_path": "/nonexistent/transcript.jsonl",
     "prompt": "hello",
     "tool_name": "Read",
-    "tool_input": {"file_path": "/tmp/example.txt"},
+    "tool_input": {},
     "tool_response": {"content": "ok"},
     "trigger": "manual",
 }
@@ -95,7 +95,7 @@ def test_hook_runs_without_import_crash(hook: Path, tmp_path: Path) -> None:
 
     proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
         [sys.executable, str(hook)],
-        input=json.dumps(_EVENT),
+        input=json.dumps({**_EVENT, "tool_input": {"file_path": str(tmp_path / "example.txt")}}),
         capture_output=True,
         text=True,
         timeout=120,
@@ -141,7 +141,7 @@ def test_on_session_start_actually_reaches_rule_install(tmp_path: Path) -> None:
 
     subprocess.run(  # noqa: S603 -- fixed argv, no shell
         [sys.executable, str(HOOKS_DIR / "on-session-start.py")],
-        input=json.dumps(_EVENT),
+        input=json.dumps({**_EVENT, "tool_input": {"file_path": str(tmp_path / "example.txt")}}),
         capture_output=True,
         text=True,
         timeout=120,
@@ -190,7 +190,7 @@ def test_on_session_start_ensures_recommended_settings(tmp_path: Path) -> None:
 
     subprocess.run(  # noqa: S603 -- fixed argv, no shell
         [sys.executable, str(HOOKS_DIR / "on-session-start.py")],
-        input=json.dumps(_EVENT),
+        input=json.dumps({**_EVENT, "tool_input": {"file_path": str(tmp_path / "example.txt")}}),
         capture_output=True,
         text=True,
         timeout=120,
@@ -260,7 +260,7 @@ def test_harness_selftest_block_never_strands_the_stop_reminder(tmp_path: Path) 
 
     proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
         [sys.executable, str(HOOKS_DIR / "on-session-start.py")],
-        input=json.dumps(_EVENT),
+        input=json.dumps({**_EVENT, "tool_input": {"file_path": str(tmp_path / "example.txt")}}),
         capture_output=True,
         text=True,
         timeout=120,

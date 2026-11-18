@@ -26,8 +26,9 @@ import ioc_taxonomy as it  # type: ignore[import-not-found]  # noqa: E402
 # ---------- IOCRecord ----------------------------------------------------
 
 
-def test_iocrecord_construction_full_bundle() -> None:
+def test_iocrecord_construction_full_bundle(tmp_path: Path) -> None:
     """IOCRecord is a NamedTuple with all ten declared fields."""
+    axios_path = str(tmp_path / "axios_runtime.js")
     rec = it.IOCRecord(
         threat_id="T001_axios",
         name="axios postinstall hijack",
@@ -35,8 +36,8 @@ def test_iocrecord_construction_full_bundle() -> None:
         versions=("1.6.0", "1.6.1"),
         c2={"dom": "evil.example", "ip": "10.0.0.1", "port": "443"},
         ioc_fs={
-            "darwin": ("/tmp/axios_runtime.js",),
-            "linux": ("/tmp/axios_runtime.js",),
+            "darwin": (axios_path,),
+            "linux": (axios_path,),
             "win32": ("C:\\Temp\\axios_runtime.js",),
         },
         persist={
@@ -52,7 +53,7 @@ def test_iocrecord_construction_full_bundle() -> None:
     assert rec.package == "axios"
     assert rec.versions == ("1.6.0", "1.6.1")
     assert rec.c2["dom"] == "evil.example"
-    assert rec.ioc_fs["darwin"] == ("/tmp/axios_runtime.js",)
+    assert rec.ioc_fs["darwin"] == (axios_path,)
     assert rec.persist["linux"] == "systemd-user unit"
     assert rec.disguise == ("axios_runtime.js", "codeql_analysis.yml")
     assert rec.published == "2026-05-14"
@@ -231,7 +232,8 @@ def _write_yaml(tmp_path: Path, body: str) -> Path:
 def test_parse_ioc_yaml_single_record(tmp_path: Path) -> None:
     """Top-level mapping → one-element list."""
     pytest.importorskip("yaml")  # gracefully skip if PyYAML absent
-    p = _write_yaml(tmp_path, """\
+    axios_path = str(tmp_path / "axios_runtime.js")
+    p = _write_yaml(tmp_path, f"""\
         threat_id: T001_axios
         name: axios postinstall hijack
         package: axios
@@ -244,9 +246,9 @@ def test_parse_ioc_yaml_single_record(tmp_path: Path) -> None:
           port: 443
         ioc_fs:
           darwin:
-            - /tmp/axios_runtime.js
+            - {axios_path}
           linux:
-            - /tmp/axios_runtime.js
+            - {axios_path}
           win32:
             - "C:\\\\Temp\\\\axios_runtime.js"
         persist:
@@ -266,7 +268,7 @@ def test_parse_ioc_yaml_single_record(tmp_path: Path) -> None:
     assert rec.versions == ("1.6.0", "1.6.1")
     # Port number parsed as int by YAML — coerced to str.
     assert rec.c2["port"] == "443"
-    assert rec.ioc_fs["darwin"] == ("/tmp/axios_runtime.js",)
+    assert rec.ioc_fs["darwin"] == (axios_path,)
     assert rec.persist["linux"] == "systemd-user unit"
     assert rec.disguise == ("axios_runtime.js",)
 

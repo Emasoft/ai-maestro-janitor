@@ -55,13 +55,15 @@ def stub_scan(monkeypatch):
 @pytest.mark.parametrize(
     "argv, expected",
     [
-        (["prog", "--out", "/tmp/x.html"], "/tmp/x.html"),
-        (["prog", "--out=/tmp/x.html"], "/tmp/x.html"),
-        (["prog", "--ci", "--out", "/tmp/x.html", "--no-open"], "/tmp/x.html"),
+        (["prog", "--out", "{tmp}/x.html"], "{tmp}/x.html"),
+        (["prog", "--out={tmp}/x.html"], "{tmp}/x.html"),
+        (["prog", "--ci", "--out", "{tmp}/x.html", "--no-open"], "{tmp}/x.html"),
         (["prog"], ""),
     ],
 )
-def test_flag_value_reads_both_spellings(monkeypatch, argv, expected) -> None:
+def test_flag_value_reads_both_spellings(monkeypatch, tmp_path: Path, argv, expected) -> None:
+    argv = [arg.replace("{tmp}", str(tmp_path)) for arg in argv]
+    expected = expected.replace("{tmp}", str(tmp_path))
     monkeypatch.setattr(sys, "argv", argv)
     assert fstat._flag_value("--out") == expected
 
@@ -128,7 +130,7 @@ def test_no_override_still_lands_in_the_project_reports_dir(tmp_path: Path, monk
 # ── --no-open: the browser must be suppressible by flag, not by PATH shimming ─────────
 
 
-def test_no_open_suppresses_the_browser_launch(monkeypatch, capsys, stub_scan) -> None:
+def test_no_open_suppresses_the_browser_launch(monkeypatch, capsys, stub_scan, tmp_path: Path) -> None:
     """Asserted on the real main() path, because the bug this prevents is a desktop popup
     and the unconditional launch lived in main(), not in a helper.
 
@@ -138,23 +140,25 @@ def test_no_open_suppresses_the_browser_launch(monkeypatch, capsys, stub_scan) -
     test fail against correct code — which is the argument for the named seam."""
     opened: list[str] = []
     monkeypatch.setattr(fstat, "_open_in_browser", opened.append)
-    monkeypatch.setattr(fstat, "_render_html", lambda *a, **k: "/tmp/fake-dash.html")
+    fake_dash = str(tmp_path / "fake-dash.html")
+    monkeypatch.setattr(fstat, "_render_html", lambda *a, **k: fake_dash)
 
     monkeypatch.setattr(sys, "argv", ["prog", "--no-open"])
     assert fstat.main() == 0
     assert opened == [], "--no-open must not open a browser"
-    assert "/tmp/fake-dash.html" in capsys.readouterr().out, (
+    assert fake_dash in capsys.readouterr().out, (
         "the path must still be printed — suppressing the window must not hide the artifact"
     )
 
 
-def test_without_no_open_the_browser_is_still_launched(monkeypatch, stub_scan) -> None:
+def test_without_no_open_the_browser_is_still_launched(monkeypatch, stub_scan, tmp_path: Path) -> None:
     """The default stays interactive. Guards against 'fixing' the popup by removing it for
     everyone, which would break the human who runs this at a terminal."""
     opened: list[str] = []
     monkeypatch.setattr(fstat, "_open_in_browser", opened.append)
-    monkeypatch.setattr(fstat, "_render_html", lambda *a, **k: "/tmp/fake-dash.html")
+    fake_dash = str(tmp_path / "fake-dash.html")
+    monkeypatch.setattr(fstat, "_render_html", lambda *a, **k: fake_dash)
 
     monkeypatch.setattr(sys, "argv", ["prog"])
     assert fstat.main() == 0
-    assert opened == ["/tmp/fake-dash.html"]
+    assert opened == [fake_dash]
