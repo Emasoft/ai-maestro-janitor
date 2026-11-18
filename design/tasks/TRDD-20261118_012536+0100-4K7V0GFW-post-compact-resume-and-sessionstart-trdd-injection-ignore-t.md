@@ -4,7 +4,7 @@ title: Post-compact resume and SessionStart TRDD injection ignore the linked wor
 column: todo
 status: tasked
 created: 2026-11-18T01:25:36+0100
-updated: 2026-11-18T16:45:26+0100
+updated: 2026-11-18T16:49:55+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -56,3 +56,4 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
   - the worktree holding the most recent commit made by this session;
   - all worktrees of the repo, newest copy wins. Weak: about 40 .claude/worktrees/agent-* worktrees exist (many marked prunable), so abandoned cards would become resume targets.
   Consistency follow-up, not changed by 486a7367: scripts/detectors/trdd-reminder.py:58 (_ACTIVE_COLUMNS) and scripts/hooks/pre-compact-handoff.py:121 still include human_review. The handoff may legitimately list cards waiting for the human; decide per module.
+- 2026-11-18T16:49:55+0100 — correction, by main-agent: the entry of 2026-11-18T16:43:47+0100 states two premises as fact that are not verified for the reporting session: that its hook-input cwd was the main checkout, and that its Bash cwd did not persist (both hold in this harness, not shown for that session). So option A is not shown to help, rather than ruled out; the worktree half stays open. Measured facts in that entry (the two hooks read the hook-input cwd as described, lines 69, 83 and 738-788) stand.
