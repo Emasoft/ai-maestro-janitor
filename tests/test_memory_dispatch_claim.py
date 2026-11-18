@@ -26,7 +26,7 @@ def _dispatch(sd: Path, epoch: int, intervention: str, scope: str = "LOCAL") -> 
     p = sd / f"{mdc.PENDING_PREFIX}{epoch}-abcd1234.json"
     p.write_text(json.dumps({
         "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
-        "scope": scope, "root": f"/tmp/{scope.lower()}/memory", "stamped_at": epoch,
+        "scope": scope, "root": str(sd / f"{scope.lower()}-memory"), "stamped_at": epoch,
         "dispatch_id": f"{epoch}-abcd1234",
     }), encoding="utf-8")
     return p
@@ -37,7 +37,7 @@ def _claimed(sd: Path, epoch: int, intervention: str, scope: str = "LOCAL") -> P
     p = sd / f"{mdc.CLAIMED_PREFIX}{epoch}-abcd1234.json"
     p.write_text(json.dumps({
         "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
-        "scope": scope, "root": f"/tmp/{scope.lower()}/memory", "stamped_at": epoch,
+        "scope": scope, "root": str(sd / f"{scope.lower()}-memory"), "stamped_at": epoch,
         "dispatch_id": f"{epoch}-abcd1234",
     }), encoding="utf-8")
     return p
@@ -100,7 +100,7 @@ def test_the_legacy_single_slot_is_not_a_fallback(tmp_path):
     """Consuming it would reintroduce the clobbering bug on the one path where it matters —
     when two dispatches overlap."""
     (tmp_path / mdc.LEGACY_NAME).write_text(
-        json.dumps({"intervention": "consolidate", "scope": "LOCAL", "root": "/tmp/x"}),
+        json.dumps({"intervention": "consolidate", "scope": "LOCAL", "root": str(tmp_path / "x")}),
         encoding="utf-8")
     assert mdc.claim_one(tmp_path, "consolidate") is None
 
@@ -608,13 +608,13 @@ def test_complete_claim_renames_claimed_to_done_with_report(tmp_path):
     p = _claimed(tmp_path, 1_000_000, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
 
-    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md", now=1_000_500) is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, str(tmp_path / "report.md"), now=1_000_500) is True
 
     assert not p.exists()
     done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
     assert done.is_file()
     payload = json.loads(done.read_text(encoding="utf-8"))
-    assert payload["report"] == "/tmp/report.md"
+    assert payload["report"] == str(tmp_path / "report.md")
     assert payload["completed_at"] == 1_000_500
     assert "outcome" not in payload
 
@@ -666,7 +666,7 @@ def test_complete_claim_empty_report_stays_empty(tmp_path):
 def test_complete_claim_unknown_id_returns_false(tmp_path):
     """A dispatch_id naming neither a claimed nor a done record is unknown — the CLI
     must exit non-zero rather than silently succeed."""
-    assert mdc.complete_claim(tmp_path, "999-doesnotexist", "/tmp/report.md") is False
+    assert mdc.complete_claim(tmp_path, "999-doesnotexist", str(tmp_path / "report.md")) is False
 
 
 def test_complete_claim_is_idempotent(tmp_path):
@@ -674,8 +674,8 @@ def test_complete_claim_is_idempotent(tmp_path):
     lost reply, or a duplicate `complete` call, is not an error."""
     p = _claimed(tmp_path, 1_000_000, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md") is True
-    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md") is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, str(tmp_path / "report.md")) is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, str(tmp_path / "report.md")) is True
 
 
 def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
@@ -750,7 +750,7 @@ def test_claim_cli_prints_a_report_header_with_the_real_values(tmp_path):
     assert "REPORT FILE created with the header already written" in proc.stdout
     assert "# repair pass — LOCAL scope" in proc.stdout
     assert (
-        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory"
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=" + str(state_dir / "local-memory")
         in proc.stdout
     ), proc.stdout
 
@@ -1157,7 +1157,7 @@ def test_claim_cli_creates_report_skeleton_with_header(tmp_path):
     lines = text.splitlines()
     assert lines[0].startswith("<!-- generated:")
     assert lines[1] == "# repair pass — LOCAL scope"
-    assert lines[2] == "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory"
+    assert lines[2] == "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=" + str(state_dir / "local-memory")
 
 
 def test_claim_cli_records_skeleton_path_on_claimed_record(tmp_path):
@@ -1481,21 +1481,21 @@ def test_report_path_with_chore_picks_that_claim_among_several(tmp_path):
     (state_dir / f"{mdc.CLAIMED_PREFIX}1000000-abcd1234.json").write_text(
         json.dumps({
             "marker": "[janitor-memory-repair]", "intervention": "repair",
-            "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 1_000_000,
-            "dispatch_id": "1000000-abcd1234", "report": "/tmp/repair-report.md",
+            "scope": "LOCAL", "root": str(project / "local-memory"), "stamped_at": 1_000_000,
+            "dispatch_id": "1000000-abcd1234", "report": str(project / "repair-report.md"),
         }), encoding="utf-8",
     )
     (state_dir / f"{mdc.CLAIMED_PREFIX}2000000-abcd1234.json").write_text(
         json.dumps({
             "marker": "[janitor-memory-consolidate]", "intervention": "consolidate",
-            "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 2_000_000,
-            "dispatch_id": "2000000-abcd1234", "report": "/tmp/consolidate-report.md",
+            "scope": "LOCAL", "root": str(project / "local-memory"), "stamped_at": 2_000_000,
+            "dispatch_id": "2000000-abcd1234", "report": str(project / "consolidate-report.md"),
         }), encoding="utf-8",
     )
 
     proc = _run_cli(["report-path", "--state-dir", str(state_dir), "--chore", "repair"])
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout == "/tmp/repair-report.md\n"
+    assert proc.stdout == str(project / "repair-report.md") + "\n"
 
 
 def test_report_path_with_chore_naming_no_claim_exits_1_empty_stdout(tmp_path):

@@ -49,19 +49,19 @@ def test_no_overview_dir_emits_no_breadcrumb() -> None:
 def test_breadcrumb_names_every_non_empty_scope_and_the_entry_point() -> None:
     """The line carries the per-scope counts and the `memgrep overview <dir>` entry."""
     line = mb.format_breadcrumb(
-        {"LOCAL": 12, "PROJECT": 3, "USER": 8}, Path("/tmp/mem")
+        {"LOCAL": 12, "PROJECT": 3, "USER": 8}, Path("/fake/mem")
     )
     assert line is not None
     assert "12 local" in line
     assert "3 project" in line
     assert "8 user-global" in line
-    assert "memgrep overview /tmp/mem" in line
+    assert "memgrep overview /fake/mem" in line
     assert "markdown-memory-recall.md" in line
 
 
 def test_empty_scopes_are_omitted_not_printed_as_zero() -> None:
     """A project whose only notes are USER-global must not read '0 local + 0 project'."""
-    line = mb.format_breadcrumb({"LOCAL": 0, "PROJECT": 0, "USER": 8}, Path("/tmp/mem"))
+    line = mb.format_breadcrumb({"LOCAL": 0, "PROJECT": 0, "USER": 8}, Path("/fake/mem"))
     assert line is not None
     assert "8 user-global" in line
     assert "0 local" not in line
@@ -76,12 +76,12 @@ def test_breadcrumb_carries_counts_never_note_content() -> None:
     the session PREFIX on every session start. The autorecall hook is the content
     path and sanitizes; this one must stay content-free.
     """
-    line = mb.format_breadcrumb({"LOCAL": 2}, Path("/tmp/mem"))
+    line = mb.format_breadcrumb({"LOCAL": 2}, Path("/fake/mem"))
     assert line is not None
     # Only the fixed template words, the count, and the dir — no interpolation slot
     # exists for a note's text.
     assert "2 local" in line
-    assert "/tmp/mem" in line
+    assert "/fake/mem" in line
 
 
 # --------------------------------------------------------------------------- #

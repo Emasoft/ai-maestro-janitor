@@ -79,7 +79,7 @@ _PERMANENT = les.SummaryAttempt(None, les.OUTCOME_PERMANENT, "llm-ext is not ins
 
 def _retry(clock: _Clock, attempt, *, budget: float = 540.0, **kw):
     return les.summarize_with_retry(
-        "/tmp/t.jsonl",
+        "/fake/t.jsonl",
         deadline=clock.now() + budget,
         now_fn=clock.now,
         sleeper=clock.sleep,
@@ -343,7 +343,7 @@ def test_a_resume_lease_budget_bounds_the_lane_wait(tmp_path: Path) -> None:
     assert held is not None
 
     got = les.summarize_with_retry(
-        "/tmp/t.jsonl",
+        str(tmp_path / "t.jsonl"),
         deadline=clock.now() + 2600.0,
         now_fn=clock.now,
         sleeper=clock.sleep,
@@ -372,7 +372,7 @@ def test_without_a_lease_budget_a_full_lane_polls_to_the_deadline(tmp_path: Path
     assert held is not None
 
     got = les.summarize_with_retry(
-        "/tmp/t.jsonl",
+        str(tmp_path / "t.jsonl"),
         deadline=clock.now() + 300.0,
         now_fn=clock.now,
         sleeper=clock.sleep,
@@ -1003,7 +1003,7 @@ def test_a_workspace_that_cannot_be_made_is_a_permanent_redaction_failure(tmp_pa
 def test_summarize_with_retry_needs_a_state_dir_when_no_attempt_is_injected() -> None:
     """Neither an attempt nor a state_dir is a programming error, not a quiet default folder."""
     with pytest.raises(ValueError, match="state_dir"):
-        les.summarize_with_retry("/tmp/t.jsonl", deadline=1.0)
+        les.summarize_with_retry("/fake/t.jsonl", deadline=1.0)
 
 
 def test_the_workspace_is_private_and_per_run_and_removed_even_on_error(tmp_path: Path) -> None:

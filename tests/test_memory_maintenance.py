@@ -1092,7 +1092,7 @@ def test_write_pending_supersedes_older_unclaimed_same_key(tmp_path, monkeypatch
     `_write_pending` — the second must supersede the first's still-unclaimed
     per-dispatch file rather than leave it sitting in the claim pool."""
     mm = _load_mm(monkeypatch, tmp_path)
-    root = "/tmp/local/memory"
+    root = str(tmp_path / "local-memory")
     first = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=1000)
     mm._write_pending(first)
     second = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=2000)
@@ -1112,13 +1112,13 @@ def test_write_pending_leaves_claimed_and_other_keys_alone(tmp_path, monkeypatch
     must both survive a supersede — only an unclaimed record sharing the exact
     (root, intervention) key is touched."""
     mm = _load_mm(monkeypatch, tmp_path)
-    root = "/tmp/local/memory"
+    root = str(tmp_path / "local-memory")
     claimed_payload = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=500)
     claimed_path = tmp_path / f"{mm._CLAIMED_PREFIX}{claimed_payload['dispatch_id']}.json"
     claimed_path.write_text(json.dumps(claimed_payload), encoding="utf-8")
 
     other_key = _dispatch_payload(
-        mm, root="/tmp/user/memory", intervention="repair", scope="USER", stamped_at=600
+        mm, root=str(tmp_path / "user-memory"), intervention="repair", scope="USER", stamped_at=600
     )
     mm._write_pending(other_key)
 
@@ -1153,7 +1153,7 @@ def test_write_pending_supersede_rewrites_legacy_slot_to_new_id(tmp_path, monkey
     never the one just superseded, or the orphan detector keeps reporting a
     deliberately-retired id."""
     mm = _load_mm(monkeypatch, tmp_path)
-    root = "/tmp/local/memory"
+    root = str(tmp_path / "local-memory")
     first = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=1000)
     mm._write_pending(first)
     second = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=2000)
