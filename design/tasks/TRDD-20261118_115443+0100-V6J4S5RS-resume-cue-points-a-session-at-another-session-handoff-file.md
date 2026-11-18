@@ -4,7 +4,7 @@ title: Resume cue points a session at another session handoff file
 column: backburner
 status: tasked
 created: 2026-11-18T11:54:43+0100
-updated: 2026-11-18T11:54:43+0100
+updated: 2026-11-18T13:41:07+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,4 @@ Observed 2026-11-18 by main-agent in session 5d861615 (after a compaction, not a
 ## Approval log
 
 - 2026-11-18T11:54:43+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T13:38:35+0100 — by main-agent: the author, mandate and approval fields of this card were set by trddgrep from --author main-agent@ai-maestro-janitor, chosen by the minting worker because main-agent ordered the card. The 7e0dca67 commit message says the worker "had no identity of its own"; the usage text of trddgrep new offers <agent-name>#<agent-uuid>, but on 2026-11-18 the harness label cheap-worker#a4572f00a6ba32acd was refused as not an identity (ai-maestro#168), and a real uuid is untested. No separate approval decision was made beyond main-agent ordering the card.
