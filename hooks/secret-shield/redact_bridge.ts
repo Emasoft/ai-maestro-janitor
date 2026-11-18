@@ -4,15 +4,16 @@
 //   {"t": s}                                   -> redact(s)
 //   {"op": "home", "t": s, "homes": [...]}     -> redactHome(s, homes)
 //   {"op": "both", "t": s, "homes": [...]}     -> redact(s) first, then redactHome on its output
+//   {"op": "jsonl", "t": s, "homes": [...]}    -> redactJsonLine(s) first (a secret behind a JSON escape too; a line that is not JSON goes through redact), then redactHome on its output; the line stays valid JSON when it was
 //   {"op": "all", "t": s, "homes": [...], "passes": [...]} -> redactAll(s, homes, passes): every pass of the pipeline (pipeline.ts) in its own order; "passes" is optional (absent = all four) and, when present, a non-empty array of "secrets", "cards", "email", "home"
-// Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both" and "all" the counts of the passes are merged.
+// Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both", "jsonl" and "all" the counts of the passes are merged.
 // Any failure: ONE line {"error": "<fixed text>"}, exit 2. Nothing else is ever written to stdout.
 //
 // WHY the input is read as a byte stream and split on "\n" here, not with `for await (const line of console)`: one line is a whole transcript record, which can be several MB, and the line reader is not meant for that.
 // WHY every error message is fixed text and never the exception own message: JSON.parse quotes a fragment of the input in its message, and that message could carry a secret to the caller. The caller must fail closed on an error line (TRDD-TKQ274RE: a skipped redaction sends secrets out).
 
 import { redactHome } from "./home.ts"
-import { addHits, redact, type Hits } from "./patterns.ts"
+import { addHits, redact, redactJsonLine, type Hits } from "./patterns.ts"
 import { ALL_PASSES, isPass, redactAll, type Pass } from "./pipeline.ts"
 
 const decoder = new TextDecoder("utf-8")
@@ -20,6 +21,15 @@ const decoder = new TextDecoder("utf-8")
 const fail = async (message: string): Promise<never> => {
   await Bun.write(Bun.stdout, JSON.stringify({ error: message }) + "\n")
   process.exit(2)
+}
+
+const isJson = (text: string): boolean => {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const handle = async (line: string): Promise<void> => {
@@ -33,7 +43,7 @@ const handle = async (line: string): Promise<void> => {
   const text = fields?.t
   if (typeof text !== "string") return fail("request has no string field t")
   const op = fields?.op
-  if (op !== undefined && op !== "home" && op !== "both" && op !== "all") return fail("unknown op")
+  if (op !== undefined && op !== "home" && op !== "both" && op !== "jsonl" && op !== "all") return fail("unknown op")
   const homes = fields?.homes
   if (op !== undefined && !(Array.isArray(homes) && homes.every((h) => typeof h === "string"))) return fail("homes is not an array of strings")
   // passes belongs to op "all" only: the other ops take no pass set and ignore the field, as they always ignored unknown fields. An empty array is refused: it would return the text unredacted.
@@ -51,6 +61,15 @@ const handle = async (line: string): Promise<void> => {
       const r = redactHome(text, homes as string[])
       out = r.text
       addHits(hits, r.hits)
+    } else if (op === "jsonl") {
+      // WHY redactJsonLine first, then redactHome: redactJsonLine decodes the escapes of the line to find a secret hidden behind them, and the home pass is a plain-text rewrite of the raw line. Run the other way round, a home rewrite could change the escapes or the text around a secret before the JSON-aware pass reads it. Last, the line must still be JSON when it was JSON: a home rewrite that breaks it throws, and the catch below answers with a fixed text, never with the input.
+      const secrets = redactJsonLine(text)
+      out = secrets.text
+      addHits(hits, secrets.hits)
+      const home = redactHome(out, homes as string[])
+      if (home.text !== out && isJson(text)) JSON.parse(home.text)
+      out = home.text
+      addHits(hits, home.hits)
     } else {
       const secrets = redact(text)
       out = secrets.text

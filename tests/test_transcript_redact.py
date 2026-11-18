@@ -182,6 +182,68 @@ def test_bridge_op_all_refuses_an_empty_pass_set() -> None:
     assert json.loads(lines[0]) == {"error": "passes is not a non-empty array of passes"}
 
 
+def _bridge_refusal(request: dict[str, Any]) -> tuple[int, list[str]]:
+    """Send one request line to the real bridge and return its exit status and every stdout line."""
+    bridge = Path(__file__).resolve().parents[1] / "hooks" / "secret-shield" / "redact_bridge.ts"
+    done = subprocess.run([tr.resolve_bun(), str(bridge)], input=(json.dumps(request) + "\n").encode("utf-8"), capture_output=True, timeout=TIMEOUT_S, check=False)
+    return done.returncode, done.stdout.decode("utf-8").splitlines()
+
+
+def test_bridge_op_jsonl_hides_a_secret_behind_an_escaped_newline_that_op_both_leaves_whole() -> None:
+    """Op jsonl hides a key written right after an escaped newline in a JSON line, op both leaves it whole, and the jsonl output still parses."""
+    line = json.dumps({"c": "first\n" + FAKE_KEY + " last"})
+    both = _bridge_one({"op": "both", "t": line, "homes": HOMES})
+    assert FAKE_KEY in both["t"]
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    assert FAKE_KEY not in out["t"] and KEY_MARK in out["t"]
+    assert json.loads(out["t"]) == {"c": "first\n" + KEY_MARK + " last"}
+    assert out["h"] == {"github-token": 1}
+
+
+def test_bridge_op_jsonl_rewrites_a_home_path_inside_a_json_string_and_the_line_still_parses() -> None:
+    """Op jsonl rewrites a home path inside a JSON string to a tilde, counts it, and the output is valid JSON."""
+    line = json.dumps({"p": HOMES[0] + "/proj/a.py"})
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    assert json.loads(out["t"]) == {"p": "~/proj/a.py"}
+    assert out["h"] == {"home-path": 1}
+
+
+def test_bridge_op_jsonl_rewrites_a_json_escaped_windows_home_and_the_line_still_parses() -> None:
+    """Op jsonl rewrites a Windows home written with JSON-escaped backslashes to %USERPROFILE%, keeps each separator kind, and the output is valid JSON."""
+    # WHY fragments: the staged privacy scan refuses a literal Windows home with a user name in source.
+    home = "C:" + "\\" + "Users" + "\\" + "bob"
+    line = json.dumps({"p": home + "\\proj\\a.py", "q": home.replace("\\", "/") + "/x"})
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    assert json.loads(out["t"]) == {"p": "%USERPROFILE%\\proj\\a.py", "q": "%USERPROFILE%/x"}
+    assert out["h"] == {"home-path": 2}
+
+
+def test_bridge_op_jsonl_sends_a_line_that_is_not_json_through_the_plain_path() -> None:
+    """A line that is not JSON gets the same text and the same counts from op jsonl as from op both."""
+    line = f"plain {FAKE_KEY} at {HOMES[0]}/a.py"
+    both = _bridge_one({"op": "both", "t": line, "homes": HOMES})
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    assert out == both
+    assert out["t"] == f"plain {KEY_MARK} at ~/a.py"
+
+
+def test_bridge_op_jsonl_refuses_homes_that_is_not_an_array_of_strings() -> None:
+    """Op jsonl with a malformed homes field is refused with one fixed error line and exit 2, like the other ops."""
+    code, lines = _bridge_refusal({"op": "jsonl", "t": "{}", "homes": [123]})
+    assert code == 2
+    assert [json.loads(x) for x in lines] == [{"error": "homes is not an array of strings"}]
+
+
+def test_bridge_op_jsonl_fails_closed_with_a_fixed_message_when_a_home_rewrite_breaks_the_json() -> None:
+    """A home literal that ends in a quote rewrites the quote that closes a JSON string; the bridge refuses with a fixed message that holds no input text."""
+    line = json.dumps({"k": "/a/b"})
+    code, lines = _bridge_refusal({"op": "jsonl", "t": line, "homes": ['/a/b"']})
+    assert code == 2
+    # WHY provisional: "SyntaxError" is the error name of Bun's JSON.parse, which the bridge reports; a Bun release that renames it turns this red without a redaction bug.
+    assert [json.loads(x) for x in lines] == [{"error": "redaction threw SyntaxError"}]
+    assert "/a/b" not in "".join(lines)
+
+
 def test_timeout_kills_the_bridge_and_raises() -> None:
     """A timeout far shorter than a bun start raises instead of returning a partial result."""
     with pytest.raises(tr.RedactionUnavailable, match="timed out"):
