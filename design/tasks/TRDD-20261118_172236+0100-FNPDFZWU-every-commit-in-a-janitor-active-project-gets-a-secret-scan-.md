@@ -4,7 +4,7 @@ title: Every commit in a janitor-active project gets a secret scan of all staged
 column: backburner
 status: tasked
 created: 2026-11-18T17:22:36+0100
-updated: 2026-11-18T17:22:48+0100
+updated: 2026-11-18T17:41:50+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -36,3 +36,22 @@ By main-agent read 2026-11-18: scripts/lib/staged_privacy_scan.py scans the ADDE
 ## Design questions
 
 (a) Enforcement point: a PreToolUse guard on agent git commit calls covers commits an agent makes in every janitor-active project without touching repo config; a git hook covers human commits too but has to be installed per repo and chained with core.hooksPath. (b) What is scanned: the staged blob of every staged path (git show :path), not the working tree, so a partially staged file is judged as committed. (c) On a finding: block naming file, line and kind, or redact the staged blob in place (rewriting the index changes what the user staged; needs the owner's word). (d) bun must start with cwd = the plugin folder (TRDD-6E2I17HN). (e) Fail closed when bun or the core cannot run, as staged_privacy_scan does (exit 2 blocks).
+
+## Owner orders
+
+USER, 2026-11-18 (verbatim), order 1: "you forgot that i told you that the secrets-shield must not only scan and redact the context and the jsonl transcripts in realtime, preventing agents to ever read or send via api a secret (like the installed mod partially does, but it is incomplete) but also to prevent committing secrets with executing the secrets-scanner on the committed files at each commit? before that git cliff will create the changelog (otherwise there is the risk of publishing secrets in the very release logs of github, or metadata of npm, bun or pypi packages!)? What are you doing now? implement those immediately. secrets-shield must be blazing fast (with its performance critical core routines optimized in rust) and always on when the janitor is armed!"
+USER, 2026-11-18 (verbatim), order 2: "if you have doubts about the mod architecture, just let the mods-expert-developer agent take care of it. let the expert deal with mods, they are complex, very complex."
+
+## Correction 2026-11-18
+
+Design question (a) is wrong: a PreToolUse guard cannot be the scan point. `git add x && git commit` runs as ONE Bash call, so the guard fires before the add; `commit -a` and pathspec commits build their index inside git. Only real git hooks see what is committed: pre-commit for the index, commit-msg for the message (the message is what git-cliff publishes).
+
+## Decisions 2026-11-18
+
+- v1 BLOCKS on a new finding, naming file, line and kind, never the value; no in-place rewrite in v1 (a non-restorable marker in a working file can overwrite uncommitted content, RULE 0); redaction comes later, only through the vault-backed redact path.
+- New vs existing: a finding blocks only when its whole line text is NOT present in the HEAD blob of the same path (rename source when renamed); pre-existing lines pass and are counted.
+- The commit message has no baseline: any finding blocks.
+- Engine: each staged blob goes into a fresh 0700 temp dir outside any git tree (paths mirrored), scanned by bun --cwd <plugin>/scripts/shield_scan scan.ts --all --passes secrets,cards; findings mapped back by path; temp dir removed in a finally; never print a value.
+- Exit codes: 0 clean, 1 block, 2 cannot run (blocks while the janitor is active); scan.ts exit 3 (incomplete) is cannot-run, never clean. Inert (exit 0, one line) when the janitor DATA dir is absent or the kill-switch file exists.
+- Plugin root is resolved from the script path (Path(__file__).resolve()), never from cwd.
+- Increment 1 files: scripts/lib/staged_secret_scan.py, git-hooks/pre-commit stage 0b, new git-hooks/commit-msg, publish.py install_hook installs commit-msg, tests/test_staged_secret_scan.py.

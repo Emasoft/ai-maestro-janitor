@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# commit-msg hook — secret scan of the commit MESSAGE (TRDD-FNPDFZWU increment 1).
+# OWNER ORDER 2026-11-18: no secret may be committed, before git-cliff builds the changelog. The message
+# is what git-cliff publishes (GitHub release notes, package metadata), and only this hook sees it:
+# a PreToolUse guard fires before `git add` / `commit -a` are even built. Any finding blocks (the
+# message has no baseline); a scanner that cannot run also blocks (exit 2), fail closed like pre-commit.
+# Inert (exit 0) when the janitor is not active: see scripts/lib/staged_secret_scan.py.
+# THIS FILE IS THE SOURCE — publish.py::install_hook copies it to .git/hooks/commit-msg.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+uv run python scripts/lib/staged_secret_scan.py --message-file "$1" || {
+  echo "commit-msg: secret scan blocked the commit (see output above)."
+  exit 1
+}
