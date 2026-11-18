@@ -1121,7 +1121,13 @@ def _record_transcript_roles_import_finding(project_root: Path) -> None:
             now=int(time.time()),
         )
     except Exception:  # noqa: BLE001 - a finding-write fault must never affect the handoff
-        pass
+        # why: a finding-write fault must never affect the handoff it reports on (docstring above); the
+        # failed finding is named on stderr, the only trace left.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[pre-compact-handoff] transcript_roles finding not recorded", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
 
 def _build_handoff(

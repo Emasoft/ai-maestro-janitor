@@ -110,7 +110,13 @@ def main() -> int:
         try:
             state.log_line("subagent-start", f"manifest add failed: {exc}")
         except Exception:  # noqa: BLE001
-            pass
+            # why: the hook must exit 0 (module docstring), so the broad catch stays; log_line can fail in
+            # any way, and the manifest failure above is then named on stderr.
+            # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+            try:
+                print("[on-subagent-start] manifest add failed; log line not written", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
     return 0
 
 

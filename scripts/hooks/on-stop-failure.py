@@ -142,7 +142,13 @@ def main() -> int:
             sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
             _mark_auth_failed(etype, now, plugin_root)
     except Exception:  # noqa: BLE001 -- routing/telemetry MUST NOT break the resume-cue capture
-        pass
+        # why: the typed event and routing are fail-open side paths after the resume-cue flag write;
+        # the hook must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[on-stop-failure] typed event or routing step failed; resume cue already written", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
     # Best-effort — STRICTLY AFTER the critical flag write above, wrapped so a logging
     # bug can NEVER break the resume-cue capture (this hook's one hard contract). Snapshot
@@ -164,7 +170,13 @@ def main() -> int:
             },
         )
     except Exception:  # noqa: BLE001 -- telemetry MUST NOT break the resume-cue capture
-        pass
+        # why: the window snapshot is a fail-open side path after the resume-cue flag write; the hook
+        # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[on-stop-failure] window snapshot step failed; resume cue already written", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
     # ACTIVE 429 RECOVERY (TRDD-G4BCRUP7 R9) — best-effort, STRICTLY AFTER the critical
     # flag write. Until now this hook was PASSIVE: it recorded the rate limit and waited for
@@ -239,7 +251,13 @@ def main() -> int:
                 "rate limit: fired detached rotator auto (rotate away only; cap learning is off, TRDD-AWIWXJIG)",
             )
     except Exception:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
-        pass
+        # why: the rotator launch is a fail-open side path after the resume-cue flag write; the hook
+        # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[on-stop-failure] rate-limit recovery step failed; resume cue already written", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
     # #J delegation (TRDD-PZLVT2RN Phase D) — best-effort, STRICTLY AFTER the critical
     # flag write. Inside an ai-maestro harness agent the SERVER owns Family-A resume, so
@@ -269,7 +287,13 @@ def main() -> int:
                     f"harness: fired detached ensure-resume for agent {ref}",
                 )
     except Exception:  # noqa: BLE001 -- delegation MUST NOT break the resume-cue capture
-        pass
+        # why: the delegation is a fail-open side path after the resume-cue flag write; the hook
+        # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[on-stop-failure] harness ensure-resume step failed; resume cue already written", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     return 0
 
 

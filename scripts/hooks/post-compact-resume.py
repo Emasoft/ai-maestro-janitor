@@ -158,7 +158,13 @@ def _trdd_paths(project_root: Path) -> list[Path]:
                     sys.path.insert(0, entry)
             from lib import trdd_common  # noqa: E402 - local package, not PyPI
         except Exception:  # noqa: BLE001 -- degrade to the project board; never break resume
-            pass
+            # why: FAIL-OPEN for any import failure (_trdd_paths docstring); the directive falls back to
+            # the PROJECT board, and the notice names that fallback.
+            # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+            try:
+                print("[post-compact-resume] trdd_common import failed; the resume directive uses PROJECT-scope cards only", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
         else:
             try:
                 return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_root))]
@@ -376,7 +382,13 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
         if user_intent.user_presence(idle_s=grace_s) is True:
             return True
     except Exception:  # noqa: BLE001 -- the probe must never break the push gate
-        pass
+        # why: the attended-user probe must never break the push gate; a failure falls through to the
+        # prompt-window check below, and the notice names that fallback.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[post-compact-resume] attended-user probe failed; falling back to the prompt window check", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     # The attended-SESSION window (TRDD-GRHP2YHP): a genuine prompt within `prompt_window_s`
     # (minutes, NOT the 20 s HID grace) means the user is here — reading the reply — even with no
     # recent keystroke. This is the fix for the push landing under an attended-but-reading user.
@@ -396,7 +408,13 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
                 return False
             path = pane_path
     except Exception:  # noqa: BLE001 -- never let pane resolution break the gate
-        pass
+        # why: pane resolution must never break the push gate; path still holds the machine-wide
+        # breadcrumb set above, so the gate reads that one.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[post-compact-resume] pane resolution failed; using the machine-wide presence breadcrumb", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError):
@@ -489,7 +507,13 @@ def _spawn_deferred_child(state, plugin_root: str, elapsed_s: int, transcript_pa
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = open(log_dir / "post-compact-resume.child.log", "ab", buffering=0)  # noqa: SIM115
     except Exception:  # noqa: BLE001 - opening a diagnostics file must never stop the spawn itself
-        pass
+        # why: a missing diagnostics file must never stop the spawn itself; the child then writes to
+        # DEVNULL, so the notice says its output is discarded.
+        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        try:
+            print("[post-compact-resume] child log file not opened; deferred child output is discarded", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     out = log_file if log_file is not None else subprocess.DEVNULL
     try:
         subprocess.Popen(  # noqa: S603 - fixed argv, no shell
@@ -636,7 +660,13 @@ def main() -> int:
                     f"deferred recheck raised: {type(exc).__name__}: {exc} (an outcome line above, if any, still stands)",
                 )
             except Exception:  # noqa: BLE001, S110 - a logging failure must not raise out of the child
-                pass
+                # why: the outcome log line must not raise out of the detached child (exit 0 below); the
+                # failure is named on stderr; the child stderr is its log file when the parent opened one, else DEVNULL.
+                # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+                try:
+                    print("[post-compact-resume] deferred recheck outcome not logged", file=sys.stderr)
+                except (OSError, ValueError):
+                    pass
         return 0
 
     # Drain stdin (PostCompact delivers a JSON payload there). We mainly rely on
