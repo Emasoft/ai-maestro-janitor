@@ -778,10 +778,12 @@ def extract_items(
                 attachment = entry.get("attachment")
                 # A `continue` here would be a SILENT skip of a broken invariant: `text is not
                 # None` already proves `jev_expand.attachment_item_text` found `attachment` to be a dict
-                # (its own only non-None return path) -- this assert exists to satisfy the type
+                # (its own only non-None return path) -- this check exists to satisfy the type
                 # checker's narrowing, not to handle a real case, so a failure means the
                 # invariant itself broke and must be loud, not swallowed like a normal skip.
-                assert isinstance(attachment, dict)
+                # why: explicit raise, not assert: the check must survive python -O
+                if not isinstance(attachment, dict):
+                    raise AssertionError("attachment must be a dict: attachment_item_text returned text for it")
                 command_mode = attachment.get("commandMode")
                 att_origin = attachment.get("origin")
                 att_origin_kind = att_origin.get("kind") if isinstance(att_origin, dict) else None
@@ -1909,7 +1911,9 @@ def _select_injected(
         key=lambda c: (c.score, c.turn), reverse=True,
     ):
         cost = c.whole_cost
-        assert cost is not None  # narrowed by the generator's own filter above; mypy can't see it
+        # why: explicit raise, not assert: the check must survive python -O
+        if cost is None:
+            raise AssertionError("cost is None although the generator above filters on whole_cost is not None")
         if fits(available, total, cost):
             whole.append(c.id)
             inline_ids.add(c.id)

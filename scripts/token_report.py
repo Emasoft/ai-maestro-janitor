@@ -567,7 +567,9 @@ def main() -> int:
     now = int(time.time())
     out_stats = token_meter.summarize(records, field="output")
     in_stats = token_meter.summarize(records, field="input")
-    assert out_stats is not None and in_stats is not None
+    # why: explicit raise, not assert: the check must survive python -O
+    if out_stats is None or in_stats is None:
+        raise AssertionError("token_meter.summarize returned None for non-empty records")
     events = token_meter.load_log(_state_dir() / "window-exhaustion.jsonl")
     window = _window_metrics(records, now, args.util5h, args.util7d, events)
 

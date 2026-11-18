@@ -42,7 +42,9 @@ class Scan:
     @property
     def summary(self) -> dict[str, Any]:
         """The last record of the findings file."""
-        assert self.records[-1]["type"] == "summary"
+        # why: explicit raise, not assert: the check must survive python -O
+        if self.records[-1]["type"] != "summary":
+            raise AssertionError("the last record of the findings file must be the summary")
         return self.records[-1]
 
     @property
@@ -130,7 +132,9 @@ class Box:
 
         def put_back(m: re.Match[str]) -> str:
             value = values[m.group(2)]
-            assert value is not None, "a marker has no vault row"
+            # why: explicit raise, not assert: the check must survive python -O
+            if value is None:
+                raise AssertionError("a marker has no vault row")
             return value
 
         return MARKER_RE.sub(put_back, text)

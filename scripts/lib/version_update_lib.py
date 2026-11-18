@@ -419,7 +419,9 @@ def resolve_latest_published(
         # retry, never a scale (TRDD-ZM5LZ24Y, category B of TRDD-7NSRD8OV).
         _fail(f"gh api timed out after {GH_PROVENANCE_TIMEOUT_S:g}s (2 attempts)")
         return None
-    assert proc is not None  # every non-timeout path above set it
+    # why: explicit raise, not assert: the check must survive python -O
+    if proc is None:
+        raise AssertionError("every non-timeout path above set proc, but proc is None")
     if proc.returncode != 0:
         _fail(
             f"gh api exited {last_returncode} (2 attempts)"

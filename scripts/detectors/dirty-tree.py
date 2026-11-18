@@ -95,7 +95,9 @@ def main() -> int:
             )
             return 0
         repo_dir = state.tracked_repo(str(state.project_root()))
-        assert repo_dir is not None
+        # why: explicit raise, not assert: the check must survive python -O
+        if repo_dir is None:
+            raise AssertionError("tracked_repo returned None after a non-None answer for the same root")
     else:
         repo_dir = state.project_root()
 

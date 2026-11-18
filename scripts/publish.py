@@ -466,7 +466,9 @@ def run_cpv_strict(cmd: list[str], cwd: Path, *, timeout: int) -> tuple[int, lis
     skipped: list[str] = []
 
     def _pump() -> None:
-        assert proc.stdout is not None
+        # why: explicit raise, not assert: the check must survive python -O
+        if proc.stdout is None:
+            raise AssertionError("proc was started with stdout=PIPE, so proc.stdout must not be None")
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()

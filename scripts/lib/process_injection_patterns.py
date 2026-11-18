@@ -140,10 +140,12 @@ _LDLINK_HIGH_VARS = frozenset({
     "LD_DEBUG", "LD_PROFILE", "LD_USE_LOAD_BIAS", "LD_ORIGIN_PATH",
     "DYLD_PRINT_LIBRARIES", "DYLD_PRINT_BINDINGS",
 })
-assert not (_LDLINK_CRITICAL_VARS & _LDLINK_HIGH_VARS), (
-    "ld-link severity partition must be disjoint — fix the overlap "
-    "before shipping"
-)
+# why: explicit raise, not assert: the check must survive python -O
+if _LDLINK_CRITICAL_VARS & _LDLINK_HIGH_VARS:
+    raise AssertionError(
+        "ld-link severity partition must be disjoint — fix the overlap "
+        "before shipping"
+    )
 
 # Captures the env-var key + the RHS value via named groups. Three
 # anchors covered in alternation: shell `export VAR=val`, Dockerfile
@@ -348,9 +350,9 @@ _PY_STARTUP_HIGH_VARS = frozenset({
 _PY_STARTUP_MEDIUM_VARS = frozenset({
     "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
 })
-assert not (_PY_STARTUP_HIGH_VARS & _PY_STARTUP_MEDIUM_VARS), (
-    "python-startup severity partition must be disjoint"
-)
+# why: explicit raise, not assert: the check must survive python -O
+if _PY_STARTUP_HIGH_VARS & _PY_STARTUP_MEDIUM_VARS:
+    raise AssertionError("python-startup severity partition must be disjoint")
 
 _PY_STARTUP_ENV_RE = _re(
     # Shell-style: optional export, VAR=val

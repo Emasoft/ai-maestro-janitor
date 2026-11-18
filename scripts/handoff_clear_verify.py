@@ -836,7 +836,9 @@ def _check_pointers(before: dict) -> dict:
         return {"pointers_transcript_rejected": reason}
     # WHY the resolved path is used for BOTH the existence check and the read: the validated
     # path and the opened path must be the same file, never the raw string re-interpreted.
-    assert transcript is not None  # validate_transcript_path returned None, so a path exists
+    # why: explicit raise, not assert: the check must survive python -O
+    if transcript is None:
+        raise AssertionError("transcript is None, yet validate_transcript_path returned None, so a path exists")
     cand = Path(transcript).expanduser().resolve(strict=False)
     if not cand.is_file():
         return {"pointers_transcript_missing": True}

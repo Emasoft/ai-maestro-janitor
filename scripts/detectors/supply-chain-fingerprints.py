@@ -628,7 +628,9 @@ _EXFIL_IMPORTS = frozenset({  # noqa: F841 - referenced as union of clusters bel
 })
 # Eagerly reference so static analysers don't flag the union constant
 # as dead code (it documents the full surface the two clusters cover).
-assert _EXFIL_IMPORTS
+# why: explicit raise, not assert: the check must survive python -O
+if not _EXFIL_IMPORTS:
+    raise AssertionError("_EXFIL_IMPORTS must not be empty: it is the union of the two exfil clusters")
 
 # At least one from each cluster is the canonical dropper shape:
 #   - obfuscation cluster   (base64 / binascii / codecs)
