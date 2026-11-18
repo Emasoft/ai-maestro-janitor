@@ -83,7 +83,10 @@ def _bridge_results(bun: str, texts: Iterable[str], homes: list[str], timeout_s:
         raise RedactionUnavailable("redaction bridge script is missing; cannot redact")
     try:
         # stderr to DEVNULL: a crash trace from the bridge could quote the text it was given.
-        proc = subprocess.Popen([bun, str(_BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        # cwd is the plugin hooks folder, never the caller folder (TRDD-6E2I17HN): bun reads bunfig.toml
+        # (its `preload` runs code) and .env from its WORKING folder, so a bridge started in a project
+        # would run that project's preload and could disable redaction before a transcript goes out.
+        proc = subprocess.Popen([bun, str(_BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=_BRIDGE.parent)
     except OSError:
         raise RedactionUnavailable("redaction bridge could not be started") from None
     if proc.stdin is None or proc.stdout is None:

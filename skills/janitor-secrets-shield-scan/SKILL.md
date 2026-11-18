@@ -30,15 +30,17 @@ Redact). Git history is not scanned yet (a later version).
    (the root or `--out`) to the home folder before quoting it: a quoted `~`
    is not expanded by the shell, and the scanner does not expand it either,
    so it would look for a folder named `~` in the current directory and
-   exit 2. A root whose name starts with a dash is passed as an absolute
-   path or as `./<name>`: the scanner reads any argument starting with a
-   dash as an option and stops with exit 2.
+   exit 2. A root whose name starts with a dash is passed as an absolute path only (a
+   relative `./<name>` would resolve against the plugin folder, see step 2): the scanner
+   reads any argument starting with a dash as an option and stops with exit 2.
 
 2. Run:
 
    ```bash
-   bun run "${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts" [options] [root]
+   bun --cwd "${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts" [options] <absolute root>
    ```
+
+   Always start bun with `--cwd "${CLAUDE_PLUGIN_ROOT}"` (TRDD-6E2I17HN): bun runs the `preload` of the `bunfig.toml` and reads the `.env` of its working folder, so started inside the tree to scan it would run that tree's code. With `--cwd` a relative path resolves against the plugin folder, so the root (the current working directory when `$ARGUMENTS` has none, written out in full) and any `--out` path must be absolute.
 
 3. A large tree can take hours: run it with `run_in_background` and read the
    two stdout lines when it ends. Never poll.
@@ -221,7 +223,7 @@ User: audit the folder ~/work for credentials and list the files
 Copy this checklist and track your progress:
 
 - [ ] Resolve the root (`$ARGUMENTS` path, else the cwd); quote each argument
-- [ ] Run `bun run "${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts" [options] [root]` in the background
+- [ ] Run `bun --cwd "${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts" [options] <absolute root>` in the background (root and `--out` absolute)
 - [ ] Read the summary line and the findings file path when it ends
 - [ ] Report counts, skips, completeness and the findings file path in words
 - [ ] Name what was not scanned (ignored entries, ignored repos, ancestor rules) and `--all`

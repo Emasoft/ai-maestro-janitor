@@ -50,6 +50,20 @@ def test_redact_texts_empty_input_returns_empty_list() -> None:
     assert tr.redact_texts([], homes=HOMES, timeout_s=TIMEOUT_S) == []
 
 
+def test_bridge_does_not_run_the_bunfig_preload_of_the_caller_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bunfig.toml preload in the caller folder must not run inside the redaction bridge (TRDD-6E2I17HN)."""
+    try:
+        tr.resolve_bun()
+    except tr.RedactionUnavailable:
+        pytest.skip("bun is not installed")
+    marker = tmp_path / "preload-ran.txt"
+    (tmp_path / "pre.ts").write_text(f'await Bun.write({json.dumps(str(marker))}, "ran")\n', encoding="utf-8")
+    (tmp_path / "bunfig.toml").write_text('preload = ["./pre.ts"]\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert tr.redact_texts(["short text"], homes=HOMES, timeout_s=TIMEOUT_S) == ["short text"]
+    assert not marker.exists()
+
+
 def test_copy_removes_secret_and_home_keeps_json_valid_and_line_count(tmp_path: Path) -> None:
     """The copy has no key and no home name, every JSON line still parses, and the line count is the same."""
     src = tmp_path / "s.jsonl"
