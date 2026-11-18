@@ -171,7 +171,7 @@ def test_sanitize_goal_table() -> None:
         ("/janitor-disarm now", "janitor-disarm now"),
         ("//  /clear it", "clear it"),
         ("see [janitor-resume] and [JANITOR-quiet]", "see ⟦janitor-resume] and ⟦JANITOR-quiet]"),
-        ("rtl ‮evil‬ nbsp x zw​q", "rtl evil nbsp x zwq"),
+        ("rtl \u202eevil\u202c nbsp x zw\u200bq", "rtl evil nbsp x zwq"),
         ("fix @src/a.py and @bob", "fix (at)src/a.py and (at)bob"),
         ("///", ""),
         ("\x1b\x07", ""),
@@ -200,7 +200,9 @@ def test_corrupt_transcript_falls_back_to_plain_bootstrap(tmp_path: Path, monkey
 
     try:
         session_continuity.clear_fields(path)
-    except Exception:  # noqa: BLE001 -- the premise: this file really does raise in the extractor
+    # why: the first bad record carries "message": "not-a-dict", and _entry_text calls .get on that
+    # string, so the premise raises AttributeError; any other exception type must fail this test
+    except AttributeError:  # the premise: this file really does raise in the extractor
         pass
     else:
         raise AssertionError("fixture no longer raises in clear_fields; pick a new corrupt record")
@@ -528,17 +530,18 @@ def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
     p = tmp_path / "proj"
     p.mkdir()
     _seed_handoff(p)
+    sentinel = tmp_path / "pwned_clear"
     proc = _run(
         ["--directive", "continue TRDD-Z582IKIR"],
         project=p,
-        iterm='x:" then do shell script "touch /tmp/pwned_clear" --',
+        iterm=f'x:" then do shell script "touch {sentinel}" --',
         home=_home(tmp_path, present=False),
     )
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "CLEAR_FIRED" not in proc.stdout
     assert (_state_dir(p) / "resume-after-clear.flag").is_file()
-    assert not Path("/tmp/pwned_clear").exists(), "the AppleScript injection must never execute"
+    assert not sentinel.exists(), "the AppleScript injection must never execute"
 
 
 # ---------- TRDD-11GAS4LC addendum: the third `_still_wanted` cancel + land logging -------
@@ -1096,7 +1099,7 @@ def test_persist_resume_state_writes_a_per_pane_sidecar_when_a_transcript_is_nam
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     captured = _capture_still_wanted(mod, monkeypatch)
 
-    payload = _chain_payload_with_transcript(tmp_path, transcript="/tmp/real-transcript.jsonl",
+    payload = _chain_payload_with_transcript(tmp_path, transcript="/fake/real-transcript.jsonl",
                                               terminal={"kind": "tmux", "pane": "%3"})
     mod._run_chain_payload(payload)
     captured["pre_submit_first"]()
@@ -1105,7 +1108,7 @@ def test_persist_resume_state_writes_a_per_pane_sidecar_when_a_transcript_is_nam
     sidecar = tmp_path / ".janitor" / "state" / f"resume-after-clear.{pane_key}.transcript"
     assert sidecar.is_file(), "expected a per-pane sidecar naming the cleared transcript"
     lines = sidecar.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "/tmp/real-transcript.jsonl"
+    assert lines[0] == "/fake/real-transcript.jsonl"
     assert int(lines[1]) > 0
 
 
@@ -1135,14 +1138,14 @@ def test_two_panes_sidecars_do_not_cross(tmp_path: Path, monkeypatch) -> None:
 
     captured_a = _capture_still_wanted(mod, monkeypatch)
     payload_a = _chain_payload_with_transcript(
-        tmp_path, transcript="/tmp/pane-a.jsonl", terminal={"kind": "tmux", "pane": "%1"},
+        tmp_path, transcript="/fake/pane-a.jsonl", terminal={"kind": "tmux", "pane": "%1"},
     )
     mod._run_chain_payload(payload_a)
     captured_a["pre_submit_first"]()
 
     captured_b = _capture_still_wanted(mod, monkeypatch)
     payload_b = _chain_payload_with_transcript(
-        tmp_path, transcript="/tmp/pane-b.jsonl", terminal={"kind": "tmux", "pane": "%2"},
+        tmp_path, transcript="/fake/pane-b.jsonl", terminal={"kind": "tmux", "pane": "%2"},
     )
     mod._run_chain_payload(payload_b)
     captured_b["pre_submit_first"]()
@@ -1152,8 +1155,8 @@ def test_two_panes_sidecars_do_not_cross(tmp_path: Path, monkeypatch) -> None:
     key_b = state.terminal_pane_key({"TMUX_PANE": "%2"})
     text_a = (sd / f"resume-after-clear.{key_a}.transcript").read_text(encoding="utf-8")
     text_b = (sd / f"resume-after-clear.{key_b}.transcript").read_text(encoding="utf-8")
-    assert "/tmp/pane-a.jsonl" in text_a
-    assert "/tmp/pane-b.jsonl" in text_b
+    assert "/fake/pane-a.jsonl" in text_a
+    assert "/fake/pane-b.jsonl" in text_b
     assert text_a != text_b
 
 
@@ -1179,10 +1182,10 @@ def test_spawn_shrink_chain_carries_transcript_path_into_the_payload(
 
     spawned, why = mod.spawn_shrink_chain(
         then=["/janitor-arm", "/janitor-resume"], directive="resume",
-        transcript_path="/tmp/shrink-me.jsonl",
+        transcript_path="/fake/shrink-me.jsonl",
     )
     assert spawned, why
-    assert captured["payload"]["transcript_path"] == "/tmp/shrink-me.jsonl"
+    assert captured["payload"]["transcript_path"] == "/fake/shrink-me.jsonl"
 
 
 def test_spawn_shrink_chain_transcript_path_defaults_to_none(tmp_path: Path, monkeypatch) -> None:

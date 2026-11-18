@@ -275,7 +275,10 @@ def _log_quietly(name: str, message: str) -> None:
     so NOTHING the log write raises (OSError, a UnicodeEncodeError from an odd path) may escape."""
     try:
         state.log_line(name, message)
-    except Exception:  # noqa: BLE001 - a diagnostic must never block a keystroke or a turn
+    # why: state.log_line can raise OSError (mkdir, open, write), RuntimeError (Path.expanduser in
+    # log_dir) and ValueError (UnicodeEncodeError, a bad path); a retry here would repeat the same
+    # failing write, so the handler swallows exactly those three and nothing else
+    except (OSError, RuntimeError, ValueError):  # a diagnostic must never block a keystroke or a turn
         pass
 
 
