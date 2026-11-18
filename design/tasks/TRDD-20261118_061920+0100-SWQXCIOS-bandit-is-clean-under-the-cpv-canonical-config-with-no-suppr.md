@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: todo
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-18T10:48:40+0100
+updated: 2026-11-18T10:56:44+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -35,7 +35,7 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 ## Lanes
 
 - Mechanical, no behaviour change (B607, B613, B101, B311, B608): cheap workers, bandit 0 on each file plus that file test run.
-- Behavioural (B110, B112: 132 sites, mostly hooks, daemon and rotator): each edit changes what is swallowed. Sonnet workers, one stated reason per site in the report, the diff read by main-agent. Pilot one hook and scripts/daemon.py first.
+- Behavioural (B110, B112: 132 sites, mostly hooks, daemon and rotator): each edit changes what is swallowed. Haiku workers (the user's order of 2026-11-18, see the dated line under Rules for every worker), one stated reason per site in the report, the diff read by main-agent. Pilot one hook and scripts/daemon.py first.
 - Classify first (B108, B105): a split literal or a renamed variable is not a fix. Each site is classified (a fake path or value in a test, a real temp-file use, a word that only looks like a password) before any edit.
 
 ## Rules for every worker

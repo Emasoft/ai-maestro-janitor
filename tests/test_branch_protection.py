@@ -21,6 +21,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "branch-protection.py"
 
@@ -70,7 +72,7 @@ _DEFAULT_ENV = {
 
 def _make_repo(tmp_path: Path) -> tuple[Path, Path]:
     """git-init a tmp repo and drop the fake gh into a bin dir; return both."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     binp = tmp_path / "_bin"
     binp.mkdir()
     gh = binp / "gh"

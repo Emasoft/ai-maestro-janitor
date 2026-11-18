@@ -107,6 +107,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # publish.py's own version-bump subject (scripts/publish.py: expected_subject
 # = f"chore: bump version to {new_ver}"). A commit whose subject matches this
@@ -206,15 +207,16 @@ def _git_env() -> dict[str, str]:
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     """Run a read-only git command in `repo`; None only if git itself is missing."""
+    git_env = _git_env()
     try:
         return subprocess.run(
-            ["git", *args],
+            [exe("git", git_env), *args],
             cwd=str(repo),
             capture_output=True,
             text=True,
             check=False,
             timeout=30,
-            env=_git_env(),
+            env=git_env,
         )
     except (OSError, subprocess.SubprocessError):
         return None

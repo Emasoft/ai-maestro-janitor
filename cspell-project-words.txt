@@ -2796,6 +2796,7 @@ pastebins
 pathbuf
 pathdir
 pathlib
+pathsep
 pathspec
 pathspecs
 pathwide
