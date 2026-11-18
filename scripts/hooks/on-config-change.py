@@ -51,7 +51,13 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- fail-open
         # why: read() can raise OSError or ValueError, and sys.stdin is None when fd 0 is closed
         # (AttributeError); the hook must exit 0 (module docstring), so the catch stays broad.
-        print("[on-config-change] stdin drain failed; due marks still set", file=sys.stderr)
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-config-change] stdin drain failed; due marks still set", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     try:
         import state  # noqa: PLC0415 -- sibling lib via the path insert
 

@@ -160,9 +160,11 @@ def _trdd_paths(project_root: Path) -> list[Path]:
         except Exception:  # noqa: BLE001 -- degrade to the project board; never break resume
             # why: FAIL-OPEN for any import failure (_trdd_paths docstring); the directive falls back to
             # the PROJECT board, and the notice names that fallback.
-            # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
             try:
-                print("[post-compact-resume] trdd_common import failed; the resume directive uses PROJECT-scope cards only", file=sys.stderr)
+                if sys.stderr is not None:
+                    print("[post-compact-resume] trdd_common import failed; the resume directive uses PROJECT-scope cards only", file=sys.stderr)
             except (OSError, ValueError):
                 pass
         else:
@@ -174,14 +176,20 @@ def _trdd_paths(project_root: Path) -> list[Path]:
                 # formatting and the print have their own guard so this hook cannot die here.
                 if isinstance(exc, trdd_common.GitRootError):
                     try:
-                        print(
-                            "[post-compact-resume] git failed resolving the design root "
-                            f"({trdd_common.git_root_error_reason(exc)}); "
-                            "the resume directive uses PROJECT-scope cards only",
-                            file=sys.stderr,
-                        )
-                    except Exception:  # noqa: BLE001, S110 -- a notice failure must not break resume
-                        pass
+                        reason = trdd_common.git_root_error_reason(exc)
+                    except Exception:  # noqa: BLE001 -- formatting the reason must not break resume
+                        reason = type(exc).__name__
+                    if sys.stderr is not None:
+                        try:
+                            print(
+                                "[post-compact-resume] git failed resolving the design root "
+                                f"({reason}); "
+                                "the resume directive uses PROJECT-scope cards only",
+                                file=sys.stderr,
+                            )
+                        # why: print to stderr raises only OSError or ValueError (a closed or non-UTF-8 stream), so only those are caught.
+                        except (OSError, ValueError):  # a notice failure must not break resume
+                            pass
     tasks_dir = project_root / "design" / "tasks"
     if not tasks_dir.is_dir():
         return []
@@ -384,9 +392,11 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     except Exception:  # noqa: BLE001 -- the probe must never break the push gate
         # why: the attended-user probe must never break the push gate; a failure falls through to the
         # prompt-window check below, and the notice names that fallback.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[post-compact-resume] attended-user probe failed; falling back to the prompt window check", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[post-compact-resume] attended-user probe failed; falling back to the prompt window check", file=sys.stderr)
         except (OSError, ValueError):
             pass
     # The attended-SESSION window (TRDD-GRHP2YHP): a genuine prompt within `prompt_window_s`
@@ -410,9 +420,11 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     except Exception:  # noqa: BLE001 -- never let pane resolution break the gate
         # why: pane resolution must never break the push gate; path still holds the machine-wide
         # breadcrumb set above, so the gate reads that one.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[post-compact-resume] pane resolution failed; using the machine-wide presence breadcrumb", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[post-compact-resume] pane resolution failed; using the machine-wide presence breadcrumb", file=sys.stderr)
         except (OSError, ValueError):
             pass
     try:
@@ -509,9 +521,11 @@ def _spawn_deferred_child(state, plugin_root: str, elapsed_s: int, transcript_pa
     except Exception:  # noqa: BLE001 - opening a diagnostics file must never stop the spawn itself
         # why: a missing diagnostics file must never stop the spawn itself; the child then writes to
         # DEVNULL, so the notice says its output is discarded.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[post-compact-resume] child log file not opened; deferred child output is discarded", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[post-compact-resume] child log file not opened; deferred child output is discarded", file=sys.stderr)
         except (OSError, ValueError):
             pass
     out = log_file if log_file is not None else subprocess.DEVNULL
@@ -662,9 +676,11 @@ def main() -> int:
             except Exception:  # noqa: BLE001, S110 - a logging failure must not raise out of the child
                 # why: the outcome log line must not raise out of the detached child (exit 0 below); the
                 # failure is named on stderr; the child stderr is its log file when the parent opened one, else DEVNULL.
-                # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+                # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+                # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
                 try:
-                    print("[post-compact-resume] deferred recheck outcome not logged", file=sys.stderr)
+                    if sys.stderr is not None:
+                        print("[post-compact-resume] deferred recheck outcome not logged", file=sys.stderr)
                 except (OSError, ValueError):
                     pass
         return 0

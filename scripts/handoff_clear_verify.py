@@ -611,8 +611,13 @@ def _context_tokens() -> tuple[int | None, str]:
         )
         if isinstance(tokens, int):
             return tokens, "transcript"
-    except Exception:  # noqa: BLE001 - best-effort
-        pass
+    except Exception as exc:  # noqa: BLE001 - best-effort
+        # why: the broad catch stays, it wraps a sibling import and a transcript parse. The diagnostic is guarded too: log_line raises OSError, RuntimeError (Path.expanduser) or ValueError (UnicodeEncodeError), and the local import can raise ImportError.
+        try:
+            import state  # noqa: PLC0415 - local sibling lib
+            state.log_line("handoff-clear-verify", f"transcript token count skipped: {type(exc).__name__}")
+        except (ImportError, OSError, RuntimeError, ValueError):
+            pass
     return None, "unknown"
 
 

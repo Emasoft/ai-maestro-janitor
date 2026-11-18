@@ -1605,3 +1605,66 @@ def test_background_agents_caps_and_keeps_newest(tmp_path: Path) -> None:
     assert result[0]["agentId"] == f"agent-{total - 1}"  # newest first
     stale_id = "agent-0"
     assert all(a["agentId"] != stale_id for a in result), "the oldest agent must be dropped"
+
+
+def test_hook_subprocess_with_stderr_closed_writes_handoff_and_stdout_stays_json(tmp_path: Path) -> None:
+    """Real run with fd 2 closed (sys.stderr is None) and no plugin root: the log line is skipped, and stdout holds only the JSON systemMessage."""
+    project = tmp_path / "project"
+    project.mkdir()
+    env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
+    payload = json.dumps(
+        {
+            "session_id": "sess-stderr-closed",
+            "cwd": str(project),
+            "transcript_path": str(project / "transcript.jsonl"),
+            "trigger": "manual",
+            "hook_event_name": "PreCompact",
+        }
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        preexec_fn=lambda: os.close(2),
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert (project / ".janitor" / "state" / "precompact-handoff.md").exists(), proc.stdout
+    emitted = json.loads(proc.stdout.strip())
+    assert "precompact-handoff.md" in emitted.get("systemMessage", ""), proc.stdout
+
+
+def test_hook_subprocess_log_write_failure_still_writes_handoff_and_emits(tmp_path: Path) -> None:
+    """Real run where the log file cannot be opened (a directory holds its name): the OSError from log_line is swallowed, the handoff is written, the systemMessage is still emitted, exit 0."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".janitor" / "logs" / "pre-compact-handoff.log").mkdir(parents=True)
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    payload = json.dumps(
+        {
+            "session_id": "sess-log-blocked",
+            "cwd": str(project),
+            "transcript_path": str(project / "transcript.jsonl"),
+            "trigger": "manual",
+            "hook_event_name": "PreCompact",
+        }
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert (project / ".janitor" / "state" / "precompact-handoff.md").exists(), proc.stderr
+    emitted = json.loads(proc.stdout.strip())
+    assert "precompact-handoff.md" in emitted.get("systemMessage", ""), proc.stdout

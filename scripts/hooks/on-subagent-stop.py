@@ -74,9 +74,11 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             # why: the hook must exit 0 (module docstring), so the broad catch stays; log_line can fail in
             # any way, and the manifest failure above is then named on stderr.
-            # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
             try:
-                print("[on-subagent-stop] manifest remove failed; log line not written", file=sys.stderr)
+                if sys.stderr is not None:
+                    print("[on-subagent-stop] manifest remove failed; log line not written", file=sys.stderr)
             except (OSError, ValueError):
                 pass
     return 0

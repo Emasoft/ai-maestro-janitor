@@ -1123,9 +1123,11 @@ def _record_transcript_roles_import_finding(project_root: Path) -> None:
     except Exception:  # noqa: BLE001 - a finding-write fault must never affect the handoff
         # why: a finding-write fault must never affect the handoff it reports on (docstring above); the
         # failed finding is named on stderr, the only trace left.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[pre-compact-handoff] transcript_roles finding not recorded", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[pre-compact-handoff] transcript_roles finding not recorded", file=sys.stderr)
         except (OSError, ValueError):
             pass
 
@@ -1296,14 +1298,14 @@ def _atomic_write(state, path: Path, text: str) -> None:  # noqa: ANN001 - local
 
 
 def _log(state, message: str) -> None:  # noqa: ANN001 - local module type
-    """Best-effort log line via `lib.state`, else stderr. Never raises — a logging
-    fault must never break the hook."""
+    """Best-effort log line via `lib.state`, else stderr. A logging fault (OSError, RuntimeError or ValueError from log_line or print) never escapes: it must never break the hook."""
     try:
         if state is not None:
             state.log_line("pre-compact-handoff", message)
-        else:
+        elif sys.stderr is not None:
             print(f"[pre-compact-handoff] {message}", file=sys.stderr)
-    except Exception:  # noqa: BLE001
+    # why: log_line raises OSError, RuntimeError (Path.expanduser) or ValueError (UnicodeEncodeError); print raises OSError or ValueError (closed or non-UTF-8 stream).
+    except (OSError, RuntimeError, ValueError):
         pass
 
 

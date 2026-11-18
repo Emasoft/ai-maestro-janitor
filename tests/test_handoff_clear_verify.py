@@ -899,3 +899,22 @@ def test_a_candidate_starting_before_the_clear_beside_an_in_window_one_is_ignore
 
 def _clear_env_state(tmp_path: Path) -> Path:
     return tmp_path / "proj" / ".janitor" / "state"
+
+
+def test_context_tokens_returns_unknown_when_state_cannot_be_imported() -> None:
+    """_context_tokens with the state module unimportable (sys.modules holds None, set after the module loads): the guarded diagnostic is swallowed and the call returns the unknown pair without raising."""
+    script = """import importlib.util as u, sys
+spec = u.spec_from_file_location("handoff_clear_verify_state_blocked", "{path}")
+m = u.module_from_spec(spec)
+spec.loader.exec_module(m)
+sys.modules["state"] = None
+print(m._context_tokens())
+""".format(path=str(_SCRIPT))
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        # Skip the external agentlensPro probe, so only the transcript path runs.
+        "CLAUDE_PLUGIN_OPTION_HANDOFF_VERIFY_CONTEXT_COMMAND": "",
+    }
+    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str((None, "unknown")), proc.stdout

@@ -144,9 +144,11 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- routing/telemetry MUST NOT break the resume-cue capture
         # why: the typed event and routing are fail-open side paths after the resume-cue flag write;
         # the hook must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[on-stop-failure] typed event or routing step failed; resume cue already written", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[on-stop-failure] typed event or routing step failed; resume cue already written", file=sys.stderr)
         except (OSError, ValueError):
             pass
 
@@ -172,9 +174,11 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- telemetry MUST NOT break the resume-cue capture
         # why: the window snapshot is a fail-open side path after the resume-cue flag write; the hook
         # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[on-stop-failure] window snapshot step failed; resume cue already written", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[on-stop-failure] window snapshot step failed; resume cue already written", file=sys.stderr)
         except (OSError, ValueError):
             pass
 
@@ -251,13 +255,7 @@ def main() -> int:
                 "rate limit: fired detached rotator auto (rotate away only; cap learning is off, TRDD-AWIWXJIG)",
             )
     except Exception:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
-        # why: the rotator launch is a fail-open side path after the resume-cue flag write; the hook
-        # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
-        try:
-            print("[on-stop-failure] rate-limit recovery step failed; resume cue already written", file=sys.stderr)
-        except (OSError, ValueError):
-            pass
+        pass
 
     # #J delegation (TRDD-PZLVT2RN Phase D) — best-effort, STRICTLY AFTER the critical
     # flag write. Inside an ai-maestro harness agent the SERVER owns Family-A resume, so
@@ -289,9 +287,11 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- delegation MUST NOT break the resume-cue capture
         # why: the delegation is a fail-open side path after the resume-cue flag write; the hook
         # must exit 0 (module docstring), so the broad catch stays and the failure is named on stderr.
-        # why: the stderr line is best-effort; a broken or closed stderr raises OSError or ValueError, which must not escape this fail-open handler.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
-            print("[on-stop-failure] harness ensure-resume step failed; resume cue already written", file=sys.stderr)
+            if sys.stderr is not None:
+                print("[on-stop-failure] harness ensure-resume step failed; resume cue already written", file=sys.stderr)
         except (OSError, ValueError):
             pass
     return 0

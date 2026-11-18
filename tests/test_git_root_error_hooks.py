@@ -9,6 +9,7 @@ are two module objects, so an exception class or a cache state cannot be compare
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -157,5 +158,24 @@ def test_post_compact_resume_without_trdd_common_falls_back_to_project_glob_sile
     assert proc.returncode == 0, proc.stderr
     assert "Traceback" not in proc.stdout + proc.stderr
     assert "git failed resolving" not in proc.stdout + proc.stderr
+    flag = project / ".janitor" / "state" / "resume-after-compact.flag"
+    assert flag.exists() and f"TRDD-{_CARD_ID}" in flag.read_text(encoding="utf-8")
+
+
+def test_post_compact_resume_with_stderr_closed_still_writes_the_directive(
+    tmp_path: Path, failing_worktree_list_git_path: str
+) -> None:
+    """PostCompact with fd 2 closed (sys.stderr is None): the git notice is skipped, nothing leaks to stdout, the directive is still written, exit 0."""
+    project = _project(tmp_path)
+    env = _env(tmp_path, project, failing_worktree_list_git_path, _ROOT)
+    body = json.dumps({"cwd": str(project), "trigger": "manual", "hook_event_name": "PostCompact"})
+    proc = subprocess.run(
+        [sys.executable, str(_COMPACT_HOOK)],
+        input=body, capture_output=True, text=True, env=env, timeout=60,
+        preexec_fn=lambda: os.close(2),
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert "git failed resolving" not in proc.stdout, proc.stdout
+    assert "Traceback" not in proc.stdout, proc.stdout
     flag = project / ".janitor" / "state" / "resume-after-compact.flag"
     assert flag.exists() and f"TRDD-{_CARD_ID}" in flag.read_text(encoding="utf-8")
