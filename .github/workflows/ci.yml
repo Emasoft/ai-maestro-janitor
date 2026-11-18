@@ -169,7 +169,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -227,14 +227,14 @@ jobs:
           # not fix — while publish.py's pinned local gate passed on the same commit.
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
-          # The cold uvx build of CPV is hoisted out of the timed attempts so the 600 s cap
+          # The cold uvx build of CPV is hoisted out of the timed attempts so the 900 s cap
           # measures validation only, mirroring release.yml; `|| true` because this line
           # must never fail the job.
-          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.23.1" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
           run_cpv() {
-            # Measured 296 s at CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so the old 300 s cap had no headroom; 3 x 600 s = 30 min fits the 40 min job bound.
-            timeout 600 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+            # Three timed full runs at CPV v5.23.1 on 2026-11-18 took 454-457 s on the dev Mac, inside the old 600 s cap. No GitHub-runner timing at this ref exists yet, so 900 s is a precaution for a slower runner, not a measured need; 3 x 900 s = 45 min fits the 55 min job bound.
+            timeout 900 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.23.1" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
@@ -246,7 +246,7 @@ jobs:
             run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
             if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
-            echo "::warning::CPV validation hung (timed out at 600s) — attempt $attempt/3"
+            echo "::warning::CPV validation hung (timed out at 900s) — attempt $attempt/3"
           done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"

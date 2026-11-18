@@ -26,11 +26,11 @@ jobs:
     # >13m one is a STALL (a wedged cargo/network fetch), not the normal cost.
     # Do not "fix" a stall by chasing compile speed.
     #
-    # 40 is therefore HEADROOM, not the fix (3 x 600 s CPV attempts = 30 min) — a killed gate is worse than a slow
+    # 55 is therefore HEADROOM, not the fix (3 x 900 s CPV attempts = 45 min) — a killed gate is worse than a slow
     # one (it never reaches a verdict, so it asserts nothing while showing a red
-    # badge nobody reads), and 40 still bounds a true zombie an order of
+    # badge nobody reads), and 55 still bounds a true zombie an order of
     # magnitude below GitHub's 6h.
-    timeout-minutes: 40
+    timeout-minutes: 55
     permissions:
       contents: write
     steps:
@@ -80,9 +80,11 @@ jobs:
         # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
         # v2.153.2 regression.) Never bump without running the candidate ref
         # against the tree locally first.
-        # PINNED AT v5.16.2 as of 2026-09-03 (bumped from v5.4.0: the older pin
-        # predates CC 2.1.251's PostModelSwitch hook event and rejected it as a
-        # CRITICAL — TRDD-GK35MOXU). publish.py DERIVES its spec from `.cpv-version`
+        # PINNED AT v5.23.1 as of 2026-11-18 (bumped from v5.16.2: the older pin
+        # flagged a system bin path followed by a comma in a frozen archived card as a
+        # MAJOR; CPV PR 278 fixed that — TRDD-BAQB9SYO). Before that, v5.16.2
+        # replaced v5.4.0, which rejected CC 2.1.251's PostModelSwitch hook event as a
+        # CRITICAL (TRDD-GK35MOXU). publish.py DERIVES its spec from `.cpv-version`
         # (_read_cpv_pin), so the moving sites are `.cpv-version` + the two
         # workflow literals, and tests/test_cpv_pin_ssot.py holds them equal.
         # Verified locally against this tree BEFORE the bump: the candidate
@@ -101,7 +103,7 @@ jobs:
         # Raising the bound was never a fix; it doubled the stall.
         # Successes took ~3.5 min of VALIDATION at CPV v5.16.2; a full run measured 296 s at
         # CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so 300/420 had no headroom;
-        # a 600 s per-attempt cap — covering validation
+        # a 900 s per-attempt cap — covering validation
         # ONLY, with the uvx build hoisted out below — leaves headroom, and three attempts
         # self-heal the hang (v0.24.4 hit it on the first attempt AND the retry, so
         # retry-once was empirically insufficient).
@@ -128,12 +130,12 @@ jobs:
           # alone. `|| true` and a discarded stdout: this step must never be able to fail
           # the release — even if the probe subcommand errors, uvx has already BUILT and
           # cached the package, which is the only thing being bought here.
-          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.23.1" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            # Measured 296 s at CPV v5.22.3 on 2026-10-22 (skillaudit_native 173.8 s), so the old 420 s cap had no headroom; 3 x 600 s = 30 min fits the 40 min job bound.
-            timeout 600 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
+            # Three timed full runs at CPV v5.23.1 on 2026-11-18 took 454-457 s on the dev Mac, inside the old 600 s cap. No GitHub-runner timing at this ref exists yet, so 900 s is a precaution for a slower runner, not a measured need; 3 x 900 s = 45 min fits the 55 min job bound.
+            timeout 900 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.23.1" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
@@ -146,7 +148,7 @@ jobs:
             run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
             if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
-            echo "::warning::CPV validation hung (timed out at 600s) — attempt $attempt/3"
+            echo "::warning::CPV validation hung (timed out at 900s) — attempt $attempt/3"
           done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"
