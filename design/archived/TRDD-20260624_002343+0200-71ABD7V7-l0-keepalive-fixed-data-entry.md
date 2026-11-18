@@ -60,7 +60,7 @@ the whole path resolves under `~/.claude/plugins/data/*/`").
 
 ### ✅ 2026-06-24 ~03:40 — #152 IS LIVE (v0.17.3 publish used CPV main that includes it). Phase 2b UNBLOCKED + contract re-verified against the LIVE discriminator (/tmp/cpv_pt_live.py, 1101 lines):
 - `_PLUGIN_DATA_LITERAL_RE` (line 111) `^(?:~|\$HOME|\$\{HOME\})/\.claude/plugins/data/[^/]+/(.+)$` folds `$HOME/.claude/plugins/data/<slug>/<rest>` → `R/<rest>`; `R/<rest>` must be an EXISTING in-tree regular file (`_resolve_in_tree`, line 222). `scripts/daemon_keepalive_entry.py` exists (Phase 1) → resolves. ✓
-- `_HEREDOC_OPEN_RE` (276) accepts UNQUOTED `<<EOF` (group 3) → shell expands `$HOME` at install time; the discriminator scans the literal body. `_extract_heredoc_body(full_content, ".plist")` (280) needs the heredoc-OPENER line to contain the literal `.plist` → I hard-code `cat > "$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF`.
+- `_HEREDOC_OPEN_RE` (276) accepts UNQUOTED `<<EOF` (group 3) → shell expands `$HOME` at install time; the discriminator scans the literal body. `_extract_heredoc_body(full_content, ".plist")` (280) needs the heredoc-OPENER line to contain the literal `.plist` → I hard-code the opener line `cat > ` followed by the quoted plist path and `<<EOF`, where the plist file is `com.ai-maestro-janitor.daemon.plist` in the LaunchAgents folder under Library below `$HOME` (so the opener line contains the literal `.plist`).
 - `_plist_program` (319) prefers `ProgramArguments` → `argv[0]` is the program; `_interp_script_target` (163) returns `argv[0]` when it is NOT an interpreter name → so the entry `.py` MUST be `ProgramArguments[0]` (shebang'd, chmod+x), NOT `[python3, entry]`. ✓
 - `_plist_extra_sources` (333) fails C3 on `EnvironmentVariables` with a code-inject key (BASH_ENV/LD_PRELOAD/…); JANITOR_LOG_DIR is safe — but I OMIT EnvironmentVariables entirely (daemon.py:847 `setdefault`s JANITOR_LOG_DIR to the global-state dir, the right place) → zero inject risk.
 - `_MECHANISM_TOKENS` (619): a line with `launchctl`/`.plist`/`launchagents` OR `.service`/`systemctl` dispatches the resolver with full_content. **SAFETY RULE (the old `.py`'s fatal flaw): ALL persistence tokens live ONLY in `keepalive_install.sh` (which carries the resolving heredoc); `launchd_keepalive.py` contains NONE — it only runs `bash keepalive_install.sh <cmd>`** (the `bash …keepalive_install.sh` command has no launchd token → not flagged). The old `launchd_keepalive.py` had `subprocess.run(["launchctl","bootstrap",…])` + a programmatic `plistlib.dumps` plist → the discriminator saw `launchctl` but found no heredoc in the `.py` → C1 fail → CRITICAL.
@@ -198,13 +198,13 @@ if __name__ == "__main__":
    the daemon at runtime).
 2. **Write the plist via a shipped heredoc installer** `scripts/keepalive_install.sh`
    (a scanned `.sh` whose `full_content` the discriminator reads): `cat >
-   "$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF … EOF`
+   "<the plist file>" <<EOF … EOF` (the plist file is `com.ai-maestro-janitor.daemon.plist` in the LaunchAgents folder under Library below `$HOME`)
    with `<string>$HOME/.claude/plugins/data/<slug>/scripts/daemon_keepalive_entry.py</string>`
    as `ProgramArguments[0]` and `<string>--keepalive</string>` as `[1]`. Heredoc body
    has the literal `$HOME` (#152 folds → repo `scripts/daemon_keepalive_entry.py`);
    the shell expands `$HOME` to the absolute path in the written plist (launchd-usable).
    `KeepAlive`+`RunAtLoad`+`ThrottleInterval` as before.
-3. `launchctl bootstrap gui/<uid> <plist>` (fallback `load -w`). systemd analog:
+3. the bootstrap subcommand of launchctl, as `bootstrap gui/<uid> <plist>` (fallback `load -w`). systemd analog:
    a shipped `keepalive_install.sh` branch writing the `.service` (`Restart=always`,
    `WantedBy=default.target`) — `_resolve_systemd` parses an in-tree unit/heredoc.
 
@@ -272,3 +272,7 @@ bare `data/*/`). This preserves fail-safe: any other `$HOME`/`~` shape still FAI
   Surface to the user if they expected launchd to point at daemon.py directly.
 - **systemd parity** — design first verified for macOS launchd; mirror for the Linux
   `.service` via the same shipped heredoc installer + `_resolve_systemd`.
+
+## Approval log
+
+- 2026-11-18T03:34:00+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 63, 201, 207, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Line 63 was reworded a second time later the same day, because the first wording contradicted itself; same line, same rule (this sentence was added at 2026-11-18T03:52:55+0100, after that second edit). Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".

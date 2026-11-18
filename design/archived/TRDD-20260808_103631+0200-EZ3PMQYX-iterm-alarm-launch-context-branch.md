@@ -20,7 +20,7 @@ external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, 
 Probed before building, and the probe killed the naive implementation — which is why this is a
 findings block and not a commit.
 
-1. **The thesis applies HERE, it is not hypothetical.** `~/Library/LaunchAgents/` carries
+1. **The thesis applies HERE, it is not hypothetical.** The per-user LaunchAgents folder (under Library in the home folder) carries
    `com.ai-maestro-janitor.daemon.plist` (`Label: com.ai-maestro-janitor.daemon`,
    `KeepAlive: True`), and the live daemon (pid 29903, up 2h18m, logging normally) has
    **PPID = 1**. So on this machine the daemon IS launchd-spawned and the alarm's
@@ -323,3 +323,4 @@ that actually varies.
   shipped in earlier commits; the fifth is refused on measurement rather than silently ticked
   or left to rot as a standing instruction to build false advice. Title kept as the historical
   record of the claim; this section is the correction.
+- 2026-11-18T03:33:59+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 23, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".

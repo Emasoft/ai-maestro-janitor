@@ -147,7 +147,7 @@ the **uv** client, but the **Python 3.12** client already has iTerm ON — so ro
 work through a normal python process.
 
 VERIFIED on this host, the mechanism behind the owner's observation:
-- launchd plist (`~/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist`) runs
+- launchd plist (file `com.ai-maestro-janitor.daemon.plist` in the per-user LaunchAgents folder under Library) runs
   `/opt/homebrew/bin/uv run --script daemon_keepalive_entry.py --keepalive`.
 - uv's python: `codesign` Identifier `-`, TeamIdentifier **not set** — adhoc; macOS has no
   stable identity to persist a TCC Automation grant against (the exact VQ4LX7ND/GH#92 case).
@@ -253,3 +253,4 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
   TRDD-VQ4LX7ND's approval log. Terminal release state reached → `published`.
 2026-09-17 — GH#92 verified CLOSED (gh issue view); TRDD-VQ4LX7ND verified column: complete. Box 7 (publish + resolution note) ticked. Approved by main session (owner standing permission 2026-09-03).
 - 2026-09-23T09:04:07+0200 — PUBLISHED by Emasoft. archived → published.
+- 2026-11-18T03:33:38+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 150, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".

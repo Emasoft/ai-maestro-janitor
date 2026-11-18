@@ -62,7 +62,7 @@ never idle to the clear lane. Blocked on that card; do NOT re-verify this one's 
 - `cold-cache-clear.log` at 00:42 and 00:47: `evaluating <root> [SHADOW — dry-run]` — the
   daemon computes `external_clear.enabled()` as False.
 - `ps -E -p <daemon pid>` snapshot: **0** `CLAUDE_PLUGIN_OPTION_*` variables in the daemon's
-  environment. `~/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist` has no
+  environment. The file `com.ai-maestro-janitor.daemon.plist` in the per-user LaunchAgents folder under Library has no
   `EnvironmentVariables` block; `launchctl getenv` of the lever is empty.
 - `external_clear.enabled()` → `state.is_truthy_env(ENABLED_ENV, DEFAULT_ENABLED)` →
   `os.environ.get(name)`. Every other daemon knob (`CLAUDE_PLUGIN_OPTION_DAEMON_*_INTERVAL`,
@@ -117,6 +117,7 @@ and duplicates the file the harness already treats as the source of truth.
   ("i've put you in charge", 2026-09-01). Fix shipped in 3.4.4 (d6c82d60, after the CPV-
   blocked os.environ route dec760ed/19a52dc8); the closing box is the daemon's own log
   line, not the session's word. Self-closure disclosed.
+- 2026-11-18T03:33:59+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 65, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".
 
 ## Notes and lessons learned
 

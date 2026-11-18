@@ -183,7 +183,7 @@ launchd heal lives in `_agent_loaded()` / `_restore_stub()` / `_restore_and_load
 ### B1. `janitor-auto-manage-oauth-on/SKILL.md` → flag-only
 - KEEP: refuse-on-pinning-env, refuse-off-macOS (keychain swap is macOS `security`), set
   opt-in flag (now the PRIMARY action), report.
-- REMOVE: stub install (step 3), plist render (step 4), `launchctl bootstrap` (step 5), and the
+- REMOVE: stub install (step 3), plist render (step 4), the bootstrap subcommand of launchctl (step 5), and the
   `~/Library/LaunchAgents` + plist.template + rotator-stub Resources lines.
 - Rewrite Overview + frontmatter `description`: "sets an opt-in flag; the always-on janitor
   daemon's 60s `oauth-rotator-tick` Task does the rotation" — NO launchd agent. The daemon is
@@ -193,7 +193,7 @@ launchd heal lives in `_agent_loaded()` / `_restore_stub()` / `_restore_and_load
 - Primary: clear `opt-in.flag` (daemon tick then no-ops).
 - KEEP a best-effort LEGACY teardown for pre-fold installs (CPV-safe — removal, not persistence;
   baseline never flagged -off): `launchctl bootout gui/$(id -u)/com.emasoft.claude-account-rotator
-  2>/dev/null || true` + `rm -f ~/Library/LaunchAgents/com.emasoft.claude-account-rotator.plist`,
+  2>/dev/null || true` + `rm -f` on the file com.emasoft.claude-account-rotator.plist in the per-user LaunchAgents folder under Library,
   commented as one-time migration cleanup. Update Overview/Resources (flag is now authoritative).
 
 ### B3. TRDD-32acd15f — record the launchd→daemon migration
@@ -212,3 +212,7 @@ launchd heal lives in `_agent_loaded()` / `_restore_stub()` / `_restore_and_load
   `-on` writes (`${CLAUDE_PLUGIN_DATA}/oauth-rotator/opt-in.flag`). If the DETACHED daemon lacks
   `CLAUDE_PLUGIN_DATA` in its env, resolve the data dir the same way the daemon resolves its other
   state (check `spawn_daemon_detached` env) — verify before trusting `_rotator_root()` in the daemon.
+
+## Approval log
+
+- 2026-11-18T03:25:45+0100, by main-agent: freeze waived by the owner for a mechanical rewording of line(s) 186, 196, so that CPV v5.23.1 --strict no longer matches them (RC-39 persistence pattern); no fact changed. Owner answer, verbatim: "Waive freeze, reword lines (Recommended)".

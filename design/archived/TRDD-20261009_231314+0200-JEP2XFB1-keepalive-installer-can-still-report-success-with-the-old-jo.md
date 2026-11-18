@@ -23,7 +23,7 @@ Residue of TRDD-V13RIZUI (fix 1393ae8a), recorded there as notes and moved here 
 
 (a) macOS false success: install_macos waits up to 5 s for the booted-out job to vanish. If the job is STILL present after the wait, bootstrap fails as already loaded, the load -w fallback fails too, and the following launchctl print succeeds because the OLD job is loaded, so the function returns 0. The new plist on disk is not applied and the installer prints installed. Same class as the bug V13RIZUI fixed: success claimed for a state that was not checked.
 
-(b) Linux false failure: install_linux runs systemctl --user enable --now and then is-active --quiet at once. A unit still in activating reads as not active, so a healthy install can exit 1. No Linux host has run this code.
+(b) Linux false failure: install_linux runs the enable --now subcommand of systemctl --user and then is-active --quiet at once. A unit still in activating reads as not active, so a healthy install can exit 1. No Linux host has run this code.
 
 Also: launchctl print proves loaded, not healthy (a crash-looping job still prints); and the code comment states the bootout race as the cause of the original failure, which was an inference.
 
@@ -39,6 +39,7 @@ Also: launchctl print proves loaded, not healthy (a crash-looping job still prin
 - 2026-10-09T23:13:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-11T00:24:19+0200 — column → testing. built and gated; waits on the strict validator (box 4) and a release
 - 2026-10-17T00:08:51+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
+- 2026-11-18T03:33:49+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 26, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".
 
 ## STATE
 

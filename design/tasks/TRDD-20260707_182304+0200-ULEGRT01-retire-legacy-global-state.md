@@ -591,7 +591,7 @@ plist "definitive" for this — that was filename-matched-to-plist-key, i.e. cau
 a name collision. The `launchctl print` above is the version that actually identifies the writer.
 
 **Why the on-disk read was not enough, recorded because the directory listing invites the mistake:**
-`~/Library/LaunchAgents/` also holds `com.ai-maestro-janitor.daemon.plist.DISABLED-flood-20260715`
+The per-user LaunchAgents folder under Library also holds `com.ai-maestro-janitor.daemon.plist.DISABLED-flood-20260715`
 and two `.bak-pre-signed-python-*` copies (20260805, 20260816) — a live plist beside a disabled
 twin and two dated rewrites is exactly the shape where the file read and the job loaded diverge.
 (Those three never end in `.plist`, so a `*janitor*.plist` glob silently skips them; "no matching
@@ -1163,3 +1163,4 @@ pass is not "done":
   predicate (:412,:31), keepalive_install.sh resolve_log_dir paths, 140 named tests passing;
   the deletion + :116 spot-checked first-hand by the approver. Report:
   reports/trdd-verify/20260901_211325+0200-ULEGRT01-human-review.md
+- 2026-11-18T03:16:29+0100, by main-agent: freeze waived by the owner for a mechanical rewording of line(s) 594, so that CPV v5.23.1 --strict no longer matches them (RC-39 persistence pattern); no fact changed. Owner answer, verbatim: "Waive freeze, reword lines (Recommended)".

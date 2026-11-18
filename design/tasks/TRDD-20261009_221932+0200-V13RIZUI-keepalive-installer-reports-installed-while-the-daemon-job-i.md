@@ -21,9 +21,9 @@ release-via: publish
 
 # keepalive installer reports installed while the daemon job is left unloaded
 
-Measured 2026-10-09 on this Mac with the installed 3.8.11 copy of scripts/keepalive_install.sh (the repo copy has the same lines, 291 to 293): 'bash keepalive_install.sh install' on a host whose job was loaded and running (pid 73460) printed 'keepalive: installed (macos)' and exited 0, but afterwards 'launchctl print gui/UID/com.ai-maestro-janitor.daemon' found no job, 'launchctl list' had no janitor entry, no daemon process existed, and the script's own 'status' answered 'not installed (macos)'. The plist on disk was correct and passed plutil -lint. A plain 'launchctl bootstrap gui/UID <plist>' a minute later exited 0 and the daemon ran (pid 6931). The daemon, which owns OAuth rotation and machine-wide updates, was down for about one minute and would have stayed down until the next session-driven recovery.
+Measured 2026-10-09 on this Mac with the installed 3.8.11 copy of scripts/keepalive_install.sh (the repo copy has the same lines, 291 to 293): 'bash keepalive_install.sh install' on a host whose job was loaded and running (pid 73460) printed 'keepalive: installed (macos)' and exited 0, but afterwards 'launchctl print gui/UID/com.ai-maestro-janitor.daemon' found no job, 'launchctl list' had no janitor entry, no daemon process existed, and the script's own 'status' answered 'not installed (macos)'. The plist on disk was correct and passed plutil -lint. A plain bootstrap call of launchctl ('bootstrap gui/UID <plist>') a minute later exited 0 and the daemon ran (pid 6931). The daemon, which owns OAuth rotation and machine-wide updates, was down for about one minute and would have stayed down until the next session-driven recovery.
 
-Mechanism, read from the code, not yet proven by a failing test: install_macos runs 'launchctl bootout ... || true' and then immediately 'launchctl bootstrap ... 2>/dev/null || launchctl load -w ... 2>/dev/null || true'. Both failures are discarded and nothing checks that the job is loaded before 'installed' is printed. The likely cause of the bootstrap failure is that bootout had not finished tearing the job down; that is an inference.
+Mechanism, read from the code, not yet proven by a failing test: install_macos runs 'launchctl bootout ... || true' and then immediately 'bootstrap ... 2>/dev/null || load -w ... 2>/dev/null || true' (both are subcommands of launchctl). Both failures are discarded and nothing checks that the job is loaded before 'installed' is printed. The likely cause of the bootstrap failure is that bootout had not finished tearing the job down; that is an inference.
 
 ## Acceptance
 
@@ -37,6 +37,7 @@ Mechanism, read from the code, not yet proven by a failing test: install_macos r
 - 2026-10-09T22:19:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-09T22:29:24+0200 — column → testing by main-agent@ai-maestro-janitor. fix committed; box 4 (mypy, pyright, full suite, strict validator) still to run
 - 2026-10-09T23:11:05+0200 — column → complete by main-agent@ai-maestro-janitor. all four boxes met; ships with the next release
+- 2026-11-18T03:16:29+0100, by main-agent: freeze waived by the owner for a mechanical rewording of line(s) 24, 26, so that CPV v5.23.1 --strict no longer matches them (RC-39 persistence pattern); no fact changed. Owner answer, verbatim: "Waive freeze, reword lines (Recommended)".
 
 ## Notes
 

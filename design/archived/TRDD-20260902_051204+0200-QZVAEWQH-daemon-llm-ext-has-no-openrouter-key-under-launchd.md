@@ -79,7 +79,7 @@ after three identical attempts; it is not a flakiness problem.
 
 ## The cause — the twin of TRDD-XCJFCJUX
 
-The daemon runs under launchd (`~/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist`,
+The daemon runs under launchd (file `com.ai-maestro-janitor.daemon.plist` in the per-user LaunchAgents folder under Library,
 no `EnvironmentVariables`). `lib/external_clear.run_llm_ext_summary` spawns `llm-ext` with
 `env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_DATA"}` — i.e. the daemon's own
 environment, which has no `OPENROUTER_API_KEY`. `~/.llm-externalizer/settings.yaml` binds every
@@ -234,3 +234,4 @@ filed alongside this proposal.
   `session-summary.log:5-6`). Follow-ups NOT closed here (left open, own owners): box 4
   (re-measure the 5 blocked drill cards) and box 5 (AgentlensPro `f7594ac9` back-fill still
   missing).
+- 2026-11-18T03:33:59+0100, by main-agent: the owner waived the archived-card lock for a mechanical rewording of line(s) 82, so that CPV v5.23.1 --strict no longer matches them (RC-39); every fact kept. Owner answer, verbatim: "Hand-edit the 9 lines (Recommended)".
