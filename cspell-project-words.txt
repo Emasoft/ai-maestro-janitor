@@ -320,6 +320,7 @@ bandroiddebugkey
 bapn
 bappleid
 baprs
+baqb
 bareword
 barkai
 basedpyright
@@ -1025,6 +1026,7 @@ directamente
 directement
 direkt
 direnv
+dirlink
 dirpaths
 disableable
 disambiguable
@@ -1308,6 +1310,7 @@ fastweb
 fatalf
 fatals
 faunadb
+fbca
 fbody
 fbqp
 fcgi
@@ -1345,6 +1348,7 @@ filemaps
 fileno
 filenotfound
 fileprovider
+fileset
 filesync
 filp
 filterexpr
@@ -1649,6 +1653,7 @@ handlefunc
 hapi
 hardcodedsalt
 hardlink
+hardlinked
 hardlinks
 hardstop
 harf
@@ -1976,6 +1981,7 @@ kerberoasting
 kernelbase
 kestra
 kexec
+keybody
 keyctl
 keydata
 keyexchange
@@ -2524,6 +2530,7 @@ nlcjpwcm
 nlcw
 nlhvlgep
 nlibc
+nlink
 nlmd
 nloglevel
 nmap
@@ -3796,6 +3803,7 @@ templatedir
 terminalreporter
 termncolor
 testbot
+testdata
 testkey
 testname
 testpaths
@@ -3871,6 +3879,7 @@ topup
 torchtriton
 tostring
 totallysafe
+totalmem
 totp
 touchend
 touchlink
@@ -4199,6 +4208,7 @@ vararg
 varbinary
 varfont
 vargroup
+vaultdir
 vawikrk
 vcmc
 vdir
@@ -4238,6 +4248,7 @@ vierteljährliche
 vimscript
 vipw
 virt
+virtualenvs
 virtualservice
 visualforce
 vite
@@ -4361,6 +4372,7 @@ wqdczebt
 writeback
 writebacks
 writefilesync
+writeguard
 writerefuse
 writeups
 writev
