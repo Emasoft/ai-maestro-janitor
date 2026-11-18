@@ -364,8 +364,9 @@ def scan_text(text: str) -> list[Finding]:
     """Scan *text* against all rules and return a list of Findings.
 
     Lines and columns are 1-based. Each match produces exactly one Finding.
-    Exceptions from regex execution are suppressed — the scanner is
-    fail-safe for malformed input.
+    A TypeError from non-str input (finditer with a str pattern) skips the
+    rule; no current rule matches the empty string, so the offset lookup cannot
+    index an empty table.
     """
     findings: list[Finding] = []
     lines = text.splitlines(keepends=True)
@@ -405,6 +406,8 @@ def scan_text(text: str) -> list[Finding]:
                         owasp_asi=rule.owasp_asi,
                     )
                 )
-        except Exception:  # noqa: BLE001
+        # why: finditer raises TypeError for bytes input (str pattern); the rest of this try
+        # body (offsets, Finding, group) cannot raise on a str text.
+        except TypeError:
             continue
     return findings

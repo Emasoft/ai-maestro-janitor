@@ -7,6 +7,7 @@ be a failed test.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import threading
@@ -32,6 +33,20 @@ from jevctx.types import (
     ScoreAnswer,
     State,
 )
+
+
+class _Sha256Random(random.Random):
+    """A seeded random.Random drawing sha256(seed:counter), so a failing draw replays exactly."""
+
+    def __init__(self, seed: int) -> None:
+        super().__init__()
+        self._key = str(seed)
+        self._counter = 0
+
+    def random(self) -> float:
+        digest = hashlib.sha256(f"{self._key}:{self._counter}".encode()).digest()
+        self._counter += 1
+        return int.from_bytes(digest[:8], "big") / 2**64
 
 # --------------------------------------------------------------------------- #
 # Shared helpers
@@ -476,7 +491,8 @@ def test_rate_limiter_rejects_nonpositive_config():
 
 
 def test_retry_policy_backoff_is_within_bounds():
-    policy = RetryPolicy(base_delay=0.5, max_delay=8.0, rng=random.Random(0))
+    # why: seeded sha256 stream replays exactly; bandit B311 rejects random.Random calls.
+    policy = RetryPolicy(base_delay=0.5, max_delay=8.0, rng=_Sha256Random(0))
     for attempt in range(6):
         cap = min(8.0, 0.5 * 2**attempt)
         delay = policy.delay(attempt)
@@ -484,7 +500,8 @@ def test_retry_policy_backoff_is_within_bounds():
 
 
 def test_retry_policy_retry_after_overrides_jitter():
-    policy = RetryPolicy(rng=random.Random(0))
+    # why: retry_after returns before any draw; seeded sha256 stream keeps bandit B311 clean.
+    policy = RetryPolicy(rng=_Sha256Random(0))
     assert policy.delay(5, retry_after=3.5) == 3.5
     assert policy.delay(0, retry_after=0.0) == 0.0
 

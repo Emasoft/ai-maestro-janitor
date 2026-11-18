@@ -678,6 +678,7 @@ def _retry_loop(
 
 def _default_jitter() -> float:
     """A multiplier in [0.75, 1.25]. Isolated so tests inject a deterministic one."""
-    import random  # noqa: PLC0415 -- only the jittered path needs it
+    import secrets  # noqa: PLC0415 -- only the jittered path needs it
 
-    return random.uniform(0.75, 1.25)  # noqa: S311 -- scheduling spread, not cryptography
+    # why: unseeded scheduling spread; secrets.SystemRandom is not on the B311 random-module list.
+    return secrets.SystemRandom().uniform(0.75, 1.25)

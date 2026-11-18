@@ -6,7 +6,8 @@ hand, never a ``JevClient``.
 
 from __future__ import annotations
 
-import random
+import hashlib
+from collections.abc import Callable
 
 from jevctx.budget import Batch, BudgetPlanner
 from jevctx.tokens import estimate_tokens
@@ -21,6 +22,23 @@ _ITEM_WRAPPER_TOKENS = estimate_tokens({"ref": "i0", "text": ""})
 
 def _item(item_id: str, tokens: int) -> ScoreItem:
     return ScoreItem(id=item_id, text=f"text for {item_id}", tokens=tokens)
+
+
+def _seeded_draw(seed: int) -> Callable[[int, int], int]:
+    """Return ``draw(lo, hi)``, a deterministic int in [lo, hi] for each call in order.
+
+    Each call hashes ``seed:counter`` with sha256, so the sequence is reproducible from the
+    seed alone and the random module is never imported (bandit B311).
+    """
+    counter = 0
+
+    def draw(lo: int, hi: int) -> int:
+        nonlocal counter
+        digest = hashlib.sha256(f"{seed}:{counter}".encode()).digest()
+        counter += 1
+        return lo + int.from_bytes(digest[:8], "big") % (hi - lo + 1)
+
+    return draw
 
 
 def _item_state_tokens(item: ScoreItem) -> int:
@@ -97,7 +115,9 @@ def test_oversized_item_is_isolated_and_not_dropped() -> None:
 
 
 def test_plan_is_deterministic() -> None:
-    items = [_item(f"i{i}", tokens=random.Random(1).randint(1, 500)) for i in range(150)]
+    # why: sha256 draws replace random.Random(1); bandit B311 rejects the random module.
+    draw = _seeded_draw(1)
+    items = [_item(f"i{i}", tokens=draw(1, 500)) for i in range(150)]
     planner = BudgetPlanner()
 
     first = planner.plan(items, question_tokens=30, envelope_tokens=100)
@@ -111,7 +131,8 @@ def test_plan_never_violates_caps_under_randomised_sizes() -> None:
     emit a batch that violates the 32-question cap or either token budget; every item must
     appear exactly once, order must be preserved, and an item too large to fit alone must
     come back as an oversized single-item batch."""
-    rng = random.Random(20240917)
+    # why: sha256 draws replace random.Random(20240917); bandit B311 rejects the random module.
+    draw = _seeded_draw(20240917)
     planner = BudgetPlanner(headroom=0.9)  # defaults for the token/question caps
     question_tokens = 40
     envelope_tokens = 120
@@ -119,15 +140,13 @@ def test_plan_never_violates_caps_under_randomised_sizes() -> None:
     longest_budget = planner.state_plus_longest_question * planner.headroom
 
     for _trial in range(25):
-        n = rng.randint(1, 220)
+        n = draw(1, 220)
         sizes = [
-            rng.choice(
-                [
-                    rng.randint(1, 50),  # tiny
-                    rng.randint(50, 3000),  # ordinary
-                    rng.randint(3000, 40000),  # occasionally oversized alone
-                ]
-            )
+            [
+                draw(1, 50),  # tiny
+                draw(50, 3000),  # ordinary
+                draw(3000, 40000),  # occasionally oversized alone
+            ][draw(0, 2)]
             for _ in range(n)
         ]
         items = [_item(f"it{i}", tokens=size) for i, size in enumerate(sizes)]
