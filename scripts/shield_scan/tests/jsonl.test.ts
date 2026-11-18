@@ -3,8 +3,8 @@
 
 import { describe, expect, test } from 'bun:test'
 import { redactAll, type Pass } from '../../../hooks/secret-shield/pipeline.ts'
-import { jsonlHits, newNonce, planJsonl, skipReasonOf, type LineHit } from '../jsonl.ts'
-import { finalText, planRedaction, restoreCheck, shieldMarker, sweepPlan, vaultEntries, type Plan } from '../redact.ts'
+import { brokenLines, jsonlHits, newNonce, planJsonl, skipReasonOf, type LineHit } from '../jsonl.ts'
+import { finalText, finalTextAligned, planRedaction, restoreCheck, shieldMarker, sweepPlan, vaultEntries, type Plan } from '../redact.ts'
 
 const HOMES: readonly string[] = []
 const SECRETS: ReadonlySet<Pass> = new Set<Pass>(['secrets'])
@@ -117,5 +117,23 @@ describe('JSONL planner', () => {
     expect(expected.length).toBe(2)
     expect(planJsonl(text, HOMES, SECRETS, newNonce(text)).lineHits).toEqual(expected)
     expect(jsonlHits(text, HOMES, SECRETS).lineHits).toEqual(expected)
+  })
+
+  test('finalTextAligned keeps the line count of the text, so brokenLines tells a stretch over several lines from a broken JSON line', () => {
+    const text = ['{"ok":1}', 'plain ' + ghToken('a'), ...pemLines(), '{"ok":2}', ''].join('\n')
+    const planned = planJsonl(text, HOMES, SECRETS, newNonce(text))
+    const swept = sweepPlan(planned.plan!)
+    const uuids = vaultEntries(swept).slot.map((_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`)
+    // The PEM block is one marker in the final text, so it has fewer lines; the aligned text has the text's own line count and no line broke.
+    expect(finalText(swept, uuids).split('\n').length).toBeLessThan(text.split('\n').length)
+    const aligned = finalTextAligned(swept, uuids)
+    expect(aligned.split('\n').length).toBe(text.split('\n').length)
+    expect(brokenLines(text, aligned)).toBe(0)
+    // A sweep copy right after a backslash inside a JSON string is an invalid escape: one line that parsed before does not parse now.
+    const rest = 'Zq7Lm2Xp9Rt4Vb8Nc3KdW5'
+    const escaped = ['{"password":"n' + rest + '"}', '{"note":"\\n' + rest + '"}', ''].join('\n')
+    const sweptEscaped = sweepPlan(planJsonl(escaped, HOMES, SECRETS, newNonce(escaped)).plan!)
+    const ids = vaultEntries(sweptEscaped).slot.map((_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`)
+    expect(brokenLines(escaped, finalTextAligned(sweptEscaped, ids))).toBe(1)
   })
 })

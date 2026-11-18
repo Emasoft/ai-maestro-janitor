@@ -32,7 +32,9 @@ restore behaviour.
   `vault-folder`, `hardlinked`,
   `recent` (modified within `--min-age-minutes`), `not-utf8` (not lossless
   UTF-8), `git-operation` (merge, rebase, cherry-pick, revert or bisect in
-  progress), `git-check-failed`, `align-error`, `not-regular-at-write`,
+  progress), `git-check-failed`, `align-error`, `json-broken` (a JSONL file whose
+  JSON line could not be hidden or rewritten without breaking it, see JSONL
+  files), `not-regular-at-write`,
   `outside-root`, `changed-during-redact`, `write-error`. Symlinks are never
   followed.
 - Large lane: a text file over `--max-file-mb` and up to `--max-large-mb` is
@@ -62,13 +64,37 @@ redacted.
 
 ## JSONL files
 
-A `.jsonl` or `.ndjson` file is redacted as plain text in this version: the
-scanner does not treat it differently and does not check that each line is
-still valid JSON. In one probe (a fake token in a JSON string on one line, a
-fake private key escaped in a JSON string on another) both secrets became
-markers and both lines still parsed.
-The JSON-aware mode is a later version. Do not run `--redact` on a tree with
-JSONL files you need intact yet.
+A `.jsonl` or `.ndjson` file is read and redacted JSON-aware, in scan-only mode
+too (one counter feeds the whole-file counts, the per-line locations and the
+residual):
+
+- Each line that parses as JSON is searched in its decoded strings, so a secret
+  written behind a JSON escape (an escaped newline, slash, quote or a
+  backslash-u escape) is found, and an escaped private key is hidden whole. The
+  vault holds the exact bytes of the original, so restore gives back the file
+  byte for byte. A line that is not JSON is read as text (a run of such lines as
+  one text, so a key over several lines is hidden whole) and counted in
+  `jsonl_lines_not_json`.
+- Two skip reasons, as for any file: the file is left as it was, its findings
+  count in `findings_not_redacted`, and the run exits 1. `json-broken`: a JSON
+  line holds a finding the shield could not hide without breaking the line, or
+  a rewrite (a copy of a hidden value found by the sweep right after a backslash,
+  or the home pass) would leave a line that parsed before unparseable.
+  `align-error`: the plan of a line cannot be explained, or the line count
+  changed in a way the plan does not explain.
+- The finding kind `json-unredactable` is that first case: one hit for each
+  such line, counted in both modes, so a file whose only finding is on such a
+  line is not reported clean.
+- The home pass (opt-in, last) rewrites each decoded string of a JSON line. A
+  string it changes is written back with `JSON.stringify`, so the other escapes
+  of that string are normalised (an escaped slash becomes a slash, a
+  backslash-u escape becomes the letter); apart from the home rewrite, the
+  string decodes to the same text. Home rewrites are not restorable anyway.
+- Time limit: a JSONL file is walked once (the whole-file counts and the line numbers come from the same pass), so a file that runs past the per-file limit is a timeout skip (the run is incomplete, exit 3) and keeps no findings, unlike a plain file, which keeps its whole-file counts with line null.
+- A card number written as a JSON number is not read: the passes read strings
+  only.
+
+Run `--redact` on a copy or a sample of the tree first.
 
 ## Restore
 
@@ -96,3 +122,7 @@ the markers after the last round, one `residual` record each),
 to `~`, not restorable). `findings` and the `finding` records are what the scan
 found before redaction, not what is left. Never call a redact complete while
 `findings_not_redacted` or `residual` is above 0, or `complete` is false.
+
+In both modes (scan only too) the summary also holds `jsonl_lines_not_json`: the
+number of non-blank lines, in all `.jsonl` and `.ndjson` files read, that are not
+JSON and were therefore read as text. Report it in words when it is above 0.

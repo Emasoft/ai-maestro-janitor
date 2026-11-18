@@ -3,6 +3,7 @@
 // Options: --all (gitignored and hidden files too, plus each repo .git/config) · --passes secrets,cards (default; email and home are opt-in; with --redact the home pass rewrites paths to ~ and is not restorable) · --jobs N · --out PATH · --max-file-mb N (64) · --max-large-mb N (1024, at least --max-file-mb; with --redact only) · --file-timeout-base S (30) · --file-timeout-per-mb S (5) · --redact · --min-age-minutes N (10; with --redact a file modified within N minutes is not written).
 // Records (never a matched value or any text of a scanned file): {"type":"finding","path","kind","line"|null,"count"} · {"type":"skip","path","reason"} · with --redact {"type":"residual","path","kind","count"} (what the passes still find between the markers of a file that was written) · {"type":"summary",...} last.
 // Exit: 0 complete with no findings (with --redact: complete and every finding redacted, no residual) · 1 complete with findings (with --redact: findings_not_redacted or residual above 0) · 3 incomplete (a timeout, read-error, crash, git-error or unreadable-dir skip) · 2 usage or fatal error (with --redact also a vault failure).
+// A .jsonl or .ndjson file is read JSON-aware in both modes (jsonl.ts, spec R6). The summary holds jsonl_lines_not_json, the number of non-blank lines of those files that are not JSON (they are read as text). A finding of kind json-unredactable is a JSON line the shield could not hide without breaking it; with --redact the file is then skipped as json-broken, as it is when the rewrite would leave a line that parsed before unparseable.
 // With --redact the worker sweeps the plan for copies of each redacted value that no pass matched, and runs the passes again over the text between the markers of the new file (redact.ts: sweepPlan, residualHits); while that re-scan finds something it runs another round (at most 3, summary rounds_used_max) and writes once after the last one. The summary then says residual_check "run" and holds the residual total of what is still found after the last round. A residual hit does not stop the write (the restore check passed); it makes the run exit 1.
 // With --redact a text file over --max-file-mb and up to --max-large-mb goes to the large lane (one such file at a time, one dedicated worker; summary large_lane_files); a text file over --max-large-mb is neither scanned nor redacted: a skip record not-scanned-too-large, counted in files_not_scanned, and the run is incomplete (exit 3). A binary file over --max-file-mb stays an ordinary binary skip. The home pass with --redact runs last on the final text and its rewrites are neither vaulted nor restorable (summary home_rewrites); home hits are findings of kind home and never count as findings_not_redacted.
 // stdout: the summary line and the findings file path, nothing else. stderr: fixed text only. The pass order is the core's (hooks/secret-shield/pipeline.ts); this file carries none of its own.
@@ -179,7 +180,7 @@ function pluginVersion(): string {
 
 type Hits = Record<string, number>
 type LineHit = [string, number, number]
-type Message = { t: 'ready' } | { t: 'skip'; reason: 'binary' | 'read-error' } | { t: 'whole'; bytes: number; hits: Hits } | { t: 'lines'; hits: LineHit[] } | RedactReply
+type Message = { t: 'ready' } | { t: 'skip'; reason: 'binary' | 'read-error' } | { t: 'whole'; bytes: number; hits: Hits; jsonlNotJson?: number } | { t: 'lines'; hits: LineHit[] } | RedactReply
 
 // One child bun process running worker.ts. A message is read with next(); null means the process has exited.
 class WorkerProc {
@@ -255,8 +256,8 @@ class WorkerProc {
 }
 
 type Outcome =
-  | { kind: 'scanned'; bytes: number; whole: Hits; lines: LineHit[]; redact: RedactReply | null }
-  | { kind: 'locate-timeout'; bytes: number; whole: Hits }
+  | { kind: 'scanned'; bytes: number; notJson: number; whole: Hits; lines: LineHit[]; redact: RedactReply | null }
+  | { kind: 'locate-timeout'; bytes: number; notJson: number; whole: Hits }
   | { kind: 'skip'; reason: 'binary' | 'read-error' }
   | { kind: 'timeout' }
   | { kind: 'crash' }
@@ -277,17 +278,17 @@ async function runFile(worker: WorkerProc, item: FileItem, passes: Pass[], limit
     if (first === null) return { kind: 'crash' }
     if (first.t === 'skip') return { kind: 'skip', reason: first.reason }
     if (first.t !== 'whole') return { kind: 'crash' }
-    if (sumOf(first.hits) === 0) return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: [], redact: null }
+    if (sumOf(first.hits) === 0) return { kind: 'scanned', bytes: first.bytes, notJson: first.jsonlNotJson ?? 0, whole: first.hits, lines: [], redact: null }
     const second = await worker.next()
-    if (timedOut) return { kind: 'locate-timeout', bytes: first.bytes, whole: first.hits }
+    if (timedOut) return { kind: 'locate-timeout', bytes: first.bytes, notJson: first.jsonlNotJson ?? 0, whole: first.hits }
     if (second === null || second.t !== 'lines') return { kind: 'crash' }
-    if (redactJob === null) return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: second.hits, redact: null }
+    if (redactJob === null) return { kind: 'scanned', bytes: first.bytes, notJson: first.jsonlNotJson ?? 0, whole: first.hits, lines: second.hits, redact: null }
     const third = await worker.next()
     if (timedOut) return { kind: 'timeout' }
     if (third === null || third.t !== 'redact') return { kind: 'crash' }
     // WHY the run ends here: the vault is the one place the values can be restored from, so a file is never written without it, and every later file would fail the same way. The message is fixed text.
     if (third.outcome === 'vault-error') throw new ScanError(third.message)
-    return { kind: 'scanned', bytes: first.bytes, whole: first.hits, lines: second.hits, redact: third }
+    return { kind: 'scanned', bytes: first.bytes, notJson: first.jsonlNotJson ?? 0, whole: first.hits, lines: second.hits, redact: third }
   } finally {
     clearTimeout(timer)
   }
@@ -330,6 +331,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
   let filesScanned = 0
   let bytesScanned = 0
   let filesWithFindings = 0
+  let jsonlLinesNotJson = 0
   let unlocatedTimeout = 0
   let filesRedacted = 0
   let valuesVaulted = 0
@@ -350,6 +352,7 @@ async function main(): Promise<{ code: number; stdout: string }> {
     if (outcome.kind === 'timeout' || outcome.kind === 'crash') return noteSkip(stats, opts.root, item.abs, outcome.kind)
     filesScanned++
     bytesScanned += outcome.bytes
+    jsonlLinesNotJson += outcome.notJson
     const before = findings.length
     const located: Hits = {}
     if (outcome.kind === 'scanned') {
@@ -478,6 +481,8 @@ async function main(): Promise<{ code: number; stdout: string }> {
     ignored_repos: stats.ignoredRepos,
     findings: total,
     files_with_findings: filesWithFindings,
+    // WHY in both modes: a .jsonl or .ndjson file whose lines are not JSON is read as text, and the report must say so; it is the number of such non-blank lines over all JSONL files read (jsonl.ts).
+    jsonl_lines_not_json: jsonlLinesNotJson,
     unlocated_timeout: unlocatedTimeout,
     complete: !incomplete,
     elapsed_s: Math.round(elapsed * 1000) / 1000,

@@ -22,7 +22,7 @@ _SHIELD_SCAN = Path(__file__).resolve().parents[1] / "scripts" / "shield_scan"
 _TEST_FILE = _SHIELD_SCAN / "tests" / "jsonl.test.ts"
 _TIMEOUT_S = 180.0
 # The number of tests in jsonl.test.ts: a run that reports fewer passes ran less than the suite.
-_EXPECTED_TESTS = 5
+_EXPECTED_TESTS = 6
 
 
 def test_jsonl_bun_suite_passes() -> None:

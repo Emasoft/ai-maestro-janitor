@@ -68,7 +68,7 @@ Redact). Git history is not scanned yet (a later version).
 - `--file-timeout-base` fixed seconds of the per-file time limit. Default: 30.
   The limit is base plus per-MB times the file size in MB; a file that runs
   past it is skipped as a timeout, unless its whole-file pass had finished:
-  then its findings are kept with line null.
+  then its findings are kept with line null (never for a JSONL file: its walk is one pass, so past the limit it is a timeout skip).
 - `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
 - `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; marker passes are those of `--passes`, default `secrets`, `cards`; `email` only when named). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. To put the values back, see Restore below. Default: off, scan only.
 - `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
@@ -109,7 +109,7 @@ redacted. Detail: [redact-and-restore § Git repositories](references/redact-and
 
 ### JSONL files
 
-A `.jsonl` or `.ndjson` file is redacted as plain text, without a check that each line is still valid JSON. Do not run `--redact` on a tree with JSONL files you need intact yet. Detail: [redact-and-restore § JSONL files](references/redact-and-restore.md#jsonl-files).
+A `.jsonl` or `.ndjson` file is redacted JSON-aware: a secret behind a JSON escape is found, and no line that parsed before is written unparseable. If the shield cannot hide a finding in a JSON line without breaking it, or a rewrite would break a line, the file is skipped as `json-broken` and its findings stay counted in `findings_not_redacted`. Still run `--redact` on a copy or a sample first. Detail: [redact-and-restore § JSONL files](references/redact-and-restore.md#jsonl-files).
 
 ## Restore
 
@@ -144,7 +144,12 @@ The findings file is JSON lines: `finding` (path, kind, line or null, count),
 `skip` (path, reason), with `--redact` also `residual` (path, kind, count), and
 the summary last. It never holds a secret value.
 A finding with line null was found in the whole file but not on one line (a
-secret split over lines, or the per-line pass was killed by the time limit).
+secret split over lines, or, in a plain file, the per-line pass was killed by the time limit).
+A finding of kind `json-unredactable` is a JSON line (in a `.jsonl` or `.ndjson`
+file) that holds a finding the shield could not hide without breaking the line:
+it is counted in both modes, one per such line, and with `--redact` the file is
+not written (skip `json-broken`). `jsonl_lines_not_json` in the summary counts
+the non-blank lines of those files that are not JSON; they are read as text.
 The file is private to the owner (mode 0600). A path inside any git work tree
 is refused (exit 2), because the file says where the secrets are.
 
@@ -221,6 +226,6 @@ Copy this checklist and track your progress:
 - [ ] Never print a secret value or the flagged lines of the scanned files
 - [ ] Add `--redact` only when asked, after telling the user it rewrites working-tree files and that the values go to a plain, unencrypted vault
 - [ ] For a git repo, say that committed secrets stay in the repo and checkout, stash or reset brings them back
-- [ ] Do not run `--redact` on a tree with JSONL files the user needs intact
+- [ ] JSONL files are redacted JSON-aware; still run `--redact` on a copy or a sample first, and say what `json-broken` skips mean
 - [ ] Report the redact summary fields in words (see Output); never call a redact complete while `findings_not_redacted` or `residual` is above 0
 - [ ] Never run `restore.ts` (a person at a terminal only)

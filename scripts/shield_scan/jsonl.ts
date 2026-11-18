@@ -47,7 +47,8 @@ export function newNonce(text: string): string {
   }
 }
 
-const parses = (text: string): boolean => {
+/** Whether a text parses as JSON. */
+export const parses = (text: string): boolean => {
   try {
     JSON.parse(text)
     return true

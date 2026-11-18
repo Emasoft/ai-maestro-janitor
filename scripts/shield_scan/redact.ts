@@ -13,7 +13,7 @@ const UUID_V4 = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 export const SHIELD_MARKER = String.raw`\[REDACTED-BY-SECRET-SHIELD\. Type: ([A-Za-z0-9_-]+)\. ID: (${UUID_V4})\]`
 
 // Why a file with findings was not written (spec R7), in the order the worker checks them. Each is a skip record of the findings file and the file's findings count as findings_not_redacted.
-export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'not-regular-at-write', 'outside-root', 'changed-during-redact', 'write-error'] as const
+export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'json-broken', 'not-regular-at-write', 'outside-root', 'changed-during-redact', 'write-error'] as const
 export type WriteSkipReason = (typeof WRITE_SKIP_REASONS)[number]
 
 // What the driver sends with a job that redacts: the age limit for a recent file and the scan root the write target must stay inside (writeguard.ts).
@@ -201,6 +201,13 @@ export function vaultEntries(plan: Plan): { entries: VaultEntry[]; slot: number[
 /** The new text: the plan with each stretch written as its marker; uuids[i] is the uuid of stretch i. */
 export function finalText(plan: Plan, uuids: readonly string[]): string {
   return plan.parts.map((part) => (part.t === 'new' ? shieldMarker(plan.stretches[part.stretch].kind, uuids[part.stretch]) : part.text)).join('')
+}
+
+/**
+ * The new text with each marker followed by as many newlines as the value it replaced holds, so the text has the line count of the original. Never written: the JSONL check that a line which parsed before still parses (worker.ts) compares it line by line with the text of the round, and the final text has fewer lines whenever a stretch spans lines.
+ */
+export function finalTextAligned(plan: Plan, uuids: readonly string[]): string {
+  return plan.parts.map((part) => (part.t === 'new' ? shieldMarker(plan.stretches[part.stretch].kind, uuids[part.stretch]) + '\n'.repeat(plan.stretches[part.stretch].value.split('\n').length - 1) : part.text)).join('')
 }
 
 /**
