@@ -850,9 +850,9 @@ def test_fire_carries_the_transcript_into_the_chain_payload(tmp_path, monkeypatc
     post-clear-compact hook consumes, instead of that hook guessing at the newest handoff."""
     _project(tmp_path)
     payload = _captured_payload(
-        monkeypatch, tmp_path, ec.TRIGGER_LONG_IDLE, transcript="/tmp/daemon-cleared.jsonl",
+        monkeypatch, tmp_path, ec.TRIGGER_LONG_IDLE, transcript=str(tmp_path / "daemon-cleared.jsonl"),
     )
-    assert payload["transcript_path"] == "/tmp/daemon-cleared.jsonl"
+    assert payload["transcript_path"] == str(tmp_path / "daemon-cleared.jsonl")
 
 
 # --- _fire: the verify harness's before-snapshot lands ahead of the keystroke (TRDD-BDZG8Y8A) --

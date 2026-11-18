@@ -1396,7 +1396,7 @@ def test_apply_reports_one_stderr_line_when_git_fails_resolving_the_design_root(
     def _git_fails(*_args: object, **_kwargs: object) -> None:
         raise trdd_common.GitRootError(
             "git worktree list --porcelain failed (exit 128) inside known git repo "
-            "\x27/tmp/fake-repo-y/sub\x27: fatal: boom"
+            "\x27/fake/fake-repo-y/sub\x27: fatal: boom"
         )
 
     monkeypatch.setattr(apply_mod.bpl, "detect_repo_slug", lambda _root: None)
@@ -1417,7 +1417,7 @@ def test_apply_reports_one_stderr_line_when_git_fails_resolving_the_design_root(
     assert len(err_lines) == 1, err_lines
     assert err_lines[0].startswith("[branch-protection] git failed resolving the design root (")
     assert "<path>" in err_lines[0]
-    assert "/tmp/fake-repo-y" not in err_lines[0]
+    assert "/fake/fake-repo-y" not in err_lines[0]
 
 
 def test_prrd_local_match_is_case_insensitive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

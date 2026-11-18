@@ -189,7 +189,7 @@ def _write_pending(state_dir: Path, dispatch_id: str, intervention: str) -> Path
     p = state_dir / f"{mdc.PENDING_PREFIX}{dispatch_id}.json"
     p.write_text(json.dumps({
         "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
-        "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 100,
+        "scope": "LOCAL", "root": str(state_dir / "local-memory"), "stamped_at": 100,
         "dispatch_id": dispatch_id,
     }), encoding="utf-8")
     return p

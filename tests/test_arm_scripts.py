@@ -231,8 +231,8 @@ def test_stagger_offset_differs_across_projects() -> None:
     offsets — that's the entire point: N sessions spread over the cadence instead of firing
     together. `hashlib.sha256`, not `hash()` — a per-process-salted `hash()` would make the
     RIGHT offsets today and DIFFERENT ones on the next process, defeating stability too."""
-    a = arm_prepare._stagger_offset(Path("/tmp/project-a"), 15)
-    b = arm_prepare._stagger_offset(Path("/tmp/project-b"), 15)
+    a = arm_prepare._stagger_offset(Path("proj-a"), 15)
+    b = arm_prepare._stagger_offset(Path("proj-b"), 15)
     assert a != b
 
 

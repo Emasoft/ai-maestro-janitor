@@ -413,5 +413,6 @@ def test_the_cache_expired_timeout_clears_the_measured_latency_with_headroom() -
 def test_cache_expired_passes_the_project_through(tmp_path: Path) -> None:
     """`--project <path>` is appended, so the probe answers about the RIGHT session — a probe
     that silently answered about the daemon's cwd would be worse than no probe at all."""
-    cmd = _write_script(tmp_path, "echo-argv.sh", 'echo preamble\n[ "$1" = "--project" ] && [ "$2" = "/tmp/proj" ] && echo true || echo false')
-    assert ap.probe_cache_expired(cmd, project="/tmp/proj") is True
+    proj = str(tmp_path / "proj")
+    cmd = _write_script(tmp_path, "echo-argv.sh", f'echo preamble\n[ "$1" = "--project" ] && [ "$2" = "{proj}" ] && echo true || echo false')
+    assert ap.probe_cache_expired(cmd, project=proj) is True

@@ -213,11 +213,11 @@ def test_decide_new_page_scope_routes_machine_paths_to_local() -> None:
 
 def test_parse_recall_full_output_extracts_page_atom_score() -> None:
     stdout = (
-        "/tmp/x/daemon-restart-behavior.md#ATOM1 — why does it restart\n"
+        "/fake/x/daemon-restart-behavior.md#ATOM1 — why does it restart\n"
         "\tscore: 2\n"
         "\tkeywords: daemon crash restart\n"
         "some body text that is not a header line\n"
-        "/tmp/x/orphan-page.md — an unrelated page\n"
+        "/fake/x/orphan-page.md — an unrelated page\n"
         "\tscore: 0\n"
     )
     hits = cmig.parse_recall_full_output(stdout)

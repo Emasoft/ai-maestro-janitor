@@ -4405,7 +4405,7 @@ def _arm_idle_clear(
     monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: present)
     monkeypatch.setattr(dispatch, "_cadence_active_waiting", lambda sd, now: active)
     monkeypatch.setattr(fleet_scan, "transcript_activity", lambda root, now: (idle_s, 0, False))
-    monkeypatch.setattr(dispatch, "_session_transcript_path", lambda: Path("/tmp/x.jsonl"))
+    monkeypatch.setattr(dispatch, "_session_transcript_path", lambda: Path("/fake/x.jsonl"))
     # TRDD-8ZY3JU2H: the phase now measures THIS sessions own transcript; an unknown session
     # (None) is unmeasurable, so the stub mirrors the real reader instead of answering for None.
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx if t else None)
@@ -4470,7 +4470,7 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
 
 
 def test_idle_clear_names_THIS_sessions_own_transcript_not_the_project_newest(
-    env_isolation: dict, monkeypatch,
+    env_isolation: dict, monkeypatch, tmp_path,
 ) -> None:
     """TRDD-RAEGS1D5 card 5: the chain payloads `transcript_path` must come from THIS fires
     own session (`_session_transcript_path`, keyed on `CLAUDE_CODE_SESSION_ID`), never
@@ -4478,12 +4478,12 @@ def test_idle_clear_names_THIS_sessions_own_transcript_not_the_project_newest(
     dispatch = _import_dispatch()
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200)
     monkeypatch.setattr(
-        dispatch, "_session_transcript_path", lambda: Path("/tmp/this-sessions-own.jsonl")
+        dispatch, "_session_transcript_path", lambda: tmp_path / "this-sessions-own.jsonl"
     )
 
     assert dispatch._phase_idle_clear_nudge() is True
     assert len(sent) == 1
-    assert sent[0]["transcript_path"] == "/tmp/this-sessions-own.jsonl"
+    assert sent[0]["transcript_path"] == str(tmp_path / "this-sessions-own.jsonl")
 
 
 def _write_usage_transcript(path: Path, tokens: int, *, mtime: float) -> None:
@@ -5252,10 +5252,10 @@ def test_phase_clear_resume_sweeps_are_pattern_based_over_pane_sidecars(
     state.init_state()
     sd.mkdir(parents=True, exist_ok=True)
     (sd / "resume-after-clear.tmux-%3.transcript").write_text(
-        "/tmp/x.jsonl\n0\n", encoding="utf-8",
+        "/fake-session/x.jsonl\n0\n", encoding="utf-8",
     )
     (sd / "resume-after-clear.iterm-abc.transcript.consumed-123").write_text(
-        "/tmp/y.jsonl\n0\n", encoding="utf-8",
+        "/fake-session/y.jsonl\n0\n", encoding="utf-8",
     )
     _write_clear_flag(state, "abandoned handoff", age_s=86400 + 60)
 
@@ -5274,7 +5274,7 @@ def test_phase_clear_resume_armed_ancient_sweep_also_clears_sidecars(env_isolati
     state.init_state()
     sd.mkdir(parents=True, exist_ok=True)
     (sd / "resume-after-clear.tmux-%9.transcript").write_text(
-        "/tmp/z.jsonl\n0\n", encoding="utf-8",
+        "/fake-session/z.jsonl\n0\n", encoding="utf-8",
     )
     _arm_clear_flag(state, "continue TRDD-Z582IKIR", age_s=86400 + 60)
 

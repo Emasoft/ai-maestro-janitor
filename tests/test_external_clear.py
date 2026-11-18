@@ -975,7 +975,7 @@ def test_should_clear_externally_recovery_pending_defaults_false():
 # trailing "pointers expand with:" line survives the budget cut no matter what ------------------
 
 
-def _compacted_doc(body_lines: int, *, transcript: str = "/tmp/fake-transcript.jsonl") -> str:
+def _compacted_doc(body_lines: int, *, transcript: str = "/fake/fake-transcript.jsonl") -> str:
     """A `jev_compact.py compact` document shape (scripts/lib/jev_compaction.py::compose):
     a header, kept items, then the fixed trailing pointer-expand line -- built directly rather
     than importing jev_compaction (this test file must not import jevctx/httpx transitively;

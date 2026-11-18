@@ -16,7 +16,7 @@ contract:
   garbage stdin          → no-op (never crash the turn).
 
 The corpus + the real memgrep binary: the hit/privacy tests need a working
-`memgrep`. We build it once (release) into a tmp CARGO_TARGET_DIR if a prebuilt
+`memgrep`. We build it once (release) into the crate's own target/ if a prebuilt
 binary isn't already present; if cargo is unavailable the binary-dependent tests
 skip-mark rather than fail (CI without a Rust toolchain still runs the rest).
 
@@ -50,7 +50,7 @@ def _find_or_build_memgrep() -> str | None:
     """Return a path to a usable `memgrep`, or None if one can't be obtained.
 
     Order: a prebuilt binary under the crate's target/ (release or debug) → on
-    PATH / cargo bin → build release into a tmp CARGO_TARGET_DIR. Returns None if
+    PATH / cargo bin → build release into the crate's own target/. Returns None if
     no binary exists and cargo is unavailable (caller then skips).
     """
     for rel in ("target/release/memgrep", "target/debug/memgrep"):
@@ -63,9 +63,6 @@ def _find_or_build_memgrep() -> str | None:
     cargo = shutil.which("cargo")
     if not cargo:
         return None
-    target_dir = Path("/tmp/memgrep-build")
-    env = dict(os.environ)
-    env["CARGO_TARGET_DIR"] = str(target_dir)
     try:
         subprocess.run(
             [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE / "Cargo.toml")],
@@ -76,7 +73,9 @@ def _find_or_build_memgrep() -> str | None:
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return None
-    built = target_dir / "release" / "memgrep"
+    # Cargo's default target/, not a temp dir: a fixed path under the shared temp dir
+    # can be pre-created by another local user (bandit B108), and the tests run the binary found there.
+    built = _MEMGREP_CRATE / "target" / "release" / "memgrep"
     return str(built) if built.is_file() else None
 
 

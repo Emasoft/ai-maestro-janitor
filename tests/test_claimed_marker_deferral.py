@@ -49,7 +49,7 @@ def _write_claimed(state_dir: Path, dispatch_id: str, chore: str, *, stamped_at:
     p = state_dir / f"{mdc.CLAIMED_PREFIX}{dispatch_id}.json"
     p.write_text(json.dumps({
         "marker": f"[janitor-memory-{chore}]", "intervention": chore,
-        "scope": scope, "root": "/tmp/project/memory", "stamped_at": stamped_at,
+        "scope": scope, "root": "/fake/project/memory", "stamped_at": stamped_at,
         "dispatch_id": dispatch_id,
     }), encoding="utf-8")
     return p
@@ -60,7 +60,7 @@ def _write_pending(state_dir: Path, dispatch_id: str, chore: str, *, stamped_at:
     p = state_dir / f"{mdc.PENDING_PREFIX}{dispatch_id}.json"
     p.write_text(json.dumps({
         "marker": f"[janitor-memory-{chore}]", "intervention": chore,
-        "scope": scope, "root": "/tmp/project/memory", "stamped_at": stamped_at,
+        "scope": scope, "root": "/fake/project/memory", "stamped_at": stamped_at,
         "dispatch_id": dispatch_id,
     }), encoding="utf-8")
     return p
