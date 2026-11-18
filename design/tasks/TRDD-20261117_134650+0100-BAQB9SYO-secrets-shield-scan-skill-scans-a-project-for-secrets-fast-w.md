@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: dev
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-18T01:34:09+0100
+updated: 2026-11-18T01:38:46+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -79,6 +79,8 @@ approval-datetime: 2026-11-17T13:46:50+0100
 - Correction, 2026-11-18T01:33:54+0100, by fast-worker for main-agent, to the lines dated 2026-11-18T00:48:09+0100: that time was taken before those lines were appended, and the last sentence of the ubs Known line (the real vault check) was reworded at about 2026-11-18T00:55+0100.
 - Board, 2026-11-18T01:33:54+0100, by fast-worker for main-agent: cards for GitHub issues 361 to 368 were added in f2e461b9 (TRDD-YRK51PGW, TRDD-TG3HS9US, TRDD-7QGRK8RS, TRDD-OWH1R0M9, TRDD-4K7V0GFW, TRDD-7RVC9T6V, TRDD-F987RQNV, TRDD-47MHZ2YF), column todo; this card keeps priority.
 - NEXT ACTION, 2026-11-18T01:33:54+0100, by fast-worker for main-agent (replaces the NEXT ACTION line of 2026-11-18T00:55:00+0100): 3a-5, SKILL.md documents redact mode, the plain vault, the git note, the JSONL limit and the large-lane readiness (worker running); then the large-lane measurement (peak memory and time of redact and of restore on one text file of a few hundred MB, under the 4 GB test-data cap), 3b JSONL, C4 read timing, 1b history scan, increment 2 (Rust), the report-sanitizer merge (TRDD-L1I0FP5T), release 3.9.9 (waits on CPV PR 278, last checked 2026-11-17 evening), the Linux getent path. Do not run --redact on real data before the large-lane measurement, nor on JSONL files that must stay intact before 3b.
+- Landed, 2026-11-18T01:38:37+0100, by fast-worker for main-agent: step 3a-5 in bf46375a. SKILL.md of janitor-secrets-shield-scan documents redact mode (ask first, copy first, the plain unencrypted vault, the 12 write-skip reasons, rounds and residual records, agents never run restore.ts), git repositories (working tree only, never history; a .git pointer file is skipped) and JSONL files (no special case before 3b: a probe on a two-line JSONL file kept both lines parseable with markers and no value left; the advice is to wait for 3b before redacting JSONL that must stay intact), plus the exit codes and output fields with --redact. Checks run by the main agent on bf46375a: 109 passed over the skill, rules_installer, frontmatter_yaml and plugin_root tests. The SKILL.md body is about 4920 of its 5000-token cap; the next addition moves redact detail into a references/ file.
+- NEXT ACTION, 2026-11-18T01:38:37+0100, by fast-worker for main-agent (replaces the NEXT ACTION line of 2026-11-18T01:33:54+0100): the large-lane measurement (peak memory and time of redact and of restore on one text file of a few hundred MB, under the 4 GB test-data cap), then 3b JSONL, C4 read timing, 1b history scan, increment 2 (Rust), the report-sanitizer merge (TRDD-L1I0FP5T), release 3.9.9 (waits on CPV PR 278, last checked 2026-11-17 evening), the Linux getent path. Do not run --redact on real data before the large-lane measurement, nor on JSONL files that must stay intact before 3b.
 
 ## Owner request and decisions (verbatim, 2026-11-17)
 - Request: "i need to scan 2 terabytes of projects and i need the secrets-shield scanner to be very very fast (better if rust optimized)"

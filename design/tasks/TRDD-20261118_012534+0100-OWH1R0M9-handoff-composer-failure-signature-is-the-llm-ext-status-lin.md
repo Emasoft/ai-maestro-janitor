@@ -4,7 +4,7 @@ title: Handoff composer failure signature is the llm-ext status line, and handof
 column: todo
 status: tasked
 created: 2026-11-18T01:25:34+0100
-updated: 2026-11-18T01:27:08+0100
+updated: 2026-11-18T01:38:48+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,6 +32,7 @@ By the issue: the handoff write command printed SUMMARY_FAILED three times on 20
 ## Suspected cause
 
 By the issue: failure_signature in the summary library is the exit code plus the first stderr line, but the first stderr line of llm-ext is the same startup status line on every run, so the logged reason is that line and every exit-1 failure gets the same signature; the retry loop counts unknown-outcome attempts by detail string and gives up as permanent repeated once one detail reaches the give-up threshold, so two different failures end the retries as if one cause repeated. The llm-ext side writes the line at import time on every command and may stop printing it, but by the issue the signature must not depend on any status line. Expected by the issue: the signature skips status lines or uses the last error line, the log carries the line that names the failure, and the summary has a size bound or a pointer-only handoff above it.
+- Follow-up, 2026-11-18T01:38:37+0100, by fast-worker for main-agent: a second comment on issue 364 (by the commenter, not verified here) reports a hand rerun of the composer's llm-ext session-summary command with stderr saved: exit 1 after 88 s, 23 stderr lines, the first the Auth status line, the last a FAILED: session-summary line naming an API error 403 (model not available in the region) on a free model. By the comment the llm-externalizer side did not rotate to another model on that 403; its fix is on the llm-externalizer development branch, not pushed yet. The commenter infers that the failures logged at 22:55 on 2026-11-17 and 00:02 on 2026-11-18 share this cause; the one at 16:13 (transient deadline) is unknown. The comment proposes keying failure_signature on the FAILED: line or the last non-empty stderr line.
 
 ## Files named by the issue
 
