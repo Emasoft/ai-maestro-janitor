@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -52,9 +53,9 @@ def test_publish_resolves_the_pin_from_the_file() -> None:
     """publish.py's spec is DERIVED from the file, not a second copy of the tag."""
     mod = _load_publish()
     pin = _PIN_FILE.read_text(encoding="utf-8").strip()
-    assert mod._CPV_PIN == pin
-    assert mod._CPV_SPEC.endswith("@" + pin)
-    assert mod._CPV_SPEC.startswith("git+https://github.com/Emasoft/")
+    spec = mod._cpv_spec()
+    assert spec.endswith("@" + pin)
+    assert spec.startswith("git+https://github.com/Emasoft/")
 
 
 def test_a_missing_pin_file_fails_fast_instead_of_defaulting(tmp_path: Path) -> None:
@@ -64,6 +65,22 @@ def test_a_missing_pin_file_fails_fast_instead_of_defaulting(tmp_path: Path) -> 
     mod = _load_publish()
     with pytest.raises(SystemExit):
         mod._read_cpv_pin(tmp_path / "does-not-exist")
+
+
+def test_main_reads_the_pin_before_any_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() stops on a bad pin before it reaches any mode or stage.
+
+    The pin is no longer read at import, so this is what keeps a malformed
+    `.cpv-version` from surfacing mid-release. `--canon-version` is the first thing
+    main() would otherwise do and it only reports, so a missing fail-fast shows up
+    here as "no SystemExit" instead of as a real publish running."""
+    mod = _load_publish()
+    bad = tmp_path / ".cpv-version"
+    bad.write_text("main", encoding="utf-8")
+    monkeypatch.setattr(mod, "_CPV_VERSION_FILE", bad)
+    monkeypatch.setattr(sys, "argv", ["publish.py", "--canon-version"])
+    with pytest.raises(SystemExit, match="malformed CPV pin"):
+        mod.main()
 
 
 @pytest.mark.parametrize(

@@ -343,7 +343,7 @@ def _read_cpv_pin(path: Path | None = None) -> str:
 # WHY (2026-10-07, TRDD-2PYQ8VVA): the validator exits 0 although it printed
 # `[WARNING] markdownlint timed out — skipping markdown lint` (and the same for pyright),
 # so publish step 4 passed a run that had skipped a check, and the push gate later refused.
-# This matches the validator's wording at pin v5.16.2; a reword upstream needs this updated.
+# This matches the validator's wording at pin v5.23.1; a reword upstream needs this updated.
 _CPV_SKIPPED_CHECK_RE = re.compile(r"timed out\b.*\bskipping", re.IGNORECASE)
 _CPV_SKIPPED_BLOCKED_MSG = (
     "BLOCKED: the validator skipped a check (a linter timed out), so this run proves "
@@ -351,8 +351,13 @@ _CPV_SKIPPED_BLOCKED_MSG = (
 )
 
 
-_CPV_PIN = _read_cpv_pin()
-_CPV_SPEC = f"git+https://github.com/Emasoft/claude-plugins-validation@{_CPV_PIN}"
+# WHY: a function, not a module-level `_CPV_SPEC = f"...{_read_cpv_pin()}"` constant. ubs 5.5.26
+# stops its python header_injection detector on this file at 250000 evaluation steps
+# (exit 2, which blocks the pre-commit hook) when a module-level call feeds the f-string
+# that flows into every subprocess argv below. The pin still comes ONLY from
+# `.cpv-version` (see _read_cpv_pin); only the evaluation moved from import to call time.
+def _cpv_spec() -> str:
+    return f"git+https://github.com/Emasoft/claude-plugins-validation@{_read_cpv_pin()}"
 
 
 def run(
@@ -1028,7 +1033,7 @@ def install_branch_rules(root: Path) -> int:
             [
                 "uvx",
                 "--from",
-                _CPV_SPEC,
+                _cpv_spec(),
                 "--with",
                 "pyyaml",
                 "cpv-setup-branch-rules",
@@ -1241,7 +1246,7 @@ def _gate_validate(root: Path) -> int:
         return 1
     ve, skipped = run_cpv_strict(
         ["uvx", "--from",
-         _CPV_SPEC,
+         _cpv_spec(),
          "--with", "pyyaml",
          "cpv-remote-validate", "plugin", ".", "--strict"],
         root, timeout=_CPV_TIMEOUT_SEC)
@@ -1957,12 +1962,12 @@ def stage_validate(root: Path) -> None:
     # the publish (the "WARNING 5+ passes" rule applies only at the push gate).
     # run_cpv_strict, not run(): a validator that skipped a timed-out linter still
     # exits 0, so its output must be checked too (TRDD-2PYQ8VVA).
-    shown = f"uvx --from {_CPV_SPEC} --with pyyaml cpv-remote-validate plugin . --strict"
+    shown = f"uvx --from {_cpv_spec()} --with pyyaml cpv-remote-validate plugin . --strict"
     cprint(f"  {BLUE}$ {shown}{NC}")
     try:
         code, skipped = run_cpv_strict([
             "uvx", "--from",
-            _CPV_SPEC,
+            _cpv_spec(),
             "--with", "pyyaml",
             "cpv-remote-validate", "plugin", ".", "--strict",
         ], root, timeout=_CPV_TIMEOUT_SEC)
@@ -2070,7 +2075,7 @@ def stage_ci_preflight(root: Path) -> None:
         try:
             rc = subprocess.run([
                 "uvx", "--from",
-                _CPV_SPEC,
+                _cpv_spec(),
                 "--with", "pyyaml",
                 "cpv-remote-validate", "ci-preflight", ".",
             ], cwd=str(dest), timeout=_CPV_TIMEOUT_SEC).returncode
@@ -3685,6 +3690,11 @@ def main() -> int:
     # every CPV plugin MUST pass validation with 0 issues (WARNING allowed) before
     # any push. Skipping tests would bypass that guarantee — there are no exceptions.
     args = parser.parse_args()
+
+    # Fail fast: the pin used to be read at import, so a missing or malformed
+    # `.cpv-version` stopped the run before any step. It is now read at each use, so
+    # force one read here, before any gate, bump or push changes anything.
+    _cpv_spec()
 
     # Answered BEFORE the repo lookup and every gate: it reads a manifest and
     # reports. Someone debugging a stale canon usually has a dirty tree, and
