@@ -637,7 +637,10 @@ def remember_agent_roots(roots: list[str]) -> None:
             pass
         state.atomic_write(target, payload)
     except Exception:
-        pass  # a cache write failure must never break a fleet scan
+        try:
+            state.log_line("daemon", "agent-roots cache write skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; a cache write failure must never break a fleet scan
 
 
 def recall_agent_roots() -> list[str]:

@@ -1387,7 +1387,10 @@ def _report_control_dir_unwritable(path: Path, exc: BaseException, log_channel: 
             ),
         )
     except Exception:  # noqa: BLE001 — a finding that cannot be filed must never break locking
-        pass
+        try:
+            state.log_line(log_channel, "control-dir finding not filed")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError (janitor log write), RuntimeError (expanduser in log_dir) or ValueError (unicode); locking must not break on it
 
 
 def _try_flock(path: Path, *, log_channel: str, blocking: bool = False) -> Optional[int]:

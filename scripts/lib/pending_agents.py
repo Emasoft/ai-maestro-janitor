@@ -312,7 +312,10 @@ def add(
             )
             _save_unlocked(entries[-MAX_ENTRIES:])
     except Exception:  # noqa: BLE001 - a manifest bug must never crash a hook
-        pass
+        try:
+            state.log_line("pending-agents", "pending-agent manifest add skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; a manifest bug must never crash a hook
 
 
 def spend_nudges(now: int | None = None, min_interval: int = 0) -> int:
@@ -384,7 +387,10 @@ def remove(agent_id: str, now: int | None = None) -> None:
             if len(kept) != len(entries):
                 _save_unlocked(kept)
     except Exception:  # noqa: BLE001 - a manifest bug must never crash a hook
-        pass
+        try:
+            state.log_line("pending-agents", "pending-agent manifest remove skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; a manifest bug must never crash a hook
 
 
 def mark_stopped(agent_id: str, now: int | None = None) -> None:
@@ -408,7 +414,10 @@ def mark_stopped(agent_id: str, now: int | None = None) -> None:
             if changed:
                 _save_unlocked(entries)
     except Exception:  # noqa: BLE001 - a manifest bug must never crash a caller
-        pass
+        try:
+            state.log_line("pending-agents", "pending-agent manifest stop mark skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; a manifest bug must never crash a caller
 
 
 def pending(now: int | None = None, *, state_dir: Path | None = None) -> list[dict]:

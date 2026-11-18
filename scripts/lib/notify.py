@@ -170,7 +170,10 @@ def _record_sent(digest: str, now: int) -> None:
     try:
         _under_sent_lock(lambda: _append_sent_unlocked(digest, now))
     except Exception:  # noqa: BLE001 -- bookkeeping must never block a push
-        pass
+        try:
+            state.log_line("daemon", "notify-sent record skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; bookkeeping must never block a push
 
 
 def _append_sent_unlocked(digest: str, now: int) -> None:
@@ -300,7 +303,10 @@ def clear_episode(
     try:
         _under_sent_lock(_mark)
     except Exception:  # noqa: BLE001 -- bookkeeping must never break the caller
-        pass
+        try:
+            state.log_line("daemon", "episode clear record skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; bookkeeping must never break the caller
 
 
 def _deliver(
@@ -335,7 +341,10 @@ def _deliver(
         elif shutil.which("notify-send"):
             run(["notify-send", "ai-maestro-janitor", message])
     except Exception:  # noqa: BLE001 -- best-effort; tier 2 still gets its chance
-        pass
+        try:
+            state.log_line("daemon", "desktop notification skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; tier 2 must still run
 
     # Tier 2 — user-configured webhook (opt-in; NEVER called without the URL).
     try:
@@ -343,7 +352,10 @@ def _deliver(
         if url:
             open_(url, json.dumps({"text": message}).encode("utf-8"))
     except Exception:  # noqa: BLE001 -- a down webhook must not break the daemon
-        pass
+        try:
+            state.log_line("daemon", "webhook notification skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; a down webhook must not break the daemon
 
 
 def push(
@@ -389,7 +401,10 @@ def push(
         try:
             state.atomic_write(stamp, today)
         except Exception:  # noqa: BLE001
-            pass
+            try:
+                state.log_line("daemon", "notify digest stamp write skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass  # why: log_line can raise OSError, RuntimeError (log_dir expanduser) or ValueError (unicode); push must not raise
         _deliver(
             f"[janitor] daily notification cap reached — more findings were recorded; "
             f"run /janitor-findings in the affected projects (latest: {_clean(project, 48)})",

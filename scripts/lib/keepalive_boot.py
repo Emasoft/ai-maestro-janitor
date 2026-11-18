@@ -91,7 +91,11 @@ def _state_dir() -> Path:
         try:
             return global_state.global_state_dir()
         except Exception:
-            pass
+            try:
+                if sys.stderr is not None:
+                    print("keepalive-boot: global_state_dir() failed, fallback dir used", file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass  # why: print to a closed or failing stderr raises OSError or ValueError; the fallback below still runs
     override = os.environ.get("JANITOR_GLOBAL_STATE_DIR")
     if override:
         return Path(override).expanduser().resolve()
@@ -114,7 +118,10 @@ def _loud(msg: str) -> None:
     try:
         print(line, file=sys.stderr, flush=True)
     except Exception:
-        pass
+        try:
+            state.log_line("daemon", "keepalive-boot stderr line skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass  # why: log_line can raise OSError, RuntimeError or ValueError; the launch gate must never raise
     try:
         d = _state_dir()
         d.mkdir(parents=True, exist_ok=True)
@@ -128,7 +135,11 @@ def _loud(msg: str) -> None:
             fh.write(line + "\n")
     except Exception:
         # A log we cannot write must not block the daemon — stderr already carried it.
-        pass
+        try:
+            if sys.stderr is not None:
+                print("keepalive-boot: boot log write skipped", file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass  # why: print to a closed or failing stderr raises OSError or ValueError, and this handler must not let it escape
 
 
 def _restage_cooldown_s() -> int:
