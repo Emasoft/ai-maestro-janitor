@@ -177,7 +177,11 @@ def is_suppressed(code: str, project_dir: str | os.PathLike[str] | None = None) 
                     project_dir=project_dir,
                 )
         except Exception:  # noqa: BLE001 -- reporting the typo is best-effort
-            pass
+            # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps is_suppressed() from raising
+            try:
+                state.log_line("findings-surface", "config-error report skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass
         return False
 
 
@@ -327,12 +331,20 @@ def record(
                 fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
             token_meter.trim_log(path, keep_lines=KEEP_LINES, max_bytes=MAX_BYTES)
         except Exception:  # noqa: BLE001 -- the mailbox must never break its writers
-            pass
+            # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps record() from raising
+            try:
+                state.log_line("findings-surface", "ledger append skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass
     if notify is not None:
         try:
             notify(entry)
         except Exception:  # noqa: BLE001 -- the push seam must never break the record
-            pass
+            # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps record() from raising
+            try:
+                state.log_line("findings-surface", "notify push skipped")
+            except (OSError, RuntimeError, ValueError):  # a failed skip line must not break record() either
+                pass
     if human_only:
         content_hash = hashlib.sha256(
             f"{entry['sev']}|{entry['code']}|{entry['msg']}".encode("utf-8")
@@ -573,7 +585,11 @@ def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
         payload = json.dumps({"offset": size, "ts": newest_ts})
         state.atomic_write(_cursor_path(project_dir), payload)
     except Exception:  # noqa: BLE001 -- an unacked cursor merely re-surfaces; never crash
-        pass
+        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps advance_cursor from raising
+        try:
+            state.log_line("findings-surface", "cursor advance skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
 
 def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
@@ -612,12 +628,14 @@ def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
     # identities retain only folded events, including duplicates and events surviving trim.
     try:
         state.atomic_write(_cursor_path(project_dir), json.dumps({"offset": size, "ts": stamp, "pending": pending}))
-    except Exception:  # noqa: BLE001 -- a failed ack repeats findings rather than losing them
+    # why: narrowed from Exception (B110): atomic_write can raise only OSError (mkdir, write, os.replace) and json.dumps of ints and a str list cannot raise
+    except OSError:  # a failed ack repeats findings rather than losing them
         pass
     if project_dir is None:
         try:
             state.log_line("findings-surface", json.dumps(counts, sort_keys=True))
-        except Exception:  # noqa: BLE001 -- diagnostic failure does not undo a successful ack
+        # why: narrowed from Exception (B110): log_line raises OSError (filesystem), ValueError (UnicodeEncodeError when CLAUDE_CODE_SESSION_ID holds a non-UTF-8 byte) or RuntimeError (Path.expanduser on JANITOR_LOG_DIR); nothing else on this path
+        except (OSError, RuntimeError, ValueError):  # diagnostic failure does not undo a successful ack
             pass
     if pending:
         lines.append(f"[findings] …{len(pending)} older unread — `/janitor-findings` to browse")

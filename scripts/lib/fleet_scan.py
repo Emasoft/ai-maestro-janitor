@@ -395,7 +395,11 @@ def record_iterm_automation_state(
         # json.loads then fails and the alarm prints the wrong fallback diagnosis.
         state.atomic_write(flag, payload)
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
-        pass
+        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
+        try:
+            state.log_line("daemon", "iterm automation state write skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
 # Keys the late patch writers (`record_iterm_host_exposure`, `record_iterm_rescue_warranted`)
 # add to the flag after the base write. Register any new patch writer's key HERE.
@@ -512,7 +516,11 @@ def record_iterm_host_exposure(exposure: tuple[int, int]) -> None:
         data["fleet_total"] = total
         state.atomic_write(flag, json.dumps(data, sort_keys=True))
     except Exception:  # noqa: BLE001 -- advisory; must never break the scan
-        pass
+        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
+        try:
+            state.log_line("daemon", "iterm host exposure patch skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
 
 def record_iterm_rescue_warranted(warranted: bool) -> None:
@@ -555,7 +563,11 @@ def record_iterm_rescue_warranted(warranted: bool) -> None:
         data["rescue_warranted"] = warranted
         state.atomic_write(flag, json.dumps(data, sort_keys=True))
     except Exception:  # noqa: BLE001 -- advisory; must never break the scan
-        pass
+        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
+        try:
+            state.log_line("daemon", "iterm rescue patch skipped")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
 
 def iterm_automation_interpreter(raw: str) -> str:
@@ -1293,7 +1305,11 @@ def capture_pane_text(terminal: Mapping[str, str]) -> str | None:
             if (gs.global_state_dir() / ITERM_TCC_FLAG).exists():
                 return None  # declined — proven-dead channel this beat (TCC denial)
         except Exception:  # noqa: BLE001 -- a probe fault must never break the scan
-            pass
+            # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
+            try:
+                state.log_line("daemon", "iterm decline check skipped")
+            except (OSError, RuntimeError, ValueError):  # a failed skip line must not break the scan either
+                pass
         return terminal_trigger.read_pane_text({"kind": "iterm", "session_id": sid})
     return None
 
@@ -1908,7 +1924,8 @@ def _end_probe_episode() -> None:
     try:
         if _probe_logged:
             state.log_line("daemon", "iterm-probe: ok after failures (" + ", ".join(sorted(_probe_logged)) + ")")
-    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
+    except (OSError, RuntimeError, ValueError):  # a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
+        # why: state.log_line is the only call here; its raise set is OSError, RuntimeError and ValueError, so the handler narrows to them and does not retry the failed write
         pass
     finally:
         _probe_logged.clear()
