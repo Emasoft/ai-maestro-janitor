@@ -721,6 +721,127 @@ export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
   return { value: mapStrings(first, node => hideKnown(node, found)), hits }
 }
 
+// WHY this exists (TRDD-BAQB9SYO): the transcript lane runs a line of JSON through redact() as plain text, and the rules are written for decoded text, so a secret that
+// sits behind an escape (`\n`, `\t`, `\"`, `\/`, a backslash-u sequence, a JSON document inside a string) is left whole. redactJsonLine decodes each string of the line first,
+// so the rules see the text the model would read, and writes back only the strings that changed.
+
+/** The spans [start, end) of every JSON string token of `doc` (keys and values, quotes included): a token ends at the next `"` that is not preceded by an odd run of backslashes. */
+function stringSpans(doc: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  for (let open = doc.indexOf('"'); open !== -1; ) {
+    let close = doc.indexOf('"', open + 1)
+    for (; close !== -1; close = doc.indexOf('"', close + 1)) {
+      let backslashes = 0
+      for (let k = close - 1; k > open && doc.charCodeAt(k) === 92; k--) backslashes++
+      if (backslashes % 2 === 0) break
+    }
+    if (close === -1) throw new Error('a JSON string token has no end')
+    spans.push([open, close + 1])
+    open = doc.indexOf('"', close + 1)
+  }
+  return spans
+}
+
+/**
+ * `doc` with every string token passed through `f` as its decoded text; only a token whose decoded text changed is rewritten (JSON.stringify), every other byte, a number included, is kept.
+ * `key` is the decoded text of the string token right before a `:` that leads to this token (the key of an object member), else undefined.
+ */
+function mapStringTokens(doc: string, f: (decoded: string, key: string | undefined) => string): string {
+  let out = ''
+  let last = 0
+  let previous: { decoded: string; end: number } | undefined
+  for (const [start, end] of stringSpans(doc)) {
+    const token = doc.slice(start, end)
+    const decoded: string = token.includes('\\') ? JSON.parse(token) : token.slice(1, -1)
+    const key = previous !== undefined && /^\s*:\s*$/.test(doc.slice(previous.end, start)) ? previous.decoded : undefined
+    previous = { decoded, end }
+    const next = f(decoded, key)
+    if (next === decoded) continue
+    out += doc.slice(last, start) + JSON.stringify(next)
+    last = end
+  }
+  return last === 0 ? doc : out + doc.slice(last)
+}
+
+/** Whether a decoded string is itself a JSON object or array (a tool input or output carried as a string). */
+function isJsonDocument(text: string): boolean {
+  const first = text.trimStart().charAt(0)
+  if (first !== '{' && first !== '[') return false
+  try {
+    const value: unknown = JSON.parse(text)
+    return typeof value === 'object' && value !== null
+  } catch {
+    return false
+  }
+}
+
+const JSON_NESTING_DEPTH = 3
+
+/** A member value judged with its key, `"key":"value"` as the rules read a plain JSON pair (the raw line shows the pair only with its escapes); the value, hidden or as it was. */
+function redactMemberValue(key: string, value: string, hits: Hits, found: Map<string, string>): string {
+  const pair = JSON.stringify(key) + ':' + JSON.stringify(value)
+  const hidden = redactInto(pair, hits, found)
+  if (hidden === pair) return value
+  const member: unknown = JSON.parse(parseable('{' + hidden + '}'))
+  // WHY the one value of the pair and not member[key]: a rule can rewrite the key itself (a key that is a secret token, or a copy of a value already found), so the lookup by the original key gave undefined and String(undefined) was written back as the text "undefined". The pair holds one member, so its one value is the hidden value whatever the key became; anything else fails closed.
+  const values = Object.values(member as Record<string, unknown>)
+  if (values.length !== 1 || typeof values[0] !== 'string') throw new Error(JSON_LINE_BROKEN)
+  return values[0]
+}
+
+/** Walk 1 over `doc`: every string token goes through the rules on its own, a member value with its key first; a token that is itself a JSON document is walked the same way, then given the whole-document pass, for key and value context. */
+function redactTokens(doc: string, depth: number, hits: Hits, found: Map<string, string>): string {
+  return mapStringTokens(doc, (decoded, key) => {
+    if (depth < JSON_NESTING_DEPTH && isJsonDocument(decoded)) return redactInto(redactTokens(decoded, depth + 1, hits, found), hits, found)
+    const hidden = redactInto(decoded, hits, found)
+    // WHY the member pass runs on the already hidden text: judged on the raw decoded text, a value such as `_authToken=<value>"` is cut at the escaped quote and leaves a bare quote that breaks the line (TRDD-BAQB9SYO).
+    return key === undefined ? hidden : redactMemberValue(key, hidden, hits, found)
+  })
+}
+
+/** Walk 2 over `doc`: every copy of a value found anywhere in the line is hidden in every decoded string, nested documents included. */
+function hideKnownTokens(doc: string, depth: number, found: Map<string, string>): string {
+  return mapStringTokens(doc, decoded => {
+    if (depth < JSON_NESTING_DEPTH && isJsonDocument(decoded)) return hideKnownTokens(decoded, depth + 1, found)
+    return hideKnown(decoded, found)
+  })
+}
+
+const JSON_LINE_BROKEN = 'redaction broke the JSON of a line'
+
+/**
+ * Every secret of one JSON line hidden, whatever escape it sits behind; the text is a line of JSON again, with only the strings that changed rewritten. A line that is not JSON goes through redact().
+ * WHY the order is walk 1 (each decoded string), then the raw line, then walk 2 (copies), and not the raw line first (TRDD-BAQB9SYO, measured on 134 escaped-form cases, one value per kind):
+ * the raw-line-first order left 8 cases whole, 3 partly (slack-token, slack-webhook and bearer-token with one character written as a backslash-u escape) and broke the JSON of 3 (npmrc-auth-token
+ * before `\"`: its value class takes the backslash and leaves a bare quote), 120 removed; this order left 8 whole, none partly, broke none, 126 removed, and every case that was removed before is still removed.
+ * Hiding a value in its decoded string first means the raw pass finds a marker where a rule would have eaten an escape character. The 8 left whole are name-assignment cells
+ * (the rule is anchored to a line start: a value right after an escaped newline is hidden, one after other text on the same line is not, as in plain text) and one `Bearer "<value>"` (not hidden in plain text either).
+ */
+export function redactJsonLine(line: string): { text: string; hits: Hits } {
+  try {
+    JSON.parse(line)
+  } catch {
+    return redact(line)
+  }
+  const hits: Hits = {}
+  const found = new Map<string, string>()
+  let out = redactTokens(line, 0, hits, found)
+  out = redactInto(parseable(out), hits, found)
+  out = hideKnownTokens(parseable(out), 0, found)
+  if (out === line) return { text: line, hits }
+  return { text: parseable(out), hits }
+}
+
+/** `text` itself when it is valid JSON; else a fixed-message error (the message never carries input text, which could hold a secret). */
+function parseable(text: string): string {
+  try {
+    JSON.parse(text)
+  } catch {
+    throw new Error(JSON_LINE_BROKEN)
+  }
+  return text
+}
+
 type Block = { type: string; [field: string]: unknown }
 
 // Maps the text a row's blocks carry through `f`: text blocks and each tool_result's content (a string or text blocks).
