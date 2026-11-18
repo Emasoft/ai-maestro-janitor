@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 import { redactAll, type Pass } from '../../../hooks/secret-shield/pipeline.ts'
 import { brokenLines, jsonlHits, newNonce, planJsonl, skipReasonOf, type LineHit } from '../jsonl.ts'
-import { finalText, finalTextAligned, planRedaction, restoreCheck, shieldMarker, sweepPlan, vaultEntries, type Plan } from '../redact.ts'
+import { finalText, finalTextAligned, planRedaction, restoreCheck, SHIELD_MARKER, shieldMarker, sweepPlan, vaultEntries, type Plan } from '../redact.ts'
 
 const HOMES: readonly string[] = []
 const SECRETS: ReadonlySet<Pass> = new Set<Pass>(['secrets'])
@@ -105,6 +105,42 @@ describe('JSONL planner', () => {
     expect(guarded.stats.causes).toEqual({})
     expect(guarded.plan?.parts.some((part) => part.t === 'new')).toBe(false)
     expect(jsonlHits(marked, HOMES, ALL_BUT_HOME).hits).toEqual({})
+  })
+
+  test('A5: the shield markers of a first round are opaque to a second round, in plan and in scan-only mode (round 2 reads them as secrets without the sentinel)', () => {
+    const pw = 'Zq7Lm2' + 'Xp9Rt4' + 'Vb8Nc3Kd'
+    const hex = 'a1b2c3d4' + 'e5f60718' + '293a4b5c' + '6d7e8f90'
+    const hexBack = [...hex].reverse().join('')
+    const shapes: Array<{ name: string; line: string; hits: Record<string, number> }> = [
+      { name: 'connection string', line: JSON.stringify({ t: 'Server=db;User Id=u;Password=' + pw + ';Encrypt=true' }), hits: { 'connection-string-key': 1 } },
+      { name: 'cookie header', line: JSON.stringify({ t: 'Cookie: _gitlab_session=' + hex + '; other=1' }), hits: { 'gitlab-session-cookie': 1 } },
+      { name: 'cookie in a nested JSON string', line: JSON.stringify({ t: JSON.stringify({ _gitlab_session: hex, x: 1 }) }), hits: { 'gitlab-session-cookie': 1 } },
+      { name: 'two cookies on one line', line: JSON.stringify({ t: '_gitlab_session=' + hex + ' and _gitlab_session=' + hexBack }), hits: { 'gitlab-session-cookie': 2 } },
+    ]
+    const shieldAll = new RegExp(SHIELD_MARKER, 'g')
+    for (const shape of shapes) {
+      const text = shape.line + '\n'
+      const first = planJsonl(text, HOMES, SECRETS, newNonce(text))
+      expect([shape.name, first.hits]).toEqual([shape.name, shape.hits])
+      expect(first.plan).not.toBeNull()
+      const written = writeOut(first.plan as Plan, text, () => crypto.randomUUID())
+      expect(written.restored).toBe(true)
+      const markers = (written.final.match(shieldAll) ?? []).length
+      expect([shape.name, markers]).toEqual([shape.name, Object.values(shape.hits)[0]])
+      // Round 2 on the final text of round 1: nothing left to find, nothing to write, and every shield marker is an old part (restoreCheck counts them there).
+      const second = planJsonl(written.final, HOMES, SECRETS, newNonce(written.final))
+      expect([shape.name, second.hits, second.stats.causes]).toEqual([shape.name, {}, {}])
+      expect(second.plan).not.toBeNull()
+      expect(second.plan?.stretches.length).toBe(0)
+      expect(second.stats.stretches).toBe(0)
+      expect(second.plan?.parts.filter((part) => part.t === 'old').length).toBe(markers)
+      expect(second.plan?.parts.some((part) => part.t === 'lit' && new RegExp(SHIELD_MARKER).test(part.text))).toBe(false)
+      expect(jsonlHits(written.final, HOMES, SECRETS).hits).toEqual(second.hits)
+    }
+    // Consequence (a) of the sentinel: a value glued right after a shield marker is not counted (the core treats a value holding a marker as a known miss).
+    const glued = JSON.stringify({ t: 'Server=db;User Id=u;Password=' + shieldMarker('connection-string-key', '12345678-1234-4234-8234-123456789012') + pw + ';Encrypt=true' })
+    expect(planJsonl(glued, HOMES, SECRETS, newNonce(glued)).hits).toEqual({})
+    expect(jsonlHits(glued, HOMES, SECRETS).hits).toEqual({})
   })
 
   test('A3: lines that are not JSON with CRLF endings are located without the carriage return', () => {

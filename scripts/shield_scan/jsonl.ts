@@ -75,6 +75,23 @@ const decodeToken = (token: string): string => {
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** Every raw marker a line can hold: a shield marker or a core marker. */
+const MARKER_ALL = new RegExp(`(?:${SHIELD_MARKER})|(?:${CORE_MARKER})`, 'g')
+const SHIELD_WHOLE = new RegExp(`^(?:${SHIELD_MARKER})$`)
+
+/**
+ * The line with every raw core marker AND every raw shield marker replaced by the nonce marker, and the originals in order.
+ * WHY shield markers too: redactJsonLine knows only the core markers (it skips `[JANITOR-REDACTED:kind]`), so on a line that already holds the shield markers of an earlier round its connection-string rule took the first word of a marker for a password and a gitlab-session-cookie hit fired, giving residual hits, cause marker-moved, a null plan and a file skipped as align-error. In the nonce form the core is inert (0 hits, a plan). Two consequences, both known: (a) a value glued to a marker (`Password=<marker>abc`) is not counted, because the core treats a value holding a marker as a known miss; (b) text shaped like a shield marker is never read by any pass, so a token put in the Type field of a fake marker is not found, the same evasion as on the plain path through cutMarkers.
+ */
+function sentinelMarkers(line: string, nonceMarker: string): { line: string; originals: string[] } {
+  const originals: string[] = []
+  const swapped = line.replace(MARKER_ALL, (marker) => {
+    originals.push(marker)
+    return nonceMarker
+  })
+  return { line: swapped, originals }
+}
+
 /** The marker passes that run on a decoded string after redactJsonLine: the given set without secrets (redactJsonLine is the secrets pass) and without home (counted, never rewritten); null when none is left (redactAll refuses an empty set). */
 const otherPasses = (passes: ReadonlySet<Pass>): ReadonlySet<Pass> | null => {
   const rest = new Set([...withoutHome(passes)].filter((pass) => pass !== 'secrets'))
@@ -149,12 +166,14 @@ function locateRun(run: LineRun, homes: readonly string[], passes: ReadonlySet<P
 }
 
 /** The hits of one line that parses as JSON: redactJsonLine (with the secrets pass) plus the other passes on each decoded string. A line redactJsonLine throws on adds JSON_UNREDACTABLE and nothing else, as in planJsonLine. */
-function jsonLineHits(line: string, homes: readonly string[], passes: ReadonlySet<Pass>, others: ReadonlySet<Pass> | null, wantHome: boolean): Hits {
+function jsonLineHits(line: string, homes: readonly string[], passes: ReadonlySet<Pass>, others: ReadonlySet<Pass> | null, wantHome: boolean, nonceMarker: string): Hits {
   const hits: Hits = {}
-  let doc = line
+  // WHY the line is sentinelled before the secrets pass: see sentinelMarkers (the same swap as planJsonLine, so the counter and the planner count alike; consequences (a) and (b) are named there).
+  const sentinelled = sentinelMarkers(line, nonceMarker).line
+  let doc = sentinelled
   if (passes.has('secrets')) {
     try {
-      const result = redactJsonLine(line)
+      const result = redactJsonLine(sentinelled)
       doc = result.text
       addHits(hits, result.hits)
     } catch {
@@ -175,10 +194,11 @@ export function jsonlHits(text: string, homes: readonly string[], passes: Readon
   const lineHits: LineHit[] = []
   let notJson = 0
   const others = otherPasses(passes)
+  const nonceMarker = `[JANITOR-REDACTED:${newNonce(text)}]`
   const wantHome = passes.has('home')
   for (const run of lineRuns(text)) {
     if (run.json) {
-      const one = jsonLineHits(run.lines[0], homes, passes, others, wantHome)
+      const one = jsonLineHits(run.lines[0], homes, passes, others, wantHome, nonceMarker)
       addHits(hits, one)
       pushLineHits(lineHits, one, run.first + 1)
       continue
@@ -306,9 +326,9 @@ function planChangedToken(token: string, dOrig: string, dOut: string, c: Context
 
 /** One line that parses as JSON (spec R6 steps 1 to 4): its parts and stretches (indexes local to the line) are pushed, a cause is added to `causes`. */
 function planJsonLine(line: string, c: Context, hits: Hits, parts: Part[], stretches: Stretch[], causes: Set<JsonlCause>): void {
-  // Step 1: the raw core markers, kept in order, and the line with the nonce form in their place.
-  const originals = line.match(c.coreAll) ?? []
-  const sentinelled = line.replace(c.coreAll, () => c.nonceMarker)
+  // Step 1: the raw core markers AND the raw shield markers, kept in order, and the line with the nonce form in their place.
+  // WHY the shield markers too: see sentinelMarkers (round 2 of a redact read the markers of round 1 as secrets). Consequences, both known: (a) a value glued to a marker (`Password=<marker>abc`) is not counted, the core treats a value holding a marker as a known miss; (b) text shaped like a shield marker is never read by any pass, so a token in the Type field of a fake marker is not found, as on the plain path through cutMarkers.
+  const { line: sentinelled, originals } = sentinelMarkers(line, c.nonceMarker)
   // Step 2. WHY redactJsonLine only with the secrets pass named: it is the secrets pass; a job without it must not run it.
   let out = sentinelled
   if (c.passes.has('secrets')) {
@@ -362,15 +382,19 @@ function planJsonLine(line: string, c: Context, hits: Hits, parts: Part[], stret
   }
   if (at < sentinelled.length) parts.push({ t: 'lit', text: sentinelled.slice(at) })
   if (causes.size > 0) return
-  // The nonce markers go back to the core markers they stood for, in order. WHY here and not in the cut: a nonce marker is a lit part of its own, so the swap cannot touch a stretch or a shield marker.
+  // The nonce markers go back to the markers they stood for, in order: a core marker stays a lit part, a shield marker becomes an old part. WHY here and not in the cut: a nonce marker is a lit part of its own, so the swap cannot touch a stretch.
+  // WHY a shield marker is an old part and not a lit one: restoreCheck counts the shield markers of the final text against the old and the new parts. The element is replaced, the part is not mutated (its t would change).
   let next = 0
-  for (const part of parts) {
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
     if (part.t !== 'lit' || part.text !== c.nonceMarker) continue
     if (next >= originals.length) {
       causes.add('token-structure')
       return
     }
-    part.text = originals[next++]
+    const original = originals[next++]
+    if (SHIELD_WHOLE.test(original)) parts[i] = { t: 'old', text: original }
+    else part.text = original
   }
   if (next !== originals.length) causes.add('token-structure')
 }

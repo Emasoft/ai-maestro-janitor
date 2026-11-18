@@ -113,6 +113,35 @@ def test_markers_already_in_a_line_survive_byte_for_byte(box: Box) -> None:
     assert box.restore(read_text(a)) == expected
 
 
+def test_second_round_reads_the_shield_markers_of_the_first_as_opaque(box: Box) -> None:
+    """A connection-string password and a gitlab session cookie are redacted without a skip (the regression guard), then a second redact run skips nothing, finds nothing and leaves the bytes alone, a scan-only run finds nothing, and restore gives back the original."""
+    # WHY these two values: round 2 used to read the shield markers of round 1 as a connection-string password and as a gitlab-session-cookie hit, so it found residual hits and skipped the file as align-error. Measured with the shield markers left out of the swap: this first run alone already ends skipped as align-error (files_redacted 0, findings_not_redacted 2), so the first assertions are the guard of the regression; the later assertions (second run, scan-only, restore) were not seen failing and check idempotence.
+    conn_password = b62("jsonl-conn", 20)
+    cookie = "a1b2c3d4" + "e5f60718" + "293a4b5c" + "6d7e8f90"
+    original = (
+        json.dumps({"id": 1, "text": "Server=db;User Id=u;Password=" + conn_password + ";Encrypt=true"})
+        + "\n"
+        + json.dumps({"id": 2, "text": "Cookie: _gitlab_session=" + cookie + "; other=1"})
+        + "\n"
+    )
+    a = box.put(box.root / "a.jsonl", original)
+    first = box.run()
+    assert first.code == 0, first.stderr
+    assert first.summary["files_redacted"] == 1 and first.summary["residual"] == 0 and first.summary["findings_not_redacted"] == 0
+    after_first = a.read_bytes()
+    text = read_text(a)
+    assert conn_password not in text and cookie not in text and len(MARKER_RE.findall(text)) == 2
+    rows = box.vault_rows()
+    second = box.run()
+    assert second.code == 0, second.stderr
+    assert second.skips == [] and second.summary["findings"] == 0 and second.summary["files_redacted"] == 0 and second.summary["residual"] == 0
+    assert a.read_bytes() == after_first and box.vault_rows() == rows
+    scanned = scan_only(box)
+    assert scanned.code == 0, scanned.stderr
+    assert scanned.summary["findings"] == 0 and scanned.summary["jsonl_lines_not_json"] == 0
+    assert box.restore(text).encode("utf-8") == original.encode("utf-8")
+
+
 def test_lines_that_are_not_json_are_redacted_as_text_and_counted(box: Box) -> None:
     """A line that is not JSON is redacted as text and counted in jsonl_lines_not_json, and a PEM block over several non-JSON lines is hidden whole."""
     original = "\n".join(["{\"ok\":1}", "plain line " + TOKEN, *PEM_LINES, "{\"ok\":2}"]) + "\n"
