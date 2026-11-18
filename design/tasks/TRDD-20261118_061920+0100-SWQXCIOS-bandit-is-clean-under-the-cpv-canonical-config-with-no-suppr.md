@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: todo
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-18T06:25:00+0100
+updated: 2026-11-18T07:06:56+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -27,6 +27,7 @@ parent-trdd: BAQB9SYO
 - Measured 2026-11-18 by main-agent: bandit with the CPV canonical .bandit.yml (gen_bandit_yml of CPV v5.23.1: skips B404 and B603, and B101 in test files only) over the 1267 Python files the CPV ci-preflight feeds bandit gives 779 findings in 269 files: B607 372 (231 in tests, 141 runtime), B108 189 (all tests), B110 126, B105 49, B101 13 (11 runtime), B112 6, B608 6, B613 5 (HIGH, tests), B311 5, B604 3, B606 2, B102 2, B605 1. The per-file list is a local scratch file of that run, not in the repo.
 - NEXT ACTION: commit .bandit.yml byte-identical to gen_bandit_yml; pilot the B607 helper in three contexts (a hyphen-named detector, a hook, a test file); measure the cost of one pilot unit; then fan out by lane.
 - Disclosure, 2026-11-18T06:25:00+0100, by main-agent: two parts of this plan satisfy the CPV gate without hardening anything, and the owner may rule on them together with the jev_compaction.py nosec. The canonical .bandit.yml skips B404 and B603 for every file and B101 in test files (CPV-authored and drift-checked, so a plugin cannot change it). The B607 helper returns shutil.which(name) or name; its canon docstring says it does not change security and only keeps the bare name out of the call. "No suppression" in the title means no marker added by this card, not that these two are hardening.
+- Correction and step 1 done, 2026-11-18T07:06:00+0100, by main-agent: c38eddcd adds .bandit.yml, byte-identical to gen_bandit_yml of the installed CPV 5.23.1 (cmp equal, sha256 0d0d65d6...289a2, checked by main-agent). Its commit message says that without the file "the local gate and CI judged different rule sets"; that is wrong for this repo: no workflow under .github/workflows runs Mega-Linter or bandit, and .mega-linter.yml states that it is dormant (TRDD-6SIY2VX2). What reads .bandit.yml here is the CPV ci-preflight that publish.py runs (cpv_ci_preflight.py:1134 passes -c .bandit.yml when the file exists) and the CPV canonical-pipeline drift check (validate_plugin.py:7675 lists the file). The commit stands; this line corrects its stated reason. NEXT ACTION: pilot the B607 helper in three contexts (a hyphen-named detector, a hook, a test file), measure the cost of one pilot unit, then fan out by lane.
 
 Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, skip or ignore marker; a site that cannot be fixed without one goes to the owner).
 
@@ -51,7 +52,7 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 
 ## Acceptance
 
-- [ ] .bandit.yml committed, byte-identical to gen_bandit_yml at the CPV pin
+- [x] .bandit.yml committed, byte-identical to gen_bandit_yml at the CPV pin (evidence: c38eddcd; cmp equal and sha256 0d0d65d6...289a2 against gen_bandit_yml of the installed CPV 5.23.1, checked by main-agent)
 - [ ] bandit with that config exits 0 over the ci-preflight file list
 - [ ] no nosec, skip or ignore marker added; the jev_compaction.py nosec decided by the owner
 - [ ] ci-preflight passes on a fresh clone
