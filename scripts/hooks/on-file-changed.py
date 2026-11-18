@@ -42,7 +42,10 @@ def main() -> int:
     try:
         raw = sys.stdin.read()
     except Exception:  # noqa: BLE001 -- fail-open
-        pass
+        # why: read() can raise OSError or ValueError, and sys.stdin is None when fd 0 is closed
+        # (AttributeError); the hook must exit 0 (module docstring), so the catch stays broad.
+        # raw stays "" and the message below says so: no detector could be marked due.
+        print("[on-file-changed] stdin read failed; no detector marked due", file=sys.stderr)
     try:
         import state  # noqa: PLC0415 -- sibling lib via the path insert
 

@@ -49,7 +49,9 @@ def main() -> int:
     try:
         sys.stdin.read()  # drain; the payload is not load-bearing (any source ⇒ same marks)
     except Exception:  # noqa: BLE001 -- fail-open
-        pass
+        # why: read() can raise OSError or ValueError, and sys.stdin is None when fd 0 is closed
+        # (AttributeError); the hook must exit 0 (module docstring), so the catch stays broad.
+        print("[on-config-change] stdin drain failed; due marks still set", file=sys.stderr)
     try:
         import state  # noqa: PLC0415 -- sibling lib via the path insert
 
