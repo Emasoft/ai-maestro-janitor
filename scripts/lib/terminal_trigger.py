@@ -662,10 +662,10 @@ def _read_iterm_pane_text(sid: str) -> str | None:
         # the timeout is still correctly surfaced to the caller via the `return None` below
         # regardless of whether this line lands, but silently discarding a disk-full signal
         # with nowhere else it is ever recorded is its own failure worth seeing (review finding).
-        # The stderr fallback is caught as bare `Exception`, not just `OSError`: a detached
-        # child process can run with `sys.stderr` set to `None` or a closed handle, and writing
-        # to it then can raise `AttributeError`/`ValueError` rather than `OSError` — the read
-        # result is what callers act on, a lost log line never is, so nothing here may escape.
+        # The stderr fallback tests `sys.stderr is not None` first: a detached child can run with
+        # `sys.stderr` set to `None`, and `print(file=None)` would then write to stdout instead of stderr.
+        # A closed stderr raises ValueError on write, so the fallback is caught as bare `Exception`:
+        # the read result is what callers act on, a lost log line never is, so nothing here may escape.
         try:
             state.log_line(
                 "terminal_trigger",
@@ -674,7 +674,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
             )
         except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
             try:
-                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                if sys.stderr is not None:
+                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
             except Exception:  # noqa: BLE001 - stderr itself may be closed/None
                 pass
         direct_script = _iterm_direct_session_script(sid, ["            return contents"])
@@ -689,7 +690,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 )
             except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
                 try:
-                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                    if sys.stderr is not None:
+                        print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
                 except Exception:  # noqa: BLE001 - stderr itself may be closed/None
                     pass
             return None
@@ -711,7 +713,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 )
             except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
                 try:
-                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                    if sys.stderr is not None:
+                        print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
                 except Exception:  # noqa: BLE001 - stderr itself may be closed/None
                     pass
             return None
@@ -731,7 +734,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 )
             except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
                 try:
-                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                    if sys.stderr is not None:
+                        print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
                 except Exception:  # noqa: BLE001 - stderr itself may be closed/None
                     pass
             return None
