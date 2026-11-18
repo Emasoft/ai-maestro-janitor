@@ -1,0 +1,21 @@
+# Canonical bandit configuration (CPV issue #254). Read by BOTH the local preflight
+# and CI's Mega-Linter (PYTHON_BANDIT_CONFIG_FILE). Do not edit: the canonical-pipeline
+# drift check compares this file byte for byte.
+#
+# B404 (import subprocess) and B603 (subprocess call without shell=True) fire on every
+# list-argument subprocess call, the SAFE form, with no information about the
+# arguments. B602, B604, B605, B606 and B607 (the rules that DO carry a signal) stay on.
+skips:
+  - B404
+  - B603
+
+# `assert` is the pytest idiom; B101 is skipped for test files ONLY. Every other rule
+# still scans them, and B101 still fires in any non-test module.
+assert_used:
+  skips:
+    - "*/test_*.py"
+    - "*/*_test.py"
+    - "*/conftest.py"
+    - "test_*.py"
+    - "*_test.py"
+    - "conftest.py"
