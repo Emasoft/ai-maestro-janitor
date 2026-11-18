@@ -1,6 +1,7 @@
 Corasick
 EPERM
 FADYLSQB
+FEFF
 KSUIEPTQ
 RJJGXPIK
 SECRETWORD
@@ -1147,8 +1148,10 @@ ecret
 ecsec
 editbody
 eedaada
+eevil
 eexist
 efcy
+efdp
 efuse
 egui
 eiusmod
