@@ -326,7 +326,13 @@ def main() -> int:
             msg=f"{line} — confirmed={confirmed}", ref="-", now=now,
         )
     except Exception:  # noqa: BLE001 — the mailbox must never break the alarm
-        pass
+        # why: the alarm was printed above; a failed ledger write must not break the heartbeat, so the
+        # broad catch stays; the log line records the unrecorded finding, and the typed guard keeps a
+        # failed log write from escaping this handler.
+        try:
+            state.log_line(_LOG, "ledger write failed; fallback alarm printed, not recorded")
+        except (OSError, ValueError):
+            pass
 
     state.rotate_log_if_big(_LOG)
     return 0

@@ -1396,7 +1396,11 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
                     )
                     dedupe.emit_once(seen_file, key, chore)
                 except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
-                    pass
+                    # why: a ledger failure must never break the heartbeat, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+                    try:
+                        state.log_line("dispatch", "memory-marker suppression record skipped")
+                    except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                        pass
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
@@ -1866,7 +1870,11 @@ def _spend_pending_agent_nudges() -> None:
         # agent in ~15 min (3 nudges x 5 min). See `pending_agents.NUDGE_MIN_INTERVAL_S`.
         pending_agents.spend_nudges(min_interval=pending_agents.NUDGE_MIN_INTERVAL_S)
     except Exception:  # noqa: BLE001 - a manifest bug must never break a fire
-        pass
+        # why: a manifest bug must never break a fire, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+        try:
+            state.log_line("dispatch", "pending-agent nudge spend skipped")
+        except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+            pass
 
 
 def _pending_agent_count() -> int:

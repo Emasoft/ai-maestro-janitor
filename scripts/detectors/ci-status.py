@@ -313,7 +313,13 @@ def main() -> int:
                     now=now,
                 )
             except Exception:  # noqa: BLE001 -- the mailbox must never break the alarm
-                pass
+                # why: the alarm was printed above; a failed ledger write must not break the fire, so the
+                # broad catch stays; the log line records the unrecorded finding, and the typed guard keeps a
+                # failed log write from escaping this handler.
+                try:
+                    state.log_line("ci-status", "ledger write failed; CI failure printed, not recorded")
+                except (OSError, ValueError):
+                    pass
 
     if action == "success":
         # Mirror the failed branch: print IS the delivery, ledger record is a durable
@@ -340,7 +346,13 @@ def main() -> int:
                 now=now,
             )
         except Exception:  # noqa: BLE001 -- the mailbox must never break the notification
-            pass
+            # why: the notice was printed above; a failed ledger write must not break the run, so the
+            # broad catch stays; the log line records the unrecorded notice, and the typed guard keeps a
+            # failed log write from escaping this handler.
+            try:
+                state.log_line("ci-status", "ledger write failed; CI success printed, not recorded")
+            except (OSError, ValueError):
+                pass
 
     # "resolved", "success", or a delivered failure → stamp so a future fire treats this SHA
     # as done (one notification per push; a CI re-run on the SAME SHA is the user's own action).

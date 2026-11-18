@@ -68,7 +68,12 @@ def _log_top_cpu(load: float) -> None:
         ]
         state.log_line(_LOG, f"top-cpu at load {load:.0f}: " + "; ".join(parts))
     except Exception:  # noqa: BLE001 - fail open: the HOST-001 alert must still print
-        pass
+        # why: the HOST-001 alert prints regardless; a failed top-cpu log must not break it, so the broad
+        # catch stays and the typed guard keeps a failed log write from escaping this handler.
+        try:
+            state.log_line(_LOG, "top-cpu snapshot failed; no process log for this episode")
+        except (OSError, ValueError):
+            pass
 
 
 def main() -> int:

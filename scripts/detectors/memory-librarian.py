@@ -1845,7 +1845,12 @@ def main() -> int:
         try:
             state.log_line("memory-librarian", f"unexpected error (fail-open no-op): {exc}")
         except Exception:
-            pass
+            # why: the catch-all already fails open; this retries the record on the same log, and the
+            # typed guard keeps a failed retry from escaping the handler.
+            try:
+                state.log_line("memory-librarian", "log append failed; fault not logged")
+            except (OSError, ValueError):
+                pass
         return 0
 
 

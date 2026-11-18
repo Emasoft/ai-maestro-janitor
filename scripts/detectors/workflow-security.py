@@ -189,6 +189,11 @@ def main() -> int:
             try:
                 rule_findings = rule.check(wf)
             except Exception:  # noqa: BLE001 - scanner resilience (mirrors doctor_classify)
+                # why: one bad rule must not blind the rest, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+                try:
+                    state.log_line("workflow-security", "structural scanner rule skipped")
+                except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                    pass
                 continue
             for finding in rule_findings:
                 _consider(rel, finding)
@@ -202,6 +207,11 @@ def main() -> int:
             for finding in repo_rule(list(texts.values())):
                 _consider(workflows_rel, finding)
         except Exception:  # noqa: BLE001
+            # why: repo-rule isolation keeps the broad catch; stderr reaches the agent every fire, so the skip goes to the log.
+            try:
+                state.log_line("workflow-security", "repo-level scanner rule skipped")
+            except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                pass
             continue
 
     # Stamp the scanned hash regardless of outcome so an all-clean scan also

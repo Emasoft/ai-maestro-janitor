@@ -223,7 +223,11 @@ def main() -> int:
                         f"BRPROT-003 not raised: git failed resolving the design root ({reason})",
                     )
             except Exception:  # noqa: BLE001 - reporting must never break the caller
-                pass
+                # why: reporting must never break the guard, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+                try:
+                    state.log_line("branch-protection-apply", "BRPROT-003 report skipped")
+                except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                    pass
         return _decline("no-repo-slug")
 
     # Gate 4: gh availability.

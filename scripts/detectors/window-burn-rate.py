@@ -341,7 +341,11 @@ def main() -> int:
                     msg=trip["line"], ref="-", now=now,
                 )
             except Exception:
-                pass  # the mailbox must never break the alarm
+                # why: the mailbox must never break the alarm, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+                try:
+                    state.log_line("window-burn-rate", "findings ledger record skipped")
+                except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+                    pass
 
     state.rotate_log_if_big("window-burn-rate")
     return 0

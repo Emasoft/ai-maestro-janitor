@@ -540,7 +540,12 @@ def main() -> int:
         try:
             state.log_line("memory-maintenance", f"unexpected error (fail-open no-op): {exc}")
         except Exception:
-            pass
+            # why: the catch-all is the contract (exit 0, no output); a failed log write must not escape it,
+            # so the typed guard keeps that write failure from breaking exit 0.
+            try:
+                state.log_line("memory-maintenance", "log append failed; unexpected error not logged")
+            except (OSError, ValueError):
+                pass
         return 0
 
 
@@ -572,7 +577,12 @@ def _surface_mistiered(scopes: list[tuple[str, Path]], split_cap: int) -> None:
         try:
             state.log_line("memory-maintenance", f"mis-tier surface skipped: {exc}")
         except Exception:  # noqa: BLE001
-            pass
+            # why: a report fault must never break the pass it rides on; the log line records the lost
+            # report, and the typed guard keeps a failed log write from escaping this handler.
+            try:
+                state.log_line("memory-maintenance", "mis-tier log append failed; report not logged")
+            except (OSError, ValueError):
+                pass
 
 
 def _surface_scope_escapes(scopes: list[tuple[str, Path]]) -> None:
@@ -628,7 +638,12 @@ def _surface_scope_escapes(scopes: list[tuple[str, Path]]) -> None:
         try:
             state.log_line("memory-maintenance", f"scope-escape surface skipped: {exc}")
         except Exception:  # noqa: BLE001
-            pass
+            # why: a report fault must never break the pass it rides on; the log line records the lost
+            # report, and the typed guard keeps a failed log write from escaping this handler.
+            try:
+                state.log_line("memory-maintenance", "scope-escape log append failed; report not logged")
+            except (OSError, ValueError):
+                pass
 
 
 def _run() -> int:

@@ -182,7 +182,11 @@ def record_outcome(outcome: str, now: int) -> None:
             pass  # absent or corrupt → write a fresh trace
         state.atomic_write(p, f"{now} {outcome}")
     except Exception:  # noqa: BLE001 — observability must never take down the detector
-        pass
+        # why: a breadcrumb must never crash the beat, so the broad catch stays; stderr reaches the agent every fire, so the skip goes to the log.
+        try:
+            state.log_line(_LOG, "outcome breadcrumb skipped")
+        except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
+            pass
 
 
 def main() -> int:

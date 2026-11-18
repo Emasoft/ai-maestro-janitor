@@ -136,7 +136,13 @@ def _record_completions(state_dir: Path, chores: list[str]) -> dict[str, int]:
         try:
             state.atomic_write(path, json.dumps(hist))
         except Exception:  # noqa: BLE001 -- a bookkeeping fault must not break the beat
-            pass
+            # why: a history write fault must not break the beat, so the broad catch stays; the log line
+            # records the fallback to the roster bound, and the typed guard keeps a failed log write from
+            # escaping this handler.
+            try:
+                state.log_line("claimed-chore-stale", "completion history not saved; roster bound used")
+            except (OSError, ValueError):
+                pass
     return {c: ccw.observed_period(hist.get(c, [])) for c in chores}
 
 
