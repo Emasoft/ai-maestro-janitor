@@ -4,7 +4,7 @@ title: a shield-scan redact skip after the vault step leaves the values of an un
 column: backburner
 status: tasked
 created: 2026-11-18T08:56:20+0100
-updated: 2026-11-18T10:07:13+0100
+updated: 2026-11-18T10:17:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,3 +31,4 @@ Found 2026-11-18 by main-agent while reading scripts/shield_scan/worker.ts redac
 ## Decision
 
 - Decision, 2026-11-18T10:20:00+0100, by main-agent under the owner ruling to decide alone: not fixed in 3.9.9; the gap is documented in skills/janitor-secrets-shield-scan/references/redact-and-restore.md (Redact details). A leftover row repeats a value that the skipped file still holds in plain text, while a cleanup that deletes the wrong row leaves a marker that can never be restored, so the fix waits for its own careful change, after 3.9.9 and before the report-sanitizer scanner pin. Chosen fix: write the vault after every check of the file, not before (restoreCheck already takes a lookup callback, worker.ts line 122), so no exit leaves rows; deleting rows after a skip cannot reach the per-file time limit kill, which is the skip that fired in acceptance 2 pass 1. Exits after the first vault write today: restoreCheck, brokenLines, both next-plan-null branches, the two home-pass skips, checkWriteTarget, a write that is not written, a VaultError in a later round, and the time-limit kill. Tests: a file that fails a late check leaves 0 new rows; a file that already holds markers and fails a late check still restores its old markers; check PRAGMA secure_delete and the WAL so that no deleted value stays in vault.db.
+- Stamp correction, 2026-11-18T10:16:30+0100, by main-agent: the stamp 10:20:00 of the Decision line above was typed, not read from the clock; the line was appended at 10:07:13 (the updated: value after the append, read from git).

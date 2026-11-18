@@ -1,10 +1,10 @@
 ---
 trdd-id: L1I0FP5T
 title: Shield and report-sanitizer share one rule core and never mask a path except the home prefix
-column: dev
+column: todo
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-18T10:10:22+0100
+updated: 2026-11-18T10:17:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -84,6 +84,8 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-18T06:25:45+0100 — Step B part 1 done in janitor dcafa805: findEmails, redactEmails and redactAll take an email option, cloneAddresses visible (default, rule G on) or hidden. Measured by main-agent with a scratch probe: 60,000 generated lines gave 0 span differences between hidden mode and the report-sanitizer EMAIL regex with email_repl (RS 1ab8670), and 1172 in the default mode. Correction to the dcafa805 message: the first shield run with 6 timing failures had no load recorded; the run at load 29 failed 2; four alternating runs at load 15 passed (HEAD 1322, the email tree 1331). Step B part 2 (the report-sanitizer swap) is in progress.
 - 2026-11-18T06:44:26+0100 — Step B done in report-sanitizer, by main-agent. 1ad71fb re-pins core/ to janitor 8b5fe69f (sync_core.py --check exit 0; core/tests email 47, pipeline 12 and known-misses 36 pass under bun, single files). 8eaa0b8 replaces the Python EMAIL rule and email_repl with bridge op email (the core email pass with cloneAddresses hidden, run where the EMAIL rule ran), adds email to LEGACY_KINDS, and adds test_r and test_s to tests/test_shield_bridge.py (35 passed; tests/test_groups.py 20 passed). Acceptance (3) of the Step B design line is met, old side a checkout of 1ab8670: 324 of 324 synthetic lines byte-equal with 0 that hide less, fuzz 4000 of 4000, --group ssh-login unchanged (worker runs, outputs read by main-agent); the parity walk over 64,220 text files (the corpus grew from 52,736), 0 Python timeouts, 7,900 spans hidden by each side, all equal, Python-only 0 (was 379), core-only 0 (worker run, result file read by main-agent). The checkout of 1ab8670 was removed afterwards (git worktree remove; it held only that commit and an ignored __pycache__).
 - 2026-11-18T10:30:00+0100 — stays in dev across release 3.9.9 (main-agent): its open work (step 4, the report-sanitizer Python rules switched off and on over the corpus; increment 6, parity) is on the report-sanitizer side and continues after 3.9.9. 3.9.9 ships the janitor shield scanner on the shared core as it is at HEAD; no half-landed change of this card is in it.
+- 2026-11-18T10:17:16+0100 — column → todo by main-agent@ai-maestro-janitor. nobody works this card now; its open work is on the report-sanitizer side (cards S9Y7FUSR and its children); back to dev when that starts
+- 2026-11-18T10:16:30+0100 — column dev to todo by main-agent: correction of the stays-in-dev line two entries above (its stamp 10:30:00 was typed; it was appended at 10:10:22); the move itself is the 10:17:16 line just above. Nobody works this card now: its open work (step 4 and increment 6) is on the report-sanitizer side and is planned as report-sanitizer cards S9Y7FUSR and its six children, so a dev column would claim activity that is not happening. It goes back to dev when that work starts.
 
 ## Design
 
