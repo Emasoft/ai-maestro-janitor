@@ -1,5 +1,5 @@
 // secrets-shield redact, increment 3 step 3b-2a (TRDD-BAQB9SYO; spec design/specs/TRDD-BAQB9SYO-increment-3-redact.md R2, R5b, R6 v6): the pure planner of a JSONL file. No fs, no env, no process, no console: it returns a Plan over the RAW file text, so sweepPlan, vaultEntries, finalText and restoreCheck of redact.ts work on it unchanged.
-// Flow of one line that parses as JSON: the core markers already in it get a per-run nonce kind, redactJsonLine hides what it finds in each decoded string, the other marker passes (cards, email) run on each decoded string, and in each string token that changed the decoded texts are aligned (alignStretches) to find what each marker replaced; each replaced stretch is mapped back to its ENCODED substring of the original token. A line that is not JSON goes through planRedaction as plain text.
+// Flow of one line that parses as JSON: the core markers already in it get a per-run nonce kind, redactJsonLine hides what it finds in each decoded string, the other marker passes (cards, email) run on each decoded string (never inside a marker), and in each string token that changed the decoded texts are aligned (alignStretches) to find what each marker replaced; each replaced stretch is mapped back to its ENCODED substring of the original token. A maximal run of consecutive lines that do not parse as JSON goes through planRedaction as one plain text.
 // A value never leaves this module except inside the plan it returns: an error or a cause name never holds a value or a line of text. The plan is null when any line cannot be planned, and the stats count every cause over every line.
 
 import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
@@ -10,6 +10,18 @@ import { alignStretches, CORE_MARKER, cutMarkers, HOME_ONLY, planRedaction, SHIE
 export const JSONL_CAUSES = ['plain-align-null', 'redactJsonLine-threw', 'token-structure', 'marker-moved', 'decoded-align-null-nested', 'decoded-align-null-flat', 'stretch-overlaps-marker', 'escaped-marker', 'split-surrogate'] as const
 export type JsonlCause = (typeof JSONL_CAUSES)[number]
 
+/**
+ * The hit kind of a JSON line that redactJsonLine could not hide without breaking its JSON (it threw its fixed error); the line adds 1 of it to the hits, and the plan records the cause redactJsonLine-threw.
+ * WHY a hit kind: redactJsonLine throws only after a rule changed the line, so the line holds a finding the shield could not hide without breaking the JSON; counting it keeps the file visible in both modes (a file whose only finding is on that line would otherwise report 0 hits and end as clean, and scan-only mode would crash on the throw).
+ */
+export const JSON_UNREDACTABLE = 'json-unredactable'
+
+/** One located hit: kind, line (1-based), count. */
+export type LineHit = [kind: string, line: number, count: number]
+
+/** Why a file whose plan is null is skipped (spec R6 steps 2 and 3): a line that redactJsonLine could not hide without breaking it is json-broken, any other cause is align-error. */
+export const skipReasonOf = (causes: Readonly<Record<string, number>>): 'json-broken' | 'align-error' => ((causes['redactJsonLine-threw'] ?? 0) > 0 ? 'json-broken' : 'align-error')
+
 export interface JsonlStats {
   lines: number
   blank: number
@@ -17,7 +29,7 @@ export interface JsonlStats {
   not_json: number
   lines_with_stretches: number
   stretches: number
-  /** Cause name to the number of lines that had it (a line with two causes counts once for each). */
+  /** Cause name to the number of lines that had it (a line with two causes counts once for each; a run of non-JSON lines that cannot be planned counts once). */
   causes: Record<string, number>
 }
 
@@ -50,7 +62,15 @@ const isJsonContainer = (text: string): boolean => {
   return (first === '{' || first === '[') && parses(text)
 }
 
-const decodeToken = (token: string): string => (token.includes('\\') ? JSON.parse(token) : token.slice(1, -1))
+// WHY the parse is wrapped: the error text is fixed, an error must never carry a value (a token is a piece of a scanned file). The failure is unreachable today: every token comes from a line that parsed.
+const decodeToken = (token: string): string => {
+  if (!token.includes('\\')) return token.slice(1, -1)
+  try {
+    return JSON.parse(token)
+  } catch {
+    throw new Error('a JSON string token could not be decoded')
+  }
+}
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -63,43 +83,110 @@ const otherPasses = (passes: ReadonlySet<Pass>): ReadonlySet<Pass> | null => {
 /**
  * Step 2 of spec R6 for the string tokens of `doc`: each is decoded, the other marker passes run on it, and with the home pass named its home paths are counted (no rewrite in 3b-2a). Returns the decoded text of each token after the other passes.
  * WHY flat (one decoded string, nested JSON not walked): the passes read text and a marker has no quote or backslash, so a rewrite inside a nested document stays valid JSON, and the alignment of step 4 works on the same decoded string.
+ * WHY the passes run on the segments between markers and not on the whole decoded string: a shield marker carries a uuid, and a pass must not read inside it; a rewrite there would move a marker (cause marker-moved) and a hit there would be a false residual. The shield markers and the core markers (the nonce form included) are kept as they are, as planRedaction and residualHits do on plain text (cutMarkers of redact.ts).
  */
 function decodedAfterPasses(doc: string, spans: ReadonlyArray<[number, number]>, homes: readonly string[], others: ReadonlySet<Pass> | null, wantHome: boolean, hits: Hits): string[] {
   return spans.map(([start, end]) => {
-    let decoded = decodeToken(doc.slice(start, end))
-    if (others !== null) {
-      const result = redactAll(decoded, homes, others)
-      addHits(hits, result.hits)
-      decoded = result.text
-    }
-    if (wantHome) addHits(hits, redactAll(decoded, homes, HOME_ONLY).hits)
-    return decoded
+    const decoded = decodeToken(doc.slice(start, end))
+    if (others === null && !wantHome) return decoded
+    return cutMarkers(decoded)
+      .map((item) => {
+        if ('old' in item) return item.old
+        if ('lit' in item) return item.lit
+        let seg = item.seg
+        if (others !== null) {
+          const result = redactAll(seg, homes, others)
+          addHits(hits, result.hits)
+          seg = result.text
+        }
+        if (wantHome) addHits(hits, redactAll(seg, homes, HOME_ONLY).hits)
+        return seg
+      })
+      .join('')
   })
 }
 
+/** One step of the walk of a text: a line that parses as JSON (`json`, one line), or a maximal run of consecutive lines that do not parse as JSON, blank lines inside it included. `first` is the 0-based index of its first line and `newline` tells whether a newline follows its last line in the text. */
+interface LineRun {
+  json: boolean
+  lines: string[]
+  first: number
+  newline: boolean
+}
+
 /**
- * The JSON-aware hit counter (spec R6: one counter feeds the whole-file hits, the per-line locate and the residual, in scan-only mode too): redactJsonLine plus the other passes on each decoded string for a line that parses, redactAll for a line that does not.
- * redactJsonLine throws its fixed error when it breaks a line; that error is not caught here.
+ * The lines of a text (split at "\n"; the empty piece after a final newline is not a line) as runs, in order.
+ * WHY a run of non-JSON lines is one step and not one line each (spec R6): a multi-line value (a PEM private key in a .jsonl that is not really JSONL) is hidden only when the passes read its lines together, as they do in plain text.
  */
-export function jsonlHits(text: string, homes: readonly string[], passes: ReadonlySet<Pass>): Hits {
-  const hits: Hits = {}
-  const others = otherPasses(passes)
-  const wantHome = passes.has('home')
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') continue
-    if (!parses(line)) {
-      addHits(hits, redactAll(line, homes, passes).hits)
+function* lineRuns(text: string): Generator<LineRun> {
+  const pieces = text.split('\n')
+  const total = pieces[pieces.length - 1] === '' ? pieces.length - 1 : pieces.length
+  let i = 0
+  while (i < total) {
+    if (parses(pieces[i])) {
+      yield { json: true, lines: [pieces[i]], first: i, newline: i + 1 < pieces.length }
+      i++
       continue
     }
-    let doc = line
-    if (passes.has('secrets')) {
-      const result = redactJsonLine(line)
-      addHits(hits, result.hits)
-      doc = result.text
-    }
-    decodedAfterPasses(doc, stringSpans(doc), homes, others, wantHome, hits)
+    let end = i + 1
+    while (end < total && !parses(pieces[end])) end++
+    yield { json: false, lines: pieces.slice(i, end), first: i, newline: end < pieces.length }
+    i = end
   }
+}
+
+const pushLineHits = (lineHits: LineHit[], hits: Hits, line: number): void => {
+  for (const [kind, count] of Object.entries(hits)) lineHits.push([kind, line, count])
+}
+
+/** The per-line hits of a run of non-JSON lines: redactAll of each non-blank line alone, a final carriage return removed (as the plain locate of the worker does). */
+function locateRun(run: LineRun, homes: readonly string[], passes: ReadonlySet<Pass>, lineHits: LineHit[]): void {
+  run.lines.forEach((raw, k) => {
+    if (raw.trim() === '') return
+    pushLineHits(lineHits, redactAll(raw.endsWith('\r') ? raw.slice(0, -1) : raw, homes, passes).hits, run.first + k + 1)
+  })
+}
+
+/** The hits of one line that parses as JSON: redactJsonLine (with the secrets pass) plus the other passes on each decoded string. A line redactJsonLine throws on adds JSON_UNREDACTABLE and nothing else, as in planJsonLine. */
+function jsonLineHits(line: string, homes: readonly string[], passes: ReadonlySet<Pass>, others: ReadonlySet<Pass> | null, wantHome: boolean): Hits {
+  const hits: Hits = {}
+  let doc = line
+  if (passes.has('secrets')) {
+    try {
+      const result = redactJsonLine(line)
+      doc = result.text
+      addHits(hits, result.hits)
+    } catch {
+      // WHY the throw is counted and not rethrown: see JSON_UNREDACTABLE. The error is a fixed text; nothing of it is kept.
+      return { [JSON_UNREDACTABLE]: 1 }
+    }
+  }
+  decodedAfterPasses(doc, stringSpans(doc), homes, others, wantHome, hits)
   return hits
+}
+
+/**
+ * The JSON-aware hit counter (spec R6: one counter feeds the whole-file hits, the per-line locate and the residual, in scan-only mode too): redactJsonLine plus the other passes on each decoded string for a line that parses, redactAll for a run of lines that do not parse. `lineHits` are the hits of each line: exactly what a JSON line added to `hits`, and redactAll of the line alone for a line inside a run of non-JSON lines. `notJson` counts the non-blank lines that do not parse.
+ * WHY the per-line hits come from this walk and not from a separate locate walk: a walk costs about 350 ns of CPU per byte (measured on three transcripts of 48 to 199 MB, 94% of it inside redactJsonLine) and the per-file limit is 30 s + 5 s per MB, so a second walk over the JSON lines would double that cost. The lines of a run of non-JSON lines are the one place that is read twice (the run as one text, then each line alone by locateRun), and redactJsonLine runs only on JSON lines. A finding that spans lines (a PEM key) is in `hits` and in no single line of `lineHits`, as in the plain locate of the worker, so `lineHits` need not sum to `hits` for such a run.
+ */
+export function jsonlHits(text: string, homes: readonly string[], passes: ReadonlySet<Pass>): { hits: Hits; lineHits: LineHit[]; notJson: number } {
+  const hits: Hits = {}
+  const lineHits: LineHit[] = []
+  let notJson = 0
+  const others = otherPasses(passes)
+  const wantHome = passes.has('home')
+  for (const run of lineRuns(text)) {
+    if (run.json) {
+      const one = jsonLineHits(run.lines[0], homes, passes, others, wantHome)
+      addHits(hits, one)
+      pushLineHits(lineHits, one, run.first + 1)
+      continue
+    }
+    for (const line of run.lines) if (line.trim() !== '') notJson++
+    addHits(hits, redactAll(run.lines.join('\n'), homes, passes).hits)
+    locateRun(run, homes, passes, lineHits)
+  }
+  return { hits, lineHits, notJson }
 }
 
 /** Lines that parsed as JSON in the original and do not parse in the final text; -1 when the two have a different number of lines. */
@@ -230,6 +317,8 @@ function planJsonLine(line: string, c: Context, hits: Hits, parts: Part[], stret
       addHits(hits, result.hits)
     } catch {
       // The error is a fixed text; nothing of it is kept.
+      // WHY the line adds a hit and not only the cause: redactJsonLine throws only after a rule changed the line, so the line holds a finding the shield could not hide without breaking the JSON. Without the hit a file whose only finding is on this line reports 0 hits and ends as clean (see JSON_UNREDACTABLE).
+      addHits(hits, { [JSON_UNREDACTABLE]: 1 })
       causes.add('redactJsonLine-threw')
       return
     }
@@ -296,12 +385,25 @@ function appendLine(parts: Part[], stretches: Stretch[], lineParts: readonly Par
   for (const stretch of lineStretches) stretches.push(stretch)
 }
 
+/** The number of lines of a plan that hold a stretch (a stretch can span lines): a newline in a part or in a stretch value moves to the next line. */
+function linesWithStretches(parts: readonly Part[], stretches: readonly Stretch[]): number {
+  const seen = new Set<number>()
+  let line = 0
+  for (const part of parts) {
+    const breaks = (part.t === 'new' ? stretches[part.stretch].value : part.text).split('\n').length - 1
+    if (part.t === 'new') for (let k = 0; k <= breaks; k++) seen.add(line + k)
+    line += breaks
+  }
+  return seen.size
+}
+
 /**
- * The plan of a whole JSONL file (spec R6): lines split at "\n" (each newline is a lit part), a blank line kept as it is and counted, a line that is not JSON planned as plain text, a line that parses planned as above.
- * WHY the plan is null when any line failed, and planJsonl still walks every line: one line that cannot be explained would make the restore of the file unprovable, so no file is written (the worker skips it as align-error), and the stats of the walk say which causes to design for.
- * `hits` is what the passes found in all lines, failed ones included.
+ * The plan of a whole JSONL file (spec R6): lines split at "\n" (each newline is a lit part), a line that parses planned as above, a maximal run of consecutive lines that do not parse (blank lines inside it included) planned as ONE plain text, a run of blank lines only kept as it is. `blank` and `not_json` count lines.
+ * WHY a run and not line by line: a multi-line value, a PEM private key in a .jsonl that is not really JSONL, is hidden only when the passes read its lines together, as they do in plain text.
+ * WHY the plan is null when any line failed, and planJsonl still walks every line: one line that cannot be explained would make the restore of the file unprovable, so no file is written (the worker skips it, skipReasonOf gives the reason), and the stats of the walk say which causes to design for.
+ * `hits` is what the passes found in all lines, failed ones included. `lineHits` are the hits of each line from the same walk: for a JSON line exactly what it added to `hits`, for a line inside a run of non-JSON lines redactAll of that line alone with a final carriage return removed (as the plain locate of the worker does). WHY from the same walk: see jsonlHits.
  */
-export function planJsonl(text: string, homes: readonly string[], passes: ReadonlySet<Pass>, nonce: string): { hits: Hits; plan: Plan | null; stats: JsonlStats } {
+export function planJsonl(text: string, homes: readonly string[], passes: ReadonlySet<Pass>, nonce: string): { hits: Hits; lineHits: LineHit[]; plan: Plan | null; stats: JsonlStats } {
   const nonceMarker = `[JANITOR-REDACTED:${nonce}]`
   const c: Context = {
     homes,
@@ -314,33 +416,37 @@ export function planJsonl(text: string, homes: readonly string[], passes: Readon
     hasCut: new RegExp(`(?:${SHIELD_MARKER})|${escapeRegExp(nonceMarker)}`),
   }
   const hits: Hits = {}
+  const lineHits: LineHit[] = []
   const stats: JsonlStats = { lines: 0, blank: 0, json: 0, not_json: 0, lines_with_stretches: 0, stretches: 0, causes: {} }
   const parts: Part[] = []
   const stretches: Stretch[] = []
   let ok = true
-  const pieces = text.split('\n')
-  for (let i = 0; i < pieces.length; i++) {
-    const line = pieces[i]
-    // The empty piece after a final newline is not a line.
-    if (i === pieces.length - 1 && line === '') break
-    stats.lines++
-    const lineParts: Part[] = []
-    const lineStretches: Stretch[] = []
+  for (const run of lineRuns(text)) {
+    stats.lines += run.lines.length
+    const runParts: Part[] = []
+    const runStretches: Stretch[] = []
     const causes = new Set<JsonlCause>()
-    if (line.trim() === '') {
-      stats.blank++
-      lineParts.push({ t: 'lit', text: line })
-    } else if (parses(line)) {
+    if (run.json) {
       stats.json++
-      planJsonLine(line, c, hits, lineParts, lineStretches, causes)
+      const one: Hits = {}
+      planJsonLine(run.lines[0], c, one, runParts, runStretches, causes)
+      addHits(hits, one)
+      pushLineHits(lineHits, one, run.first + 1)
     } else {
-      stats.not_json++
-      const result = planRedaction(line, homes, passes)
-      addHits(hits, result.hits)
-      if (result.plan === null) causes.add('plain-align-null')
+      const runText = run.lines.join('\n')
+      const nonBlank = run.lines.filter((line) => line.trim() !== '').length
+      stats.not_json += nonBlank
+      stats.blank += run.lines.length - nonBlank
+      if (nonBlank === 0) runParts.push({ t: 'lit', text: runText })
       else {
-        for (const part of result.plan.parts) lineParts.push(part)
-        for (const stretch of result.plan.stretches) lineStretches.push(stretch)
+        const result = planRedaction(runText, homes, passes)
+        addHits(hits, result.hits)
+        locateRun(run, homes, passes, lineHits)
+        if (result.plan === null) causes.add('plain-align-null')
+        else {
+          for (const part of result.plan.parts) runParts.push(part)
+          for (const stretch of result.plan.stretches) runStretches.push(stretch)
+        }
       }
     }
     if (causes.size > 0) {
@@ -348,10 +454,10 @@ export function planJsonl(text: string, homes: readonly string[], passes: Readon
       for (const cause of causes) stats.causes[cause] = (stats.causes[cause] ?? 0) + 1
       continue
     }
-    if (lineStretches.length > 0) stats.lines_with_stretches++
-    stats.stretches += lineStretches.length
-    appendLine(parts, stretches, lineParts, lineStretches)
-    if (i < pieces.length - 1) appendLine(parts, stretches, [{ t: 'lit', text: '\n' }], [])
+    stats.lines_with_stretches += linesWithStretches(runParts, runStretches)
+    stats.stretches += runStretches.length
+    appendLine(parts, stretches, runParts, runStretches)
+    if (run.newline) appendLine(parts, stretches, [{ t: 'lit', text: '\n' }], [])
   }
-  return { hits, plan: ok ? { parts, stretches } : null, stats }
+  return { hits, lineHits, plan: ok ? { parts, stretches } : null, stats }
 }
