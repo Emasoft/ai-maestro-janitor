@@ -1078,7 +1078,7 @@ def _log_clear_decision(label: str, verdict: ClearVerdict, *, context_tokens: in
     exactly one production entry point per gate) gets the log line — a root-cause fix in the one
     place both callers route through, not a copy pasted into each.
 
-    Best-effort: a log failure must never break the decision it only records.
+    Best-effort: a log failure of the types named at the except clause must never break the decision it only records.
     """
     try:
         ctx = "unmeasurable" if context_tokens is None else str(context_tokens)
@@ -1087,7 +1087,8 @@ def _log_clear_decision(label: str, verdict: ClearVerdict, *, context_tokens: in
             f"{'fire' if verdict.fire else 'decline'} trigger={verdict.trigger or '-'} "
             f"context={ctx} autoCompactEnabled={harness_auto_compacts()} why={verdict.why}",
         )
-    except Exception:  # noqa: BLE001 -- logging must never break the caller's decision
+    # why: state.log_line raises OSError (log write), RuntimeError (Path.expanduser on the log dir) or ValueError (unicode encode). harness_auto_compacts() adds no type outside this tuple: its inner catch takes read and parse errors, a RecursionError from json.loads is a RuntimeError, and its environment read is plain dict access. verdict.fire, trigger and why format without raising. Any other type propagates.
+    except (OSError, RuntimeError, ValueError):  # a log failure of these types must never break the caller's decision
         pass
 
 

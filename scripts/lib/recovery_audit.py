@@ -167,8 +167,13 @@ def trim_recovery_audit(
         if not key:
             return
         jsi.AuditChain(p, key).trim(keep_lines=keep_lines, max_bytes=max_bytes)
-    except Exception:  # noqa: BLE001 -- an audit fault must never perturb the beat
-        pass
+    except Exception as exc:  # an audit fault must never perturb the beat
+        # why: the try body calls into janitor_self_integrity (key load, HMAC chain trim), an open raise set; the broad catch keeps the fail-open contract and the guarded line records the skip. The local import mirrors handoff_clear_verify._context_tokens.
+        try:
+            import state
+            state.log_line("recovery-audit", f"audit trim skipped: {type(exc).__name__}")
+        except (ImportError, OSError, RuntimeError, ValueError):
+            pass
 
 
 def load_records(path: Path | None = None) -> list[dict]:

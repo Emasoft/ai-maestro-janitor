@@ -95,3 +95,13 @@ def test_gh_not_on_path_prints_gh_not_on_path_reason(
     result = bpl.detect_default_branch("o/r")
     assert result is None
     assert "detect_default_branch gh-not-on-path" in capsys.readouterr().err
+
+
+def test_trace_soft_fail_with_no_stderr_prints_nothing(
+    capsys, bpl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no stderr stream, `_trace_soft_fail` prints nothing and never falls back to stdout."""
+    # capsys is listed first so monkeypatch is undone while capsys still owns sys.stderr.
+    monkeypatch.setattr(sys, "stderr", None)
+    assert bpl._trace_soft_fail("fn", "reason", ["argv0"]) is None
+    assert capsys.readouterr().out == ""

@@ -664,7 +664,7 @@ def _read_iterm_pane_text(sid: str) -> str | None:
         # with nowhere else it is ever recorded is its own failure worth seeing (review finding).
         # The stderr fallback tests `sys.stderr is not None` first: a detached child can run with
         # `sys.stderr` set to `None`, and `print(file=None)` would then write to stdout instead of stderr.
-        # A closed stderr raises ValueError on write, so the fallback is caught as bare `Exception`:
+        # A closed stderr raises ValueError on write, so the fallback is caught as (OSError, ValueError):
         # the read result is what callers act on, a lost log line never is, so nothing here may escape.
         try:
             state.log_line(
@@ -676,7 +676,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
             try:
                 if sys.stderr is not None:
                     print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
-            except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+            # why: print to sys.stderr raises OSError (write fails) or ValueError (stream closed, or text not encodable); the fallback must never raise
+            except (OSError, ValueError):
                 pass
         direct_script = _iterm_direct_session_script(sid, ["            return contents"])
         try:
@@ -692,7 +693,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 try:
                     if sys.stderr is not None:
                         print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
-                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                # why: print to sys.stderr raises OSError (write fails) or ValueError (stream closed, or text not encodable); the fallback must never raise
+                except (OSError, ValueError):
                     pass
             return None
         # Only shape/exit-code validated here, NOT emptiness: a live check against a real
@@ -715,7 +717,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 try:
                     if sys.stderr is not None:
                         print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
-                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                # why: print to sys.stderr raises OSError (write fails) or ValueError (stream closed, or text not encodable); the fallback must never raise
+                except (OSError, ValueError):
                     pass
             return None
         # The retry only runs after the PRIMARY read already timed out 15s ago — an empty
@@ -736,7 +739,8 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                 try:
                     if sys.stderr is not None:
                         print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
-                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                # why: print to sys.stderr raises OSError (write fails) or ValueError (stream closed, or text not encodable); the fallback must never raise
+                except (OSError, ValueError):
                     pass
             return None
         return proc.stdout
@@ -884,7 +888,8 @@ def wait_until_pane_free(
                         f"pane-free typing probe blinded {blind_streak}x in a row — "
                         "holding the pane-busy verdict rather than declaring it free",
                     )
-                except Exception:  # noqa: BLE001,S110 - a diagnostic must never break the gate
+                # why: state.log_line raises OSError (log write), RuntimeError (Path.expanduser on the log dir) or ValueError (unicode encode); a diagnostic must never break the gate
+                except (OSError, RuntimeError, ValueError):
                     pass
             return True
         blind_streak = 0
@@ -1110,7 +1115,8 @@ def inject_until_sent(
                         f"typing probe blinded {blind_streak}x in a row (hid unreadable) — "
                         "deferring injection rather than typing over a possibly-typing user",
                     )
-                except Exception:  # noqa: BLE001,S110 - a diagnostic must never break the gate
+                # why: state.log_line raises OSError (log write), RuntimeError (Path.expanduser on the log dir) or ValueError (unicode encode); a diagnostic must never break the gate
+                except (OSError, RuntimeError, ValueError):
                     pass
             return True  # blindness DEFERS (bounded by giveup_s), never licenses
         blind_streak = 0

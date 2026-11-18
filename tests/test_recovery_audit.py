@@ -215,6 +215,55 @@ def test_trim_noop_when_small(isolated) -> None:
     assert path.read_bytes() == before
 
 
+def test_trim_logs_and_swallows_a_trim_fault(isolated, monkeypatch) -> None:
+    """A trim fault is swallowed and logged once as `audit trim skipped: <type>`."""
+
+    class _TrimFault(Exception):
+        pass
+
+    class _Chain:
+        def __init__(self, *a, **k):
+            pass
+
+        def trim(self, **_k):
+            raise _TrimFault()
+
+    import state
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(jsi, "AuditChain", _Chain)
+    monkeypatch.setattr(state, "log_line", lambda *args: calls.append(args))
+    ra.trim_recovery_audit(ra.recovery_audit_path())
+    assert calls == [("recovery-audit", "audit trim skipped: _TrimFault")]
+
+
+def test_trim_swallows_a_failing_log_line(isolated, monkeypatch) -> None:
+    """A failing log line during a trim fault is swallowed; trim returns None."""
+
+    class _TrimFault(Exception):
+        pass
+
+    class _Chain:
+        def __init__(self, *a, **k):
+            pass
+
+        def trim(self, **_k):
+            raise _TrimFault()
+
+    failed: list[tuple] = []
+
+    def _failing_log(*args):
+        failed.append(args)
+        raise OSError("simulated log write failure")
+
+    import state
+
+    monkeypatch.setattr(jsi, "AuditChain", _Chain)
+    monkeypatch.setattr(state, "log_line", _failing_log)
+    assert ra.trim_recovery_audit(ra.recovery_audit_path()) is None
+    assert len(failed) == 1
+
+
 def test_record_triggers_rotation(isolated, monkeypatch) -> None:
     """record_recovery rotates AFTER appending — the just-written record always
     survives even when rotation trims older history."""

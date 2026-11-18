@@ -594,8 +594,10 @@ def _trace_soft_fail(fn: str, reason: str, argv: list[str]) -> None:
     stderr-line shape (commit 8bcd2975) for the same class of failure in this sibling module.
     """
     try:
-        print(f"⟦branch_protection_lib⟧ {fn} {reason}: {argv[0] if argv else ''}", file=sys.stderr)
-    except Exception:
+        if sys.stderr is not None:
+            print(f"⟦branch_protection_lib⟧ {fn} {reason}: {argv[0] if argv else ''}", file=sys.stderr)
+    # why: print to sys.stderr raises OSError (write fails) or ValueError (stream closed, or text not encodable); a breadcrumb must never raise; sys.stderr can be None, and print(file=None) would then write to stdout, so the guard skips the line instead
+    except (OSError, ValueError):
         pass
 
 
