@@ -799,12 +799,21 @@ function redactTokens(doc: string, depth: number, hits: Hits, found: Map<string,
   })
 }
 
-/** Walk 2 over `doc`: every copy of a value found anywhere in the line is hidden in every decoded string, nested documents included. */
-function hideKnownTokens(doc: string, depth: number, found: Map<string, string>): string {
+/** Walk 2 uses this with hideKnown (every copy of a value found anywhere in the line is hidden in every decoded string); the home pass uses it with redactHome. Every decoded string of `doc` passes through `f`, a nested JSON document carried as a string is walked the same way (to JSON_NESTING_DEPTH). */
+function mapJsonStrings(doc: string, depth: number, f: (decoded: string) => string): string {
   return mapStringTokens(doc, decoded => {
-    if (depth < JSON_NESTING_DEPTH && isJsonDocument(decoded)) return hideKnownTokens(decoded, depth + 1, found)
-    return hideKnown(decoded, found)
+    if (depth < JSON_NESTING_DEPTH && isJsonDocument(decoded)) return mapJsonStrings(decoded, depth + 1, f)
+    return f(decoded)
   })
+}
+
+/**
+ * `line` with `f` applied to every decoded string of it, nested JSON documents included; a string `f` leaves alone keeps its bytes and its escapes, and the result is a line of JSON again.
+ * WHY the callback reads decoded text (TRDD-BAQB9SYO): a plain-text rewrite of the raw line cannot see a value written behind an escape (`\/`, `\\`), and a literal that holds a quote or a backslash could rewrite JSON syntax.
+ * Run on the decoded string, neither can happen. `parseable` is a backstop: every rewritten token is written back with JSON.stringify, so for a line that is JSON whatever `f` returns leaves JSON (verified by the "result always parses" test); it throws the fixed message only for an input that was not JSON, which the bridge never passes (it calls this only when the line parsed), so no bridge input reaches that throw and there is no bridge-level test for it.
+ */
+export function mapJsonLineStrings(line: string, f: (decoded: string) => string): string {
+  return parseable(mapJsonStrings(line, 0, f))
 }
 
 const JSON_LINE_BROKEN = 'redaction broke the JSON of a line'
@@ -827,7 +836,7 @@ export function redactJsonLine(line: string): { text: string; hits: Hits } {
   const found = new Map<string, string>()
   let out = redactTokens(line, 0, hits, found)
   out = redactInto(parseable(out), hits, found)
-  out = hideKnownTokens(parseable(out), 0, found)
+  out = mapJsonStrings(parseable(out), 0, s => hideKnown(s, found))
   if (out === line) return { text: line, hits }
   return { text: parseable(out), hits }
 }

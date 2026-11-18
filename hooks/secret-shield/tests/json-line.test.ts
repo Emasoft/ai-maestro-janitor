@@ -4,7 +4,7 @@
 // The fakes are built at run time from generated bodies; a vendor prefix or a PEM marker is split in the source, and no assertion prints a value.
 import { describe, expect, test } from 'claude-code/testing'
 
-import { countOf, propagates, redact, redactJsonLine } from '../patterns'
+import { countOf, mapJsonLineStrings, propagates, redact, redactJsonLine } from '../patterns'
 
 const j = (...parts: string[]) => parts.join('')
 const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -341,5 +341,34 @@ describe('redactJsonLine keeps a member whose key is a secret', () => {
       expect(Object.values(parsed)).toContain('plain text')
       expect(out.text.includes('undefined')).toBe(false)
     }
+  })
+})
+
+describe('mapJsonLineStrings', () => {
+  test('a string f leaves alone keeps its escapes byte for byte, and only a changed token is rewritten', () => {
+    // WHY built from a char code: the escape must reach the function as a backslash-u sequence, not as the character it decodes to.
+    const esc = String.fromCharCode(92) + 'u00e9'
+    const line = String.raw`{"a":"x\/y ${esc}","b":"keep","n":12}`
+    expect(mapJsonLineStrings(line, s => s)).toBe(line)
+    const out = mapJsonLineStrings(line, s => (s === 'keep' ? 'swap' : s))
+    expect(out).toBe(String.raw`{"a":"x\/y ${esc}","b":"swap","n":12}`)
+  })
+
+  test('a JSON document carried as a string is walked, and the nested string is the one f sees', () => {
+    const inner = JSON.stringify({ p: 'old-value' })
+    const seen: string[] = []
+    const out = mapJsonLineStrings(JSON.stringify({ input: inner }), s => {
+      seen.push(s)
+      return s.replace('old', 'new')
+    })
+    const outer = JSON.parse(out) as { input: string }
+    expect(JSON.parse(outer.input)).toEqual({ p: 'new-value' })
+    expect(seen.includes('old-value')).toBe(true)
+    expect(seen.includes(inner)).toBe(false)
+  })
+
+  test('the result always parses, whatever f returns for a string (a quote, a backslash, a newline)', () => {
+    const out = mapJsonLineStrings(JSON.stringify({ k: 'v' }), s => (s === 'v' ? 'v"\\\n' : s))
+    expect(JSON.parse(out)).toEqual({ k: 'v"\\\n' })
   })
 })

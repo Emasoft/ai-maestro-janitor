@@ -4,7 +4,7 @@
 //   {"t": s}                                   -> redact(s)
 //   {"op": "home", "t": s, "homes": [...]}     -> redactHome(s, homes)
 //   {"op": "both", "t": s, "homes": [...]}     -> redact(s) first, then redactHome on its output
-//   {"op": "jsonl", "t": s, "homes": [...]}    -> redactJsonLine(s) first (a secret behind a JSON escape too; a line that is not JSON goes through redact), then redactHome on its output; the line stays valid JSON when it was
+//   {"op": "jsonl", "t": s, "homes": [...]}    -> redactJsonLine(s) first (a secret behind a JSON escape too; a line that is not JSON goes through redact), then redactHome on each decoded string of its output (on the whole text when it is not JSON); the line stays valid JSON when it was
 //   {"op": "all", "t": s, "homes": [...], "passes": [...]} -> redactAll(s, homes, passes): every pass of the pipeline (pipeline.ts) in its own order; "passes" is optional (absent = all four) and, when present, a non-empty array of "secrets", "cards", "email", "home"
 // Response {"t": <redacted text>, "h": {<kind>: <count>}}; for "both", "jsonl" and "all" the counts of the passes are merged.
 // Any failure: ONE line {"error": "<fixed text>"}, exit 2. Nothing else is ever written to stdout.
@@ -13,7 +13,7 @@
 // WHY every error message is fixed text and never the exception own message: JSON.parse quotes a fragment of the input in its message, and that message could carry a secret to the caller. The caller must fail closed on an error line (TRDD-TKQ274RE: a skipped redaction sends secrets out).
 
 import { redactHome } from "./home.ts"
-import { addHits, redact, redactJsonLine, type Hits } from "./patterns.ts"
+import { addHits, mapJsonLineStrings, redact, redactJsonLine, type Hits } from "./patterns.ts"
 import { ALL_PASSES, isPass, redactAll, type Pass } from "./pipeline.ts"
 
 const decoder = new TextDecoder("utf-8")
@@ -62,14 +62,21 @@ const handle = async (line: string): Promise<void> => {
       out = r.text
       addHits(hits, r.hits)
     } else if (op === "jsonl") {
-      // WHY redactJsonLine first, then redactHome: redactJsonLine decodes the escapes of the line to find a secret hidden behind them, and the home pass is a plain-text rewrite of the raw line. Run the other way round, a home rewrite could change the escapes or the text around a secret before the JSON-aware pass reads it. Last, the line must still be JSON when it was JSON: a home rewrite that breaks it throws, and the catch below answers with a fixed text, never with the input.
+      // WHY redactJsonLine first, then the home pass on each decoded string: redactJsonLine decodes the escapes of the line to find a secret hidden behind them, and a plain-text home rewrite of the raw line could change the escapes or the text around a secret before that pass reads it. The home pass reads each decoded string (mapJsonLineStrings), so a home written with an escaped slash or backslash cannot hide, and a home literal can never rewrite JSON syntax (a quote in it is a character of the string, not the end of it). A line that is not JSON keeps the plain-text home pass on the whole text. mapJsonLineStrings throws a fixed message if the line stops being JSON, and the catch below answers with a fixed text, never with the input.
       const secrets = redactJsonLine(text)
       out = secrets.text
       addHits(hits, secrets.hits)
-      const home = redactHome(out, homes as string[])
-      if (home.text !== out && isJson(text)) JSON.parse(home.text)
-      out = home.text
-      addHits(hits, home.hits)
+      if (isJson(text)) {
+        out = mapJsonLineStrings(out, (decoded) => {
+          const home = redactHome(decoded, homes as string[])
+          addHits(hits, home.hits)
+          return home.text
+        })
+      } else {
+        const home = redactHome(out, homes as string[])
+        out = home.text
+        addHits(hits, home.hits)
+      }
     } else {
       const secrets = redact(text)
       out = secrets.text

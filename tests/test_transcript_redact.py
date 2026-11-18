@@ -218,6 +218,30 @@ def test_bridge_op_jsonl_rewrites_a_json_escaped_windows_home_and_the_line_still
     assert out["h"] == {"home-path": 2}
 
 
+def _escaped_slash_home_line() -> str:
+    """A raw JSON line whose home path is written with JSON-escaped slashes (a backslash before each slash), built by concatenation so the source holds no such literal."""
+    return "{" + chr(34) + "p" + chr(34) + ":" + chr(34) + "\\/".join(["", "Users", "runner", "proj", "a.py"]) + chr(34) + "}"
+
+
+def test_bridge_op_jsonl_hides_a_home_written_with_escaped_slashes() -> None:
+    """Op jsonl hides a home whose slashes are JSON-escaped in the raw line, counts it, and the output still parses."""
+    line = _escaped_slash_home_line()
+    assert "\\/Users\\/runner" in line
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    assert json.loads(out["t"]) == {"p": "~/proj/a.py"}
+    assert out["h"] == {"home-path": 1}
+
+
+def test_bridge_op_jsonl_hides_an_escaped_home_inside_a_json_document_carried_as_a_string() -> None:
+    """Op jsonl hides an escaped-slash home inside a JSON document that a string value carries, and the inner document still parses."""
+    line = json.dumps({"input": _escaped_slash_home_line()})
+    out = _bridge_one({"op": "jsonl", "t": line, "homes": HOMES})
+    outer = json.loads(out["t"])
+    assert json.loads(outer["input"]) == {"p": "~/proj/a.py"}
+    assert "runner" not in out["t"]
+    assert out["h"] == {"home-path": 1}
+
+
 def test_bridge_op_jsonl_sends_a_line_that_is_not_json_through_the_plain_path() -> None:
     """A line that is not JSON gets the same text and the same counts from op jsonl as from op both."""
     line = f"plain {FAKE_KEY} at {HOMES[0]}/a.py"
@@ -234,14 +258,12 @@ def test_bridge_op_jsonl_refuses_homes_that_is_not_an_array_of_strings() -> None
     assert [json.loads(x) for x in lines] == [{"error": "homes is not an array of strings"}]
 
 
-def test_bridge_op_jsonl_fails_closed_with_a_fixed_message_when_a_home_rewrite_breaks_the_json() -> None:
-    """A home literal that ends in a quote rewrites the quote that closes a JSON string; the bridge refuses with a fixed message that holds no input text."""
+def test_bridge_op_jsonl_leaves_json_syntax_alone_when_a_home_literal_ends_in_a_quote() -> None:
+    """A home literal that ends in a quote is matched against decoded strings only: it never touches the quote that closes a JSON string, so the line comes back unchanged with no hit and exit 0."""
     line = json.dumps({"k": "/a/b"})
     code, lines = _bridge_refusal({"op": "jsonl", "t": line, "homes": ['/a/b"']})
-    assert code == 2
-    # WHY provisional: "SyntaxError" is the error name of Bun's JSON.parse, which the bridge reports; a Bun release that renames it turns this red without a redaction bug.
-    assert [json.loads(x) for x in lines] == [{"error": "redaction threw SyntaxError"}]
-    assert "/a/b" not in "".join(lines)
+    assert code == 0
+    assert [json.loads(x) for x in lines] == [{"t": line, "h": {}}]
 
 
 def test_timeout_kills_the_bridge_and_raises() -> None:
