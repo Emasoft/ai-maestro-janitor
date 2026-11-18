@@ -617,8 +617,17 @@ def _run_chain_payload(payload_b64: str) -> int:
                 window = token_meter.default_window()
                 pct = int(tokens * 100 / window) if window else 0
                 state.log_line("clear-trigger", f"clear landing at {tokens} tokens ({pct}% of window)")
-        except Exception:  # noqa: BLE001 — telemetry must never block the verified Enter
-            pass
+        except Exception as exc:  # fail-open boundary: telemetry must never block the Enter
+            # why: this is a fail-open boundary. pre_submit() runs unguarded right before the
+            # verified Enter (scripts/lib/terminal_trigger.py:1436), so an exception escaping here
+            # would abort /clear. The try body reads and parses the transcript, so the set of
+            # exceptions it can raise is not enumerated here, and the catch is broad by design
+            # (same fail-open precedent as trim_recovery_audit in commit 9ca341ca). The skip is
+            # logged with its type name; a failure of that log line is not retried.
+            try:
+                state.log_line("clear-trigger", f"clear-landing telemetry skipped: {type(exc).__name__}")
+            except (OSError, RuntimeError, ValueError):
+                pass
         # TRDD-RAEGS1D5 card 5 regression fix (post-2f463d3b review): stamped HERE, not by the
         # parent `spawn_shrink_chain` at spawn time — this closure runs only immediately before
         # the verified Enter, so a chain that self-cancels earlier (recovery pending, warm

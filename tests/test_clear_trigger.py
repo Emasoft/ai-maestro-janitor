@@ -1771,3 +1771,22 @@ def test_a_failed_hold_write_does_not_stop_the_chain(tmp_path: Path, monkeypatch
     captured["pre_submit_first"]()  # must not raise
     assert any("summary hold write failed" in m and "disk full" in m for m in logged), logged
     assert not (tmp_path / ".janitor" / "state" / "summary-pending.json").exists()
+
+
+def test_a_telemetry_fault_on_the_landing_line_is_logged_and_never_blocks_the_enter(tmp_path: Path, monkeypatch) -> None:
+    """A transcript whose usage cannot be summed logs the skipped landing telemetry and lets the Enter callback return."""
+    import json
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": [1]}}}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JANITOR_TRANSCRIPT_PATH", str(transcript))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    assert mod._run_chain_payload(_chain_payload(tmp_path)) == 0
+    captured["pre_submit_first"]()
+    log = (mod.state.log_dir() / "clear-trigger.log").read_text(encoding="utf-8")
+    assert "clear-landing telemetry skipped: TypeError" in log

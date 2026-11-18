@@ -569,6 +569,13 @@ def test_log_probe_failure_never_raises_when_the_detail_cannot_be_built() -> Non
     fs._log_probe_failure(["false"], "error", 1, object(), None)  # type: ignore[arg-type]
 
 
+def test_log_probe_failure_survives_a_line_the_log_cannot_encode() -> None:
+    """A stderr holding a lone surrogate makes the log write raise; the helper returns None and records no episode key."""
+    fs._probe_logged.clear()
+    assert fs._log_probe_failure(["false"], "error", 1, "\udcff", None) is None
+    assert fs._probe_logged == {}
+
+
 def test_probe_failure_detail_cleans_and_caps_stderr() -> None:
     """Multi-line stderr with the home path and a trailing error number becomes one capped line."""
     home = str(Path.home())

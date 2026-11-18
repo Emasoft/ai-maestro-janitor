@@ -1912,7 +1912,24 @@ def _log_probe_failure(cmd: list[str], outcome: str, returncode: int | None, std
             return
         state.log_line("daemon", line)
         _probe_logged[key] = now
-    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
+    # why: a diagnostic must never break the scan or change a probe result (TRDD-0QCRG2YX).
+    # Raise set of this function and of _probe_failure_detail, read whole (inputs as annotated):
+    #   OSError: state.log_line (init_state mkdir, open or write of the daemon log).
+    #   RuntimeError: log_dir() expanduser; Path.home() in _probe_failure_detail when no home
+    #     directory resolves.
+    #   ValueError (UnicodeEncodeError included): the log write of a line holding a lone
+    #     surrogate, from stderr or from a PATH entry that shutil.which returned.
+    # Cannot occur with annotated inputs: KeyError (dict .get only); IndexError (cmd is tested
+    #   for truthiness, re.split always returns one item); TypeError (every operand is a str or a
+    #   number, and cmd[0] is always the literal osascript, fleet_scan.py:1814); UnicodeDecodeError
+    #   (bytes are decoded with errors="replace").
+    # AttributeError: only for a stderr that is neither str, bytes nor None (.split() in
+    #   _probe_failure_detail). The annotation forbids it; the test
+    #   test_log_probe_failure_never_raises_when_the_detail_cannot_be_built pins it, so it stays.
+    # str(exc) on the exc branch raises only if the exception __str__ raises; the exceptions
+    #   passed here come from subprocess.run in _run_probe_outcome.
+    # Nothing is logged on a fault: a second line would repeat the flood the dedupe prevents.
+    except (AttributeError, OSError, RuntimeError, ValueError):
         pass
 
 
