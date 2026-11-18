@@ -167,6 +167,20 @@ class TestTrddStateHook(unittest.TestCase):
             out = _run(root, "compact")
             self.assertIn("no ## STATE block", out)
 
+    def test_human_review_card_is_not_an_active_trdd(self):
+        """A card in human_review is not reported as active; a dev card on the same board still is (TRDD-4K7V0GFW, issue 365)."""
+        with TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "design/tasks/TRDD-20260530_100000+0200-hhhhhhhh-waiting.md").write_text(
+                "---\ntitle: Waiting for the owner\ncolumn: human_review\n"
+                "updated: 2026-05-30T10:00:00+0200\n---\n\n# waiting\n")
+            (root / "design/tasks/TRDD-20260530_100000+0200-iiiiiiii-working.md").write_text(
+                "---\ntitle: Being worked\ncolumn: dev\n"
+                "updated: 2026-05-30T10:00:00+0200\n---\n\n# working\n")
+            out = _run(root, "resume")
+            self.assertIn("iiiiiiii-working.md", out)
+            self.assertNotIn("hhhhhhhh-waiting.md", out)
+
     def test_state_block_extraction_unit(self):
         """_state_block returns the section from the STATE heading to the next H2."""
         mod = _load_module()

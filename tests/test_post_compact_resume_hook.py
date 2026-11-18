@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util as _u
 import json
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -886,3 +888,148 @@ def test_reentry_prints_identity_lines_to_stdout(
     assert len(lines) == 2
     assert "pid=" in lines[0] and "CLAUDE_PROJECT_DIR=" in lines[0]
     assert "state_dir=" in lines[1]
+
+
+def test_stable_interpreter_still_runs_after_the_uv_temp_env_is_gone(tmp_path: Path) -> None:
+    """Proves interpreter resolution only: the path _stable_python() returns still runs a stub after
+    the uv-run driver that resolved it has exited (TRDD-47MHZ2YF, issue 368).
+
+    It does not prove that the temp-env bug is caught. That bug is proven by the shell repro:
+    reports_dev/cheap-worker/pc368/repro/out/state-log.txt (HEAD: the child fails with FileNotFoundError)
+    and reports_dev/cheap-worker/pc368/repro-fixed/plugin/trigger-ran.txt (fixed: the child runs).
+    On HEAD this test fails only because _stable_python does not exist yet.
+    """
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        "# /// script\n"
+        "# requires-python = \">=3.11\"\n"
+        "# ///\n"
+        "import importlib.util\n"
+        "import sys\n"
+        "spec = importlib.util.spec_from_file_location(\"hook\", sys.argv[1])\n"
+        "hook = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(hook)\n"
+        "print(hook._stable_python())\n",
+        encoding="utf-8",
+    )
+    # uv runs the driver in a temporary environment, as it runs the hook, and deletes that environment on exit.
+    resolved = subprocess.run(
+        ["uv", "run", "--quiet", "--script", str(driver), str(_HOOK_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    interpreter = resolved.stdout.strip()
+    stub = tmp_path / "stub.py"
+    stub.write_text(
+        "import pathlib\n"
+        "import sys\n"
+        "pathlib.Path(sys.argv[1]).write_text(\"ran\", encoding=\"utf-8\")\n",
+        encoding="utf-8",
+    )
+    marker = tmp_path / "ran.txt"
+    # A path inside the deleted environment fails here with FileNotFoundError.
+    ran = subprocess.run([interpreter, str(stub), str(marker)], capture_output=True, text=True, timeout=60)
+    assert ran.returncode == 0, ran.stderr
+    assert marker.read_text(encoding="utf-8") == "ran"
+
+
+@pytest.mark.real_subprocess("python-gone", "python-not-executable")
+def test_both_spawn_sites_start_the_resolved_interpreter_and_refuse_when_it_is_gone(
+    state_mod, tmp_path: Path
+) -> None:
+    """Real processes, no recorder: _fire_push and _defer_push start children under the resolved interpreter, and both refuse, launching nothing, when it is gone or not executable (TRDD-47MHZ2YF, issue 368)."""
+    _project, state = state_mod
+    hook = _import_hook()
+    resolved = os.path.realpath(sys.executable)
+    plugin = tmp_path / "plugin"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "scripts" / "lib").symlink_to(_PROJECT_ROOT / "scripts" / "lib")
+    reported = tmp_path / "child-interpreter.txt"
+    (plugin / "scripts" / "resume_trigger.py").write_text(
+        "import pathlib\n"
+        "import sys\n"
+        f"pathlib.Path({str(reported)!r}).write_text(sys.executable, encoding=\"utf-8\")\n",
+        encoding="utf-8",
+    )
+    # Part 1: a real detached trigger reports the interpreter that _fire_push started it with.
+    hook._fire_push(str(plugin))
+    deadline = time.time() + 30
+    child = ""
+    while time.time() < deadline and not child:
+        if reported.is_file():
+            child = reported.read_text(encoding="utf-8")
+        time.sleep(0.2)
+    assert child == resolved, f"the trigger ran under {child!r}, not the resolved interpreter {resolved!r}"
+    # Part 2: a real deferred child. Its argv[0] is read from the process table for the PID it logged, and only that PID is signalled.
+    hook._defer_push(state, str(plugin))
+    child_log = state.log_dir() / "post-compact-resume.child.log"
+    pid = 0
+    deadline = time.time() + 30
+    while time.time() < deadline and not pid:
+        if child_log.is_file():
+            for line in child_log.read_text(encoding="utf-8").splitlines():
+                if line.startswith("post-compact-resume child: pid="):
+                    pid = int(line.split()[2].split("=")[1])
+        time.sleep(0.2)
+    assert pid, "the deferred child never started"
+    try:
+        listed = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=30).stdout.split()
+    finally:
+        os.kill(pid, signal.SIGTERM)
+    started_with = listed[0] if listed else ""
+    assert started_with == resolved, f"the deferred child was started with {started_with!r}, not {resolved!r}"
+    # Part 3: a real process whose own interpreter link is deleted, or replaced by a file that is not executable, must refuse before anything is launched.
+    # The driver unlinks only the link path it is given, never sys.executable, which may be the real uv interpreter.
+    driver = tmp_path / "refuse.py"
+    driver.write_text(
+        "import importlib.util\n"
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "hook_path, plugin, mode, link = sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])\n"
+        "os.unlink(link)\n"
+        "if mode == \"not-executable\":\n"
+        "    link.write_text(\"\", encoding=\"utf-8\")\n"
+        "spec = importlib.util.spec_from_file_location(\"hook\", hook_path)\n"
+        "hook = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(hook)\n"
+        "class State:\n"
+        "    def log_dir(self):\n"
+        "        return Path(plugin) / \"log\"\n"
+        "def report(name, call):\n"
+        "    try:\n"
+        "        call()\n"
+        "        print(name, \"launched\")\n"
+        "    except RuntimeError as exc:\n"
+        "        print(name, \"RuntimeError\", exc)\n"
+        "report(\"fire\", lambda: hook._fire_push(plugin))\n"
+        "report(\"defer\", lambda: hook._defer_push(State(), plugin))\n",
+        encoding="utf-8",
+    )
+    for mode in ("gone", "not-executable"):
+        link = tmp_path / f"python-{mode}"
+        os.symlink(resolved, link)
+        run = subprocess.run(
+            [str(link), str(driver), str(_HOOK_PATH), str(plugin), mode, str(link)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert run.returncode == 0, run.stderr
+        lines = run.stdout.splitlines()
+        assert len(lines) == 2 and lines[0].startswith("fire RuntimeError") and lines[1].startswith("defer RuntimeError"), f"{mode}: {run.stdout!r}"
+
+
+def test_inflight_pick_ignores_human_review_and_compares_updated_as_an_instant(tmp_path: Path) -> None:
+    """The in-flight pick never chooses a human_review card, and between dev cards the later instant wins even when its text sorts lower (TRDD-4K7V0GFW, issue 365)."""
+    hook = _import_hook()
+    tasks = tmp_path / "design" / "tasks"
+    # HUMANREV carries the newest stamp of all; a card waiting for the owner must not win.
+    _write_trdd(tasks, "HUMANREV", "human_review", "2026-11-18T12:00:00+0100", "Waiting for owner", "waiting")
+    # 10:30+0100 is 09:30Z, the later instant; 11:00+0200 is 09:00Z, and as text "11:00..." sorts higher.
+    _write_trdd(tasks, "OLDERWRK", "dev", "2026-11-18T11:00:00+0200", "Older instant", "older")
+    _write_trdd(tasks, "NEWERWRK", "dev", "2026-11-18T10:30:00+0100", "Newer instant", "newer")
+    out = hook._inflight_trdd_directive(tmp_path)
+    assert out.startswith("continue TRDD-NEWERWRK ")

@@ -29,7 +29,8 @@ Directive source priority:
   2. Newest in-flight TRDD on the design board — a zero-discipline fallback for
      the case where a native auto-compact fires without the skill having set a
      directive. "In-flight" = column in {design, dispatch, dev, testing,
-     ai_review, human_review}; ties broken by the most recent `updated:` field.
+     ai_review}; human_review is not a continue target (a card waiting for the owner is not work to resume);
+     ties broken by the most recent `updated:` instant, compared as a datetime (see _updated_epoch).
   3. Nothing identifiable → write NO flag. A compaction with no work in
      progress must not spawn a spurious resume turn.
 
@@ -48,13 +49,16 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # Columns that mean "this TRDD is actively being worked" — not parked
 # (backburner/todo), not blocked, not terminal (complete/published/live/
 # failed/superseded), not soak-monitoring (live_auditing).
+# WHY human_review is absent (TRDD-4K7V0GFW, issue 365): a card waiting for the owner is not work the
+# agent should resume; treating it as in-flight sent the agent back to a card only the owner can move.
 _INFLIGHT_COLUMNS = frozenset(
-    {"design", "dispatch", "dev", "testing", "ai_review", "human_review"}
+    {"design", "dispatch", "dev", "testing", "ai_review"}
 )
 
 # Canonical TRDD filename shape: TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid8>-<slug>.md.
@@ -196,6 +200,20 @@ def _trdd_paths(project_root: Path) -> list[Path]:
     return sorted(tasks_dir.glob("TRDD-*.md"))
 
 
+# `updated:` is written with its UTC offset (the TRDD rule: `date +%Y-%m-%dT%H:%M:%S%z`). Text order is
+# right only when every card carries the same offset; this board mixes +0100 and +0200, so the value is
+# parsed and compared as an instant (TRDD-4K7V0GFW, issue 365).
+_UPDATED_FMT = "%Y-%m-%dT%H:%M:%S%z"
+
+
+def _updated_epoch(raw: str) -> float | None:
+    """Epoch seconds of an `updated:` value that carries its offset; None when it does not parse."""
+    try:
+        return datetime.strptime(raw, _UPDATED_FMT).timestamp()
+    except ValueError:
+        return None
+
+
 def _inflight_trdd_directive(project_root: Path) -> str:
     """Build a 'continue TRDD-xxxx' directive from the newest in-flight TRDD.
 
@@ -204,14 +222,14 @@ def _inflight_trdd_directive(project_root: Path) -> str:
     likely to be interrupted: a LOCAL TRDD is a chore about THIS machine, and after a
     compaction it is the one thing a fresh context cannot reconstruct from the repo.
 
-    `updated:` is an ISO-8601 string that sorts lexicographically within a
-    shared local TZ offset, so a plain string-max picks the most recently
+    `updated:` is an ISO-8601 value with a UTC offset, compared as an instant (see _updated_epoch), not as text.
+    A plain max over those instants picks the most recently
     touched in-flight task — a good "what was I just doing" heuristic.
     """
     trdds = _trdd_paths(project_root)
     if not trdds:
         return ""
-    best: tuple[str, str, str] | None = None  # (updated, uid8, title)
+    best: tuple[float, str, str] | None = None  # (epoch of updated, uid8, title)
     for path in trdds:
         m = _UID_RE.search(path.name)
         if not m:
@@ -240,8 +258,20 @@ def _inflight_trdd_directive(project_root: Path) -> str:
             continue
         if column not in _INFLIGHT_COLUMNS:
             continue
-        if best is None or updated > best[0]:
-            best = (updated, uid8, title)
+        epoch = _updated_epoch(updated)
+        if epoch is None:
+            # why: a card whose updated: does not parse is ranked LAST, by design, so it stays reachable as the only candidate;
+            # the notice names it, so the ordering it gets is visible and never silent.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol channel;
+            # so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print(f"[post-compact-resume] {path.name}: updated {updated!r} is not ISO-8601 with an offset; ranked last", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
+            epoch = float("-inf")
+        if best is None or epoch > best[0]:
+            best = (epoch, uid8, title)
     if best is None:
         return ""
     _, uid8, title = best
@@ -481,6 +511,24 @@ def _maybe_push_resume(state, transcript_path: str | None = None) -> None:  # no
     state.log_line("post-compact-resume", "resume push fired (/janitor-resume)")
 
 
+def _stable_python() -> str:
+    """Interpreter that detached children start with: a path that outlives this hook process.
+
+    WHY (TRDD-47MHZ2YF, issue 368): the hook runs under `uv run --script`, so sys.executable is the
+    Python of a temporary uv environment (~/.cache/uv/builds-v0/.tmpXXXX/bin/python). uv deletes that
+    environment when the hook exits, so a detached child that starts with the stale path fails with
+    FileNotFoundError when its deferred recheck runs 60 s later. The symlink resolves to the uv-managed
+    interpreter, which persists. It is resolved here, while this process is alive, so every child and
+    grandchild inherits a path that exists.
+
+    Fail-fast: if the resolved path is not an executable file, raise. Never fall back to sys.executable.
+    """
+    real = os.path.realpath(sys.executable)
+    if not (os.path.isfile(real) and os.access(real, os.X_OK)):
+        raise RuntimeError(f"no stable interpreter for detached children: {real} is not an executable file")
+    return real
+
+
 def _fire_push(plugin_root: str, transcript_path: str | None = None) -> None:
     """Spawn the detached `resume_trigger.py` — the actual keystroke injector.
     `transcript_path` is forwarded as `--transcript-path` so `terminal_trigger`'s
@@ -492,7 +540,8 @@ def _fire_push(plugin_root: str, transcript_path: str | None = None) -> None:
     trigger = Path(plugin_root) / "scripts" / "resume_trigger.py"
     if not trigger.is_file():
         return
-    argv = [sys.executable, str(trigger)]
+    # WHY (TRDD-47MHZ2YF, issue 368): sys.executable of a uv-run hook is gone once the hook exits; see _stable_python.
+    argv = [_stable_python(), str(trigger)]
     if transcript_path:
         argv += ["--transcript-path", transcript_path]
     subprocess.Popen(  # noqa: S603 - fixed argv, no shell
@@ -531,7 +580,8 @@ def _spawn_deferred_child(state, plugin_root: str, elapsed_s: int, transcript_pa
     out = log_file if log_file is not None else subprocess.DEVNULL
     try:
         subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(elapsed_s), transcript_path or ""],
+            # WHY (TRDD-47MHZ2YF, issue 368): the child outlives this hook; a sys.executable from a uv-run hook is deleted by then.
+            [_stable_python(), str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(elapsed_s), transcript_path or ""],
             stdin=subprocess.DEVNULL,
             stdout=out,
             stderr=out,

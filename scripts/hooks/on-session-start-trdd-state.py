@@ -257,7 +257,9 @@ def _column(text_head: str) -> str | None:
 
 # TRDD v2 columns that mean "actively being worked" — the WORK group of the kanban
 # (~/.claude/rules/trdd-design-tasks.md). v1's `status: in-progress` maps onto these.
-_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review", "human_review"})
+# human_review is not here (TRDD-4K7V0GFW, issue 365): a card waiting for the owner is not work to continue, so
+# injecting it as an active TRDD told the agent to resume a card only the owner can move.
+_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review"})
 
 
 def _title(text_head: str, fallback: str) -> str:
