@@ -11,148 +11,22 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import stat
-import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
-import transcript_redact as tr
 from _fake_secrets import secret
+from _shield_redact_box import AT, MARKER_RE, REDACT, SHIELD, TOKEN, TOKEN2, VAULT, Box, read_text
 
 # The suite denies every real binary by default (tests/sandbox_guard.py); this file exists to run the REAL bun and the REAL git, so it opts in.
 pytestmark = pytest.mark.real_subprocess("bun", "git")
-
-_SHIELD = Path(__file__).resolve().parents[1] / "scripts" / "shield_scan"
-SCAN = _SHIELD / "scan.ts"
-VAULT = _SHIELD / "vault.ts"
-REDACT = _SHIELD / "redact.ts"
-TIMEOUT_S = 180.0
-TOKEN = secret("gh" + "p_", "redact-1", 36)
-TOKEN2 = secret("gh" + "p_", "redact-2", 36)
-AT = chr(64)
-MARKER_RE = re.compile(r"\[REDACTED-BY-SECRET-SHIELD\. Type: ([A-Za-z0-9_-]+)\. ID: ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\]")
-
-
-class Scan:
-    """The result of one scanner run: exit code, both streams, and the records of the findings file when it was written."""
-
-    def __init__(self, done: subprocess.CompletedProcess[str], out: Path) -> None:
-        self.code = done.returncode
-        self.stdout = done.stdout
-        self.stderr = done.stderr
-        self.out = out
-        self.records: list[dict[str, Any]] = []
-        if out.exists():
-            self.records = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
-
-    @property
-    def summary(self) -> dict[str, Any]:
-        """The last record of the findings file."""
-        assert self.records[-1]["type"] == "summary"
-        return self.records[-1]
-
-    @property
-    def skips(self) -> list[tuple[str, str]]:
-        """Every skip record as (path, reason), in file order."""
-        return [(r["path"], r["reason"]) for r in self.records if r["type"] == "skip"]
-
-    def streams(self) -> str:
-        """Everything the run wrote that a person could read: stdout, stderr and the findings file."""
-        return self.stdout + self.stderr + (self.out.read_text(encoding="utf-8") if self.out.exists() else "")
-
-
-class Box:
-    """One test's folders (root, out, home, vault, global git config) and the commands that run in them."""
-
-    def __init__(self, base: Path) -> None:
-        self.base = base.resolve()
-        self.root = self.base / "root"
-        self.root.mkdir()
-        self.home_dir = self.base / "home"
-        self.home_dir.mkdir()
-        self.vault_dir = self.base / "vault"
-        self.gitconfig = self.base / "gitconfig"
-        self.gitconfig.write_text(f"[user]\n\tname = redact test\n\temail = redact{AT}example.test\n", encoding="utf-8")
-        self.runs = 0
-
-    def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        """The environment of every child: HOME, the global git config and the vault folder are the test's own."""
-        env = dict(os.environ)
-        env.update({"HOME": str(self.home_dir), "GIT_CONFIG_GLOBAL": str(self.gitconfig), "GIT_CONFIG_NOSYSTEM": "1", "SECRETS_SHIELD_VAULT_DIR": str(self.vault_dir)})
-        for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-            env.pop(name, None)
-        env.update(extra or {})
-        return env
-
-    def git(self, cwd: Path, *args: str) -> str:
-        """Run git in cwd and return its stdout; a failure raises."""
-        done = subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env())
-        return done.stdout
-
-    def put(self, path: Path, text: str | bytes) -> Path:
-        """Write a file, creating its folders."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(text, bytes):
-            path.write_bytes(text)
-        else:
-            path.write_text(text, encoding="utf-8", newline="")
-        return path
-
-    def repo(self, path: Path, *tracked: str) -> Path:
-        """Make a git repo at path and commit the named files (relative to path)."""
-        path.mkdir(parents=True, exist_ok=True)
-        self.git(path, "init", "-q")
-        if tracked:
-            self.git(path, "add", "-f", "--", *tracked)
-            self.git(path, "commit", "-q", "-m", "c")
-        return path
-
-    def run(self, *args: str, root: Path | None = None, min_age: str | None = "0", env_extra: dict[str, str] | None = None) -> Scan:
-        """Run the scanner with --redact over root (default: the box root), 2 jobs and an explicit findings file under the box."""
-        self.runs += 1
-        out_path = self.base / "out" / f"run{self.runs}.jsonl"
-        cmd = [tr.resolve_bun(), str(SCAN), "--jobs", "2", "--out", str(out_path), "--redact"]
-        if min_age is not None:
-            cmd += ["--min-age-minutes", min_age]
-        cmd += [*args, str(root or self.root)]
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env(env_extra), check=False)
-        return Scan(done, out_path)
-
-    def bun_json(self, script: str, data: object) -> Any:
-        """Run a `bun -e` script that reads one JSON value from stdin and prints one JSON value."""
-        done = subprocess.run([tr.resolve_bun(), "-e", script], input=json.dumps(data), capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env(), check=True)
-        return json.loads(done.stdout)
-
-    def vault_rows(self) -> list[dict[str, Any]]:
-        """Every vault row (uuid, type, origin, encoding, count, value)."""
-        script = f"import {{ openVault }} from {json.dumps(str(VAULT))}; await Bun.stdin.text(); const v = openVault(); console.log(JSON.stringify(v.list().map((m) => ({{ ...m, value: v.byUuid(m.uuid)?.value }})))); v.close()"
-        rows: list[dict[str, Any]] = self.bun_json(script, None)
-        return rows
-
-    def restore(self, text: str) -> str:
-        """The text with every shield marker replaced by the value of its vault row (what restore.ts will do in step 3a-4)."""
-        script = f"import {{ openVault }} from {json.dumps(str(VAULT))}; const uuids = JSON.parse(await Bun.stdin.text()); const v = openVault(); const out = {{}}; for (const u of uuids) out[u] = v.byUuid(u)?.value ?? null; console.log(JSON.stringify(out)); v.close()"
-        values: dict[str, str | None] = self.bun_json(script, sorted({m.group(2) for m in MARKER_RE.finditer(text)}))
-
-        def put_back(m: re.Match[str]) -> str:
-            value = values[m.group(2)]
-            assert value is not None, "a marker has no vault row"
-            return value
-
-        return MARKER_RE.sub(put_back, text)
 
 
 @pytest.fixture
 def box(tmp_path: Path) -> Box:
     """A fresh Box in tmp_path."""
     return Box(tmp_path)
-
-
-def _read(path: Path) -> str:
-    return path.read_bytes().decode("utf-8")
 
 
 def test_redact_then_restore_is_byte_identical(box: Box) -> None:
@@ -169,7 +43,7 @@ def test_redact_then_restore_is_byte_identical(box: Box) -> None:
     # WHY the fields are asserted: a --redact run reports that the re-scan ran and how many residual hits it found.
     assert summary["residual_check"] == "run" and summary["residual"] == 0 and summary["complete"] is True
     for path, original in ((a, original_a), (b, original_b)):
-        text = _read(path)
+        text = read_text(path)
         assert TOKEN not in text and TOKEN2 not in text and "REDACTED-BY-SECRET-SHIELD. Type: github-token. ID: " in text
         assert box.restore(text).encode("utf-8") == original.encode("utf-8")
     assert stat.S_IMODE(a.stat().st_mode) == 0o640
@@ -184,8 +58,8 @@ def test_same_value_twice_is_one_uuid_and_in_two_files_two_uuids(box: Box) -> No
     b = box.put(box.root / "b.txt", f"z = {TOKEN}\n")
     result = box.run()
     assert result.code == 0, result.stderr
-    in_a = [m.group(2) for m in MARKER_RE.finditer(_read(a))]
-    in_b = [m.group(2) for m in MARKER_RE.finditer(_read(b))]
+    in_a = [m.group(2) for m in MARKER_RE.finditer(read_text(a))]
+    in_b = [m.group(2) for m in MARKER_RE.finditer(read_text(b))]
     assert len(in_a) == 2 and in_a[0] == in_a[1] and len(in_b) == 1 and in_a[0] != in_b[0]
     assert len(box.vault_rows()) == 2
     assert result.summary["values_vaulted"] == 2
@@ -206,13 +80,13 @@ def test_marker_already_in_the_file_and_a_new_copy_of_its_value_share_one_uuid(b
     """A redacted file that gets a new raw copy of the same value is redacted again with the same uuid; the old marker is kept and restore gives back the whole file."""
     a = box.put(box.root / "a.txt", f"k = {TOKEN}\n")
     assert box.run().code == 0
-    redacted = _read(a)
+    redacted = read_text(a)
     box.put(a, redacted + f"other = {TOKEN}\n")
     result = box.run()
     assert result.code == 0 and result.summary["files_redacted"] == 1, result.stderr
-    ids = [m.group(2) for m in MARKER_RE.finditer(_read(a))]
+    ids = [m.group(2) for m in MARKER_RE.finditer(read_text(a))]
     assert len(ids) == 2 and ids[0] == ids[1]
-    assert box.restore(_read(a)) == f"k = {TOKEN}\nother = {TOKEN}\n"
+    assert box.restore(read_text(a)) == f"k = {TOKEN}\nother = {TOKEN}\n"
 
 
 def test_gitignored_env_is_untouched_by_default_and_redacted_with_all(box: Box) -> None:
@@ -222,10 +96,10 @@ def test_gitignored_env_is_untouched_by_default_and_redacted_with_all(box: Box) 
     env_file = box.put(box.root / ".env", f"API = {TOKEN}\n")
     box.repo(box.root, "a.txt", ".gitignore")
     default = box.run()
-    assert default.code == 0 and _read(env_file) == f"API = {TOKEN}\n" and default.summary["gitignored_entries"] == 1
+    assert default.code == 0 and read_text(env_file) == f"API = {TOKEN}\n" and default.summary["gitignored_entries"] == 1
     everything = box.run("--all")
     assert everything.code == 0, everything.stderr
-    assert TOKEN not in _read(env_file) and box.restore(_read(env_file)) == f"API = {TOKEN}\n"
+    assert TOKEN not in read_text(env_file) and box.restore(read_text(env_file)) == f"API = {TOKEN}\n"
 
 
 def test_git_config_token_under_all_is_reported_and_left_unchanged(box: Box) -> None:
@@ -251,23 +125,23 @@ def test_repo_with_a_merge_in_progress_is_untouched_until_the_merge_ends(box: Bo
     merge_head = box.root / ".git" / "MERGE_HEAD"
     merge_head.write_text(box.git(box.root, "rev-parse", "HEAD"), encoding="utf-8")
     first = box.run()
-    assert first.code == 1 and _read(a) == f"k = {TOKEN}\n"
+    assert first.code == 1 and read_text(a) == f"k = {TOKEN}\n"
     assert ("a.txt", "git-operation") in first.skips and first.summary["findings_not_redacted"] == 1
     merge_head.unlink()
     second = box.run()
-    assert second.code == 0 and TOKEN not in _read(a)
+    assert second.code == 0 and TOKEN not in read_text(a)
 
 
 def test_recent_file_is_skipped_by_default_and_redacted_once_old(box: Box) -> None:
     """A file modified a moment ago is skipped as recent with the default of 10 minutes (exit 1); with an old mtime the same run redacts it."""
     a = box.put(box.root / "a.txt", f"k = {TOKEN}\n")
     first = box.run(min_age=None)
-    assert first.code == 1 and _read(a) == f"k = {TOKEN}\n"
+    assert first.code == 1 and read_text(a) == f"k = {TOKEN}\n"
     assert ("a.txt", "recent") in first.skips and first.summary["findings_not_redacted"] == 1 and first.summary["min_age_minutes"] == 10
     old = time.time() - 3600
     os.utime(a, (old, old))
     second = box.run(min_age=None)
-    assert second.code == 0 and TOKEN not in _read(a)
+    assert second.code == 0 and TOKEN not in read_text(a)
 
 
 def test_hardlinked_and_invalid_utf8_files_are_skipped_and_counted(box: Box) -> None:
@@ -283,7 +157,7 @@ def test_hardlinked_and_invalid_utf8_files_are_skipped_and_counted(box: Box) -> 
     assert hard.read_bytes() == link.read_bytes() == f"k = {TOKEN}\n".encode() and bad.read_bytes() == bad_bytes
     assert sorted(result.skips) == [("bad.txt", "not-utf8"), ("hard.txt", "hardlinked"), ("hard2.txt", "hardlinked")]
     assert result.summary["findings_not_redacted"] == 3 and result.summary["files_redacted"] == 1
-    assert TOKEN2 not in _read(ok)
+    assert TOKEN2 not in read_text(ok)
     assert TOKEN not in result.streams()
 
 
@@ -323,8 +197,8 @@ def test_home_pass_with_redact_rewrites_home_paths_last_and_they_are_not_restora
     b = box.put(box.root / "b.txt", f"cfg = {home}/y\n")
     result = box.run("--passes", "secrets,cards,home")
     assert result.code == 0, result.stderr
-    assert _read(b) == "cfg = ~/y\n"
-    text = _read(a)
+    assert read_text(b) == "cfg = ~/y\n"
+    text = read_text(a)
     assert text.startswith("dir = ~/proj/x\nk = [REDACTED-BY-SECRET-SHIELD. Type: github-token. ID: ") and TOKEN not in text
     assert box.restore(text) == f"dir = ~/proj/x\nk = {TOKEN}\n"
     summary = result.summary
@@ -339,7 +213,7 @@ def test_a_home_only_file_skipped_as_recent_adds_nothing_to_findings_not_redacte
     a = box.put(box.root / "a.txt", f"cfg = {box.home_dir}/y\n")
     result = box.run("--passes", "secrets,home", min_age=None)
     assert result.code == 0, result.stderr
-    assert _read(a) == f"cfg = {box.home_dir}/y\n"
+    assert read_text(a) == f"cfg = {box.home_dir}/y\n"
     assert ("a.txt", "recent") in result.skips
     assert result.summary["findings_not_redacted"] == 0 and result.summary["files_redacted"] == 0 and result.summary["home_rewrites"] == 0
     assert [(r["kind"], r["count"]) for r in result.records if r["type"] == "finding"] == [("home-path", 1)]
@@ -357,8 +231,8 @@ def test_text_over_max_file_mb_is_redacted_through_the_large_lane(box: Box) -> N
     result = box.run("--max-file-mb", "0.01")
     assert result.code == 0, result.stderr
     assert result.summary["large_lane_files"] == 1 and result.summary["files_redacted"] == 2 and result.summary["files_not_scanned"] == 0
-    assert TOKEN not in _read(big) and TOKEN2 not in _read(small)
-    assert box.restore(_read(big)) == original
+    assert TOKEN not in read_text(big) and TOKEN2 not in read_text(small)
+    assert box.restore(read_text(big)) == original
     assert TOKEN not in result.streams()
 
 
@@ -372,7 +246,7 @@ def test_text_over_max_large_mb_is_not_scanned_and_makes_the_run_incomplete(box:
     assert ("big.txt", "not-scanned-too-large") in result.skips
     summary = result.summary
     assert summary["files_not_scanned"] == 1 and summary["complete"] is False and summary["large_lane_files"] == 0 and summary["files_scanned"] == 1
-    assert big.read_bytes() == original.encode() and TOKEN2 not in _read(small)
+    assert big.read_bytes() == original.encode() and TOKEN2 not in read_text(small)
     assert [r for r in result.records if r["type"] == "finding" and r["path"] == "big.txt"] == []
 
 
@@ -431,7 +305,7 @@ def test_ordinary_slots_keep_working_while_a_large_file_runs(box: Box) -> None:
 
 _ALIGN = f"""
 import {{ alignStretches, cutMarkers, CORE_MARKER, planRedaction, finalText, restoreCheck }} from {json.dumps(str(REDACT))}
-import {{ mark }} from {json.dumps(str(_SHIELD.parents[1] / "hooks" / "secret-shield" / "patterns.ts"))}
+import {{ mark }} from {json.dumps(str(SHIELD.parents[1] / "hooks" / "secret-shield" / "patterns.ts"))}
 const input = JSON.parse(await Bun.stdin.text())
 const out = {{
   pin: new RegExp('^' + CORE_MARKER + '$').test(mark('github-token')) && mark('github-token') === '[JANITOR-REDACTED:github-token]',
@@ -506,13 +380,13 @@ def test_a_copy_left_by_the_marker_cut_is_swept_and_shares_the_uuid(box: Box) ->
     """A pair "password":"<value>" is redacted, an old shield marker follows, then the bare value (which no rule matches alone): the sweep turns both copies into markers with one uuid, the run exits 0 with no residual, and restore (which also puts back the old marker) gives the file with the old marker replaced by its token."""
     a = box.put(box.root / "a.txt", f"k = {TOKEN}\n")
     assert box.run().code == 0
-    old_line = _read(a)
+    old_line = read_text(a)
     assert MARKER_RE.search(old_line) is not None
     original = f'{{"password":"{SWEEP_VALUE}"}}\n{old_line}note {SWEEP_VALUE} end\n'
     box.put(a, original)
     result = box.run()
     assert result.code == 0 and result.summary["residual"] == 0 and result.summary["files_redacted"] == 1, result.stderr
-    text = _read(a)
+    text = read_text(a)
     assert SWEEP_VALUE not in text
     ids = [m.group(2) for m in MARKER_RE.finditer(text)]
     assert len(ids) == 3
@@ -568,7 +442,7 @@ def test_a_residual_hit_is_redacted_by_a_further_round_in_the_same_run(box: Box)
     assert [r for r in first.records if r["type"] == "residual"] == []
     assert first.summary["residual"] == 0 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1 and first.summary["findings_not_redacted"] == 0
     assert first.summary["rounds_used_max"] == 2
-    assert "abc12345" not in _read(a) and box.restore(_read(a)) == original
+    assert "abc12345" not in read_text(a) and box.restore(read_text(a)) == original
     assert "abc12345" not in first.streams()
     after = a.read_bytes()
     second = box.run()
@@ -585,11 +459,11 @@ def test_round_cap_of_one_leaves_a_residual_that_the_run_reports_and_a_run_witho
     assert [r for r in first.records if r["type"] == "residual"] == [{"type": "residual", "path": "a.txt", "kind": "assignment", "count": 1}]
     assert first.summary["residual"] == 1 and first.summary["residual_check"] == "run" and first.summary["files_redacted"] == 1
     assert first.summary["findings_not_redacted"] == 0 and first.summary["rounds_used_max"] == 1
-    assert MARKER_RE.search(_read(a)) is not None and box.restore(_read(a)) == original
+    assert MARKER_RE.search(read_text(a)) is not None and box.restore(read_text(a)) == original
     assert "abc12345" not in first.streams()
     second = box.run()
     assert second.code == 0, second.stderr
-    assert "abc12345" not in _read(a) and box.restore(_read(a)) == original
+    assert "abc12345" not in read_text(a) and box.restore(read_text(a)) == original
 
 
 def test_round_cap_outside_one_to_three_ends_the_run_with_the_file_unchanged_and_no_value_printed(box: Box) -> None:
@@ -598,14 +472,14 @@ def test_round_cap_outside_one_to_three_ends_the_run_with_the_file_unchanged_and
     a = box.put(box.root / "a.txt", original)
     result = box.run(env_extra={"SHIELD_SCAN_TEST_MAX_ROUNDS": "7"})
     assert result.code == 2 and "a worker process did not start" in result.stderr
-    assert _read(a) == original
+    assert read_text(a) == original
     assert TOKEN not in result.streams()
     assert box.run().code == 0
 
 
 _RESIDUAL = f"""
 import {{ HOME_KIND, residualHits }} from {json.dumps(str(REDACT))}
-import {{ redactHome }} from {json.dumps(str(_SHIELD.parents[1] / "hooks" / "secret-shield" / "home.ts"))}
+import {{ redactHome }} from {json.dumps(str(SHIELD.parents[1] / "hooks" / "secret-shield" / "home.ts"))}
 const input = JSON.parse(await Bun.stdin.text())
 console.log(JSON.stringify({{ residual: residualHits(input.text, [], new Set(['secrets'])), clean: residualHits(input.clean, [], new Set(['secrets'])), homeKind: Object.keys(redactHome('/a/b/x', ['/a/b']).hits), pinned: HOME_KIND }}))
 """
@@ -626,20 +500,20 @@ def test_linked_worktree_with_its_own_merge_head_is_untouched_while_the_main_wor
     linked = box.root / "wt"
     box.git(main, "worktree", "add", "-q", "-b", "wtbranch", str(linked))
     linked_file = linked / "a.txt"
-    assert _read(linked_file) == f"k = {TOKEN}\n"
+    assert read_text(linked_file) == f"k = {TOKEN}\n"
     git_dir = Path(box.git(linked, "rev-parse", "--absolute-git-dir").strip())
     assert git_dir != main / ".git"
     (git_dir / "MERGE_HEAD").write_text(box.git(linked, "rev-parse", "HEAD"), encoding="utf-8")
     result = box.run()
     assert result.code == 1, result.stderr
-    assert _read(linked_file) == f"k = {TOKEN}\n"
+    assert read_text(linked_file) == f"k = {TOKEN}\n"
     assert ("wt/a.txt", "git-operation") in result.skips
-    assert TOKEN not in _read(main / "a.txt") and box.restore(_read(main / "a.txt")) == f"k = {TOKEN}\n"
+    assert TOKEN not in read_text(main / "a.txt") and box.restore(read_text(main / "a.txt")) == f"k = {TOKEN}\n"
     assert result.summary["files_redacted"] == 1 and result.summary["findings_not_redacted"] == 1
 
 
 _GUARD = f"""
-import {{ checkWriteTarget }} from {json.dumps(str(_SHIELD / "writeguard.ts"))}
+import {{ checkWriteTarget }} from {json.dumps(str(SHIELD / "writeguard.ts"))}
 const input = JSON.parse(await Bun.stdin.text())
 console.log(JSON.stringify(input.map(([path, root]) => checkWriteTarget(path, root))))
 """
