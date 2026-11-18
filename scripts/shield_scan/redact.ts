@@ -6,7 +6,7 @@ import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
 import { addHits, propagates, type Hits } from '../../hooks/secret-shield/patterns.ts'
 import type { VaultEntry } from './vault.ts'
 
-// The grammar of the core marker is not exported by the core (the only core change of increment 3 is the export of propagates), so it is rebuilt here from `mark(kind)` = [JANITOR-REDACTED:<kind>]; the unit test pins the two against each other.
+// The grammar of the core marker is not exported by the core (increment 3 adds the propagates and stringSpans exports, redactJsonLine and mapJsonLineStrings to the core; spec R5 lists them), so it is rebuilt here from `mark(kind)` = [JANITOR-REDACTED:<kind>]; the unit test pins the two against each other.
 export const CORE_MARKER = String.raw`\[JANITOR-REDACTED:([A-Za-z0-9_-]+)\]`
 const UUID_V4 = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`
 // The marker this module writes: [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>].
