@@ -3,7 +3,9 @@
 WHY THIS EXISTS: the janitor sent session transcripts to remote models unredacted. The one redaction
 rule set is the TypeScript secret-shield core (`hooks/secret-shield/patterns.ts` + `home.ts`); this
 module reaches it through `hooks/secret-shield/redact_bridge.ts`, run by bun, so there is no second
-copy of the rules to drift.
+copy of the rules to drift. Two bridge ops are used: `redact_texts` runs op "both" over plain texts; the transcript copy runs
+op "jsonl" over each JSONL line, which decodes every JSON string first so a secret or a home behind a JSON escape is hidden (op "both" reads
+the raw line as text and misses it).
 
 EVERY failure here raises `RedactionUnavailable`. There is deliberately no fallback, no "send it
 unredacted", no "skip the line": a skipped redaction is a secret sent out. The caller must abort the
@@ -37,6 +39,8 @@ _BRIDGE = Path(__file__).resolve().parents[2] / "hooks" / "secret-shield" / "red
 # so bun is looked up on PATH first and then at its usual install locations.
 _BUN_FALLBACKS: tuple[str, ...] = ("/opt/homebrew/bin/bun", "/usr/local/bin/bun", "~/.bun/bin/bun")
 _SIDECAR_SUFFIX = ".redact-meta.json"
+# The bridge op the transcript copy runs: it decodes each JSON string of a line before redacting it, so a secret or a home behind a JSON escape is seen. Part of the sidecar metadata (see `_copy_meta`).
+_COPY_OP = "jsonl"
 
 
 class RedactionUnavailable(RuntimeError):
@@ -67,8 +71,8 @@ def _bridge_fingerprint() -> list[list[int | str]]:
     return [[str(f.relative_to(root)), f.stat().st_size, f.stat().st_mtime_ns] for f in files]
 
 
-def _bridge_results(bun: str, texts: Iterable[str], homes: list[str], timeout_s: float) -> Generator[str, None, None]:
-    """Run one bridge process over `texts`, yield each redacted text in order.
+def _bridge_results(bun: str, texts: Iterable[str], homes: list[str], timeout_s: float, *, op: str) -> Generator[str, None, None]:
+    """Run one bridge process over `texts` with bridge op `op`, yield each redacted text in order.
 
     A writer thread feeds stdin while this generator drains stdout, so a pipe buffer filling on
     either side cannot deadlock. Raises RedactionUnavailable on a missing bridge, a spawn failure, a
@@ -82,7 +86,11 @@ def _bridge_results(bun: str, texts: Iterable[str], homes: list[str], timeout_s:
         proc = subprocess.Popen([bun, str(_BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     except OSError:
         raise RedactionUnavailable("redaction bridge could not be started") from None
-    assert proc.stdin is not None and proc.stdout is not None
+    if proc.stdin is None or proc.stdout is None:
+        # WHY an explicit raise and not an assert: an assert vanishes under python -O (and bandit B101 flags it), which would let the next line fail with an AttributeError instead of failing closed.
+        proc.kill()
+        proc.wait()
+        raise RedactionUnavailable("redaction bridge pipes could not be opened")
     stdin, stdout = proc.stdin, proc.stdout
     timed_out = threading.Event()
     writer_failed = threading.Event()
@@ -96,7 +104,7 @@ def _bridge_results(bun: str, texts: Iterable[str], homes: list[str], timeout_s:
         nonlocal sent
         try:
             for text in texts:
-                stdin.write(json.dumps({"op": "both", "t": text, "homes": homes}).encode("utf-8") + b"\n")
+                stdin.write(json.dumps({"op": op, "t": text, "homes": homes}).encode("utf-8") + b"\n")
                 sent += 1
         except BaseException:
             # Recorded as a flag only, never the exception: its message can quote the text.
@@ -153,20 +161,26 @@ def redact_texts(texts: list[str], *, homes: list[str] | None = None, timeout_s:
     """Redact secrets, then home paths, in every text; same order, same length, or raise RedactionUnavailable."""
     bun = resolve_bun()
     home_list = [str(Path.home())] if homes is None else homes
-    out = list(_bridge_results(bun, texts, home_list, timeout_s))
+    # WHY op "both": these inputs are decoded item texts (from jev_compaction), not JSONL lines, so there is no JSON to decode.
+    out = list(_bridge_results(bun, texts, home_list, timeout_s, op="both"))
     if len(out) != len(texts):
         raise RedactionUnavailable("redaction returned a different number of texts than it was given")
     return out
 
 
+def _copy_meta(src_stat: os.stat_result, homes: list[str]) -> dict[str, object]:
+    """The metadata a copy is made under: source size and mtime, homes, bridge op and bridge code.
+
+    WHY one function for the sidecar write and the reuse check: the two can never disagree. WHY the op is in it: a copy made by an older op (plain text, `both`) may still hold a secret behind a JSON escape, so it must not be reused.
+    """
+    return {"src_size": src_stat.st_size, "src_mtime_ns": src_stat.st_mtime_ns, "homes": homes, "op": _COPY_OP, "bridge": _bridge_fingerprint()}
+
+
 def _reusable(src_stat: os.stat_result, meta_path: Path, dest: Path, homes: list[str]) -> bool:
-    """True when `dest` was made from this exact source, with these homes, by this exact bridge code."""
+    """True when `dest` was made from this exact source, with these homes, by this exact bridge op and code."""
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        return bool(
-            dest.is_file()
-            and meta == {"src_size": src_stat.st_size, "src_mtime_ns": src_stat.st_mtime_ns, "homes": homes, "bridge": _bridge_fingerprint()}
-        )
+        return bool(dest.is_file() and meta == _copy_meta(src_stat, homes))
     except (OSError, ValueError):
         return False
 
@@ -187,8 +201,10 @@ def _atomic_write_text(dest: Path, text: str) -> None:
 def redacted_transcript_copy(src: Path, dest_dir: Path, *, timeout_s: float, homes: list[str] | None = None) -> Path:
     """Write a redacted copy of the JSONL transcript `src` as `dest_dir/<src.name>` and return its path.
 
-    Streams line by line (a transcript can be hundreds of MB; the file is never held whole). A copy
-    already made from the same source size and mtime, the same homes and the same bridge code is reused.
+    Streams line by line (a transcript can be hundreds of MB; the file is never held whole). Each line goes through
+    bridge op "jsonl", which decodes every JSON string of the line before redacting it, so a secret or a home written
+    behind a JSON escape is hidden too; a line that is not JSON gets the plain text path. A copy already made from the
+    same source size and mtime, the same homes, the same bridge op and the same bridge code is reused.
     On ANY failure the temp file is deleted and RedactionUnavailable is raised: no partial copy is ever
     left at the destination, so a caller that catches nothing cannot send a half-redacted file.
     """
@@ -234,7 +250,7 @@ def redacted_transcript_copy(src: Path, dest_dir: Path, *, timeout_s: float, hom
     tmp = Path(tmp_name)
     try:
         os.chmod(tmp, 0o600)
-        with os.fdopen(fd, "wb") as out, contextlib.closing(_bridge_results(bun, source_lines(), home_list, timeout_s)) as results:  # closing(): a failing loop body must kill the bridge now, not whenever the generator is collected
+        with os.fdopen(fd, "wb") as out, contextlib.closing(_bridge_results(bun, source_lines(), home_list, timeout_s, op=_COPY_OP)) as results:  # closing(): a failing loop body must kill the bridge now, not whenever the generator is collected
             for redacted in results:
                 parsed, has_newline = flags.get_nowait()
                 if parsed:
@@ -257,7 +273,7 @@ def redacted_transcript_copy(src: Path, dest_dir: Path, *, timeout_s: float, hom
             raise RedactionUnavailable("redacted transcript has more lines than the source") from None
         raise RedactionUnavailable("transcript could not be redacted") from None
     try:
-        _atomic_write_text(meta_path, json.dumps({"src_size": src_stat.st_size, "src_mtime_ns": src_stat.st_mtime_ns, "homes": home_list, "bridge": _bridge_fingerprint()}))
+        _atomic_write_text(meta_path, json.dumps(_copy_meta(src_stat, home_list)))
     except OSError:
         raise RedactionUnavailable("redaction metadata could not be written; cannot redact") from None
     return dest

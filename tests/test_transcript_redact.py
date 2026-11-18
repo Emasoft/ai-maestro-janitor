@@ -120,6 +120,56 @@ def test_different_homes_do_not_reuse_the_copy(tmp_path: Path) -> None:
     assert "runner" not in dest.read_text(encoding="utf-8")
 
 
+def test_copy_hides_a_key_written_right_after_an_escaped_newline_and_every_line_parses(tmp_path: Path) -> None:
+    """The copy hides a key that follows an escaped newline inside a JSON line (op both leaves it whole), and every copied line still parses."""
+    src = tmp_path / "s.jsonl"
+    escaped = json.dumps({"c": "first\n" + FAKE_KEY + " last"})
+    _write_transcript(src, [_record(0), escaped, _record(1)])
+    dest = tr.redacted_transcript_copy(src, tmp_path / "out", timeout_s=TIMEOUT_S, homes=HOMES)
+    raw = dest.read_text(encoding="utf-8")
+    assert FAKE_KEY not in raw
+    parsed = [json.loads(line) for line in raw.splitlines()]
+    assert len(parsed) == 3
+    assert parsed[1] == {"c": "first\n" + KEY_MARK + " last"}
+
+
+def test_copy_hides_a_home_written_with_escaped_slashes(tmp_path: Path) -> None:
+    """The copy hides a home whose slashes are JSON-escaped in the raw line (op both leaves it whole), and the line still parses."""
+    src = tmp_path / "s.jsonl"
+    _write_transcript(src, [_escaped_slash_home_line()])
+    dest = tr.redacted_transcript_copy(src, tmp_path / "out", timeout_s=TIMEOUT_S, homes=HOMES)
+    raw = dest.read_text(encoding="utf-8")
+    assert "runner" not in raw
+    assert json.loads(raw) == {"p": "~/proj/a.py"}
+
+
+def test_sidecar_of_a_fresh_copy_records_the_jsonl_op(tmp_path: Path) -> None:
+    """The sidecar of a fresh copy holds the op the copy was made with."""
+    src = tmp_path / "s.jsonl"
+    _write_transcript(src, [_record(0)])
+    out_dir = tmp_path / "out"
+    tr.redacted_transcript_copy(src, out_dir, timeout_s=TIMEOUT_S, homes=HOMES)
+    meta = json.loads((out_dir / ("s.jsonl" + tr._SIDECAR_SUFFIX)).read_text(encoding="utf-8"))
+    assert meta["op"] == "jsonl"
+
+
+def test_a_copy_whose_sidecar_has_no_op_is_rebuilt_not_reused(tmp_path: Path) -> None:
+    """A copy made before the op was recorded may hold a secret behind an escape: it is not reused, it is rebuilt and the new sidecar holds the op."""
+    src = tmp_path / "s.jsonl"
+    _write_transcript(src, [_record(0)])
+    out_dir = tmp_path / "out"
+    first = tr.redacted_transcript_copy(src, out_dir, timeout_s=TIMEOUT_S, homes=HOMES)
+    sidecar = out_dir / ("s.jsonl" + tr._SIDECAR_SUFFIX)
+    meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    del meta["op"]
+    sidecar.write_text(json.dumps(meta), encoding="utf-8")
+    before = (first.stat().st_mtime_ns, first.stat().st_ino)
+    second = tr.redacted_transcript_copy(src, out_dir, timeout_s=TIMEOUT_S, homes=HOMES)
+    assert second == first
+    assert (second.stat().st_mtime_ns, second.stat().st_ino) != before
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["op"] == "jsonl"
+
+
 def test_unresolvable_bun_raises_and_writes_no_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With bun on neither PATH nor a fallback location, the copy raises and leaves nothing in the destination."""
     monkeypatch.setattr(tr.shutil, "which", lambda *_a, **_k: None)
