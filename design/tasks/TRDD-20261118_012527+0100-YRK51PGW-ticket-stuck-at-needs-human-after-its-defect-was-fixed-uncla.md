@@ -4,7 +4,7 @@ title: Ticket stuck at needs_human after its defect was fixed, unclaimed dispatc
 column: todo
 status: tasked
 created: 2026-11-18T01:25:27+0100
-updated: 2026-11-18T01:27:07+0100
+updated: 2026-11-18T16:21:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,3 +45,4 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:27+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:21:41+0100 — progress, by cheap-worker for main-agent. Commit 745ac3ce (scripts/lib/tickets.py, tests/test_tickets.py): per main-agent evidence: done in 745ac3ce, the two observed-state resolution wordings and the needs_human twin bump. Remaining, card not closed: reroute before a human; auto-close of a needs_human ticket when a same-key ticket resolves or the finding no longer reproduces (card item 3, scripts/detectors/ticket-dispatch.py); ticket lines after the janitor-ticket token delimited from drift lines (not in the evidence); the attempt rule for an unclaimed dispatch (it still spends an attempt) is an owner decision; answer and close of GitHub issue #361 (outward, not done here).

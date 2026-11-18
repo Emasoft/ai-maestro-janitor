@@ -4,7 +4,7 @@ title: Memory passes, LOCAL note ownership conflict, missing conflict CLI option
 column: todo
 status: tasked
 created: 2026-11-18T01:25:32+0100
-updated: 2026-11-18T01:27:07+0100
+updated: 2026-11-18T16:32:41+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:32+0100
+implementation-commits: [331f6720]
 ---
 
 # Memory passes, LOCAL note ownership conflict, missing conflict CLI option, trashcan candidates, atom template
@@ -45,3 +46,6 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:32+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:21:41+0100 — progress, by cheap-worker for main-agent. Commit 331f6720 (scripts/lib/memory_scopes.py, skills/janitor-memory-atomize/SKILL.md, tests/test_memory_candidates_cli.py); per main-agent evidence: .trashcan is excluded from the shared note walk (205 to 0 trashed files on this tree), and the atomize keyword template is fixed. per main-agent evidence: the premise of the conflict defect (SKILL.md line 95: the conflict skill calls memory_candidates_cli.py with --intervention conflict) is proven correct by running; no edit was made, so it stays open. Remaining, card not closed: (1) one ownership rule for LOCAL pages listed in MEMORY.md; (2) the conflict CLI intervention choice; (3) a same-subject compatible duplicate pair dispatched as conflict instead of consolidate; (4) per main-agent evidence: Rust memgrep EXCLUDED_SUBDIRS lacks .trashcan (walked only with --hidden), known gap, not fixed; (5) the lint result after the template change is not in the evidence (WMATOM-011, WMATOM-012); (6) answer and close of GitHub issue #363 (outward, not done here).
+- 2026-11-18T16:24:13+0100 — correction, by cheap-worker for main-agent: the figures 205 to 0 trashed files and the premise proven correct by running, in the progress line of 2026-11-18T16:21:41, are main-agent's reported evidence from the assignment; cheap-worker did not check them. Cheap-worker read only git show --stat of 331f6720 (3 files, 21 insertions, 3 deletions).
+- 2026-11-18T16:32:40+0100 — field note, by cheap-worker: implementation-commits [331f6720] is grep-derived from git log --grep=TRDD-7QGRK8RS, oldest first, keeping only commits that changed files outside design/, reports/ and the cspell list; f2e461b9 was dropped as design-only. Every kept subject names TRDD-7QGRK8RS. A grep match is a proxy, not a per-commit proof.

@@ -4,7 +4,7 @@ title: stale-stash advisory drops by a shifting positional index and its dedupe 
 column: todo
 status: tasked
 created: 2026-11-18T01:25:41+0100
-updated: 2026-11-18T01:27:08+0100
+updated: 2026-11-18T16:32:41+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T01:25:41+0100
+implementation-commits: [3093b7c0]
 ---
 
 # stale-stash advisory drops by a shifting positional index and its dedupe key includes that index
@@ -45,3 +46,5 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 ## Approval log
 
 - 2026-11-18T01:25:41+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-18T16:21:41+0100 — progress, by cheap-worker for main-agent. Commit 3093b7c0 (fix(stale-stash), scripts/detectors/stale-stash.py and tests/test_stale_stash.py): per main-agent evidence: the advisory and the dedupe key use the stash commit sha, not stash@{N}. Tests test_a_nudged_stash_is_not_re_emitted_after_a_newer_stash_is_pushed and test_the_advisory_names_the_stash_commit_not_a_positional_index: per main-agent evidence, both fail on the old detector and pass now. Remaining, card not closed: answer and close of GitHub issue #367 (outward, not done here); the WUIN2IGF overlap check the card asks for is not in the evidence.
+- 2026-11-18T16:32:40+0100 — field note, by cheap-worker: implementation-commits [3093b7c0] is grep-derived from git log --grep=TRDD-F987RQNV, oldest first, keeping only commits that changed files outside design/, reports/ and the cspell list; f2e461b9 was dropped as design-only. Every kept subject names TRDD-F987RQNV. A grep match is a proxy, not a per-commit proof.

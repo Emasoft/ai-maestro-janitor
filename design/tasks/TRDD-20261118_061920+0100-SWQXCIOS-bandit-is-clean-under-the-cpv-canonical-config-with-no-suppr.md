@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: todo
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-18T15:05:05+0100
+updated: 2026-11-18T16:27:56+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -18,6 +18,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-18T06:19:20+0100
 parent-trdd: BAQB9SYO
+implementation-commits: [c38eddcd, fb3a15c7, 2d63cba5, 3b11de75, 82c5ca44, ce05d495, 88f31622, 69a5c507, 9c9186a0, 0d009f47, 715a709a, 03c703f5, 7b51a828, 48a6bbf7, ba6fa0a8, fab65b3e, c91c8ece, 20f00021, e31dbb73, d7989645, c474ab36, 8f51b704, 767b8511, a12f276a, 71bc2ba7, 137fd747, 9ca341ca, cf68bfb9]
 ---
 
 # Bandit is clean under the CPV canonical config with no suppression
@@ -31,6 +32,9 @@ parent-trdd: BAQB9SYO
 
 Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, skip or ignore marker; a site that cannot be fixed without one goes to the owner).
 2026-11-18T10:48:36+0100 by main-agent: re-measured on HEAD 0cc07209 with the canonical config over git ls-files '*.py' (1269 files, an approximation of the CPV file set, which this card measured as 1267): 778 findings in 268 files. 29 are in frozen rotator files (scripts/oauth_rotator/cascade.py, reauth.py, rotator.py, safe_storage.py, slot_capture_browser.py, tests/test_oauth_rotator.py, tests/test_daemon_rotator_thread.py), so exit 0 needs an owner ruling on the rotator freeze (asked 2026-11-18). Handled alone, outside the fan-out: scripts/daemon.py (14; its rotator-tick logging is under the freeze), scripts/publish.py (30), scripts/lib/jev_compaction.py (2) and tests/test_jev_compaction.py (43, classified against the nosec). NEXT ACTION as of this entry (superseded by line 28): B607 pilot (scripts/detectors/repo-state.py, scripts/detectors/stale-index-lock.py, tests/test_branch_protection.py), then the B110/B112/B105/B108 lanes; the B607 mass replacement waits for the owner's ruling on the 06:25 disclosure.
+- 2026-11-18T16:21:41+0100 — progress, by cheap-worker for main-agent. Commit cf68bfb9 (scripts/clear_trigger.py, scripts/lib/fleet_scan.py, tests/test_clear_trigger.py, tests/test_fleet_scan.py); per main-agent evidence: two B110 sites fixed; clear_trigger.py logs the broad catch at the fail-open boundary, fleet_scan.py catches a typed tuple. Acceptance boxes 2 to 4 stay open (bandit exit 0; no marker added, with the jev_compaction nosec ruling; ci-preflight on a fresh clone). The card stays todo.
+- 2026-11-18T16:24:13+0100 — implementation-commits lists the 28 SHAs of commits that changed code, tests or config (grep-derived: git log --grep=TRDD-SWQXCIOS, minus design/, reports/ and cspell-only commits; every kept subject names TRDD-SWQXCIOS). The commits named in this STATE (137fd747, 9ca341ca, 71bc2ba7, 767b8511, a12f276a, c38eddcd) are in the field.
+- 2026-11-18T16:27:55+0100 — correction, by cheap-worker: this line records that the disclosure line above was edited in place on this date. The field now lists the 28 landed SHAs that changed code, tests or config: git log --grep=TRDD-SWQXCIOS, oldest first, minus commits whose files are all under design/ or reports/ or the cspell word list (5 of 33 dropped: c4eab769, 10bc7531, f260bd6d, bf6eacaa, 1e155b8e).
 
 ## Lanes
 

@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: dev
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-18T10:17:15+0100
+updated: 2026-11-18T16:32:37+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-17T13:46:50+0100
+implementation-commits: [32cc16f5, e3a058a9, 92eb3472, 08a8e8f2, c06cecd4, a221ceb1, acd033ae, 0c52f0b3, ee644e36, 2923a7e7, 10f26175, 4a273c1c, e81e8da8, 0f96e75c, bf46375a, 6523e31f, 4c46d82c, 2b31776c, 5e3985c1, a0f6a29e, 7d7992f7, 0f370a4e, 170593c6, 5aaa6973, 8b5fe69f, a1c758ae, 619abb6f, 5da85ccc, c6270b48, e1ac16d0, 1c42d3c2, acf280b4, 91a27e61, 1c7e521c, aac4efb4]
 ---
 
 # secrets-shield-scan skill scans a project for secrets fast, with Rust only where measured hot
@@ -110,6 +111,9 @@ approval-datetime: 2026-11-17T13:46:50+0100
 - Split, 2026-11-18T09:55:49+0100, by main-agent: the open work of this card moves to four child cards: TRDD-QWD53NHM (git history scan, scan only, increment 1b), TRDD-LJSST2WL (Rust accelerator, increment 2), TRDD-VD8UAXGF (large lane for scan-only, its cost, and a --max-large-mb default from the memory of the machine), TRDD-ANTE5721 (narrow the marker kind charset); TRDD-JYZAL6HW (vault rows of a late skip) stays as it is. Moving the Rust accelerator out of this card is the decision of the main agent under the owner ruling to decide alone, not an owner order: the owner asked for speed, "better if rust optimized", and the Rust card stays in todo. This card closes with increment 1 without history and increment 3 once 3.9.9 is released and installed.
 - Acceptance 3 on the scanner code of HEAD, 2026-11-18T10:30:00+0100, by main-agent: scripts_dev/jsonl-real/accept3.sh on copies of the same 6 transcripts (753 MB), code of d4d895bc, which equals HEAD for scripts/shield_scan and hooks/secret-shield (the commits after it change cards and one doc only), a temporary vault in TMPDIR, passes secrets and cards, 8 jobs, --file-timeout-base 3600 (raised from the default 30, so this run does not test the default time limit). Pass 1 exit 0, complete, 6 of 6 files scanned, 301 findings in 5 files, 5 files redacted, 57 values vaulted, 0 findings not redacted, 0 residual, 0 skips, 740 s (0.97 MB/s, 5 files in the large lane), worker resident peak 5,892,000 KiB by one-second ps samples, load 19 to 53. Pass 2, a second --redact over the redacted tree: exit 0, 0 findings, 0 files redacted, 468 s, worker peak 4,882,896 KiB. In both passes no line that parsed broke and no line count changed (parse1.txt, parse2.txt). Restore exit 0: 839 markers restored in 5 files, 0 left, and cmp shows all 6 files byte-identical to their originals. The work copies and the temporary vault were deleted after the run. Data: reports_dev/main-agent/jsonl-accept3/ (gitignored). This settles the NEXT of the line of 09:45:04 (rerun on HEAD) except for the default time limit; the worker memory of the parallel lane (files up to 64 MiB, 8 jobs) is being measured (scripts_dev/jsonl-real/mem8.sh).
 - Stamp correction and pointer, 2026-11-18T10:16:30+0100, by main-agent: the stamp 10:30:00 of the Acceptance 3 line above and of its Approval log line was typed, not read from the clock; both were appended at 10:10:22. The parallel-lane memory that line calls in progress had finished at 10:10 and is recorded on TRDD-VD8UAXGF (Progress, Parallel-lane memory): 8 files of 57 to 66 MB, 8 jobs, default limits, 57 s, exit 0, largest worker 2.95 GiB, largest sum 10.8 GiB, restore byte-identical.
+- 2026-11-18T16:21:41+0100 — aac4efb4 (feat(shield-scan), scripts/shield_scan/scan.ts, skills/janitor-secrets-shield-scan/SKILL.md, tests/test_shield_scan_version.py); per main-agent evidence: SECRETS_SHIELD_SCAN_VERSION lets a vendored scan.ts report its version from the environment (report-sanitizer decision D2). Column unchanged (dev).
+- 2026-11-18T16:24:13+0100 — implementation-commits lists the 35 SHAs of commits that changed code, tests or config (grep-derived: git log --grep=TRDD-BAQB9SYO, minus design/, reports/ and cspell-only commits, and 064caad4, whose subject names only TRDD-L1I0FP5T; every other kept subject names TRDD-BAQB9SYO). The commits named in this STATE (for example bf46375a, 0f370a4e, 170593c6, 8b5fe69f) are in the field.
+- 2026-11-18T16:27:55+0100 — correction, by cheap-worker: this line records that the disclosure line above was edited in place on this date. The field now lists the 35 landed SHAs that changed code, tests or config, of 73 from git log --grep=TRDD-BAQB9SYO, oldest first; 38 dropped (36 with files only under design/ or reports/, 853ece9b cspell word list only, and 064caad4 whose subject names only TRDD-L1I0FP5T). Kept but doc-only or config: bf46375a, 6523e31f, 4c46d82c, 91a27e61 (skill docs) and 1c7e521c (.cspell.json plus word list), for the main agent to decide.
 
 ## Owner request and decisions (verbatim, 2026-11-17)
 - Request: "i need to scan 2 terabytes of projects and i need the secrets-shield scanner to be very very fast (better if rust optimized)"
