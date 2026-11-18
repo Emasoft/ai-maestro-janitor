@@ -111,6 +111,27 @@ describe('pass pipeline', () => {
     expect(redactAll(MIXED, HOMES).hits).toEqual({ 'github-token': 1, 'payment-card': 1, email: 1, 'home-path': 1 })
   })
 
+  test('options: email cloneAddresses hidden hides a git clone address, the default and visible keep it, with the same call otherwise', () => {
+    const clone = 'git' + AT + 'host.net'
+    const text = 'clone ' + clone + ':owner/repo path ' + HOME_PATH
+    const kept = redactAll(text, HOMES)
+    expect(kept.text).toContain(clone)
+    expect(kept.hits).toEqual({ 'home-path': 1 })
+    expect(redactAll(text, HOMES, ALL_PASSES, {})).toEqual(kept)
+    expect(redactAll(text, HOMES, ALL_PASSES, { email: { cloneAddresses: 'visible' } })).toEqual(kept)
+    const hidden = redactAll(text, HOMES, ALL_PASSES, { email: { cloneAddresses: 'hidden' } })
+    expect(hidden.text).toBe('clone ' + mark('email') + ':owner/repo path ~/x.ts')
+    expect(hidden.hits).toEqual({ email: 1, 'home-path': 1 })
+  })
+
+  test('options: the email option changes nothing when the email pass is not in the pass set', () => {
+    const text = 'clone ' + 'git' + AT + 'host.net' + ':owner/repo path ' + HOME_PATH
+    const options = { email: { cloneAddresses: 'hidden' } } as const
+    for (const passes of [new Set<Pass>(['secrets']), new Set<Pass>(['home']), new Set<Pass>(['secrets', 'cards', 'home'])]) {
+      expect(redactAll(text, HOMES, passes, options)).toEqual(redactAll(text, HOMES, passes))
+    }
+  })
+
   test('idempotence: running it on its own output changes nothing and counts 0 hits', () => {
     const first = redactAll(MIXED, HOMES)
     expect(redactAll(first.text, HOMES)).toEqual({ text: first.text, hits: {} })

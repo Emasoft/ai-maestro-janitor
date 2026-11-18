@@ -1,6 +1,7 @@
 // Tests of the email pass (email.ts), one test per rule and form, the known misses pinned as they are today, and a timing pin.
 // WHY every address is built at run time: the privacy scans read source text, so no address may stand in a tracked file. e() joins a local part, the at sign and a host; the host is a domain, never an address by itself.
 // WHY the expected results were checked against report-sanitizer: each case of the rules below was run through its EMAIL regex and email_repl (RS commit f2def51) with rule G applied, and a random differential run of 300,000 strings gave 0 differences with this scan (TRDD-L1I0FP5T increment 3).
+// Hidden mode, measured 2026-11-18 by the main agent (a scratch probe, not in the repo): 60,000 generated lines (50,000 random strings over at signs, git, ssh, host and path characters, and 10,000 built from clone-address forms) gave 0 span differences between findEmails with cloneAddresses hidden and the report-sanitizer EMAIL regex with email_repl (RS 1ab8670); the same lines with the default (rule G on) gave 1172, so the comparison can see a difference (TRDD-L1I0FP5T step B part 1).
 import { describe, expect, test } from 'claude-code/testing'
 
 import { findEmails, redactEmails } from '../email'
@@ -126,6 +127,72 @@ describe('email pass: the address of a git clone over SSH (rule G)', () => {
   test('a visible clone address still ends the previous match, and the addresses around it are hidden', () => {
     hides(e('git', 'host.net') + ':a ' + e('user', 'host.net'), e('git', 'host.net') + ':a ' + M, 1)
     hides('ssh://' + e('git', 'host.net1y') + '@h.net', 'ssh://' + e('git', 'host.net') + M, 1)
+  })
+})
+
+describe('email pass: cloneAddresses hidden (rule G off)', () => {
+  const hiddenOptions = { cloneAddresses: 'hidden' } as const
+  const hid = (text: string) => redactEmails(text, hiddenOptions)
+  test('the default is rule G on: passing no options, or visible, equals the default result', () => {
+    const text = 'git clone ' + e('git', 'github.com') + ':owner/repo.git'
+    expect(r(text)).toEqual({ text, hits: {} })
+    expect(redactEmails(text, { cloneAddresses: 'visible' })).toEqual({ text, hits: {} })
+    expect(findEmails(text, { cloneAddresses: 'visible' })).toEqual(findEmails(text))
+  })
+  test('the scp-like form is hidden and counted, in any letter case and with every path character', () => {
+    expect(hid('git clone ' + e('git', 'github.com') + ':owner/repo.git')).toEqual({ text: 'git clone ' + M + ':owner/repo.git', hits: { email: 1 } })
+    expect(hid(e('Git', 'host.net') + ':_x')).toEqual({ text: M + ':_x', hits: { email: 1 } })
+    expect(hid(e('GIT', 'host.net') + ':22')).toEqual({ text: M + ':22', hits: { email: 1 } })
+    expect(hid(e('git', 'host.net') + ':~/repo')).toEqual({ text: M + ':~/repo', hits: { email: 1 } })
+    expect(hid(e('git', 'host.net') + ':/srv/repo')).toEqual({ text: M + ':/srv/repo', hits: { email: 1 } })
+    expect(hid(e('git', 'host.net') + ':-x')).toEqual({ text: M + ':-x', hits: { email: 1 } })
+  })
+  test('the ssh:// and git+ssh:// forms are hidden and counted, in any letter case', () => {
+    expect(hid('ssh://' + e('git', 'host.net') + '/owner/repo')).toEqual({ text: 'ssh://' + M + '/owner/repo', hits: { email: 1 } })
+    expect(hid('git+ssh://' + e('GIT', 'host.net') + ':22/x')).toEqual({ text: 'git+ssh://' + M + ':22/x', hits: { email: 1 } })
+    expect(hid('SSH://' + e('git', 'host.net'))).toEqual({ text: 'SSH://' + M, hits: { email: 1 } })
+  })
+  test('a hidden clone address still ends the previous match, like any hidden address', () => {
+    expect(hid('ssh://' + e('git', 'host.net1y') + '@h.net')).toEqual({ text: 'ssh://' + M + M, hits: { email: 2 } })
+    expect(hid(e('git', 'host.net') + ':a ' + e('user', 'host.net'))).toEqual({ text: M + ':a ' + M, hits: { email: 2 } })
+  })
+  test('rule 3 is not changed by the option: the visible domains stay visible', () => {
+    for (const text of [e('user', 'example.com'), e('123+name', 'users.noreply.github.com'), e('noreply', 'anthropic.com')]) {
+      expect(hid(text)).toEqual({ text, hits: {} })
+    }
+  })
+  test('on mixed lines the hidden spans are the default spans plus exactly the clone addresses', () => {
+    const lines: Array<{ text: string; clones: string[] }> = [
+      { text: 'git clone ' + e('git', 'github.com') + ':owner/repo.git', clones: [e('git', 'github.com')] },
+      { text: 'ssh://' + e('git', 'host.net') + '/owner/repo ' + e('user', 'host.net'), clones: [e('git', 'host.net')] },
+      { text: 'git+ssh://' + e('GIT', 'host.net') + ':22/x', clones: [e('GIT', 'host.net')] },
+      { text: e('git', 'host.net') + ':a ' + e('user', 'host.net'), clones: [e('git', 'host.net')] },
+      { text: 'ssh://' + e('git', 'host.net1y') + '@h.net', clones: [e('git', 'host.net')] },
+      { text: 'mail ' + e('git', 'host.net') + ', thanks', clones: [] },
+      { text: e('x', 'example.com') + e('1y', 'host.net'), clones: [] },
+      { text: e('xgit', 'host.net') + ':owner/r ' + e('noreply', 'anthropic.com'), clones: [] },
+      { text: 'plain text, no address', clones: [] },
+    ]
+    for (const line of lines) {
+      const expected = findEmails(line.text)
+      for (const clone of line.clones) {
+        const start = line.text.indexOf(clone)
+        expected.push({ start, end: start + clone.length })
+      }
+      expected.sort((a, b) => a.start - b.start)
+      const spans = findEmails(line.text, hiddenOptions)
+      expect(spans).toEqual(expected)
+      expect(hid(line.text).hits).toEqual(spans.length === 0 ? {} : { email: spans.length })
+    }
+  })
+  test('about 256 KB of one clone address per line takes under 100 ms and hides every address', () => {
+    const n = 262144
+    const line = e('git', 'host.net') + ':owner/repo\n'
+    const lines = Math.floor(n / line.length)
+    const text = line.repeat(lines)
+    let hits = 0
+    expect(ms(() => { hits = hid(text).hits.email ?? 0 })).toBeLessThan(100)
+    expect(hits).toBe(lines)
   })
 })
 

@@ -4,12 +4,16 @@
 //   1. The local part is the longest run of letters, digits and . _ % + - that ends right before the at sign and does not start before the end of the previous match. Empty: no address at this at sign.
 //   2. The domain is labels of letters, digits and hyphens joined by single dots. The first label must not be empty. The address ends after the leading letters of the LAST label that starts with 2 or more ASCII letters (not the first label): this is what the regex does by backtracking. So a domain whose last label is a host then a letters-and-digits tail ends after the letters, and what follows them (the digit) stays visible; a double dot ends the labels.
 //   3. A matched address stays visible, and still counts as the end of the previous match, when its lowercased domain is the GitHub no-reply domain, or example.com or example.org, or when its lowercased local part is noreply and its domain is the Anthropic domain. The domain tested is the matched one, which can be shorter than the text after the at sign.
-//   G. (this pass hides less than report-sanitizer, by decision of the TRDD-L1I0FP5T coordinator) The address of a git clone over SSH stays visible and counts as the end of the previous match: a local part equal to git in any letter case, when the character right after the matched domain is a colon followed by a path character (the scp-like form: git, at sign, host, colon, owner, slash, repo), or when the local part is directly preceded by ssh:// or git+ssh://. It is a service account and not a person (report-sanitizer's ssh_cmd_repl keeps it for the same reason). A git local part in any other place is hidden like every address.
+//   G. (this pass hides less than report-sanitizer by default, by decision of the TRDD-L1I0FP5T coordinator; a caller may turn it off with the cloneAddresses option set to hidden, which report-sanitizer does because its rule hides a clone address; WHY: a report must hide nothing less than before) The address of a git clone over SSH stays visible and counts as the end of the previous match: a local part equal to git in any letter case, when the character right after the matched domain is a colon followed by a path character (the scp-like form: git, at sign, host, colon, owner, slash, repo), or when the local part is directly preceded by ssh:// or git+ssh://. It is a service account and not a person (report-sanitizer's ssh_cmd_repl keeps it for the same reason). A git local part in any other place is hidden like every address. With cloneAddresses hidden rule G does not apply and such an address is hidden and still ends the previous match, like any hidden address.
 // KNOWN MISSES, each pinned by a test titled "KNOWN MISS <slug>: ..." in tests/email.test.ts and described in KNOWN-MISSES.md: a git clone address (email-git-local-part); a non-ASCII letter in the local part or the domain (email-non-ascii); a quoted local part (email-quoted-local-part); an IP-literal domain (email-ip-literal-domain); a domain of a single label (email-single-label-domain); a last label that does not start with two letters (email-tld-without-two-leading-letters); the tail of a last label after its leading letters (email-domain-tail-after-letter-run). All but the first are shared with report-sanitizer.
 import { mark } from './patterns'
 import type { Hits } from './patterns'
 
 export type EmailSpan = { start: number; end: number }
+
+// WHY a caller option for rule G: rule G is a decision of this core for the live shield, where a service account is not worth hiding. The report sanitizer replaces its Python EMAIL rule with this pass and its own rule hides a git clone address (a report must show nothing less than before), so the caller must be able to turn rule G off. visible is the default so that every caller that passes nothing keeps rule G; hidden hides a clone address like any other address, and it still ends the previous match.
+export type EmailOptions = { cloneAddresses: 'visible' | 'hidden' }
+export const DEFAULT_EMAIL_OPTIONS: EmailOptions = { cloneAddresses: 'visible' }
 
 // WHY findEmails and EmailSpan are exported: only the span-level parity measurement of TRDD-L1I0FP5T uses them today, to compare spans with the report-sanitizer Python rule; redactEmails is the one function callers use.
 
@@ -55,19 +59,19 @@ const ANTHROPIC_DOMAIN = 'anthropic.com'
 // example.com and example.org have the same length
 const EXAMPLE_DOMAIN_LENGTH = 'example.com'.length
 
-// Rule 3 and G, on the matched text lowercased. The local part and the domain are compared apart, so that no address stands in this file.
-const staysVisible = (text: string, start: number, at: number, end: number): boolean => {
+// Rule 3 and G, on the matched text lowercased. The local part and the domain are compared apart, so that no address stands in this file. Rule G applies only when the caller left cloneAddresses at visible.
+const staysVisible = (text: string, start: number, at: number, end: number, options: EmailOptions): boolean => {
   const localLength = at - start
   const domainLength = end - at - 1
   // WHY the lengths are tested before anything is sliced: a text of 256 KB with one address per line made a slice, a lowercase copy and a compare for every address, and that run took 104 ms in one runner run on a loaded host (limit 100 ms) against 9 to 10 ms on an idle one. Only a part whose length equals one of the listed ones can equal it, so an ordinary address allocates nothing.
-  if (localLength === 3 && text.slice(start, at).toLowerCase() === 'git' && isCloneAddress(text, start, end)) return true
+  if (options.cloneAddresses === 'visible' && localLength === 3 && text.slice(start, at).toLowerCase() === 'git' && isCloneAddress(text, start, end)) return true
   if (domainLength !== NOREPLY_DOMAIN.length && domainLength !== EXAMPLE_DOMAIN_LENGTH && !(localLength === 7 && domainLength === ANTHROPIC_DOMAIN.length)) return false
   const domain = text.slice(at + 1, end).toLowerCase()
   return domain === NOREPLY_DOMAIN || domain === 'example.com' || domain === 'example.org' || (domain === ANTHROPIC_DOMAIN && text.slice(start, at).toLowerCase() === 'noreply')
 }
 
-/** Where the email addresses are: [start, end) spans over the text, left to right, never overlapping; the addresses that stay visible are not listed. */
-export function findEmails(text: string): EmailSpan[] {
+/** Where the email addresses are: [start, end) spans over the text, left to right, never overlapping; the addresses that stay visible are not listed. `options` decides whether a git clone address stays visible (rule G). */
+export function findEmails(text: string, options: EmailOptions = DEFAULT_EMAIL_OPTIONS): EmailSpan[] {
   const spans: EmailSpan[] = []
   // End of the previous match, visible or not: report-sanitizer resumes there, so a local part never reaches back into it.
   let lastEnd = 0
@@ -81,16 +85,16 @@ export function findEmails(text: string): EmailSpan[] {
       at = text.indexOf('@', at + 1)
       continue
     }
-    if (!staysVisible(text, start, at, end)) spans.push({ start, end })
+    if (!staysVisible(text, start, at, end, options)) spans.push({ start, end })
     lastEnd = end
     at = text.indexOf('@', end)
   }
   return spans
 }
 
-/** Hides every email address with the email marker; the count is the number of addresses hidden. */
-export function redactEmails(text: string): { text: string; hits: Hits } {
-  const spans = findEmails(text)
+/** Hides every email address with the email marker; the count is the number of addresses hidden. `options` is the same as for findEmails. */
+export function redactEmails(text: string, options: EmailOptions = DEFAULT_EMAIL_OPTIONS): { text: string; hits: Hits } {
+  const spans = findEmails(text, options)
   if (spans.length === 0) return { text, hits: {} }
   let out = ''
   let at = 0
