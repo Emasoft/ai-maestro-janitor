@@ -257,7 +257,7 @@ def test_installer_like_word_not_matched(registry_base: str) -> None:
 
 
 def test_non_bash_tool_ignored(registry_base: str) -> None:
-    payload = {"tool_name": "Edit", "tool_input": {"file_path": "/tmp/x.py", "old_string": "a", "new_string": "b"}}
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": "/fake/x.py", "old_string": "a", "new_string": "b"}}
     rc, out = _run(payload, registry_base)
     assert rc == 0 and out == {}
 

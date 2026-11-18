@@ -1392,14 +1392,14 @@ def test_open_files_from_transcript_dedupes_recent_read_edit(tmp_path: Path) -> 
 
 
 def test_open_files_from_transcript_excludes_scratch_and_outside_paths(tmp_path: Path) -> None:
-    """A `/tmp` path, a `reports/`-nested path, and a path outside the project root are
-    all dropped — a continuity nudge naming scratch/report files is worse than silence
-    (review fix on TRDD-7MGJYLY5)."""
+    """A scratch file beside the project root, a `reports/`-nested path, and a path
+    outside the project root are all dropped — a continuity nudge naming scratch/report files is
+    worse than silence (review fix on TRDD-7MGJYLY5)."""
     hook = _hook()
     tx = tmp_path / "t.jsonl"
     outside = tx.parent.parent / "outside.py"
     _write_jsonl(tx, [
-        _tool_use_turn("Read", file_path="/tmp/scratch.py"),
+        _tool_use_turn("Read", file_path=str(tmp_path.parent / "scratch.py")),
         _tool_use_turn("Read", file_path=str(tmp_path / "reports" / "audit.md")),
         _tool_use_turn("Read", file_path=str(outside)),
         _tool_use_turn("Edit", file_path=str(tmp_path / "src" / "real.py")),

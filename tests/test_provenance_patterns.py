@@ -52,7 +52,7 @@ def test_every_rule_has_severity_in_jansevs() -> None:
 def test_finding_named_tuple_shape() -> None:
     f = pp.Finding(
         rule_id="r", line=1, column=2, matched_text="m",
-        severity="HIGH", description="d", file_path="/tmp/x.yml",
+        severity="HIGH", description="d", file_path="/fake/x.yml",
     )
     assert f.rule_id == "r"
     assert f.line == 1
@@ -60,7 +60,7 @@ def test_finding_named_tuple_shape() -> None:
     assert f.matched_text == "m"
     assert f.severity == "HIGH"
     assert f.description == "d"
-    assert f.file_path == "/tmp/x.yml"
+    assert f.file_path == "/fake/x.yml"
 
 
 def test_rule_record_has_all_fields() -> None:

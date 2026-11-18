@@ -63,7 +63,7 @@ def test_finding_named_tuple_shape() -> None:
     """Finding shape mirrors provenance_patterns.Finding."""
     f = stp.Finding(
         rule_id="r", line=1, column=2, matched_text="m",
-        severity="HIGH", description="d", file_path="/tmp/x.json",
+        severity="HIGH", description="d", file_path="/fake/x.json",
     )
     assert f.rule_id == "r"
     assert f.line == 1
@@ -71,7 +71,7 @@ def test_finding_named_tuple_shape() -> None:
     assert f.matched_text == "m"
     assert f.severity == "HIGH"
     assert f.description == "d"
-    assert f.file_path == "/tmp/x.json"
+    assert f.file_path == "/fake/x.json"
 
 
 def test_rule_record_has_all_fields() -> None:

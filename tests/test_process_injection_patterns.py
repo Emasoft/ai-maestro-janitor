@@ -647,7 +647,7 @@ def test_scan_findings_are_sorted() -> None:
 
 def test_long_match_truncated_with_ellipsis() -> None:
     """Matched text > 200 chars is truncated with an ellipsis."""
-    long_path = "/tmp/" + "a" * 250 + ".so"
+    long_path = "/fake/" + "a" * 250 + ".so"
     src = f"env:\n  LD_PRELOAD: {long_path}\n"
     findings = pip.scan_text(src)
     assert findings

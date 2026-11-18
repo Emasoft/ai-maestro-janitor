@@ -309,12 +309,12 @@ def test_owasp_id_label_unknown_returns_id() -> None:
 
 
 def test_has_invisible_unicode_zero_width_space() -> None:
-    s = "hello​world"  # zero-width space hidden between two words
+    s = "hello\N{ZERO WIDTH SPACE}world"  # zero-width space hidden between two words
     assert sh.has_invisible_unicode(s)
 
 
 def test_has_invisible_unicode_rtl_override() -> None:
-    s = "hello‮world"  # RTL override
+    s = "hello\N{RIGHT-TO-LEFT OVERRIDE}world"  # RTL override
     assert sh.has_invisible_unicode(s)
 
 
@@ -325,7 +325,7 @@ def test_has_invisible_unicode_clean_string() -> None:
 def test_strip_invisible_unicode_removes_zero_width() -> None:
     """The stripped form is what a human SEES; original is what the parser
     sees. Mismatch is the security signal."""
-    raw = "hello​world"
+    raw = "hello\N{ZERO WIDTH SPACE}world"
     stripped = sh.strip_invisible_unicode(raw)
     assert stripped == "helloworld"
     assert raw != stripped

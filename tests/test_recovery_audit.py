@@ -57,7 +57,7 @@ def _key() -> bytes:
     return k
 
 
-def _rec(ra_mod, *, outcome: str = "fired", project_root: str = "/tmp/projA",
+def _rec(ra_mod, *, outcome: str = "fired", project_root: str = "/fake/projA",
          pid: int = 123, diagnosis: str = "frozen", rung: str = "rearm",
          channel: str = "iterm") -> dict | None:
     return ra_mod.record_recovery(
@@ -139,13 +139,13 @@ def test_fail_open_on_append_raise(isolated, monkeypatch) -> None:
 def test_load_records_and_recent(isolated) -> None:
     """load_records returns all records in file order; load_recent returns the tail."""
     for i in range(5):
-        _rec(ra, outcome="fired", project_root=f"/tmp/proj{i}")
+        _rec(ra, outcome="fired", project_root=f"/fake/proj{i}")
     recs = ra.load_records()
     assert len(recs) == 5
-    assert [r["project_root"] for r in recs] == [f"/tmp/proj{i}" for i in range(5)]
+    assert [r["project_root"] for r in recs] == [f"/fake/proj{i}" for i in range(5)]
     recent = ra.load_recent(limit=2)
     assert len(recent) == 2
-    assert recent[-1]["project_root"] == "/tmp/proj4"
+    assert recent[-1]["project_root"] == "/fake/proj4"
     assert ra.load_recent(limit=0) == []
 
 
@@ -221,12 +221,12 @@ def test_record_triggers_rotation(isolated, monkeypatch) -> None:
     # Tiny caps so every append rotates down to the most recent record.
     monkeypatch.setattr(ra, "_MAX_BYTES", 1)
     monkeypatch.setattr(ra, "_KEEP_LINES", 1)
-    _rec(ra, outcome="fired", project_root="/tmp/old")
-    last = _rec(ra, outcome="dry_run", project_root="/tmp/new")
+    _rec(ra, outcome="fired", project_root="/fake/old")
+    last = _rec(ra, outcome="dry_run", project_root="/fake/new")
     assert last is not None
     recs = ra.load_records()
     assert len(recs) == 1
-    assert recs[0]["project_root"] == "/tmp/new"
+    assert recs[0]["project_root"] == "/fake/new"
     assert recs[0]["outcome"] == "dry_run"
 
 
@@ -261,7 +261,7 @@ def test_pid_none_recorded_as_null(isolated) -> None:
     """A None pid is recorded as JSON null (not the string 'None'), and the record
     still round-trips + verifies."""
     entry = ra.record_recovery(
-        ts=1_750_000_000, project_root="/tmp/p", pid=None, tty=None,
+        ts=1_750_000_000, project_root="/fake/p", pid=None, tty=None,
         diagnosis="cron_dead", rung="rearm", channel="tmux", outcome="fired",
     )
     assert entry is not None

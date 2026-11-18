@@ -14,6 +14,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -41,8 +42,9 @@ def needs_claude(test: _F) -> _F:
 
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    # cwd=/tmp: never the repo root, as the script itself insists on.
-    return subprocess.run([sys.executable, str(_SCRIPT), *args], cwd="/tmp", env=env, capture_output=True, text=True, timeout=400)
+    # cwd is the temp dir, not the repo root: it keeps the child process out of the repo.
+    # The script itself does not check its own cwd.
+    return subprocess.run([sys.executable, str(_SCRIPT), *args], cwd=tempfile.gettempdir(), env=env, capture_output=True, text=True, timeout=400)
 
 
 def _copy_mod(dest: Path) -> Path:
