@@ -225,11 +225,7 @@ def main() -> int:
                 home, now, server_owns_tick=supervisor._server_owns_chores()
             )
     except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
-        # why: a notify fault must never break the heartbeat, so the broad catch stays; this detector prints nothing, so the skip goes to the log.
-        try:
-            state.log_line("oauth-login-needed", "stalled-tick owner notice skipped")
-        except (OSError, ValueError):  # why: log_line can raise OSError or UnicodeEncodeError (a ValueError); a fail-open handler must not raise
-            pass
+        pass
 
     # Every path named in the messages below is RESOLVED, never hard-coded (janitor#258).
     # These lines used to spell `~/.claude/account-rotator/...` literally while the state read
