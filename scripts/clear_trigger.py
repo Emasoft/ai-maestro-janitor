@@ -639,7 +639,11 @@ def _run_chain_payload(payload_b64: str) -> int:
 
                 cold_cache_compact.mark_clear_fired(sd, now=int(time.time()))
             except Exception:  # noqa: BLE001 — the stamp is best-effort; never block /clear
-                pass
+                # why: state.log_line raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); a failed diagnostic is not retried and must not end the chain before the verified Enter
+                try:
+                    state.log_line("clear-trigger", "cooldown stamp skipped")
+                except (OSError, RuntimeError, ValueError):
+                    pass
 
     def _clear_still_wanted() -> tuple[bool, str]:
         # Owner directive 2026-08-16: while the pane is busy (the user is typing), do NOT give
@@ -723,7 +727,11 @@ def _run_chain_payload(payload_b64: str) -> int:
             if live:
                 return False, f"{len(live)} agent(s) live"
         except Exception:  # noqa: BLE001
-            pass
+            # why: _log_veto_once writes through state.log_line, which raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps a failed diagnostic from ending the pending clear
+            try:
+                _log_veto_once("agents_probe", "chain: pending-agents probe skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass
         # Issue 356, TRDD-C9CO0I7L: a /janitor-write-handoff compose is mid-flight FOR THIS SESSION --
         # a /clear now destroys the context it is summarizing. Cancel; the next Stop re-fires it.
         # The session key comes from the transcript path (payload, else the env the spawner sets),
@@ -746,7 +754,11 @@ def _run_chain_payload(payload_b64: str) -> int:
             if secs is not None:
                 return False, f"interrupted {int(secs)}s ago — within the cooldown"
         except Exception:  # noqa: BLE001
-            pass
+            # why: _log_veto_once writes through state.log_line, which raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps a failed diagnostic from ending the pending clear
+            try:
+                _log_veto_once("interrupt_probe", "chain: interrupt probe skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass
         return True, "no live agents, no recent interrupt"
 
     def _recovery_ok() -> tuple[bool, str]:
@@ -993,7 +1005,11 @@ def _run_chain_payload(payload_b64: str) -> int:
                         "will switch it, not /clear"
                     )
         except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
-            pass
+            # why: _log_veto_once writes through state.log_line, which raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps a failed diagnostic from ending the pending clear
+            try:
+                _log_veto_once("pane_policy_probe", "chain: pane-policy conflict probe skipped")
+            except (OSError, RuntimeError, ValueError):
+                pass
         return True, "no actuator-conflict state on pane"
 
     def _still_wanted() -> tuple[bool, str]:

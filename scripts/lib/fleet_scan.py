@@ -395,8 +395,8 @@ def record_iterm_automation_state(
         # json.loads then fails and the alarm prints the wrong fallback diagnosis.
         state.atomic_write(flag, payload)
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
-        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
         try:
+            # why: state.log_line raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
             state.log_line("daemon", "iterm automation state write skipped")
         except (OSError, RuntimeError, ValueError):
             pass
@@ -516,8 +516,8 @@ def record_iterm_host_exposure(exposure: tuple[int, int]) -> None:
         data["fleet_total"] = total
         state.atomic_write(flag, json.dumps(data, sort_keys=True))
     except Exception:  # noqa: BLE001 -- advisory; must never break the scan
-        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
         try:
+            # why: state.log_line raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
             state.log_line("daemon", "iterm host exposure patch skipped")
         except (OSError, RuntimeError, ValueError):
             pass
@@ -563,8 +563,8 @@ def record_iterm_rescue_warranted(warranted: bool) -> None:
         data["rescue_warranted"] = warranted
         state.atomic_write(flag, json.dumps(data, sort_keys=True))
     except Exception:  # noqa: BLE001 -- advisory; must never break the scan
-        # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
         try:
+            # why: state.log_line raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
             state.log_line("daemon", "iterm rescue patch skipped")
         except (OSError, RuntimeError, ValueError):
             pass
@@ -1305,8 +1305,8 @@ def capture_pane_text(terminal: Mapping[str, str]) -> str | None:
             if (gs.global_state_dir() / ITERM_TCC_FLAG).exists():
                 return None  # declined — proven-dead channel this beat (TCC denial)
         except Exception:  # noqa: BLE001 -- a probe fault must never break the scan
-            # why: state.log_line raises OSError (init_state, open, write) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
             try:
+                # why: state.log_line raises OSError (init_state, open, write), RuntimeError (Path.expanduser in log_dir on JANITOR_LOG_DIR) or ValueError (UnicodeEncodeError on a non-UTF-8 session id); the guard keeps the scan from raising
                 state.log_line("daemon", "iterm decline check skipped")
             except (OSError, RuntimeError, ValueError):  # a failed skip line must not break the scan either
                 pass
