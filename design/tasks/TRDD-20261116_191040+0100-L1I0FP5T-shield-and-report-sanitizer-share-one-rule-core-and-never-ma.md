@@ -4,7 +4,7 @@ title: Shield and report-sanitizer share one rule core and never mask a path exc
 column: dev
 status: tasked
 created: 2026-11-16T19:10:40+0100
-updated: 2026-11-18T06:45:28+0100
+updated: 2026-11-18T10:10:22+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -83,6 +83,7 @@ Windows home prefix: %USERPROFILE%. Reverses report-sanitizer TRDD-ZADXHV6W desi
 - 2026-11-18T06:25:44+0100 — Correction to the Step B pre-check line of 2026-11-18T05:31:53+0100, read by main-agent at report-sanitizer sanitize_reports.py:114-119: email_repl also keeps noreply at the Anthropic domain visible (the full address, not a domain), like core rule 3; the pre-check named only example.com, example.org and users.noreply.github.com.
 - 2026-11-18T06:25:45+0100 — Step B part 1 done in janitor dcafa805: findEmails, redactEmails and redactAll take an email option, cloneAddresses visible (default, rule G on) or hidden. Measured by main-agent with a scratch probe: 60,000 generated lines gave 0 span differences between hidden mode and the report-sanitizer EMAIL regex with email_repl (RS 1ab8670), and 1172 in the default mode. Correction to the dcafa805 message: the first shield run with 6 timing failures had no load recorded; the run at load 29 failed 2; four alternating runs at load 15 passed (HEAD 1322, the email tree 1331). Step B part 2 (the report-sanitizer swap) is in progress.
 - 2026-11-18T06:44:26+0100 — Step B done in report-sanitizer, by main-agent. 1ad71fb re-pins core/ to janitor 8b5fe69f (sync_core.py --check exit 0; core/tests email 47, pipeline 12 and known-misses 36 pass under bun, single files). 8eaa0b8 replaces the Python EMAIL rule and email_repl with bridge op email (the core email pass with cloneAddresses hidden, run where the EMAIL rule ran), adds email to LEGACY_KINDS, and adds test_r and test_s to tests/test_shield_bridge.py (35 passed; tests/test_groups.py 20 passed). Acceptance (3) of the Step B design line is met, old side a checkout of 1ab8670: 324 of 324 synthetic lines byte-equal with 0 that hide less, fuzz 4000 of 4000, --group ssh-login unchanged (worker runs, outputs read by main-agent); the parity walk over 64,220 text files (the corpus grew from 52,736), 0 Python timeouts, 7,900 spans hidden by each side, all equal, Python-only 0 (was 379), core-only 0 (worker run, result file read by main-agent). The checkout of 1ab8670 was removed afterwards (git worktree remove; it held only that commit and an ignored __pycache__).
+- 2026-11-18T10:30:00+0100 — stays in dev across release 3.9.9 (main-agent): its open work (step 4, the report-sanitizer Python rules switched off and on over the corpus; increment 6, parity) is on the report-sanitizer side and continues after 3.9.9. 3.9.9 ships the janitor shield scanner on the shared core as it is at HEAD; no half-landed change of this card is in it.
 
 ## Design
 
