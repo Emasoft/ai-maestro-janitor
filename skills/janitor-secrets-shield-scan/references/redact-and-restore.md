@@ -102,6 +102,7 @@ Run `--redact` on a copy or a sample of the tree first.
 
 - It reads every file under the root, gitignored files too, but never the content of a `.git` folder or the vault folder. Home paths rewritten to `~` are not restored.
 - A marker is restored only in the file it was redacted in. A marker in a moved or copied file is left and reported as `moved`, unless `--any-origin` is given. Another hard-link name of a redacted file is reported as `moved`, because its path is not the origin recorded in the vault; with `--any-origin` it reaches the hardlink guard and is skipped as `hardlinked`.
+- A marker whose vault row has an encoding other than raw (only a vault made by an older development version can hold one) is left as it is and reported as `unknown-encoding`; the run goes on and exits 1.
 - A hardlinked file, a file that is not lossless UTF-8, and a file in a repo with a merge, rebase, cherry-pick, revert or bisect in progress are left as they are and reported.
 - A binary file (a NUL in its first 8192 bytes) is left as it is and is not searched for markers, so a marker in one does not change the exit code; the summary counts it under `skipped` as `binary`.
 - A file that changes while it is being read is skipped as `changed-during-restore`; the exit code is 1 when the bytes read held a marker.
