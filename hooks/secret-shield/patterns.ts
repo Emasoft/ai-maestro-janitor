@@ -725,8 +725,9 @@ export function redactDeep(value: unknown): { value: unknown; hits: Hits } {
 // sits behind an escape (`\n`, `\t`, `\"`, `\/`, a backslash-u sequence, a JSON document inside a string) is left whole. redactJsonLine decodes each string of the line first,
 // so the rules see the text the model would read, and writes back only the strings that changed.
 
+// WHY exported: scripts/shield_scan/jsonl.ts (TRDD-BAQB9SYO 3b-2) splits a line into string tokens with the same tokenizer redactJsonLine uses; report-sanitizer vendors this file and re-pins later.
 /** The spans [start, end) of every JSON string token of `doc` (keys and values, quotes included): a token ends at the next `"` that is not preceded by an odd run of backslashes. */
-function stringSpans(doc: string): Array<[number, number]> {
+export function stringSpans(doc: string): Array<[number, number]> {
   const spans: Array<[number, number]> = []
   for (let open = doc.indexOf('"'); open !== -1; ) {
     let close = doc.indexOf('"', open + 1)
