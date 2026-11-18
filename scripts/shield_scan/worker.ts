@@ -13,6 +13,7 @@
 // WHY no error text is ever written: a stack trace prints source text, and a scanned file can hold a secret. A failure exits the process; the driver records it as a crash.
 // Nothing here writes a matched value: replies hold kinds, counts, line numbers and fixed text only.
 
+import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, realpathSync, type BigIntStats } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, sep } from 'node:path'
@@ -21,7 +22,7 @@ import { isPass, redactAll, type Pass } from '../../hooks/secret-shield/pipeline
 import { BINARY_PROBE_BYTES } from './fileset.ts'
 import { finalText, finalTextAligned, HOME_KIND, HOME_ONLY, markerFreeHits, planRedaction, residualHits, restoreCheck, sweepPlan, vaultEntries, withoutHome, type Plan, type RedactJob, type RedactReply, type WriteSkipReason } from './redact.ts'
 import { brokenLines, isJsonlPath, jsonlHits, newNonce, parses, planJsonl, skipReasonOf, type JsonlStats, type LineHit } from './jsonl.ts'
-import type { Vault } from './vault.ts'
+import type { Vault, VaultEntry } from './vault.ts'
 import { checkWriteTarget, gitOperation, writeAtomic } from './writeguard.ts'
 
 // WHY a cap: each round plans, vaults and re-scans the whole text again, and a value that survives three rounds is a rule gap, which the run reports as residual and does not chase.
@@ -72,7 +73,7 @@ function homeJsonl(text: string, homes: readonly string[]): { text: string; hits
   return { text: lines.join('\n'), hits }
 }
 
-// Redacts one file that has findings, or says why not. The skips come first and cost no vault write; the vault rows of the file are committed (one transaction) before the file is replaced, so a crash in between leaves rows with no marker, never a marker with no row. A vault failure is a typed reply, never a crash.
+// Redacts one file that has findings, or says why not. Every check of the file (the skips, the restore check, the JSONL check, the next-round plan, the home pass, the write target) comes before the first vault write (TRDD-JYZAL6HW), so a skipped file leaves no row. The vault rows of the file are then committed in one transaction right before the file is replaced, so a crash in between leaves rows with no marker, never a marker with no row. A vault failure is a typed reply, never a crash.
 async function redactFile(path: string, data: Buffer, before: BigIntStats, text: string, plan: Plan | null, jsonl: JsonlStats | null, passes: ReadonlySet<Pass>, job: RedactJob): Promise<RedactReply> {
   const { openVault, resolveVaultDir, VaultError } = await import('./vault.ts')
   try {
@@ -97,29 +98,41 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
     if (plan === null) return skipReply(jsonl === null ? 'align-error' : skipReasonOf(jsonl.causes))
     // The marker passes only: the home pass writes no marker, so it stays out of the plan, the sweep and the re-scan and runs last (below).
     const markers = withoutHome(passes)
-    // WHY rounds: one run over the text can leave a copy that no rule matched in that call (two assignments on one line: the first hides, the second is left). Each round plans again on the final text of the round before (its markers are cut out like old markers), sweeps, vaults, builds the next final text and checks its restore against the text of the round before; the file is written once, after the last round. At most MAX_ROUNDS: what is still found after the last round is reported as residual.
+    // WHY rounds: one run over the text can leave a copy that no rule matched in that call (two assignments on one line: the first hides, the second is left). Each round plans again on the final text of the round before (its markers are cut out like old markers), sweeps, assigns a uuid to each new value, builds the next final text and checks its restore against the text of the round before; the file is written once, after the last round. At most MAX_ROUNDS: what is still found after the last round is reported as residual.
+    // WHY the uuids are planned here and the vault is not written (TRDD-JYZAL6HW): a value keeps one uuid across rounds (the row of an earlier run when the vault has one for this file and value, a fresh one otherwise), and the vault rows are committed once, after the last check of the file (below). The restore check of a round reads the planned values, not rows; no step looks a marker up in the vault between rounds, and a marker already in the file is only copied as text.
     let current = text
     let round: Plan = plan
     let rounds = 0
     let final = text
     let residual: Hits = {}
-    const distinct = new Set<string>()
+    const planned = new Map<string, { uuid: string; type: string }>()
+    const valueOf = new Map<string, string>()
     for (;;) {
       rounds++
-      // WHY the sweep runs here, after every skip and before the vault: the copies it finds are vaulted with the same rows, finalText writes them and restoreCheck covers them (spec R5).
+      // WHY the sweep runs here, after every skip and before the plan of the uuids: the copies it finds share the uuid of their value, finalText writes them and restoreCheck covers them (spec R5).
       const swept = sweepPlan(round)
       const { entries, slot } = vaultEntries(swept)
-      let uuids: string[] = []
-      // A round with nothing to vault (a file whose only hits are home paths) never opens the vault.
-      if (entries.length > 0) {
+      // The values of this round that no earlier round planned: one read-only lookup for the rows an earlier run left. A round with nothing new (a file whose only hits are home paths, or a round that finds only known values) never opens the vault.
+      const fresh = entries.filter((entry) => !planned.has(entry.value))
+      let existing: Array<string | null> = []
+      if (fresh.length > 0) {
         vault ??= openVault()
-        const rows = vault.lookupOrInsert(real, entries)
-        uuids = slot.map((index) => rows[index])
-        for (const uuid of rows) distinct.add(uuid)
+        existing = vault.lookup(real, fresh)
       }
+      const entryUuids: string[] = []
+      let nextFresh = 0
+      for (const entry of entries) {
+        let known = planned.get(entry.value)
+        if (known === undefined) {
+          known = { uuid: existing[nextFresh++] ?? randomUUID(), type: entry.type }
+          planned.set(entry.value, known)
+          valueOf.set(known.uuid, entry.value)
+        }
+        entryUuids.push(known.uuid)
+      }
+      const uuids = slot.map((index) => entryUuids[index])
       final = finalText(swept, uuids)
-      const open = vault
-      if (!restoreCheck(swept, final, uuids, (uuid) => open?.byUuid(uuid)?.value ?? null, current)) return skipReply('align-error')
+      if (!restoreCheck(swept, final, uuids, (uuid) => valueOf.get(uuid) ?? null, current)) return skipReply('align-error')
       // WHY a line that parsed before must parse now (spec R6 step 5): the sweep writes a marker where it finds a copy of a value, and a copy right after a backslash inside a JSON string is an invalid escape; the restore check cannot see that.
       // WHY the aligned text and not final: a stretch of a run of non-JSON lines can span lines (a PEM key), and its marker then replaces several lines, so final has fewer lines than current and brokenLines would say -1. In the aligned text each marker is followed by the newlines of its value, so the line numbers are the original's; a stretch of a JSON line never holds a newline (a JSON string holds none raw), and the lines a multi-line stretch covers did not parse, so only a sweep copy that crosses lines is counted, as broken.
       if (jsonl !== null) {
@@ -144,7 +157,7 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
       current = final
       round = next
     }
-    // WHY the home pass runs here, last, on the final text, after the vault step, the sweep, the re-scan and the restore check: its rewrites (/Users/x becomes ~) are neither vaulted nor restorable, and rewriting home paths in configs, scripts and virtualenvs changes what they point to, so it is opt-in (--passes home, spec R1).
+    // WHY the home pass runs here, last, on the final text, after the sweep, the re-scan and the restore check: its rewrites (/Users/x becomes ~) are neither vaulted nor restorable, and rewriting home paths in configs, scripts and virtualenvs changes what they point to, so it is opt-in (--passes home, spec R1). It runs before the vault commit, so a skip here leaves no row.
     let out = final
     let homeRewrites = 0
     if (passes.has('home')) {
@@ -157,12 +170,21 @@ async function redactFile(path: string, data: Buffer, before: BigIntStats, text:
       if (broken !== 0) return skipReply(broken < 0 ? 'align-error' : 'json-broken')
     }
     // Nothing to vault and nothing to rewrite: the hits the walker counted cannot be explained, so the file is left alone.
-    if (distinct.size === 0 && homeRewrites === 0) return skipReply('align-error')
+    if (planned.size === 0 && homeRewrites === 0) return skipReply('align-error')
     // WHY the target is checked again here and not only when the walker listed the file, and after the home pass: see writeguard.ts.
     const target = checkWriteTarget(path, job.root)
     if (target !== 'ok') return skipReply(target)
+    // WHY the vault is written HERE and nowhere earlier (TRDD-JYZAL6HW): every exit above (restore check, JSONL check, next-round plan, home pass, write target) leaves the vault untouched, so a skipped file leaves no plaintext row. A file that gets this far is written, unless one of the exits below fires.
+    // WHY the commit comes before writeAtomic: a crash between the two leaves rows with no marker, never a marker with no row.
+    // WHY these exits still leave rows (stated, not closed): writeAtomic returning changed-during-redact or write-error, and a kill between the commit and the rename. The rows then repeat a value the file still holds in plain text; a later run reuses them (one row per origin and value), so they are never doubled. Every other exit, the read-back and a uuid mismatch included, leaves no row: insertPlanned checks each row inside its own transaction and rolls back on any difference.
+    if (planned.size > 0) {
+      vault ??= openVault()
+      const rows: VaultEntry[] = [...planned].map(([value, row]) => ({ value, type: row.type, encoding: 'raw' }))
+      // WHY a false result is a skip: another writer put a row for the same (origin, value) after lookup(), or the row read back inside the transaction did not hold the planned value, so a marker with the planned uuid would not restore. insertPlanned rolled everything back, so nothing was written. WHY no read-back after the commit: it is done inside the transaction, where a difference still rolls back; after the commit it could not undo anything.
+      if (!vault.insertPlanned(real, rows, [...planned.values()].map((row) => row.uuid))) return skipReply('vault-conflict')
+    }
     const written = writeAtomic(real, Buffer.from(out, 'utf8'), before)
-    return written === 'written' ? { t: 'redact', outcome: 'written', values: distinct.size, residual, homeRewrites, rounds } : skipReply(written)
+    return written === 'written' ? { t: 'redact', outcome: 'written', values: planned.size, residual, homeRewrites, rounds } : skipReply(written)
   } catch (error) {
     if (error instanceof VaultError) return { t: 'redact', outcome: 'vault-error', message: error.message }
     throw error

@@ -1,5 +1,5 @@
 // secrets-shield vault, increment 3 step 3a-1 (TRDD-BAQB9SYO; vault design TRDD-QM8YRCZ5): every redacted value is kept in plain text in one SQLite file, keyed by the uuid that goes into the redaction marker.
-// Library: openVault() -> { lookupOrInsert(origin, entries), byUuid(uuid), list(), remove(uuid), close() }. The caller (the redact step) looks up or inserts the rows of one file, commits, and only then replaces the file.
+// Library: openVault() -> { lookupOrInsert(origin, entries), lookup(origin, entries), insertPlanned(origin, entries, uuids), byUuid(uuid), list(), remove(uuid), close() }. The caller (the redact step) plans the uuids with lookup(), runs every check of the file, then commits all rows of the file with insertPlanned() and only then replaces the file; a skipped file leaves no row (TRDD-JYZAL6HW).
 // CLI (human and agent safe, never prints a value): bun vault.ts list  (TAB-separated, one row per line: uuid, type, origin, first_seen, last_seen, count) · bun vault.ts delete <uuid>  (exit 0 deleted, 1 not found).
 // There is no restore command here: restore.ts (step 3a-4) is human-only and is the only reader of a value besides byUuid().
 // A value never reaches argv, stdout, stderr or an error message: every error is fixed text (plus a SQLITE_* code, which is fixed text of SQLite itself).
@@ -127,8 +127,12 @@ export function resolveVaultDir(): string {
 }
 
 export interface Vault {
-  // One BEGIN IMMEDIATE transaction: every entry is looked up by (origin, value, encoding) and inserted when missing; returns each entry's uuid, in order. A repeat bumps last_seen and count.
+  // One BEGIN IMMEDIATE transaction: every entry is looked up by (origin, value, encoding) and inserted when missing; returns each entry's uuid, in order. A repeat bumps last_seen and count. The redact worker no longer calls it (it commits through insertPlanned, after every check of the file); it stays as the one-call primitive of the vault tests and of restore tests.
   lookupOrInsert(origin: string, entries: VaultEntry[]): string[]
+  // Read only, no write and no lock: each entry's existing uuid, or null when the vault holds no row for (origin, value, encoding), in order.
+  lookup(origin: string, entries: VaultEntry[]): Array<string | null>
+  // One BEGIN IMMEDIATE transaction that upserts every entry with the uuid planned for it (uuids[i] for entries[i]) and counts as a repeat a row that exists, then reads each row back by its uuid inside the same transaction. True when committed. False, with the whole transaction rolled back (no row added, no count or last_seen moved), when any row came back with a uuid other than the planned one (another writer put a row for the same (origin, value) after lookup(), and a marker written with the planned uuid would then point at no row) or the row read back does not hold the entry's value, encoding and origin. A SQLite failure is a VaultError, never false.
+  insertPlanned(origin: string, entries: VaultEntry[], uuids: readonly string[]): boolean
   byUuid(uuid: string): VaultRow | null
   list(): VaultMeta[]
   remove(uuid: string): boolean
@@ -173,8 +177,21 @@ export function openVault(): Vault {
   return wrap(db)
 }
 
+// WHY a class of its own and not a VaultError: insertPlanned turns it into `false` (the worker skips the file), while every other failure of the transaction is a VaultError that ends the run. It carries no text, so no value can travel in it.
+class PlannedUuidMismatch extends Error {}
+
+// The checks every write of entries shares.
+function checkEntries(origin: string, entries: readonly VaultEntry[]): void {
+  if (!isAbsolute(origin)) throw new VaultError('the origin of a vault entry must be an absolute path')
+  for (const entry of entries) {
+    if (entry.value === '') throw new VaultError('a vault entry has an empty value')
+    if (entry.encoding !== 'raw') throw new VaultError('a vault entry has an unknown encoding')
+    if (entry.type === '') throw new VaultError('a vault entry has an empty type')
+  }
+}
+
 function wrap(db: Database): Vault {
-  // WHY ON CONFLICT DO UPDATE ... RETURNING and not INSERT OR IGNORE then SELECT: one statement per entry that is atomic against another worker and returns the uuid of the row that exists, new or old. The fresh uuid generated for a repeat is discarded. type is not updated on a repeat: the row keeps the kind it was first vaulted with.
+  // WHY ON CONFLICT DO UPDATE ... RETURNING and not INSERT OR IGNORE then SELECT: one statement per entry that is atomic against another worker and returns the uuid of the row that exists, new or old. The uuid given for a repeat is discarded. type is not updated on a repeat: the row keeps the kind it was first vaulted with.
   const upsert = db.prepare(
     `INSERT INTO secrets (uuid, type, origin, value, encoding, first_seen, last_seen, count) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (origin, value, encoding) DO UPDATE SET last_seen = excluded.last_seen, count = count + 1
@@ -182,24 +199,49 @@ function wrap(db: Database): Vault {
   )
   const meta = 'uuid, type, origin, encoding, first_seen, last_seen, count'
   const selectOne = db.prepare(`SELECT ${meta}, value FROM secrets WHERE uuid = ?`)
+  const selectKey = db.prepare('SELECT uuid FROM secrets WHERE origin = ? AND value = ? AND encoding = ?')
   // WHY list() never selects the value: the CLI process then never holds one, so no bug in its printing can leak it.
   const selectAll = db.prepare(`SELECT ${meta} FROM secrets ORDER BY first_seen, uuid`)
   const deleteOne = db.prepare('DELETE FROM secrets WHERE uuid = ?')
 
   return {
     lookupOrInsert(origin, entries) {
-      if (!isAbsolute(origin)) throw new VaultError('the origin of a vault entry must be an absolute path')
-      for (const entry of entries) {
-        if (entry.value === '') throw new VaultError('a vault entry has an empty value')
-        if (entry.encoding !== 'raw') throw new VaultError('a vault entry has an unknown encoding')
-        if (entry.type === '') throw new VaultError('a vault entry has an empty type')
-      }
+      checkEntries(origin, entries)
       const now = new Date().toISOString()
       // WHY IMMEDIATE: it takes the write lock at BEGIN, so a second worker waits (busy_timeout) instead of failing half way with a lock upgrade error. The transaction is all-or-nothing: a failed entry rolls the whole file's rows back, and the redact step then leaves the file untouched.
       const run = db.transaction(() => entries.map((entry) => (upsert.get(randomUUID(), entry.type, origin, entry.value, entry.encoding, now, now) as { uuid: string }).uuid))
       try {
         return run.immediate()
       } catch (error) {
+        throw new VaultError(`the vault write failed${sqliteCode(error)}`)
+      }
+    },
+    lookup(origin, entries) {
+      checkEntries(origin, entries)
+      try {
+        return entries.map((entry) => (selectKey.get(origin, entry.value, entry.encoding) as { uuid: string } | null)?.uuid ?? null)
+      } catch (error) {
+        throw new VaultError(`the vault read failed${sqliteCode(error)}`)
+      }
+    },
+    insertPlanned(origin, entries, uuids) {
+      checkEntries(origin, entries)
+      if (uuids.length !== entries.length || !uuids.every((uuid) => UUID_RE.test(uuid))) throw new VaultError('the planned uuids of a vault write do not match its entries')
+      const now = new Date().toISOString()
+      // WHY the uuid is compared and the row read back INSIDE the transaction: a difference must roll back the rows written before it in the same call; a check after the commit could only report it, and the rows would stay. The read-back selects each row by its uuid and compares value, encoding and origin with the entry, so a committed call is known to hold what the marker will point at.
+      const run = db.transaction(() => {
+        entries.forEach((entry, index) => {
+          const row = upsert.get(uuids[index], entry.type, origin, entry.value, entry.encoding, now, now) as { uuid: string }
+          if (row.uuid !== uuids[index]) throw new PlannedUuidMismatch()
+          const stored = selectOne.get(uuids[index]) as VaultRow | null
+          if (stored === null || stored.value !== entry.value || stored.encoding !== entry.encoding || stored.origin !== origin) throw new PlannedUuidMismatch()
+        })
+      })
+      try {
+        run.immediate()
+        return true
+      } catch (error) {
+        if (error instanceof PlannedUuidMismatch) return false
         throw new VaultError(`the vault write failed${sqliteCode(error)}`)
       }
     },

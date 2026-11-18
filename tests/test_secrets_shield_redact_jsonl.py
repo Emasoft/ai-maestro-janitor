@@ -177,6 +177,42 @@ def test_sweep_copy_that_would_break_an_escape_skips_the_file_as_json_broken(box
     assert value not in result.streams()
 
 
+def _sweep_break_pair() -> tuple[str, str, str]:
+    """The value, its password-pair line and a line that holds the value after one backslash: the sweep of that copy would write a marker into an invalid escape (json-broken)."""
+    rest = b62("jsonl-sweep", 20)
+    value = "n" + rest
+    return value, "{\"password\":\"" + value + "\"}", "{\"note\":\"" + "\\" + "n" + rest + "\"}"
+
+
+def test_a_file_skipped_by_a_late_check_leaves_no_row_in_the_vault(box: Box) -> None:
+    """A file skipped as json-broken, after its plan and its restore check passed, is unchanged and leaves 0 rows in the vault (the vault is written only once every check of the file has passed)."""
+    value, first, second = _sweep_break_pair()
+    original = first + "\n" + second + "\n"
+    a = box.put(box.root / "a.jsonl", original)
+    result = box.run()
+    assert result.code == 1 and ("a.jsonl", "json-broken") in result.skips, result.stderr
+    assert a.read_bytes() == original.encode("utf-8")
+    assert box.vault_rows() == []
+    assert result.summary["values_vaulted"] == 0 and value not in result.streams()
+
+
+def test_a_file_with_old_markers_skipped_by_a_late_check_keeps_its_rows_and_still_restores(box: Box) -> None:
+    """A file that already holds a marker, then gets a pair that a late check skips as json-broken, is unchanged, the vault rows (count and times included) are unchanged, and restore still gives the old value back."""
+    a = box.put(box.root / "a.jsonl", "{\"k\":\"v " + TOKEN + "\"}\n")
+    assert box.run().code == 0
+    redacted = read_text(a)
+    rows = box.vault_rows()
+    assert len(rows) == 1
+    _, first, second = _sweep_break_pair()
+    grown = redacted + first + "\n" + second + "\n"
+    box.put(a, grown)
+    result = box.run()
+    assert result.code == 1 and ("a.jsonl", "json-broken") in result.skips, result.stderr
+    assert a.read_bytes() == grown.encode("utf-8")
+    assert box.vault_rows() == rows
+    assert box.restore(redacted) == "{\"k\":\"v " + TOKEN + "\"}\n"
+
+
 def test_scan_only_finds_a_secret_after_an_escaped_newline_with_its_line_number(box: Box) -> None:
     """Scan-only finds a secret written right after an escaped newline in a JSON string, located on its line; the plain counter does not find it in the same text in a .txt file."""
     box.put(box.root / "a.jsonl", "\n".join(AFTER_NEWLINE) + "\n")

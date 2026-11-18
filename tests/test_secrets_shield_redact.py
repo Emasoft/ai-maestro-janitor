@@ -190,6 +190,61 @@ def test_vault_write_failure_in_a_worker_ends_the_run_with_exit_2_and_keeps_the_
     assert TOKEN not in result.streams()
 
 
+def test_a_competing_row_with_another_uuid_at_the_commit_rolls_back_and_skips_the_file(box: Box) -> None:
+    """A row for the same (origin, value) that appears under another uuid after the lookup (a trigger of its own stands in for another writer) makes the commit roll back: the file is unchanged and skipped as vault-conflict, the vault holds 0 rows (the competitor too), the run exits 1 and no value is printed."""
+    original = f"k = {TOKEN}\n"
+    a = box.put(box.root / "a.txt", original)
+    script = (
+        f"import {{ openVault }} from {json.dumps(str(VAULT))}; import {{ Database }} from 'bun:sqlite'; await Bun.stdin.text(); openVault().close(); "
+        "const db = new Database(process.env.SECRETS_SHIELD_VAULT_DIR + '/vault.db'); "
+        "db.exec(\"CREATE TRIGGER rival BEFORE INSERT ON secrets WHEN NEW.uuid <> '00000000-0000-4000-8000-000000000001' BEGIN "
+        "INSERT OR IGNORE INTO secrets (uuid, type, origin, value, encoding, first_seen, last_seen, count) VALUES ('00000000-0000-4000-8000-000000000001', NEW.type, NEW.origin, NEW.value, NEW.encoding, 'x', 'x', 1); END\"); "
+        "db.close(); console.log('null')"
+    )
+    box.bun_json(script, None)
+    result = box.run()
+    assert result.code == 1, result.stderr
+    assert result.skips == [("a.txt", "vault-conflict")] and result.summary["skipped"]["vault-conflict"] == 1
+    assert a.read_bytes() == original.encode("utf-8") and [p.name for p in box.root.iterdir()] == ["a.txt"]
+    assert box.vault_rows() == []
+    assert result.summary["files_redacted"] == 0 and result.summary["values_vaulted"] == 0
+    assert TOKEN not in result.streams()
+
+
+def test_a_write_that_fails_after_the_vault_commit_keeps_its_rows_by_design_and_a_later_run_reuses_them(box: Box) -> None:
+    """A folder that refuses the temp file makes writeAtomic fail AFTER the vault commit: the file is unchanged and skipped as write-error, and its row REMAINS in the vault by design (the commit comes before the write so that a crash leaves a row with no marker, never a marker with no row); a later run on the same file reuses that row (one row, same uuid in the marker, count 2) instead of adding another."""
+    original = f"k = {TOKEN}\n"
+    sub = box.root / "sub"
+    a = box.put(sub / "a.txt", original)
+    sub.chmod(0o500)
+    try:
+        failed = box.run()
+    finally:
+        sub.chmod(0o700)
+    assert failed.code == 1, failed.stderr
+    assert failed.skips == [("sub/a.txt", "write-error")]
+    assert a.read_bytes() == original.encode("utf-8")
+    rows = box.vault_rows()
+    assert len(rows) == 1 and rows[0]["value"] == TOKEN and rows[0]["count"] == 1
+    assert TOKEN not in failed.streams()
+    again = box.run()
+    assert again.code == 0, again.stderr
+    after = box.vault_rows()
+    assert len(after) == 1 and after[0]["uuid"] == rows[0]["uuid"] and after[0]["count"] == 2
+    assert [m.group(2) for m in MARKER_RE.finditer(read_text(a))] == [rows[0]["uuid"]]
+    assert box.restore(read_text(a)) == original
+
+
+def test_a_two_round_redact_bumps_the_vault_count_once_per_run(box: Box) -> None:
+    """A file that needs two rounds (two assignments on one line) leaves its rows with count 1: the vault is written once per run, not once per round."""
+    a = box.put(box.root / "a.txt", "\"password\":\"abc12345\"password: abc12345\n")
+    result = box.run()
+    assert result.code == 0 and result.summary["rounds_used_max"] == 2, result.stderr
+    rows = box.vault_rows()
+    assert rows and all(row["count"] == 1 for row in rows)
+    assert "abc12345" not in read_text(a)
+
+
 def test_home_pass_with_redact_rewrites_home_paths_last_and_they_are_not_restorable(box: Box) -> None:
     """--passes secrets,cards,home with --redact: the token becomes a restorable marker and the home path becomes ~ (not vaulted, so restore gives back the ~); a file whose only hit is a home path is still written; home_rewrites counts the rewrites, findings_not_redacted is 0, and the home findings are reported with the kind home-path."""
     home = str(box.home_dir)

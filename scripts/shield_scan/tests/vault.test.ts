@@ -140,6 +140,66 @@ describe('bookkeeping', () => {
   })
 })
 
+describe('planned write (TRDD-JYZAL6HW)', () => {
+  const entry = (value: string) => ({ value, type: 'fake-kind', encoding: 'raw' as const })
+
+  test('lookup reads the existing uuid or null and writes nothing', () => {
+    const v = open()
+    const [known] = v.lookupOrInsert(ORIGIN, [entry(FAKE_VALUE)])
+    const before = v.byUuid(known)!
+    expect(v.lookup(ORIGIN, [entry(FAKE_VALUE), entry(FAKE_VALUE + 'new')])).toEqual([known, null])
+    expect(v.lookup('/tmp/fake-project/other.env', [entry(FAKE_VALUE)])).toEqual([null])
+    expect(v.list()).toHaveLength(1)
+    expect(v.byUuid(known)).toEqual(before)
+  })
+
+  test('insertPlanned writes each row under the planned uuid and counts a repeat of an existing row', () => {
+    const v = open()
+    const [known] = v.lookupOrInsert(ORIGIN, [entry(FAKE_VALUE)])
+    const fresh = crypto.randomUUID()
+    expect(v.insertPlanned(ORIGIN, [entry(FAKE_VALUE), entry(FAKE_VALUE + 'new')], [known, fresh])).toBe(true)
+    expect(v.byUuid(fresh)).toMatchObject({ origin: ORIGIN, value: FAKE_VALUE + 'new', count: 1 })
+    expect(v.byUuid(known)).toMatchObject({ value: FAKE_VALUE, count: 2 })
+    expect(v.list()).toHaveLength(2)
+  })
+
+  test('a uuid other than the planned one rolls the whole call back: no row added, no count or last_seen moved, and the result is false, not an error', () => {
+    const v = open()
+    const [known] = v.lookupOrInsert(ORIGIN, [entry(FAKE_VALUE)])
+    const before = v.byUuid(known)!
+    const planned = [crypto.randomUUID(), crypto.randomUUID()]
+    // The first entry is new, the second collides with the row of another uuid: the first row must be rolled back with it.
+    expect(v.insertPlanned(ORIGIN, [entry(FAKE_VALUE + 'new'), entry(FAKE_VALUE)], planned)).toBe(false)
+    expect(v.list()).toHaveLength(1)
+    expect(v.byUuid(planned[0])).toBeNull()
+    expect(v.byUuid(known)).toEqual(before)
+  })
+
+  test('a SQLite failure is a VaultError with the fixed text, never false; bad input is refused before any write', () => {
+    const v = open()
+    const db = new Database(join(dir, 'vault.db'))
+    db.exec("CREATE TRIGGER no_insert BEFORE INSERT ON secrets BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+    db.close()
+    expect(() => v.insertPlanned(ORIGIN, [entry(FAKE_VALUE)], [crypto.randomUUID()])).toThrow('the vault write failed')
+    expect(() => v.insertPlanned(ORIGIN, [entry(FAKE_VALUE)], ['not-a-uuid'])).toThrow('the planned uuids of a vault write do not match its entries')
+    expect(() => v.insertPlanned(ORIGIN, [entry(FAKE_VALUE)], [])).toThrow(VaultError)
+    expect(() => v.insertPlanned('relative/path', [entry(FAKE_VALUE)], [crypto.randomUUID()])).toThrow(VaultError)
+    expect(v.list()).toHaveLength(0)
+  })
+})
+describe('planned write read-back (TRDD-JYZAL6HW)', () => {
+  test('a row that does not read back as the entry rolls the whole call back inside the transaction: false, 0 rows', () => {
+    const v = open()
+    const db = new Database(join(dir, 'vault.db'))
+    // A trigger of its own changes the value of every inserted row, so the read-back inside the transaction must see a value other than the planned one.
+    db.exec("CREATE TRIGGER tamper AFTER INSERT ON secrets BEGIN UPDATE secrets SET value = 'tampered' WHERE uuid = NEW.uuid; END")
+    db.close()
+    const first = crypto.randomUUID()
+    expect(v.insertPlanned(ORIGIN, [{ value: FAKE_VALUE, type: 'fake-kind', encoding: 'raw' }, { value: FAKE_VALUE + 'two', type: 'fake-kind', encoding: 'raw' }], [first, crypto.randomUUID()])).toBe(false)
+    expect(v.list()).toHaveLength(0)
+    expect(v.byUuid(first)).toBeNull()
+  })
+})
 describe('storage', () => {
   test('a new vault refuses a json-string row at the database level, so the CHECK says raw too', () => {
     open().close()

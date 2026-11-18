@@ -23,15 +23,21 @@ restore behaviour.
 - Passes: those of `--passes` (default `secrets,cards`; `email` only when
   named). `home` runs last, rewrites home paths to `~`, is not vaulted and not
   restorable.
-- A file is replaced only after its vault rows are committed and a restore
-  check shows the original comes back byte for byte (else `align-error`).
-- Known gap (TRDD-JYZAL6HW): the vault rows of a file are committed before the
-  last checks that can still skip it (the restore check, a broken JSON line, a
-  later round, the home pass, the write target, the write, or the per-file time
-  limit). A file skipped at one of those points keeps its original text, and
-  its values also stay in the vault as rows that no marker points at; restore
-  never reads them. `bun vault.ts list` shows them by origin (never the value)
-  and `bun vault.ts delete <uuid>` removes one.
+- A file is replaced only after a restore check shows the original comes back
+  byte for byte (else `align-error`) and its vault rows are committed. The vault
+  is written once per file, as the last step before the write, after every check
+  that can skip the file (the restore check, a broken JSON line, a later round,
+  the home pass, the write target). A file skipped at one of those points keeps
+  its original text and leaves no row in the vault.
+- Exits that still leave rows (TRDD-JYZAL6HW): the vault is committed before the
+  file is replaced, so that a crash leaves a row with no marker, never a marker
+  with no row. If the write itself then fails (`write-error` or
+  `changed-during-redact`), or the process is killed between the commit and
+  the rename (the per-file time limit is one way), the file keeps its original
+  text and its values stay in the vault as rows that no marker points at;
+  restore never reads them. A later run on the same file reuses those rows (one
+  row per file and value). `bun vault.ts list` shows them by origin (never the
+  value) and `bun vault.ts delete <uuid>` removes one.
 - Never written, still scanned and counted in `findings_not_redacted`; each is
   a `skip` record and a count under `skipped`: `git-internal` (anything inside
   a `.git` folder, or a `.git` pointer file; with `--all`, `.git/config` is
@@ -42,7 +48,7 @@ restore behaviour.
   progress), `git-check-failed`, `align-error`, `json-broken` (a JSONL file whose
   JSON line could not be hidden or rewritten without breaking it, see JSONL
   files), `not-regular-at-write`,
-  `outside-root`, `changed-during-redact`, `write-error`. Symlinks are never
+  `outside-root`, `vault-conflict` (another writer put a row for the same file and value into the vault while the file was being redacted; the vault write was rolled back and the file is left as it was, run it again), `changed-during-redact`, `write-error`. Symlinks are never
   followed.
 - Large lane: a text file over `--max-file-mb` and up to `--max-large-mb` is
   redacted one at a time. A larger text file is neither scanned nor redacted

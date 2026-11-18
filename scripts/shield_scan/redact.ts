@@ -1,5 +1,5 @@
 // secrets-shield redact, increment 3 steps 3a-2 and 3a-3 (TRDD-BAQB9SYO; spec design/specs/TRDD-BAQB9SYO-increment-3-redact.md R2, R3, R5, R5b): the pure part of redacting a text file. No fs, no env, no process: the worker (worker.ts) does the vault and the file writes around it.
-// Flow of one file: planRedaction() cuts out the markers already in the text, runs the core passes on each stretch between them, and aligns each output with its input to recover the exact text every core marker replaced. sweepPlan() then replaces the copies of those values that no pass matched (R5). The worker vaults the stretches, then finalText() writes the new text with [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>] markers, restoreCheck() proves that the vault rows put the original back before anything is written, and residualHits() runs the passes again over what lies between the markers of the final text.
+// Flow of one file: planRedaction() cuts out the markers already in the text, runs the core passes on each stretch between them, and aligns each output with its input to recover the exact text every core marker replaced. sweepPlan() then replaces the copies of those values that no pass matched (R5). The worker plans a uuid for each distinct value (vaultEntries), then finalText() writes the new text with [REDACTED-BY-SECRET-SHIELD. Type: <kind>. ID: <uuid>] markers, restoreCheck() proves that the planned values put the original back before anything is written, and residualHits() runs the passes again over what lies between the markers of the final text. The vault rows are committed once, after every check of the file, right before the write (worker.ts).
 // A value never leaves this module except inside the plan it returns; nothing here prints or throws one. A text the alignment cannot explain gives plan null (the worker skips the file as align-error); it never throws.
 
 import { redactAll, type Pass } from '../../hooks/secret-shield/pipeline.ts'
@@ -13,7 +13,7 @@ const UUID_V4 = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 export const SHIELD_MARKER = String.raw`\[REDACTED-BY-SECRET-SHIELD\. Type: ([A-Za-z0-9_-]+)\. ID: (${UUID_V4})\]`
 
 // Why a file with findings was not written (spec R7), in the order the worker checks them. Each is a skip record of the findings file and the file's findings count as findings_not_redacted.
-export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'json-broken', 'not-regular-at-write', 'outside-root', 'changed-during-redact', 'write-error'] as const
+export const WRITE_SKIP_REASONS = ['git-internal', 'vault-folder', 'hardlinked', 'recent', 'not-utf8', 'git-operation', 'git-check-failed', 'align-error', 'json-broken', 'not-regular-at-write', 'outside-root', 'vault-conflict', 'changed-during-redact', 'write-error'] as const
 export type WriteSkipReason = (typeof WRITE_SKIP_REASONS)[number]
 
 // What the driver sends with a job that redacts: the age limit for a recent file and the scan root the write target must stay inside (writeguard.ts).
@@ -211,9 +211,9 @@ export function finalTextAligned(plan: Plan, uuids: readonly string[]): string {
 }
 
 /**
- * The restore check (spec R5b, raw encoding only in this step), made on the final text itself: every marker this run inserted is replaced by the value `valueOf` gives for its uuid (the vault row), every marker that was already in the original stays; the result must equal the original byte for byte.
+ * The restore check (spec R5b, raw encoding only in this step), made on the final text itself: every marker this run inserted is replaced by the value `valueOf` gives for its uuid (the value planned for it), every marker that was already in the original stays; the result must equal the original byte for byte.
  * WHY by position and not by uuid over the whole text: a file that already holds a marker for a value V, with a new copy of V elsewhere, gets the same uuid for both (one row per origin and value); a global substitution would also replace the old marker and fail a legitimate file.
- * The values come from the vault rows, not from the plan, so a pass also means the vault holds what the file loses. It does not prove a row holds exactly the secret: the stretches are the original's own text (spec R5b).
+ * The values come from the plan the worker made of the uuids (a vault row of an earlier run, or a fresh uuid), not from rows read here: the vault is written only after every check of the file has passed (TRDD-JYZAL6HW), and the worker reads each row back before it writes the file. A pass therefore proves the markers restore the original given those values, not that the vault holds them yet. It does not prove a row holds exactly the secret: the stretches are the original's own text (spec R5b).
  */
 export function restoreCheck(plan: Plan, final: string, uuids: readonly string[], valueOf: (uuid: string) => string | null, original: string): boolean {
   const expected = plan.parts.filter((part): part is Exclude<Part, { t: 'lit' }> => part.t !== 'lit')
