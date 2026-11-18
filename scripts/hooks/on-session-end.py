@@ -56,7 +56,15 @@ def main() -> int:
     try:
         sys.stdin.read()
     except Exception:  # noqa: BLE001 -- fail-open: payload is not load-bearing
-        pass
+        # why: the module must exit 0 (fail-open), so the catch stays broad;
+        # one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-session-end] stdin drain failed; teardown continues", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
     try:
         import harness_backend  # noqa: PLC0415 -- sibling lib via the path insert

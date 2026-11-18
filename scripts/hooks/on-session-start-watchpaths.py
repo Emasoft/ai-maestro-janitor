@@ -46,7 +46,15 @@ def main() -> int:
     try:
         sys.stdin.read()  # drain the payload; the declaration is unconditional
     except Exception:  # noqa: BLE001 -- fail-open
-        pass
+        # why: the drain must not stop the hook before its declaration, and the hook must exit 0,
+        # so the catch stays broad; one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-session-start-watchpaths] stdin drain failed", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     try:
         import state  # noqa: PLC0415 -- sibling lib via the path insert
 

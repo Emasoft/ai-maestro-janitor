@@ -72,8 +72,16 @@ def _early_log(message: str) -> None:
         prefix = f"[{ts}] [s:{sid[:8]}] " if sid else f"[{ts}] "
         with (logs / "session-start.log").open("a", encoding="utf-8") as fh:
             fh.write(f"{prefix}{message}\n")
-    except Exception:  # noqa: BLE001,S110 -- a logging fault must never break session start
-        pass
+    except Exception:  # noqa: BLE001 -- a logging fault must never break session start
+        # why: best-effort logging must never break session start, so the catch stays broad;
+        # one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-session-start] early log write failed", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
 
 def _slog(state, name: str, message: str) -> None:  # noqa: ANN001 - local module type
@@ -90,7 +98,15 @@ def _slog(state, name: str, message: str) -> None:  # noqa: ANN001 - local modul
     try:
         state.log_line(name, message)
     except Exception:  # noqa: BLE001 -- logging must never break session start
-        pass
+        # why: a logging fault must never break session start, so the catch stays broad;
+        # one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-session-start] log line failed", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
 
 def _active_global_stop(gs) -> tuple[str, str, int] | None:

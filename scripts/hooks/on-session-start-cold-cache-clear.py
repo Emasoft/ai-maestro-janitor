@@ -334,7 +334,15 @@ def main() -> int:
 
             state.log_line("cold-cache-clear", f"skipped: {exc}")
         except Exception:  # noqa: BLE001
-            pass
+            # why: the handler must never break session start, and its log write may have failed,
+            # so the catch stays broad; one fixed-text stderr line replaces the silent pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-session-start-cold-cache-clear] skip log write failed", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
     return 0
 
 

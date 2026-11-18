@@ -134,8 +134,16 @@ def _add_session_title(payload: dict[str, Any], output: dict[str, Any]) -> None:
     except Exception as exc:  # noqa: BLE001 - naming a session must never abort the turn
         try:
             importlib.import_module("state").log_line("prompt-submit", f"session title failed: {exc!r}")
-        except Exception:  # noqa: BLE001,S110 - a log write must never abort the turn either
-            pass
+        except Exception:  # noqa: BLE001 - a log write must never abort the turn either
+            # why: a failed log write must not abort the turn, so the catch stays broad;
+            # one fixed-text stderr line replaces the silent pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-prompt-submit] session title failure not logged", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
 
 
 def main() -> int:
@@ -206,13 +214,29 @@ def _process_prompt(payload: dict[str, Any]) -> int:
         # hide a permanently broken check that lets every janitor-typed command mint consent.
         try:
             state.log_line("prompt-submit", f"machine-typed check failed: {exc!r}")
-        except Exception:  # noqa: BLE001,S110 - a log write must never abort the turn either
-            pass
+        except Exception:  # noqa: BLE001 - a log write must never abort the turn either
+            # why: a failed log write must not abort the turn, so the catch stays broad;
+            # one fixed-text stderr line replaces the silent pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-prompt-submit] machine-typed log write failed", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
     try:
         if not machine_typed:
             state.bump_user_presence()
     except Exception:  # noqa: BLE001 - a breadcrumb write must never abort the turn
-        pass
+        # why: the turn must not abort on a failed breadcrumb write, so the catch stays broad;
+        # one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-prompt-submit] presence breadcrumb not written", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
 
     # Record which janitor verbs the user EXPLICITLY asked for (TRDD-RDFWQIFA, TRDD-USRPRES1).
     #
@@ -229,7 +253,15 @@ def _process_prompt(payload: dict[str, Any]) -> int:
         if not machine_typed:
             user_intent.record_intent_from_prompt(prompt)
     except Exception:  # noqa: BLE001 - intent recording must never abort the turn
-        pass
+        # why: the try holds an import and the turn must not abort, so the catch stays broad;
+        # one fixed-text stderr line replaces the silent pass.
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-prompt-submit] user intent not recorded", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     return 0
 
 

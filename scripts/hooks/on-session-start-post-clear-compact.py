@@ -264,7 +264,15 @@ def main() -> int:
 
             state.log_line("jev-post-clear-hook", f"crashed: {exc!r}")
         except Exception:  # noqa: BLE001 -- logging itself must never raise either
-            pass
+            # why: a hook must never break session start, so the catch stays broad;
+            # one fixed-text stderr line replaces the silent pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-session-start-post-clear-compact] crash not logged", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
         return 0
 
 

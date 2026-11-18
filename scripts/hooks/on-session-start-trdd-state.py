@@ -68,8 +68,17 @@ def _read_input() -> tuple[Path, str]:
                 data = json.loads(raw)
                 cwd = str(data.get("cwd", "")).strip()
                 source = str(data.get("source", "")).strip()
+    # why: main() calls _read_input unguarded, so this is a fail-open boundary: an input that
+    # cannot be read (isatty, read, json.loads RecursionError, data.get on non-object JSON) must
+    # not crash the SessionStart hook, so the catch stays broad.
     except Exception:
-        pass
+        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+        try:
+            if sys.stderr is not None:
+                print("[on-session-start-trdd-state] hook input unreadable; using the env project dir", file=sys.stderr)
+        except (OSError, ValueError):
+            pass
     if not cwd:
         cwd = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
     return Path(cwd), source
@@ -335,7 +344,15 @@ def _trdd_paths(project_dir: Path) -> list[Path]:
                     sys.path.insert(0, entry)
             from lib import trdd_common  # noqa: E402 - local package, not PyPI
         except Exception:  # noqa: BLE001 -- degrade to the project board; never break session start
-            pass
+            # why: the docstring promises fail-open on ANY import failure, and module-level errors
+            # are not ImportError only, so the catch stays broad; one fixed line replaces the pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-session-start-trdd-state] trdd_common import failed; PROJECT board only", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
         else:
             try:
                 return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_dir))]
@@ -351,8 +368,16 @@ def _trdd_paths(project_dir: Path) -> list[Path]:
                             f"({trdd_common.git_root_error_reason(exc)}); LOCAL-scope cards are not shown "
                             "this time (informational; not a task - do not investigate unless asked)"
                         )
-                    except Exception:  # noqa: BLE001, S110 -- a notice failure must not break session start
-                        pass
+                    except Exception:  # noqa: BLE001 -- a notice failure must not break session start
+                        # why: the notice is best-effort and must not break session start, so the
+                        # catch stays broad; one fixed-text stderr line replaces the silent pass.
+                        # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+                        # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+                        try:
+                            if sys.stderr is not None:
+                                print("[on-session-start-trdd-state] git-failure notice not printed", file=sys.stderr)
+                        except (OSError, ValueError):
+                            pass
     tasks_dir = project_dir / "design" / "tasks"
     if not tasks_dir.is_dir():
         return []

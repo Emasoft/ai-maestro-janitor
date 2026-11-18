@@ -267,7 +267,15 @@ def _recall(memgrep: str, query: str, note_paths: list[str], project_dir: str | 
                     project_dir=project_dir,
                 )
         except Exception:  # noqa: BLE001 -- fail open, see WHY above
-            pass
+            # why: the try holds imports and ledger writes; a bookkeeping failure must not break
+            # the prompt, so the catch stays broad. One fixed-text stderr line replaces the pass.
+            # why: with fd 2 closed sys.stderr is None, and print would write to stdout, the hook protocol
+            # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
+            try:
+                if sys.stderr is not None:
+                    print("[on-prompt-submit-autorecall] timeout ledger record failed", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
         return ""
     except (OSError, ValueError):
         return ""
