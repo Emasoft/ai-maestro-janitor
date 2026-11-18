@@ -147,10 +147,10 @@ def test_renamed_file_is_compared_with_its_source_blob(box: Box) -> None:
 
 
 def test_commit_dash_a_is_blocked_by_the_real_hook(box: Box) -> None:
-    """`git commit -a` builds its index inside git; the pre-commit hook still sees it and blocks the commit."""
+    """`git commit -a` builds its index inside git; the prepare-commit-msg hook still sees it and blocks the commit."""
     box.stage("a.md", "clean\n")
     box.git("commit", "-q", "-m", "seed")
-    box.install_hook("pre-commit")
+    box.install_hook("prepare-commit-msg")
     box.write("a.md", f"clean\nkey = {FAKE}\n")
     r = box.git("commit", "-a", "-q", "-m", "add", check=False)
     out = r.stdout + r.stderr
@@ -160,11 +160,11 @@ def test_commit_dash_a_is_blocked_by_the_real_hook(box: Box) -> None:
 
 
 def test_pathspec_commit_is_blocked_by_the_real_hook(box: Box) -> None:
-    """`git commit <path>` builds a temporary index from the working file; the hook judges that index."""
+    """`git commit <path>` builds a temporary index from the working file; prepare-commit-msg judges that index."""
     box.stage("a.md", "clean\n")
     box.stage("b.md", "clean\n")
     box.git("commit", "-q", "-m", "seed")
-    box.install_hook("pre-commit")
+    box.install_hook("prepare-commit-msg")
     box.write("a.md", f"clean\nkey = {FAKE}\n")
     r = box.git("commit", "-q", "-m", "add", "a.md", check=False)
     out = r.stdout + r.stderr
@@ -208,7 +208,7 @@ def test_secret_in_the_message_is_blocked_by_the_real_commit_msg_hook(box: Box) 
     _no_value(out)
 
 def test_merge_that_brings_a_new_secret_is_blocked_by_the_real_hook(box: Box) -> None:
-    """`git merge --no-ff` runs pre-merge-commit, not pre-commit; a side branch that adds a secret is refused."""
+    """`git merge --no-ff` runs prepare-commit-msg, not pre-commit; a side branch that adds a secret is refused."""
     box.stage("a.md", "clean\n")
     box.git("commit", "-q", "-m", "seed")
     box.git("checkout", "-q", "-b", "side")
@@ -217,13 +217,60 @@ def test_merge_that_brings_a_new_secret_is_blocked_by_the_real_hook(box: Box) ->
     box.git("checkout", "-q", "main")
     box.stage("main.md", "clean main\n")
     box.git("commit", "-q", "-m", "main work")
-    box.install_hook("pre-merge-commit")
+    box.install_hook("prepare-commit-msg")
     before = box.commits()
     r = box.git("merge", "--no-ff", "-m", "merge side", "side", check=False)
     out = r.stdout + r.stderr
     assert r.returncode != 0 and "side.md:1" in out, out
     assert box.commits() == before
     _no_value(out)
+
+
+def _side_branch_with(box: Box, rel: str, text: str) -> str:
+    """Commit `rel` on a side branch off a seeded main, return to main, and return the side commit sha."""
+    box.stage("a.md", "clean\n")
+    box.git("commit", "-q", "-m", "seed")
+    box.git("checkout", "-q", "-b", "side")
+    box.stage(rel, text)
+    box.git("commit", "-q", "-m", "side")
+    sha = box.git("rev-parse", "HEAD").stdout.strip()
+    box.git("checkout", "-q", "main")
+    return sha
+
+
+def test_cherry_pick_of_a_commit_with_a_new_secret_is_refused(box: Box) -> None:
+    """`git cherry-pick` runs only prepare-commit-msg; picking a commit that adds a secret is refused and the value is not printed."""
+    sha = _side_branch_with(box, "side.md", f"key = {FAKE}\n")
+    box.install_hook("prepare-commit-msg")
+    before = box.commits()
+    r = box.git("cherry-pick", sha, check=False)
+    out = r.stdout + r.stderr
+    assert r.returncode != 0 and "side.md:1" in out, out
+    assert box.commits() == before
+    _no_value(out)
+
+
+def test_commit_no_verify_with_a_new_secret_is_refused(box: Box) -> None:
+    """`git commit --no-verify` skips pre-commit but not prepare-commit-msg, so a new secret is still refused."""
+    box.stage("a.md", "clean\n")
+    box.git("commit", "-q", "-m", "seed")
+    box.install_hook("prepare-commit-msg")
+    box.stage("b.md", f"key = {FAKE}\n")
+    r = box.git("commit", "--no-verify", "-q", "-m", "add", check=False)
+    out = r.stdout + r.stderr
+    assert r.returncode != 0 and "b.md:1" in out, out
+    assert box.commits() == 1
+    _no_value(out)
+
+
+def test_clean_cherry_pick_succeeds(box: Box) -> None:
+    """A cherry-pick of a commit with no secret passes the prepare-commit-msg scan and creates the commit."""
+    sha = _side_branch_with(box, "side.md", "clean side\n")
+    box.install_hook("prepare-commit-msg")
+    before = box.commits()
+    r = box.git("cherry-pick", sha, check=False)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert box.commits() == before + 1
 
 
 def test_bunfig_preload_in_the_repo_does_not_run_and_does_not_disarm_the_scan(box: Box) -> None:
@@ -305,24 +352,26 @@ def test_scanner_exit_0_without_a_complete_summary_is_cannot_run(box: Box, tmp_p
 
 
 def test_shipped_hooks_are_wired() -> None:
-    """pre-commit runs the scan between stage 0 and stage 1; commit-msg passes the message file; pre-merge-commit runs the index scan; all are executable."""
+    """pre-commit no longer runs the index scan; commit-msg passes the message file; prepare-commit-msg runs the index scan; all are executable."""
     pre = (REPO / "git-hooks" / "pre-commit").read_text(encoding="utf-8")
     run = "uv run python scripts/lib/"
-    assert pre.index(run + "redact_staged_reports.py") < pre.index(run + "staged_secret_scan.py") < pre.index(run + "staged_privacy_scan.py")
+    assert "staged_secret_scan.py" not in pre
+    assert pre.index(run + "redact_staged_reports.py") < pre.index(run + "staged_privacy_scan.py")
     msg_hook = REPO / "git-hooks" / "commit-msg"
     assert os.access(msg_hook, os.X_OK)
     assert "staged_secret_scan.py --message-file" in msg_hook.read_text(encoding="utf-8")
-    merge_hook = REPO / "git-hooks" / "pre-merge-commit"
-    assert os.access(merge_hook, os.X_OK)
-    assert "staged_secret_scan.py" in merge_hook.read_text(encoding="utf-8")
+    assert not (REPO / "git-hooks" / "pre-merge-commit").exists()
+    index_hook = REPO / "git-hooks" / "prepare-commit-msg"
+    assert os.access(index_hook, os.X_OK)
+    assert "staged_secret_scan.py" in index_hook.read_text(encoding="utf-8")
 
 def test_install_hook_installs_the_new_hooks(tmp_path: Path) -> None:
-    """publish.install_hook copies commit-msg and pre-merge-commit into .git/hooks, executable."""
+    """publish.install_hook copies commit-msg and prepare-commit-msg into .git/hooks, executable."""
     root = tmp_path / "plugin"
     (root / ".git").mkdir(parents=True)
     (root / "git-hooks").mkdir()
-    for name in ("pre-push", "pre-commit", "commit-msg", "pre-merge-commit"):
+    for name in ("pre-push", "pre-commit", "commit-msg", "prepare-commit-msg"):
         shutil.copy2(REPO / "git-hooks" / name, root / "git-hooks" / name)
     assert publish.install_hook(root) == 0
-    for name in ("commit-msg", "pre-merge-commit"):
+    for name in ("commit-msg", "prepare-commit-msg"):
         assert os.access(root / ".git" / "hooks" / name, os.X_OK)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook — stages 0 (reports/ redaction), 0b (secret scan, TRDD-FNPDFZWU), then 1-3 below:
+# Pre-commit hook — stage 0 (reports/ redaction), then 1-3 below:
 #   1. Privacy-leak scan (TRDD-FWDZDB7W): the staged diff is scanned for
 #      personal e-mails, home paths, machine identity and PII shapes by
 #      scripts/lib/staged_privacy_scan.py (reuses the G1b lint and the
@@ -39,17 +39,8 @@ uv run python scripts/lib/redact_staged_reports.py || {
   exit 1
 }
 
-# Stage 0b — secret scan of the staged blobs (TRDD-FNPDFZWU). OWNER ORDER 2026-11-18: no
-# secret may be committed (before git-cliff builds the changelog from the commits). Every staged
-# file of any type, Markdown included, is scanned with the shield scanner
-# (scripts/lib/staged_secret_scan.py); a NEW finding blocks, naming file, line and kind, never the
-# value. It runs after stage 0 so it sees the redacted reports/ files, and before stage 1.
-# Fail closed: exit 2 (bun, scanner or git cannot run) blocks too. Inert (exit 0) when the janitor
-# is not active. git-hooks/commit-msg scans the message, git-hooks/pre-merge-commit the merged index.
-uv run python scripts/lib/staged_secret_scan.py || {
-  echo "pre-commit: secret scan blocked the commit (see output above)."
-  exit 1
-}
+# The index secret scan moved to git-hooks/prepare-commit-msg (TRDD-FNPDFZWU increment 2b) so it also
+# covers cherry-pick, rebase and --no-verify.
 
 # Stage 1 — staged-diff privacy scan. Fail toward BLOCKING: exit 2 from the
 # scanner (git failure, no toplevel) blocks the commit too, never waves it

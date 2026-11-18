@@ -959,7 +959,7 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
 # -- Hook installer ------------------------------------------------------------
 
 def install_hook(root: Path) -> int:
-    """Copy the git-hooks/ hooks (pre-push, pre-commit, commit-msg, pre-merge-commit) into .git/hooks/ and set core.hooksPath."""
+    """Copy the git-hooks/ hooks (pre-push, pre-commit, commit-msg, prepare-commit-msg) into .git/hooks/ and set core.hooksPath."""
     cprint(f"\n{BOLD}Installing git hooks...{NC}")
     git_dir = root / ".git"
     if not git_dir.is_dir():
@@ -967,7 +967,7 @@ def install_hook(root: Path) -> int:
         return 1
     hooks_dir = git_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    for hook_name in ("pre-push", "pre-commit", "commit-msg", "pre-merge-commit"):
+    for hook_name in ("pre-push", "pre-commit", "commit-msg", "prepare-commit-msg"):
         source = root / "git-hooks" / hook_name
         if not source.is_file():
             cprint(f"  {RED}git-hooks/{hook_name} not found{NC}")

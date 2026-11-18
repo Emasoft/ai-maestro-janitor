@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# prepare-commit-msg hook — secret scan of the index (TRDD-FNPDFZWU increment 2b).
+# Why this hook and not pre-commit / pre-merge-commit: measured 2026-11-18 in scratch repos with marker
+# hooks, prepare-commit-msg runs on a plain commit, `merge --no-ff`, `cherry-pick`, every `rebase` pick and
+# `commit --no-verify`, and its non-zero exit aborts all of them. pre-commit misses cherry-pick, rebase and
+# --no-verify; pre-merge-commit only covers merge --no-ff. So --no-verify no longer skips the secret scan.
+# (The rebase and amend behaviour is measured, not covered by a test in tests/test_staged_secret_scan.py.)
+# Known gap: `commit --amend` compares with the commit being amended, so a secret that came in through an
+# earlier unscanned commit passes the amend; the push-time range scan (git-hooks/pre-push) covers that gap.
+# It runs after pre-commit, so stage 0 redaction of reports/ happens first on a normal commit.
+# It never touches the message file ($1); git-hooks/commit-msg scans the message.
+# Fail closed: exit 2 from the scanner (bun, scanner or git cannot run) blocks too. Inert (exit 0) when the
+# janitor is not active: see scripts/lib/staged_secret_scan.py.
+# THIS FILE IS THE SOURCE — publish.py::install_hook copies it to .git/hooks/prepare-commit-msg.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+uv run python scripts/lib/staged_secret_scan.py || {
+  echo "prepare-commit-msg: secret scan blocked the commit (see output above)."
+  exit 1
+}
