@@ -162,7 +162,7 @@ def test_a_pane_sidecar_suppresses_this_hooks_own_injection(
     # line-2 written_at, not from file existence; 0 reads as a stale sidecar and correctly falls
     # through to the pointer, which is not what this test is about.
     (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
-        f"/tmp/cleared.jsonl\n{int(time.time())}\n", encoding="utf-8",
+        f"{sd / 'cleared.jsonl'}\n{int(time.time())}\n", encoding="utf-8",
     )
     _load_hook()._inject_post_clear_handoff(real_state)
     assert capsys.readouterr().out == ""
@@ -183,7 +183,7 @@ def test_a_keyed_handoff_with_no_sidecar_downgrades_to_a_pointer_even_when_it_ma
     import handoff_files  # noqa: PLC0415
     import jev_compaction_lane as jcl  # noqa: PLC0415
 
-    prev = Path("/tmp/prev-session-abcdef01.jsonl")
+    prev = sd / "prev-session-abcdef01.jsonl"
     key = handoff_files.session_key(str(prev))
     _arm_keyed(sd, key=key, handoff="# Handoff\n\nNEXT ACTION: resume the real work.")
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, session_id: prev)
@@ -206,12 +206,12 @@ def test_a_newer_foreign_sessions_keyed_handoff_is_not_injected(
     import handoff_files  # noqa: PLC0415
     import jev_compaction_lane as jcl  # noqa: PLC0415
 
-    foreign_key = handoff_files.session_key("/tmp/some-other-session-11112222.jsonl")
+    foreign_key = handoff_files.session_key(str(sd / "some-other-session-11112222.jsonl"))
     _arm_keyed(sd, key=foreign_key, handoff="# Handoff\n\nUNRELATED work from another session.")
     # This session's own previous transcript resolves to something ELSE entirely.
     monkeypatch.setattr(
         jcl, "previous_transcript",
-        lambda root, session_id: Path("/tmp/this-sessions-own-99998888.jsonl"),
+        lambda root, session_id: sd / "this-sessions-own-99998888.jsonl",
     )
 
     _load_hook()._inject_post_clear_handoff(real_state)
@@ -235,7 +235,7 @@ def test_a_legacy_handoff_newer_than_a_keyed_one_still_downgrades_to_a_pointer(
     import handoff_files  # noqa: PLC0415
 
     now = int(time.time())
-    old_key = handoff_files.session_key("/tmp/an-older-session-aaaa1111.jsonl")
+    old_key = handoff_files.session_key(str(sd / "an-older-session-aaaa1111.jsonl"))
     # `now=` back-dates the KEYED file's embedded filename timestamp; the legacy file below has
     # no embedded timestamp and is ranked by mtime instead (`handoff_files._entries`), so the
     # two must differ by more than the 1-second int-epoch resolution both use, or a tie lets

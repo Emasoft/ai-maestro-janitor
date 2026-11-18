@@ -509,12 +509,12 @@ def test_push_forwards_transcript_path_to_resume_trigger(
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", raising=False)
     calls = _patch_popen(monkeypatch, hook)
-    hook._maybe_push_resume(state, "/tmp/fake-session.jsonl")
+    hook._maybe_push_resume(state, str(tmp_path / "fake-session.jsonl"))
     assert len(calls) == 1
     assert calls[0][-3:] == [
         str(_PROJECT_ROOT / "scripts" / "resume_trigger.py"),
         "--transcript-path",
-        "/tmp/fake-session.jsonl",
+        str(tmp_path / "fake-session.jsonl"),
     ]
 
 

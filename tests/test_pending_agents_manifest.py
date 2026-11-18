@@ -365,7 +365,7 @@ def test_start_hook_drops_the_parent_sessions_transcript(iso) -> None:
             "hook_event_name": "SubagentStart",
             "agent_id": "wf001",
             "session_id": sid,
-            "transcript_path": f"/tmp/projects/whatever/{sid}.jsonl",
+            "transcript_path": str(project.parent / "projects" / "whatever" / f"{sid}.jsonl"),
             "cwd": str(project),
         },
         project,
@@ -388,14 +388,14 @@ def test_start_hook_keeps_a_genuine_agent_transcript(iso) -> None:
             "hook_event_name": "SubagentStart",
             "agent_id": "mem001",
             "session_id": "be8c05d6-8513-4f84-8980-7fe885a361a0",
-            "transcript_path": "/tmp/projects/whatever/e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl",
+            "transcript_path": str(project.parent / "projects" / "whatever" / "e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl"),
             "cwd": str(project),
         },
         project,
     )
     assert res.returncode == 0, res.stderr
     data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
-    assert data[0]["transcript"] == "/tmp/projects/whatever/e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl"
+    assert data[0]["transcript"] == str(project.parent / "projects" / "whatever" / "e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl")
 
 
 def test_stop_hook_removes_agent(iso) -> None:
@@ -939,9 +939,9 @@ def test_transcript_survives_a_reload(iso, tmp_path) -> None:
     does not name is dropped on the first load — which would delete the respawn handle at
     exactly the moment it is needed. Pinned so it cannot silently regress."""
     pa = iso["pa"]
-    pa.add("a1", "job", now=1000, transcript="/tmp/t.jsonl")
+    pa.add("a1", "job", now=1000, transcript=str(tmp_path / "t.jsonl"))
     got = pa.pending(now=1000)
-    assert got[0]["transcript"] == "/tmp/t.jsonl", "the respawn handle must survive a reload"
+    assert got[0]["transcript"] == str(tmp_path / "t.jsonl"), "the respawn handle must survive a reload"
 
 
 def test_spawn_prompt_reads_the_first_user_message(tmp_path, iso) -> None:
@@ -1011,7 +1011,7 @@ def test_start_hook_stores_agent_dir_alongside_blanked_transcript(iso) -> None:
             "hook_event_name": "SubagentStart",
             "agent_id": "wf002",
             "session_id": sid,
-            "transcript_path": f"/tmp/projects/whatever/{sid}.jsonl",
+            "transcript_path": str(project.parent / "projects" / "whatever" / f"{sid}.jsonl"),
             "cwd": str(project),
         },
         project,
@@ -1019,7 +1019,7 @@ def test_start_hook_stores_agent_dir_alongside_blanked_transcript(iso) -> None:
     assert res.returncode == 0, res.stderr
     data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
     assert data[0]["transcript"] == ""
-    assert data[0]["agentDir"] == f"/tmp/projects/whatever/{sid}/subagents"
+    assert data[0]["agentDir"] == str(project.parent / "projects" / "whatever" / sid / "subagents")
 
 
 def test_start_hook_stores_no_agent_dir_when_the_payload_gave_the_agents_own_path(iso) -> None:
@@ -1039,7 +1039,7 @@ def test_start_hook_stores_no_agent_dir_when_the_payload_gave_the_agents_own_pat
     """
     project = iso["project"]
     sid = "be8c05d6-8513-4f84-8980-7fe885a361a0"
-    own = f"/tmp/projects/whatever/{sid}/subagents/workflows/wf_c1827891-050/agent-a693805.jsonl"
+    own = str(project.parent / "projects" / "whatever" / sid / "subagents" / "workflows" / "wf_c1827891-050" / "agent-a693805.jsonl")
     res = _run_hook(
         _START_HOOK,
         {

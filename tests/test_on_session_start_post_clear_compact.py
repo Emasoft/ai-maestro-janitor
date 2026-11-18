@@ -957,7 +957,7 @@ def test_floor_backstop_holds_even_when_trimming_every_card_is_not_enough(monkey
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=[])
 
     trimmed_inputs, inject_max_bytes = jcl.trim_cards_for_room(
-        inputs, now_iso="2026-01-01T00:00:00+0000", tail=[], transcript_path="/tmp/x.jsonl",
+        inputs, now_iso="2026-01-01T00:00:00+0000", tail=[], transcript_path="/fake/x.jsonl",
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
 
@@ -1015,7 +1015,7 @@ def test_natural_value_never_inflated_past_real_room_even_when_titles_are_fully_
     )
 
     def _summary_of_size(n: int) -> str:
-        marker = "/tmp/x"
+        marker = "/fake/x"
         head = f"# Compacted context (Jev compaction)\ntranscript: {marker}\n\n## Kept items\n"
         trailer = (
             f'\n\npointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/'

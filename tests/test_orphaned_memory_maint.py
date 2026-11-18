@@ -61,7 +61,7 @@ def test_read_pending_well_formed_payload(tmp_path):
     (tmp_path / omm.PENDING_NAME).write_text(
         json.dumps({
             "marker": "[janitor-memory-repair]", "intervention": "repair",
-            "scope": "LOCAL", "root": "/tmp/x", "stamped_at": 100, "dispatch_id": "d1",
+            "scope": "LOCAL", "root": str(tmp_path / "x"), "stamped_at": 100, "dispatch_id": "d1",
         }),
         encoding="utf-8",
     )

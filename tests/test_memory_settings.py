@@ -65,16 +65,16 @@ def test_set_none_reverts_to_default():
     assert ms.get("split_per_day") == 1
 
 
-def test_per_day_rate_above_86400_never_crashes_is_due():
+def test_per_day_rate_above_86400_never_crashes_is_due(tmp_path):
     """M-5 (wikimem audit 2026-07-07): a per-day rate > 86400 (interval < 1 s)
     is accepted by validation, so is_due must not die on `% int(interval)` —
     pre-fix int(0.5) == 0 raised `integer modulo by zero` on EVERY is_due."""
     ms.set_value("harvest_per_day", "100000")
-    assert isinstance(ms.is_due("harvest", "LOCAL", "/tmp/root", _NOW), bool)
+    assert isinstance(ms.is_due("harvest", "LOCAL", str(tmp_path / "root"), _NOW), bool)
     assert ms.interval_s("harvest_per_day") < 1
 
 
-def test_wrong_typed_stored_value_degrades_to_default():
+def test_wrong_typed_stored_value_degrades_to_default(tmp_path):
     """M-6 (wikimem audit 2026-07-07): a hand-edited store with a wrong-TYPED
     value must degrade to the default like a corrupt FILE does — pre-fix
     interval_s raised ValueError, crashing the scheduler's is_due and the txn
@@ -89,7 +89,7 @@ def test_wrong_typed_stored_value_degrades_to_default():
     assert ms.get("split_max_bytes") == 36000      # corrupt → default
     assert ms.get("split_per_day") == 2.0          # the valid key still applies
     assert ms.interval_s("harvest_per_day") == 86400.0  # default is now 1/day, not disabled
-    assert isinstance(ms.is_due("harvest", "LOCAL", "/tmp/root", _NOW), bool)  # never raises
+    assert isinstance(ms.is_due("harvest", "LOCAL", str(tmp_path / "root"), _NOW), bool)  # never raises
 
 
 def test_set_zero_is_allowed_and_disables():

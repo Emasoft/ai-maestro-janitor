@@ -242,7 +242,7 @@ def test_non_bash_tool_passes_through() -> None:
     """An Edit / Write call doesn't fire this hook — only Bash."""
     payload = json.dumps({
         "tool_name": "Edit",
-        "tool_input": {"file_path": "/tmp/x.txt", "new_string": "x"},
+        "tool_input": {"file_path": "/fake/x.txt", "new_string": "x"},
     })
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED"] = "true"

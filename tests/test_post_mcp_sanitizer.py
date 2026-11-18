@@ -27,7 +27,7 @@ _ENABLED = "CLAUDE_PLUGIN_OPTION_POST_MCP_SANITIZER_ENABLED"
 _STRIP = "CLAUDE_PLUGIN_OPTION_POST_MCP_SANITIZER_STRIP"
 
 _ZWSP = "​"   # zero-width space
-_RLO = "‮"    # right-to-left override (bidi)
+_RLO = "\u202e"    # right-to-left override (bidi)
 
 
 def _run(

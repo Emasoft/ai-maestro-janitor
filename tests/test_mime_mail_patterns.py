@@ -78,7 +78,7 @@ def test_findings_sorted_by_line_then_column() -> None:
         # Line 2 — double-extension literal
         'attachment = {"filename": "report.pdf.exe", "data": buf}\n'
         # Line 3 — bidi RTLO in filename literal
-        'header = "Content-Disposition: attachment; filename=\\"invoice‮fdp.exe\\""\n'
+        'header = "Content-Disposition: attachment; filename=\\"invoice\u202efdp.exe\\""\n'
     )
     findings = mmp.scan_text(src)
     assert len(findings) >= 2
@@ -212,7 +212,7 @@ def test_m5_positive_filename_with_rtlo_codepoint() -> None:
     """Filename literal containing U+202E (RTLO) flags."""
     # The U+202E (RTLO) character makes "invoiceexe.pdf" appear in UI
     # but the on-disk file is "invoice<RTLO>fdp.exe".
-    src = 'attach = {"filename": "invoice‮fdp.exe", "data": buf}\n'
+    src = 'attach = {"filename": "invoice\u202efdp.exe", "data": buf}\n'
     hits = _hits("mime-attachment-filename-rtlo-bidi", src)
     assert len(hits) >= 1
 

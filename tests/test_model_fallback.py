@@ -191,7 +191,7 @@ def _load_detector():
     return mod
 
 
-def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
+def _wire_acting_detector(det, monkeypatch, pane_text: str, tmp_path: Path) -> dict[str, list]:
     """Fake every gate up to the injection so main() reaches the actuation call with
     `pane_text` on the pane, and spy on the ONE remaining injection entry point.
 
@@ -207,7 +207,8 @@ def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
     monkeypatch.setattr(det.state, "init_state", lambda: None)
     monkeypatch.setattr(det.state, "log_line", lambda *a, **k: None)
     monkeypatch.setattr(det.state, "rotate_log_if_big", lambda *a, **k: None)
-    monkeypatch.setattr(det.state, "project_root", lambda: Path("/tmp/model-fallback-test"))
+    monkeypatch.setattr(det.state, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(det.state, "state_dir", lambda: tmp_path / "state")
     monkeypatch.setattr(det.mfb, "enabled", lambda: True)
     monkeypatch.setattr(det, "_live_account", lambda: {"usage": {}, "sample_age_s": 0, "is_live": True})
     monkeypatch.setattr(
@@ -243,7 +244,7 @@ def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
     return called
 
 
-def test_no_headroom_routes_through_pane_actuate_not_terminal_trigger_directly(monkeypatch, capsys) -> None:
+def test_no_headroom_routes_through_pane_actuate_not_terminal_trigger_directly(monkeypatch, capsys, tmp_path) -> None:
     """TRDD-8P4BNY5J acceptance (1): the detector must have no direct
     `send_verified`/`send_model_switch_true_error` call — asserted here by making BOTH raise,
     proving `main()` never reaches them, while the ONE routed call
@@ -257,18 +258,18 @@ def test_no_headroom_routes_through_pane_actuate_not_terminal_trigger_directly(m
 
     monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
     monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     assert det.main() == 0
     assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]
 
 
-def test_no_headroom_passes_the_configured_target_as_command(monkeypatch, capsys) -> None:
+def test_no_headroom_passes_the_configured_target_as_command(monkeypatch, capsys, tmp_path) -> None:
     """TRDD-8P4BNY5J follow-up: `pane_policy._at_wedge`/`_at_idle`'s NO_HEADROOM row hardcoded
     `/model opus`, ignoring `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET`. The detector must
     thread `mfb.fallback_target()` through `pane_actuate.act`'s existing `command=` channel so
     a non-default target reaches the typed keystroke."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     monkeypatch.setattr(det.mfb, "fallback_target", lambda: "sonnet")
     assert det.main() == 0
     assert called["command"] == ["/model sonnet"]
@@ -281,8 +282,8 @@ def test_confirmed_unconfirmed_and_unknown_outcomes_are_durable(monkeypatch, cap
         det = _load_detector()
         state_dir = tmp_path / expected
         state_dir.mkdir()
+        _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
         monkeypatch.setattr(det.state, "state_dir", lambda state_dir=state_dir: state_dir)
-        _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
         monkeypatch.setattr(det.terminal_trigger, "confirm_model_switch", lambda *_a, confirmed=confirmed: confirmed)
         assert det.main() == 0
         payload = (state_dir / "model-fallback-outcome.json").read_text(encoding="utf-8")
@@ -291,14 +292,14 @@ def test_confirmed_unconfirmed_and_unknown_outcomes_are_durable(monkeypatch, cap
         capsys.readouterr()
 
 
-def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkeypatch, capsys) -> None:
+def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkeypatch, capsys, tmp_path) -> None:
     """TRDD-M4HVFU2A, 2026-09-06 incident (owner ruling): rotation must come BEFORE any
     model change — a model switch resets the whole cache, burning millions of tokens
     across every agent. A non-live sibling still below 100% on the SAME model must divert
     to the rotate-first line and the pane must never be touched (the injector fails loudly
     if called, proving nothing was typed)."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
 
     def _raise(*_a, **_k):
         raise AssertionError("must not inject when a sibling has headroom")
@@ -334,23 +335,23 @@ def _sibling(*, fable_pct: float, seven_day_pct: float = 20.0) -> list[dict]:
                                    "is_active": False}]}}]
 
 
-def test_a_sibling_over_the_rotation_bar_does_not_divert(monkeypatch, capsys) -> None:
+def test_a_sibling_over_the_rotation_bar_does_not_divert(monkeypatch, capsys, tmp_path) -> None:
     """A sibling at 95 % Fable is NOT a rotation target — rotate_to's auto-select would type
     `/model opus` itself before switching to it — so the detector must not stand down for it;
     it switches here. Pins the shared bar (`_SCOPED_HIGH`, == rotator.SCOPED_SWITCH_AT)."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=95.0))
     assert det.main() == 0
     assert "rotate first" not in capsys.readouterr().out
     assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]
 
 
-def test_a_sibling_with_a_spent_account_window_does_not_divert(monkeypatch, capsys) -> None:
+def test_a_sibling_with_a_spent_account_window_does_not_divert(monkeypatch, capsys, tmp_path) -> None:
     """Fable headroom on a sibling whose 7d window is at 95 % is not a rotation target either
     (rotate_to excludes it on the account bar) — the detector switches here."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=40.0, seven_day_pct=95.0))
     assert det.main() == 0
     assert "rotate first" not in capsys.readouterr().out
@@ -368,12 +369,12 @@ def test_the_detectors_bars_equal_the_rotation_verbs_bars() -> None:
     assert det._ACCOUNT_HEADROOM == rotator.SCOPED_ACCOUNT_HEADROOM
 
 
-def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys) -> None:
+def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys, tmp_path) -> None:
     """An unconfirmed switch (the owner cancelled the dialog) must not re-type on the very
     next heartbeat — TRDD-M4HVFU2A. Within the back-off window the injector must not be
     called at all."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: [])
     monkeypatch.setattr(det, "_declined_age_s", lambda _now: 10.0)  # declined 10s ago
 
@@ -386,10 +387,10 @@ def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys) ->
     assert called["act"] == []
 
 
-def test_a_stale_decline_no_longer_backs_off(monkeypatch, capsys) -> None:
+def test_a_stale_decline_no_longer_backs_off(monkeypatch, capsys, tmp_path) -> None:
     """Once the back-off window has elapsed, the switch is retryable again."""
     det = _load_detector()
-    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n", tmp_path)
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: [])
     monkeypatch.setattr(det, "_declined_age_s", lambda _now: det._DECLINED_BACKOFF_S + 1.0)
 
