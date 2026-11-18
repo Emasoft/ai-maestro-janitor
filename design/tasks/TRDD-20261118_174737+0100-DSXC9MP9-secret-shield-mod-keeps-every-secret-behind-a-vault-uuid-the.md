@@ -4,7 +4,7 @@ title: Secret-shield mod keeps every secret behind a vault UUID the agent never 
 column: backburner
 status: tasked
 created: 2026-11-18T17:47:37+0100
-updated: 2026-11-18T18:59:54+0100
+updated: 2026-11-18T19:11:04+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,7 @@ approval-datetime: 2026-11-18T17:47:37+0100
 2026-11-18 (verbatim): "you forgot that i told you that the secrets-shield must not only scan and redact the context and the jsonl transcripts in realtime, preventing agents to ever read or send via api a secret (like the installed mod partially does, but it is incomplete) but also to prevent committing secrets with executing the secrets-scanner on the committed files at each commit? before that git cliff will create the changelog (otherwise there is the risk of publishing secrets in the very release logs of github, or metadata of npm, bun or pypi packages!)? What are you doing now? implement those immediately. secrets-shield must be blazing fast (with its performance critical core routines optimized in rust) and always on when the janitor is armed!"
 2026-11-18 (owner message on the shield): jss CLI, autonomous .env editing and a context field per secret. Verbatim text and derived requirements R1-R4 in design/specs/TRDD-DSXC9MP9-owner-jss-envkey.md.
 2026-11-18, main-agent reading (not the owner's words): the jss name replaces `shield get` in the mods-expert design, and the context field is a new column of the vault row. Derived requirements R1-R4 are in design/specs/TRDD-DSXC9MP9-owner-jss-envkey.md.
+2026-11-18 (owner message on the shield): jss add NAME VALUE "CONTEXT" writes a secret straight into the vault; the owner's envget helper for .env is the example. Verbatim text, derived requirements R5-R7 and four open questions in design/specs/TRDD-DSXC9MP9-owner-jss-add.md.
 
 ## Owner
 
