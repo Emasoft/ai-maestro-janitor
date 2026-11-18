@@ -41,7 +41,7 @@ _DETECTOR_PATH = _SCRIPTS / "detectors" / "janitor-self-integrity.py"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
-_BOGUS_PLUGIN_DATA = "/tmp/dkeychn7-bogus-other-plugin-data-DO-NOT-USE"
+_BOGUS_PLUGIN_DATA = "/fake/dkeychn7-bogus-other-plugin-data-DO-NOT-USE"
 _KEY_FILENAME = ".integrity-key"
 _CHAIN_FILENAME = "janitor-chain.ndjson"
 

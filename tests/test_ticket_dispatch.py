@@ -306,7 +306,7 @@ def test_a_failed_git_worktree_list_is_one_scrubbed_stderr_line_with_no_machine_
         "#!/bin/sh\n"
         "case \" $* \" in\n"
         "  *\" rev-parse --is-inside-work-tree \"*) echo true; exit 0;;\n"
-        "  *\" worktree list \"*) echo \"fatal: /tmp/fake-repo-x/sub: broken\" >&2; exit 128;;\n"
+        "  *\" worktree list \"*) echo \"fatal: /fake/fake-repo-x/sub: broken\" >&2; exit 128;;\n"
         "esac\n"
         f"exec \"{real_git}\" \"$@\"\n",
         encoding="utf-8",
@@ -326,7 +326,7 @@ def test_a_failed_git_worktree_list_is_one_scrubbed_stderr_line_with_no_machine_
     detector_lines = [ln for ln in proc.stderr.splitlines() if ln.startswith("ticket-dispatch: git failed resolving the design root (")]
     assert len(detector_lines) == 1, proc.stderr
     assert "<path>" in detector_lines[0], detector_lines[0]
-    assert "/tmp/fake-repo-x" not in detector_lines[0], detector_lines[0]
+    assert "/fake/fake-repo-x" not in detector_lines[0], detector_lines[0]
 
 
 @pytest.mark.no_timeout_scale  # the 5 s timeout IS the subject; the suite otherwise scales it away

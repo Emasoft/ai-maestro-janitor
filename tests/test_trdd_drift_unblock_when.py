@@ -32,7 +32,7 @@ def _eval(drift, predicates, **kw):
         column_by_uid={},
         project_repo_slug="Emasoft/ai-maestro-janitor",
         open_issue_numbers=set(),
-        project_root=Path("/tmp/does-not-matter"),
+        project_root=Path("/fake/does-not-matter"),
         now=int(time.time()),
     )
     defaults.update(kw)

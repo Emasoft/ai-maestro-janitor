@@ -44,7 +44,7 @@ _GENERAL_TIERS = {"hub", "aspect"}
 
 def _find_or_build_memgrep() -> str | None:
     """Repo convention (see test_autorecall_hook.py): prebuilt target/ binary →
-    PATH → cargo build into a tmp CARGO_TARGET_DIR → None (caller skips)."""
+    PATH → cargo build into the crate's own target/ → None (caller skips)."""
     for rel in ("target/release/memgrep", "target/debug/memgrep"):
         cand = _MEMGREP_CRATE / rel
         if cand.is_file() and os.access(cand, os.X_OK):
@@ -55,17 +55,16 @@ def _find_or_build_memgrep() -> str | None:
     cargo = shutil.which("cargo")
     if not cargo:
         return None
-    target_dir = Path("/tmp/memgrep-build")
-    env = dict(os.environ)
-    env["CARGO_TARGET_DIR"] = str(target_dir)
     try:
         subprocess.run(
             [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE / "Cargo.toml")],
-            check=True, capture_output=True, text=True, timeout=600, env=env,
+            check=True, capture_output=True, text=True, timeout=600,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return None
-    built = target_dir / "release" / "memgrep"
+    # Cargo's default target/, not a temp dir: a fixed path under the shared temp dir
+    # can be pre-created by another local user (bandit B108), and the tests run the binary found there.
+    built = _MEMGREP_CRATE / "target" / "release" / "memgrep"
     return str(built) if built.is_file() else None
 
 

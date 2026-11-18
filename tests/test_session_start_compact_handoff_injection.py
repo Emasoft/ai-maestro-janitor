@@ -94,7 +94,7 @@ def _arm_continuity(project: Path, **overrides: object) -> Path:
         "inflight_trdds": ["TRDD-ABCDEF01"],
         "background_agents": [{"agentId": "agent-1", "description": "do the thing"}],
         "active_skills": ["tldr-code"],
-        "open_files": ["/tmp/does-not-exist-on-disk-xyz.py"],
+        "open_files": [str(project / "does-not-exist-on-disk-xyz.py")],
         **overrides,
     }
     (sd / "precompact-continuity.json").write_text(json.dumps(record), encoding="utf-8")
@@ -312,7 +312,7 @@ def test_a_newer_continuity_record_injects_a_nudge_not_the_prose_body(tmp_path: 
     """
     project, env = _project(tmp_path)
     _arm_continuity(project)
-    missing_path = "/tmp/does-not-exist-on-disk-xyz.py"
+    missing_path = str(project / "does-not-exist-on-disk-xyz.py")
     assert not Path(missing_path).exists(), "fixture assumption broken — path must not exist"
     proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
         [sys.executable, str(HOOK)],

@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from pathlib import Path
@@ -97,11 +98,15 @@ publish.run_pytest_in_own_session([sys.executable, "-c", child], Path({tmp!r}), 
 
 
 def _pgids_alive() -> set[int]:
-    snap = Path(os.environ.get("TMPDIR", "/tmp")) / f"ps-snapshot-{os.getpid()}.txt"
-    with snap.open("w") as f:
-        subprocess.run(["ps", "-eo", "pid,pgid"], stdout=f, check=True)
-    rows = [ln.split() for ln in snap.read_text().splitlines()[1:]]
-    snap.unlink()
+    fd, snap_name = tempfile.mkstemp(prefix="ps-snapshot-", suffix=".txt")
+    os.close(fd)
+    snap = Path(snap_name)
+    try:
+        with snap.open("w") as f:
+            subprocess.run(["ps", "-eo", "pid,pgid"], stdout=f, check=True)
+        rows = [ln.split() for ln in snap.read_text().splitlines()[1:]]
+    finally:
+        snap.unlink(missing_ok=True)
     return {int(r[1]) for r in rows}
 
 

@@ -1115,7 +1115,7 @@ def test_llm_ext_fallback_passes_the_state_folder_to_the_script(tmp_path):
     run_state = tmp_path / "the-state-folder"
 
     ok, payload = jcl._run_llm_ext_fallback(
-        plugin_root, transcript="/tmp/x.jsonl", timeout_s=60.0, state_dir=run_state,
+        plugin_root, transcript="/fake/x.jsonl", timeout_s=60.0, state_dir=run_state,
     )
 
     assert ok is True, payload
@@ -1699,7 +1699,7 @@ def test_transcript_flag_skips_the_pane_claim_check_and_the_guess(tmp_path, monk
     assert pane_key
     # A FRESH sidecar for THIS pane -- without --transcript, main() would return 0 immediately.
     (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
-        f"/tmp/some-other-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
+        f"/fake/some-other-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
     )
 
     explicit = _make_prev_transcript(project_dir, name="explicit.jsonl")
@@ -1754,7 +1754,7 @@ def test_fresh_pane_sidecar_skips_composing_entirely(tmp_path, monkeypatch, _iso
     sd = state.state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
-        f"/tmp/some-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
+        f"/fake/some-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
     )
 
     def _boom(*_a, **_kw):
@@ -1777,7 +1777,7 @@ def test_fresh_consumed_pane_sidecar_skips_composing(tmp_path, monkeypatch, _iso
     sd.mkdir(parents=True, exist_ok=True)
     recent_epoch = int(time.time()) - 10
     (sd / f"resume-after-clear.{pane_key}.transcript.consumed-{recent_epoch}").write_text(
-        f"/tmp/some-transcript.jsonl\n{recent_epoch}\n", encoding="utf-8"
+        f"/fake/some-transcript.jsonl\n{recent_epoch}\n", encoding="utf-8"
     )
 
     def _boom(*_a, **_kw):
@@ -1804,7 +1804,7 @@ def test_stale_consumed_pane_sidecar_does_not_block_composing_forever(
     sd.mkdir(parents=True, exist_ok=True)
     old_epoch = int(time.time()) - 10_000
     (sd / f"resume-after-clear.{pane_key}.transcript.consumed-{old_epoch}").write_text(
-        f"/tmp/some-transcript.jsonl\n{old_epoch}\n", encoding="utf-8"
+        f"/fake/some-transcript.jsonl\n{old_epoch}\n", encoding="utf-8"
     )
 
     project_dir = _isolated_env
@@ -1830,7 +1830,7 @@ def test_a_stale_pane_sidecar_for_a_DIFFERENT_pane_does_not_block_composing(
     sd = state.state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     (sd / f"resume-after-clear.{other_key}.transcript").write_text(
-        f"/tmp/other-pane-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
+        f"/fake/other-pane-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
     )
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
@@ -2112,7 +2112,7 @@ def test_llm_ext_fallback_outer_timeout_kills_the_whole_process_group(tmp_path, 
     monkeypatch.setattr(jcl, "_LLM_EXT_OUTER_SLACK_S", 0.5)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
+        plugin_root, transcript="/fake/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
     )
     assert ok is False
     assert "timed out" in detail
@@ -2165,7 +2165,7 @@ def test_llm_ext_fallback_outer_timeout_reaps_the_group_leader(tmp_path, monkeyp
     monkeypatch.setattr(jcl.subprocess, "Popen", _capturing_popen)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
+        plugin_root, transcript="/fake/x.jsonl", timeout_s=1.0, state_dir=tmp_path,
     )
     assert ok is False
     assert "timed out" in detail
@@ -2226,7 +2226,7 @@ def test_llm_ext_fallback_outer_timeout_on_windows_calls_proc_kill_not_killpg(
     monkeypatch.setattr(jcl.os, "killpg", _fake_killpg)
 
     ok, detail = jcl._run_llm_ext_fallback(
-        tmp_path, transcript="/tmp/x.jsonl", timeout_s=60.0, state_dir=tmp_path,
+        tmp_path, transcript="/fake/x.jsonl", timeout_s=60.0, state_dir=tmp_path,
     )
 
     assert calls["kill"] == 1, "expected proc.kill() (TerminateProcess) on the win32 branch"

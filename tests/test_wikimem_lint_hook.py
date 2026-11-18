@@ -196,7 +196,7 @@ def test_a_vanished_path_is_not_linted(tmp_path):
 # --- the premise that made the incident possible ------------------------------
 
 
-def test_validate_reports_clean_for_a_path_that_does_not_exist():
+def test_validate_reports_clean_for_a_path_that_does_not_exist(tmp_path):
     """MEASURED 2026-08-06 and the reason this gate exists: `memgrep validate` prints NONE and
     exits 0 for a nonexistent path, so gating on validate alone gates on nothing.
 
@@ -211,7 +211,7 @@ def test_validate_reports_clean_for_a_path_that_does_not_exist():
 
         pytest.skip("memgrep not installed")
     proc = subprocess.run(
-        [binary, "validate", "/tmp/definitely-not-a-real-page-9f3a.md"],
+        [binary, "validate", str(tmp_path / "definitely-not-a-real-page-9f3a.md")],
         capture_output=True, text=True, timeout=60,
     )
     assert proc.returncode == 0

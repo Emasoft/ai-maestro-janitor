@@ -22,20 +22,20 @@ import unicode_smuggling_patterns as usp  # type: ignore[import-not-found]  # no
 # ---------- Codepoint helpers --------------------------------------------
 
 
-ZWSP = "​"          # zero-width space
-ZWNJ = "‌"          # zero-width non-joiner
-ZWJ = "‍"           # zero-width joiner
-WJ = "⁠"            # word joiner
-BOM = "﻿"           # zero-width no-break space (BOM)
-LRE = "‪"           # left-to-right embedding
-RLE = "‫"           # right-to-left embedding
-PDF = "‬"           # pop directional formatting
-LRO = "‭"           # left-to-right override
-RLO = "‮"           # right-to-left override
-LRI = "⁦"           # left-to-right isolate
-RLI = "⁧"           # right-to-left isolate
-FSI = "⁨"           # first-strong isolate
-PDI = "⁩"           # pop directional isolate
+ZWSP = "\u200B"  # zero-width space
+ZWNJ = "\u200C"  # zero-width non-joiner
+ZWJ  = "\u200D"  # zero-width joiner
+WJ   = "\u2060"  # word joiner
+BOM  = "\uFEFF"  # zero-width no-break space (BOM)
+LRE  = "\u202A"  # left-to-right embedding
+RLE  = "\u202B"  # right-to-left embedding
+PDF  = "\u202C"  # pop directional formatting
+LRO  = "\u202D"  # left-to-right override
+RLO  = "\u202E"  # right-to-left override
+LRI  = "\u2066"  # left-to-right isolate
+RLI  = "\u2067"  # right-to-left isolate
+FSI  = "\u2068"  # first-strong isolate
+PDI  = "\u2069"  # pop directional isolate
 VS_FE0F = "️"       # variation selector 16
 VS_E0100 = "\U000E0100"  # variation selector 17 (supplementary)
 HANGUL_FILLER = "ㅤ"  # ideographic Hangul filler

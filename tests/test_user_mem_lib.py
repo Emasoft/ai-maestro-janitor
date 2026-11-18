@@ -384,14 +384,14 @@ def test_split_hit_line_parses_both_memgrep_output_formats():
     # ISO TIMESTAMP, not a bare date — anchoring the column on a bare date silently returned ZERO
     # results for every user-mem search, which is what this case pins.
     path, summary = user_mem_lib._split_hit_line(
-        "2026-07-26T13:38:44Z\t/tmp/user-mem/000001.md\tthe deployment script needs a keychain check"
+        "2026-07-26T13:38:44Z\t/fake/user-mem/000001.md\tthe deployment script needs a keychain check"
     )
-    assert path == "/tmp/user-mem/000001.md"
+    assert path == "/fake/user-mem/000001.md"
     assert summary == "the deployment script needs a keychain check"
     # A note with no date still occupies the column, so the later columns never shift.
-    assert user_mem_lib._split_hit_line("-\t/tmp/user-mem/000002.md\tno date")[0] == "/tmp/user-mem/000002.md"
+    assert user_mem_lib._split_hit_line("-\t/fake/user-mem/000002.md\tno date")[0] == "/fake/user-mem/000002.md"
     # LEGACY em-dash row (`--output full`, or an older memgrep) must keep working.
-    assert user_mem_lib._split_hit_line("/tmp/user-mem/000003.md — a summary")[0] == "/tmp/user-mem/000003.md"
+    assert user_mem_lib._split_hit_line("/fake/user-mem/000003.md — a summary")[0] == "/fake/user-mem/000003.md"
     # An unexpected shape is SKIPPED, never mis-parsed into a bogus path.
     assert user_mem_lib._split_hit_line("just some prose with no separator") == (None, "")
 

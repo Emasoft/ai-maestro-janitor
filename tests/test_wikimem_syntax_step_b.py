@@ -30,7 +30,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -368,11 +367,11 @@ def test_local_scope_findings_never_claim(recorder: _Recorder, roots, tmp_path: 
     assert not _claim_file().exists()
 
 
-def test_claim_fails_open_when_state_dir_unwritable(recorder: _Recorder, monkeypatch):
+def test_claim_fails_open_when_state_dir_unwritable(recorder: _Recorder, monkeypatch, tmp_path: Path):
     """A9: claims fail open. A vanished/unreadable claim file can cost one cross-project
     duplicate — never a lost finding. Simulated by pointing the state dir at a path whose
     PARENT is a file (os.open on the lock path raises) — the claim must return True anyway."""
-    blocker = Path("/tmp") / f"not-a-dir-{time.time_ns()}"
+    blocker = tmp_path / "not-a-dir"
     blocker.write_text("x", encoding="utf-8")
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(blocker / "subdir"))
     assert wsyntax.claim_user_key("k") is True
