@@ -718,8 +718,7 @@ def test_scan_text_path_argument_is_optional() -> None:
 
 def test_long_match_is_truncated() -> None:
     """Findings with matched_text > 200 chars are truncated to 200 + ellipsis."""
-    long_var = "x" * 250
-    src = f'cursor.execute(f"SELECT * FROM t WHERE id = {{{long_var}}}")\n'
+    src = 'cursor.execute(f"SELECT * FROM t WHERE id = {xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}")\n'
     findings = dip.scan_text(src)
     rule1 = [
         f for f in findings if f.rule_id == "db-py-cursor-execute-fstring"

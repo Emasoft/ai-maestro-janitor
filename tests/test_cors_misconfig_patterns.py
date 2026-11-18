@@ -654,12 +654,25 @@ def test_scan_text_long_match_truncated() -> None:
     # Build a GET-with-side-effect file where the bridge between the
     # decorator and the SQL is long. The matched text will exceed 200
     # chars and be truncated.
-    src = (
-        "app.get('/api/clear', (req, res) => {\n"
-        + ("  // padding line that makes the body long\n" * 15)
-        + "  db.run('DELETE FROM logs');\n"
-        + "});\n"
-    )
+    src = """app.get('/api/clear', (req, res) => {
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  // padding line that makes the body long
+  db.run('DELETE FROM logs');
+});
+"""
     findings = [
         f for f in cmp.scan_text(src)
         if f.rule_id == "cors-get-with-side-effect"

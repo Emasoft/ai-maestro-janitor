@@ -7,6 +7,7 @@ the map-drift detector's structure-hash confirmation path.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
 import time
@@ -34,9 +35,10 @@ def test_detector_tick_keys_guard_zero_interval() -> None:
 
 def test_trdd_state_hook_matches_v2_columns(tmp_path: Path) -> None:
     """A v2 `column: dev` TRDD must be selected by the SessionStart injector."""
-    hook = (_ROOT / "scripts" / "hooks" / "on-session-start-trdd-state.py").read_text(encoding="utf-8")
-    ns: dict = {}
-    exec(compile(hook, "hook", "exec"), ns)  # module is import-safe (no side effects at top level)
+    spec = importlib.util.spec_from_file_location("on_session_start_trdd_state", _ROOT / "scripts" / "hooks" / "on-session-start-trdd-state.py")
+    assert spec is not None and spec.loader is not None
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)  # module is import-safe (no side effects at top level)
     tasks = tmp_path / "design" / "tasks"
     tasks.mkdir(parents=True)
     (tasks / "TRDD-20260703_000000+0200-AAAA1111-v2.md").write_text(
@@ -51,7 +53,7 @@ def test_trdd_state_hook_matches_v2_columns(tmp_path: Path) -> None:
     # `_in_progress` now takes the already-resolved board (the caller composes it from BOTH
     # design scopes via _trdd_paths). This test is about the COLUMN-MATCHING filter, not the
     # discovery, so hand it the files directly and keep the assertions unchanged.
-    picked = {p.name for p in ns["_in_progress"](sorted(tasks.glob("TRDD-*.md")))}
+    picked = {p.name for p in hook._in_progress(sorted(tasks.glob("TRDD-*.md")))}
     assert "TRDD-20260703_000000+0200-AAAA1111-v2.md" in picked  # v2 WORK column
     assert "TRDD-20260518_000000+0200-bbbb2222-v1.md" in picked  # v1 fallback kept
     assert "TRDD-20260518_000000+0200-cccc3333-done.md" not in picked  # terminal skipped

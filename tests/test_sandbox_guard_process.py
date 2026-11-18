@@ -185,10 +185,10 @@ def test_security_scoped_to_the_real_login_keychain_is_denied() -> None:
 # ─── git: read anywhere, mutate only in a tmp repo ─────────────────────────────────────────
 
 
-def test_git_may_not_mutate_the_real_repo() -> None:
+def test_git_may_not_mutate_the_real_repo(tmp_path: Path) -> None:
     """pytest's cwd IS this repo, so an un-`cwd=`'d `git commit` lands on real history."""
     assert _verdict(["git", "commit", "-m", "x"], cwd=_REPO).allowed is False
-    assert _verdict(["git", "-C", str(_REPO), "reset", "--hard"], cwd="/tmp").allowed is False
+    assert _verdict(["git", "-C", str(_REPO), "reset", "--hard"], cwd=tmp_path).allowed is False
 
 
 def test_git_may_mutate_a_tmp_repo(tmp_path: Path) -> None:
@@ -285,8 +285,8 @@ def test_a_child_python_is_handed_the_sandbox_even_when_the_test_builds_its_own_
     PYTHONPATH and the deny roots — producing a completely UNGUARDED interpreter, which is the
     exact shape of the 2026-07-11 source clobber. Denying them would have broken all 47 and
     protected nothing; injecting the two vars makes the child SANDBOXED instead."""
-    hardened = sandbox_guard._harden_child_env([sys.executable, "-c", "pass"], {"HOME": "/tmp/fake"})
-    assert hardened["HOME"] == "/tmp/fake", "the test's own env must survive untouched"
+    hardened = sandbox_guard._harden_child_env([sys.executable, "-c", "pass"], {"HOME": "/fake/home"})
+    assert hardened["HOME"] == "/fake/home", "the test's own env must survive untouched"
     assert hardened.get(sandbox_guard.ENV_DENY), "the child must inherit the deny roots"
     assert "_sandbox_boot" in hardened.get("PYTHONPATH", ""), "the child must boot sitecustomize"
 
