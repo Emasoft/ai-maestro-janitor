@@ -104,6 +104,18 @@ def test_a_refused_page_is_omitted(tmp_path):
     assert out.strip() == ""
 
 
+def test_repair_skips_pages_in_trashcan(tmp_path):
+    """A defective page under `.trashcan/` is trashed work, not a candidate; the same
+    defect on a live page still is."""
+    _no_notes(tmp_path / ".trashcan" / "20261023_092237", "trashed.md")
+    _no_notes(tmp_path, "live.md")
+
+    code, out = _cli("--intervention", "repair", "--scope", "LOCAL", "--root", str(tmp_path))
+
+    assert code == 0
+    assert [ln for ln in out.splitlines() if ln] == ["live.md\tno-notes-heading"]
+
+
 def test_unsupported_intervention_is_refused(tmp_path):
     """An intervention this CLI does not implement fails loud with exit 2, not a
     silent empty candidate list that looks like 'nothing to do'."""

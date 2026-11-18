@@ -130,8 +130,14 @@ SUPERSEDED_DIRNAME = ".superseded"
 # Non-note sub-dirs inside a memory dir, never walked into: the private store,
 # memgrep's SQLite sidecar cache, the transaction staging dir (a staged copy
 # mid-edit is not a committed note), and the mirror's superseded attic.
+# `.trashcan` is safe-delete staging: a page moved there is work the user already deleted,
+# not a note of this corpus. It is excluded HERE, in the one shared walk, not in a single
+# lister, because the scheduler (memory_content_precheck) and the candidate CLI both gate on
+# iter_note_files. A CLI-only filter would leave the scheduler counting trashed pages as work
+# while the CLI lists none: the janitor#227 dispatch loop. Measured before this change: the
+# walk returned 205 .trashcan note files and the repair CLI listed 203 of them.
 EXCLUDED_DIRNAMES: frozenset[str] = frozenset(
-    {USER_MEM_DIRNAME, ".memgrep", ".maint-staging", SUPERSEDED_DIRNAME}
+    {USER_MEM_DIRNAME, ".memgrep", ".maint-staging", SUPERSEDED_DIRNAME, ".trashcan"}
 )
 
 # An atom marker: `^<id>` at the start of a line, followed by whitespace or its

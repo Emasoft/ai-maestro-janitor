@@ -90,7 +90,7 @@ content (the marker OPENS the atom; the content below it, up to the next marker 
 body):
 
 ```markdown
-^<8-char-A-Z0-9-uuid> [desc: "<≤200-char PROSE summary of this fact>", keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
+^<8-char-A-Z0-9-uuid> [desc: "<≤200-char PROSE summary of this fact>", keywords: <3+ phrases separated by SPACES, each phrase joined with _>, type: <type>, ocd: <fact's date>, lmd: <today>]
 <the fact's content — the paragraph(s) / table / code block this atom holds>
 ```
 
@@ -98,7 +98,7 @@ body):
   content, never after it. memgrep's parser opens an atom at the marker and reads the lines below
   it as the body. (A trailing marker would mis-attribute the WRONG content to the atom.)
 - **TWO REQUIRED props: `keywords:` AND `desc:`** (TRDD-AP2X9A0H). `keywords:` — SYMPTOM/question
-  words, not the answer's jargon. `type`/`ocd`/`lmd` optional.
+  words, not the answer's jargon. Give at least 3 distinct phrases, separated by SPACES, each phrase joined with `_` (`keywords: disk_full cache_cleared_wrongly`). A COMMA ends the field, so comma-separated keywords are discarded (WMATOM-005, ERROR), and fewer than 3 distinct phrases is WMATOM-006 (ERROR). `type`/`ocd`/`lmd` optional; a missing `ocd` or `lmd` is INFO (WMATOM-011/012), not an error.
 - **`desc:` is a REQUIRED ≤200-char PROSE summary of the atom's body, QUOTED**, never a slug.
   Why it's the LISTING surface + legacy-slug handling:
   [atomize-background § Why desc: is the LISTING surface](references/atomize-background.md#why-desc-is-the-listing-surface).
