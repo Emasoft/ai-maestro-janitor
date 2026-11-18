@@ -152,7 +152,8 @@ def _log_roster_failure(returncode: int, stderr: str) -> None:
             return
         _state.log_line("daemon", line)
         _last_logged_failure = line
-    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change the probe result (TRDD-0QCRG2YX)
+    except (OSError, RuntimeError, ValueError):  # a diagnostic line must never break the scan or change the probe result (TRDD-0QCRG2YX)
+        # why: _state.log_line can raise OSError, RuntimeError or ValueError and the home-directory lookup can raise RuntimeError; the rest of the body is str work; the failed write is not retried
         pass
 
 def _child_cwd() -> str:
