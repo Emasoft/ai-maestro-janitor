@@ -177,10 +177,11 @@ class TestMemoryScopeLeak(unittest.TestCase):
             root = Path(td) / "proj"
             root.mkdir()
             _init_repo(root)
-            secret = "Zk9hQm*c2VjUmV0X3Rva2VuX3hQ8wLm5vdF9hX3JlYWxfb25lX2J1dF9yYW5kb20"
+            # Runtime-generated (tests/_fake_secrets.py): a literal here, even a fake one, is a secret pattern in the tree (TRDD-SWQXCIOS).
+            blob = fake_b62("scope-leak-high-entropy", 64)
             _write_project_memory(
                 root, "token.md",
-                f"the api key was {secret} but it has been rotated since.\n",
+                f"the api key was {blob} but it has been rotated since.\n",
             )
             _git(["add", ".claude/project/memory/token.md"], root)
             _git(["commit", "-qm", "x"], root)
