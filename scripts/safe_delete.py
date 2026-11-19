@@ -48,6 +48,7 @@ from types import ModuleType
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from exe_path import exe  # noqa: E402
 
 # state.py is optional — script runs out-of-tree without logging. The
 # annotation is on the SAME statement that imports the module so mypy
@@ -103,7 +104,7 @@ def _resolve_project_root() -> Path:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
+        [exe("git"), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
         env=git_env,
     )

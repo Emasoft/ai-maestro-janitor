@@ -15,6 +15,7 @@ from typing import Any
 
 import transcript_redact as tr
 from _fake_secrets import secret
+from exe_path import exe
 
 SHIELD = Path(__file__).resolve().parents[1] / "scripts" / "shield_scan"
 SCAN = SHIELD / "scan.ts"
@@ -82,7 +83,7 @@ class Box:
 
     def git(self, cwd: Path, *args: str) -> str:
         """Run git in cwd and return its stdout; a failure raises."""
-        done = subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env())
+        done = subprocess.run([exe("git"), "-C", str(cwd), *args], check=True, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env())
         return done.stdout
 
     def put(self, path: Path, text: str | bytes) -> Path:

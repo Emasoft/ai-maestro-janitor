@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import memory_migrate as mm  # noqa: E402
 import project_memory_tracked  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _stamp() -> str:
@@ -69,7 +70,7 @@ def _cwd_repo_root() -> Path | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [exe("git"), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10, check=False,
             env=git_env,
         )

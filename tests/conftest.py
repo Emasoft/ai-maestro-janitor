@@ -110,6 +110,8 @@ _SCRIPTS_LIB = Path(__file__).resolve().parent.parent / "scripts" / "lib"
 if str(_SCRIPTS_LIB) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_LIB))
 
+from exe_path import exe  # noqa: E402
+
 # ─── S1a/S1b module state (filled by pytest_configure) ──────────────────────────────────
 
 _ISOLATION_ENVS = (
@@ -440,18 +442,18 @@ def _security_temp_keychain_roundtrip_ok() -> bool:
     kc = os.path.join(probe_dir, "probe.keychain-db")
     pw, svc, acct = "janitor-probe-pw", "janitor-conftest-probe", "probe@example.test"
     try:
-        create = subprocess.run(["security", "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
+        create = subprocess.run([exe("security"), "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
         if create.returncode != 0:
             return False
-        subprocess.run(["security", "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
-        add = subprocess.run(["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe", kc], capture_output=True, text=True, timeout=8)
-        read = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct, "-w", kc], capture_output=True, text=True, timeout=8)
+        subprocess.run([exe("security"), "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
+        add = subprocess.run([exe("security"), "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe", kc], capture_output=True, text=True, timeout=8)
+        read = subprocess.run([exe("security"), "find-generic-password", "-s", svc, "-a", acct, "-w", kc], capture_output=True, text=True, timeout=8)
         return add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
     except (subprocess.TimeoutExpired, OSError):
         return False
     finally:
         try:
-            subprocess.run(["security", "delete-keychain", kc], capture_output=True, text=True, timeout=8)
+            subprocess.run([exe("security"), "delete-keychain", kc], capture_output=True, text=True, timeout=8)
         except (subprocess.TimeoutExpired, OSError):
             pass
         shutil.rmtree(probe_dir, ignore_errors=True)
@@ -478,18 +480,18 @@ def isolated_keychain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Itera
     kc = tmp_path / "janitor-test.keychain-db"
     pw = "janitor-test-pw"  # noqa: S105 - a throwaway temp-keychain password, not a secret
     try:
-        _sp.run(["security", "create-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
-        _sp.run(["security", "unlock-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "create-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "unlock-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
         # No `-t <timeout>` → auto-lock disabled → the keychain never re-locks (and so never
         # re-prompts) mid-test.
-        _sp.run(["security", "set-keychain-settings", str(kc)], check=False, capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "set-keychain-settings", str(kc)], check=False, capture_output=True, text=True, timeout=15)
     except (_sp.CalledProcessError, _sp.TimeoutExpired, OSError) as exc:
         pytest.skip(f"could not create isolated temp keychain: {exc}")
     monkeypatch.setenv("JANITOR_ROTATOR_KEYCHAIN", str(kc))
     try:
         yield kc
     finally:
-        _sp.run(["security", "delete-keychain", str(kc)], check=False, capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "delete-keychain", str(kc)], check=False, capture_output=True, text=True, timeout=15)
 
 
 @pytest.fixture(autouse=True)
@@ -658,10 +660,10 @@ def _setup_session_keychain() -> None:
     kc = str(_SESSION_TMP / "session.keychain-db")
     pw = "janitor-session-pw"  # throwaway temp-keychain password, not a secret
     try:
-        if _sp.run(["security", "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15).returncode != 0:
+        if _sp.run([exe("security"), "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15).returncode != 0:
             return
-        _sp.run(["security", "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15)
-        _sp.run(["security", "set-keychain-settings", kc], capture_output=True, text=True, timeout=15)  # no autolock
+        _sp.run([exe("security"), "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "set-keychain-settings", kc], capture_output=True, text=True, timeout=15)  # no autolock
     except (_sp.SubprocessError, OSError):
         return
     _SESSION_KEYCHAIN = kc
@@ -675,7 +677,7 @@ def _teardown_session_keychain() -> None:
     import subprocess as _sp
 
     try:
-        _sp.run(["security", "delete-keychain", _SESSION_KEYCHAIN], capture_output=True, text=True, timeout=15)
+        _sp.run([exe("security"), "delete-keychain", _SESSION_KEYCHAIN], capture_output=True, text=True, timeout=15)
     except (_sp.SubprocessError, OSError):
         pass
     _SESSION_KEYCHAIN = None

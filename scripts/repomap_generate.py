@@ -98,6 +98,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from exe_path import exe  # noqa: E402
 from repomap import (  # noqa: E402
     EXTRACTORS,
     FileMap,
@@ -171,7 +172,7 @@ def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         return subprocess.run(
-            ["git", *args],
+            [exe("git"), *args],
             cwd=root,
             capture_output=True,
             text=True,
