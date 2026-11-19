@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "dirty-tree.py"
 
@@ -82,12 +83,12 @@ def test_everything_else_is_still_counted(line: str) -> None:
 
 def _repo(tmp_path: Path) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "config", "user.name", "t"], cwd=tmp_path, check=True)
     (tmp_path / "seed.txt").write_text("seed\n", encoding="utf-8")
-    subprocess.run(["git", "add", "seed.txt"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "add", "seed.txt"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "commit", "-qm", "seed"], cwd=tmp_path, check=True)
     return tmp_path
 
 

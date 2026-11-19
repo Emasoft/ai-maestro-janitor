@@ -13,13 +13,14 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "design-tracked.py"
 _REPORTS = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "reports-gitignore.py"
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+    subprocess.run([exe("git"), "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
 
 def _repo(tmp_path: Path, with_design: bool = True) -> Path:
@@ -43,7 +44,7 @@ def _run(script: Path, repo: Path) -> list[str]:
 
 
 def _ignored(repo: Path, rel: str) -> bool:
-    return subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", "--no-index", rel],
+    return subprocess.run([exe("git"), "-C", str(repo), "check-ignore", "-q", "--no-index", rel],
                           capture_output=True).returncode == 0
 
 

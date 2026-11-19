@@ -20,6 +20,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+from exe_path import exe  # noqa: E402
 from repomap import claudemd_slim as cs  # noqa: E402
 from repomap.markers import _fence_span  # noqa: E402
 from repomap.renderer import FENCE_END as MAP_END  # noqa: E402
@@ -413,7 +414,7 @@ def test_detector_slim_nudge_gates_on_corpus_and_dedupes(tmp_path: Path) -> None
         return res.stdout
 
     root = tmp_path
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True, timeout=30)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True, timeout=30)
     map_block = f"{MAP_START} v1 sha=x digest=y generated=z\nmap\n{MAP_END}\n"
     claude_md = root / "CLAUDE.md"
     claude_md.write_text(f"# P\n\nprose without url\n\n{map_block}", encoding="utf-8")
@@ -457,7 +458,7 @@ def test_slim_nudge_fires_without_the_repomap_optin_or_a_map_block(tmp_path: Pat
 
     detector = _PROJECT_ROOT / "scripts" / "detectors" / "project-map-drift.py"
     root = tmp_path
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True, timeout=30)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True, timeout=30)
     _corpus(root)
     claude_md = root / "CLAUDE.md"
     # NO map block, and NO repomap-opt-in.flag — deliberately the shape this repo has.

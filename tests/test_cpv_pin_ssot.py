@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from exe_path import exe
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PIN_FILE = _ROOT / ".cpv-version"
@@ -120,7 +121,7 @@ def test_no_source_file_hardcodes_the_pin() -> None:
     would not see it.
     """
     tracked = subprocess.run(
-        ["git", "ls-files", "-z"],
+        [exe("git"), "ls-files", "-z"],
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split("\0")
 

@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DETECTORS_DIR = _ROOT / "scripts" / "detectors"
@@ -100,7 +101,7 @@ def test_workflow_security_failing_git_is_one_stderr_line_and_exit_1(
     workflow = project / ".github" / "workflows" / "vuln.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text(_VULN_WF, encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, capture_output=True)
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = str(project)
     env["PATH"] = failing_worktree_list_git_path

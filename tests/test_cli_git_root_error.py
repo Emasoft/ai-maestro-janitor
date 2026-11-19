@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 FINDINGS_CLI = SCRIPTS / "findings_cli.py"
@@ -23,7 +24,7 @@ def _project(tmp_path: Path) -> Path:
     project = tmp_path / "proj"
     (project / "design" / "tasks").mkdir(parents=True)
     (project / ".janitor").mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, capture_output=True)
     return project
 
 

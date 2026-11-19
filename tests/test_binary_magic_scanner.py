@@ -17,6 +17,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "binary-magic-scanner.py"
 
@@ -454,7 +456,7 @@ def test_binary_in_a_project_specific_gitignored_dir_is_not_flagged(tmp_path: Pa
     project-specific ignored tree is not part of the shipped surface, so flagging it is a
     finding no one can act on. Git is the authority; the name list stays only as the cheap
     walk prune."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text("/.rechecker/\n", encoding="utf-8")
     d = tmp_path / ".rechecker" / "scripts"
     d.mkdir(parents=True)
@@ -469,7 +471,7 @@ def test_binary_in_a_project_specific_gitignored_dir_is_not_flagged(tmp_path: Pa
 def test_binary_in_a_tracked_scripts_dir_is_still_flagged(tmp_path: Path) -> None:
     """The guard must not disable the scanner: a TRACKED ELF under scripts/ is exactly
     the dropper shape this detector exists to catch."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     d = tmp_path / "scripts"
     d.mkdir()
     (d / "tool").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64)
@@ -493,7 +495,7 @@ def test_gitignore_filter_still_applies_when_the_file_budget_is_exhausted(tmp_pa
     was not.
 
     Budget of 2 with 4 gitignored binaries guarantees the early return is the path taken."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text("/downloads_corpus/\n", encoding="utf-8")
     d = tmp_path / "downloads_corpus" / "scripts"
     d.mkdir(parents=True)

@@ -42,6 +42,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import terminal_trigger  # noqa: E402
 import user_intent  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # The sandbox guard denies every spawn not on its allow-list; the REAL private-socket tmux is the point.
 pytestmark = [
@@ -116,7 +117,7 @@ class _Pane:
         # Safety: never type unless the env really points at OUR server (a `%0` also exists in the
         # developer's own tmux).
         seen = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", self.pane_id, "#{socket_path}"],
+            [exe("tmux"), "display-message", "-p", "-t", self.pane_id, "#{socket_path}"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
         assert seen == socket_path, f"TMUX env does not select the private server: {seen!r} != {socket_path!r}"
@@ -125,7 +126,7 @@ class _Pane:
 
     def _tmux(self, *args: str) -> str:
         return subprocess.run(
-            ["tmux", "-u", "-L", self._label, "-f", "/dev/null", *args],
+            [exe("tmux"), "-u", "-L", self._label, "-f", "/dev/null", *args],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout
 
@@ -149,7 +150,7 @@ class _Pane:
         return self.submitted_file.read_text(encoding="utf-8").splitlines()
 
     def close(self) -> None:
-        subprocess.run(["tmux", "-L", self._label, "kill-server"], check=False, timeout=10, capture_output=True)
+        subprocess.run([exe("tmux"), "-L", self._label, "kill-server"], check=False, timeout=10, capture_output=True)
 
 
 @pytest.fixture

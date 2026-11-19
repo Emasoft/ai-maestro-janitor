@@ -16,12 +16,14 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _ROOT = Path(__file__).resolve().parent.parent
 
 
 def _git_mode_644_pyfiles(subdir: str) -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files", "-s", subdir],
+        [exe("git"), "ls-files", "-s", subdir],
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout
     bad: list[str] = []
@@ -59,7 +61,7 @@ def test_every_hook_is_executable_in_git():
 def test_runnable_shebang_scripts_are_executable_in_git():
     """Every tracked scripts/**/*.py that starts with a `#!` shebang must be 100755 in git."""
     out = subprocess.run(
-        ["git", "ls-files", "-s", "scripts"],
+        [exe("git"), "ls-files", "-s", "scripts"],
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout
     bad: list[str] = []

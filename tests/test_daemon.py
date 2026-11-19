@@ -29,6 +29,7 @@ assert _DAEMON.is_file(), f"daemon not found at {_DAEMON}"
 
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+from exe_path import exe  # noqa: E402
 
 
 def _import_daemon_module():
@@ -310,7 +311,7 @@ def test_run_workload_once_kills_grandchild_launcher_grants(
     # self-match) so the check runs against a static, already-complete listing.
     snap = tmp_path / "ps-snapshot.txt"
     ps_out = subprocess.run(
-        ["ps", "-eo", "pid,pgid,command"], capture_output=True, text=True, check=False
+        [exe("ps"), "-eo", "pid,pgid,command"], capture_output=True, text=True, check=False
     ).stdout
     snap.write_text(ps_out, encoding="utf-8")
     leftover = [

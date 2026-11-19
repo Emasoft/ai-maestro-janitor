@@ -22,6 +22,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 sys.path.insert(0, str(_ROOT / "scripts" / "oauth_rotator"))
 sys.path.insert(0, str(_ROOT / "scripts"))
+from exe_path import exe  # noqa: E402
+
 daemon = importlib.import_module("daemon")
 gs = importlib.import_module("global_state")
 rotator = importlib.import_module("rotator")
@@ -75,7 +77,7 @@ def test_tick_runs_while_the_main_thread_is_blocked() -> None:
     t.start()
     try:
         before = gs.read_heartbeat()
-        subprocess.run(["sleep", "3.5"], check=True)  # the 'stuck main loop'
+        subprocess.run([exe("sleep"), "3.5"], check=True)  # the 'stuck main loop'
         assert len(ran) >= 1, "the tick thread must run while the main thread is blocked"
         assert gs.read_heartbeat() == before, "the tick thread must not refresh the heartbeat"
     finally:

@@ -42,6 +42,7 @@ _MEMGREP_CRATE = _PROJECT_ROOT / "tools" / "memgrep"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import user_mem_lib  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _ON = {"CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL": "true"}
 
@@ -461,7 +462,7 @@ def _init_git(root: Path) -> None:
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
     })
-    subprocess.run(["git", "init", "-q"], cwd=str(root), env=env, check=False,
+    subprocess.run([exe("git"), "init", "-q"], cwd=str(root), env=env, check=False,
                    capture_output=True, text=True)
 
 

@@ -35,7 +35,7 @@ assert _LIB.is_file(), f"lib not found at {_LIB}"
 
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
-
+from exe_path import exe  # noqa: E402
 
 # Fake gh: dispatches on argv, prints a canned body, exits a canned code.
 # Mirrors the contract `branch_protection_lib` makes against `gh`:
@@ -1295,9 +1295,9 @@ def test_detect_repo_slug_falls_back_to_the_git_remote(tmp_path: Path) -> None:
     import subprocess
 
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    subprocess.run(["git", "init", "-q", "."], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q", "."], cwd=tmp_path, check=True)
     subprocess.run(
-        ["git", "remote", "add", "origin",
+        [exe("git"), "remote", "add", "origin",
          "https://github.com/Emasoft/ai-maestro-janitor.git"],
         cwd=tmp_path, check=True,
     )
@@ -1311,9 +1311,9 @@ def test_detect_repo_slug_fallback_accepts_an_ssh_remote(tmp_path: Path) -> None
     import subprocess
 
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    subprocess.run(["git", "init", "-q", "."], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q", "."], cwd=tmp_path, check=True)
     subprocess.run(
-        ["git", "remote", "add", "origin",
+        [exe("git"), "remote", "add", "origin",
          "git@github.com:Emasoft/ai-maestro-janitor.git"],
         cwd=tmp_path, check=True,
     )
@@ -1328,9 +1328,9 @@ def test_detect_repo_slug_manifest_WINS_over_a_divergent_remote(project_env: Pat
 
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _make_plugin_manifest(project_env, "https://github.com/Emasoft/ai-maestro-janitor")
-    subprocess.run(["git", "init", "-q", "."], cwd=project_env, check=True)
+    subprocess.run([exe("git"), "init", "-q", "."], cwd=project_env, check=True)
     subprocess.run(
-        ["git", "remote", "add", "origin",
+        [exe("git"), "remote", "add", "origin",
          "https://github.com/someone-else/a-fork.git"],
         cwd=project_env, check=True,
     )
@@ -1347,11 +1347,11 @@ def test_apply_RAISES_when_a_github_repo_cannot_be_named(project_env: Path) -> N
 
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     gh = _make_gh_stub(project_env)
-    subprocess.run(["git", "init", "-q", "."], cwd=project_env, check=True)
+    subprocess.run([exe("git"), "init", "-q", "."], cwd=project_env, check=True)
     # A URL git accepts and `detect_repo_slug` cannot parse — the ONLY interesting case now that
     # the remote fallback exists. A well-formed remote would simply resolve.
     subprocess.run(
-        ["git", "remote", "add", "origin", "https://github.com/not-a-valid-slug"],
+        [exe("git"), "remote", "add", "origin", "https://github.com/not-a-valid-slug"],
         cwd=project_env, check=True,
     )
     assert bpl.detect_repo_slug(project_env) is None, "fixture must be unresolvable"

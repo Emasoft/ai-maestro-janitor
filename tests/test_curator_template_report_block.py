@@ -12,6 +12,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENT_MD = REPO_ROOT / "agents" / "janitor-memory-subconscious-agent.md"
 
@@ -97,7 +99,7 @@ def _run(tmp_path: Path, *, stub_mode: str, precreate: bool, fill_placeholder: b
     env["STUB_LOG_DIR"] = str(tmp_path)
 
     return subprocess.run(
-        ["bash", "-e", str(script_path)],
+        [exe("bash"), "-e", str(script_path)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
