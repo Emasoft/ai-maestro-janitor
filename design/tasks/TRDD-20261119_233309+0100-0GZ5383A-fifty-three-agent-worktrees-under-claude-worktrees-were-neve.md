@@ -4,7 +4,7 @@ title: Fifty-three agent worktrees under .claude/worktrees were never merged or 
 column: todo
 status: tasked
 created: 2026-11-19T23:33:09+0100
-updated: 2026-11-19T23:53:27+0100
+updated: 2026-11-20T00:05:18+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -26,6 +26,7 @@ approval-datetime: 2026-11-19T23:33:09+0100
 ## Approval log
 
 - 2026-11-19T23:33:09+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-11-20 00:00 +0100, main-agent@ai-maestro-janitor: authority for the removal of 32 worktrees = RULE 0 recoverability, not a user order. Every tracked file of each removed worktree is restorable from its kept worktree-agent-* branch (each was clean and every commit patch-equivalent in main); the ignored content deleted with them was .venv, .mypy_cache, .pytest_cache, .ruff_cache, __pycache__ and .DS_Store (regenerable, RULE 0 exemption); the only other ignored entry, reports/ in 20 worktrees, was moved first to reports_dev/retired-worktree-reports/. Command (git_safety_guard OTP 280E58 consumed): per path in /tmp/wtA.txt, git -C <repo> worktree remove <repo>/<path> (no --force), then git worktree prune -v. Result removed=32 failed=0, prune dropped 8 entries. Remaining 13: 2 class B, 10 class C with uncommitted work, plus wt2 (session scratchpad) whose changes are already in main and which is left for the scratchpad cleanup because removing it needs --force. Disk gain about 18 GB (other writers active).
 
 ## Findings
 
