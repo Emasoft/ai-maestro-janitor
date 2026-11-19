@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "repo-state.py"
 
@@ -75,7 +76,7 @@ dedupe_ledger = _load_findings_ledger()
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run([exe("git"), *args], cwd=repo, check=True, capture_output=True, text=True)
 
 
 def _commit(repo: Path, msg: str, filename: str = "f.txt", date: str | None = None) -> None:
@@ -119,7 +120,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # cwd=tmp_path on every git call whose cwd would otherwise be the project
     # root: the sandbox guard reads the CALLING cwd, and `git init` invoked
     # from the project tree reads as a mutation of the real repo.
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True, cwd=tmp_path)
+    subprocess.run([exe("git"), "init", "-q", "--bare", str(origin)], check=True, capture_output=True, cwd=tmp_path)
     # A fresh bare repo's HEAD points at refs/heads/master, so a later
     # `git push origin HEAD:refs/heads/main` from a clone is rejected as
     # non-fast-forward against a ref that does not even exist. Point HEAD at
@@ -128,12 +129,12 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         # TRDD-90LAMQ8B: `--git-dir`, not `-C`: safe.bareRepository=explicit refuses `-C <bare>`;
         # cwd=tmp_path because the sandbox guard reads the calling cwd and does not understand
         # `--git-dir`, so a project-root cwd would read as a mutation of the real repo.
-        ["git", "--git-dir", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"],
+        [exe("git"), "--git-dir", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"],
         check=True,
         capture_output=True,
         cwd=tmp_path,
     )
-    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True, cwd=tmp_path)
+    subprocess.run([exe("git"), "clone", "-q", str(origin), str(work)], check=True, capture_output=True, cwd=tmp_path)
     _git(work, "config", "user.email", "t@t.t")
     _git(work, "config", "user.name", "t")
 
@@ -178,7 +179,7 @@ def test_ahead_count_after_local_commit(repo: Path, tmp_path: Path) -> None:
 def test_behind_count_after_remote_commit(repo: Path, tmp_path: Path) -> None:
     # Push a commit from a second clone, then fetch: local is now behind.
     other = repo.parent / "other"
-    subprocess.run(["git", "clone", "-q", repo.parent / "origin.git", str(other)], check=True, capture_output=True, cwd=tmp_path)
+    subprocess.run([exe("git"), "clone", "-q", repo.parent / "origin.git", str(other)], check=True, capture_output=True, cwd=tmp_path)
     _git(other, "config", "user.email", "t@t.t")
     _git(other, "config", "user.name", "t")
     _commit(other, "remote side work")
@@ -198,7 +199,7 @@ def test_no_upstream_is_silent(tmp_path: Path) -> None:
     """A repo with no upstream at all (local init, no remote) must not error or nag."""
     solo = tmp_path / "solo"
     solo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=solo, check=True, capture_output=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=solo, check=True, capture_output=True)
     _git(solo, "config", "user.email", "t@t.t")
     _git(solo, "config", "user.name", "t")
     _commit(solo, "seed")

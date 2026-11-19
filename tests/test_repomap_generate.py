@@ -33,6 +33,7 @@ _SCRIPT = _PROJECT_ROOT / "scripts" / "repomap_generate.py"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import pytest  # noqa: E402
+from exe_path import exe  # noqa: E402
 from repomap import insert_map_block, read_header, render_block  # noqa: E402
 
 _NARRATIVE = "# My project\n\nHuman-authored architecture notes the janitor must NEVER touch.\n- gotcha one\n- gotcha two\n"
@@ -50,11 +51,11 @@ def _load_module():
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+    return subprocess.run([exe("git"), *args], cwd=root, check=True, capture_output=True, text=True).stdout
 
 
 def _check_ignore_rc(root: Path) -> int:
-    return subprocess.run(["git", "check-ignore", "-q", "PROJECT_MAP.md"], cwd=root, capture_output=True).returncode
+    return subprocess.run([exe("git"), "check-ignore", "-q", "PROJECT_MAP.md"], cwd=root, capture_output=True).returncode
 
 
 def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
@@ -65,11 +66,11 @@ def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
     (root / "pkg" / "beta.py").write_text('"""Beta module — does beta things."""\n\ndef beta_fn() -> None:\n    """Fire the beta path exactly once."""\n')
     if with_claude_md:
         (root / "CLAUDE.md").write_text(_NARRATIVE)
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.name", "t"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", "-A"], cwd=root, check=True)
+    subprocess.run([exe("git"), "commit", "-qm", "init"], cwd=root, check=True)
 
 
 def _legacy_block(root: Path) -> str:
@@ -407,8 +408,8 @@ def test_excludes_are_persisted_and_honored():
         _make_project(root)
         (root / "tests").mkdir()
         (root / "tests" / "test_alpha.py").write_text('"""Alpha tests."""\n\ndef test_alpha():\n    pass\n')
-        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "tests"], cwd=root, check=True)
+        subprocess.run([exe("git"), "add", "-A"], cwd=root, check=True)
+        subprocess.run([exe("git"), "commit", "-qm", "tests"], cwd=root, check=True)
         assert _run(root, "--exclude", "tests/*")[0] == 0
         text = (root / "PROJECT_MAP.md").read_text()
         assert "test_alpha" not in text, "excluded tree must not appear in the map"
@@ -427,8 +428,8 @@ def test_legacy_exclude_file_is_still_read():
         _make_project(root)
         (root / "tests").mkdir()
         (root / "tests" / "test_alpha.py").write_text('"""Alpha tests."""\n\ndef test_alpha():\n    pass\n')
-        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "tests"], cwd=root, check=True)
+        subprocess.run([exe("git"), "add", "-A"], cwd=root, check=True)
+        subprocess.run([exe("git"), "commit", "-qm", "tests"], cwd=root, check=True)
         legacy = root / ".janitor" / "state" / "repomap-excludes.txt"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("tests/*\n")
@@ -567,11 +568,11 @@ def _make_ts_heavy_project(root: Path) -> None:
         (root / "app" / f"component{i}.tsx").write_text(f"export function Component{i}() {{ return null; }}\n")
     (root / "scripts").mkdir()
     (root / "scripts" / "helper.py").write_text('"""A peripheral helper script."""\n\ndef helper_fn() -> None:\n    """Do a peripheral thing."""\n')
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.name", "t"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", "-A"], cwd=root, check=True)
+    subprocess.run([exe("git"), "commit", "-qm", "init"], cwd=root, check=True)
 
 
 def test_ts_heavy_repo_gets_an_honest_coverage_disclaimer():
@@ -614,8 +615,8 @@ def test_discovery_follows_the_registry_not_a_hardcoded_extension():
         root = Path(d)
         _make_project(root)
         (root / "pkg" / "widget.fake").write_text("not really parsed")
-        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "add fake"], cwd=root, check=True)
+        subprocess.run([exe("git"), "add", "-A"], cwd=root, check=True)
+        subprocess.run([exe("git"), "commit", "-qm", "add fake"], cwd=root, check=True)
         before = {p.name for p in mod.discover_sources(root)}
         assert "widget.fake" not in before, "an unregistered extension must stay invisible"
         mod.EXTRACTORS[".fake"] = lambda p: mod.FileMap(path=str(p), role="", symbols=[])

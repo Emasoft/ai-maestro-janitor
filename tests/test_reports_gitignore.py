@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
@@ -36,12 +37,12 @@ def _isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@e"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.name", "t"], cwd=root, check=True)
+    subprocess.run([exe("git"), "config", "user.email", "t@e"], cwd=root, check=True)
     (root / "f.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "f.txt"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", "f.txt"], cwd=root, check=True)
+    subprocess.run([exe("git"), "commit", "-qm", "init"], cwd=root, check=True)
     return root
 
 
@@ -98,7 +99,7 @@ def test_a_TRACKED_reports_dev_is_never_silently_ignored(tmp_path):
     root = _repo(tmp_path)
     (root / "reports_dev").mkdir()
     (root / "reports_dev" / "leak.md").write_text("pasted log line\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-f", "reports_dev/leak.md"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", "-f", "reports_dev/leak.md"], cwd=root, check=True)
     added, _ok, human = rg.ensure_ignored(root)
     assert "reports_dev" in human and "reports_dev" not in added
     assert not (root / ".gitignore").is_file()

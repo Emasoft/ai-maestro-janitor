@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _HELPER = Path(__file__).resolve().parent.parent / "scripts" / "lib" / "redact_staged_reports.py"
 
@@ -26,7 +27,7 @@ _HOME_PATH = "/Users/" + getpass.getuser() + "/proj/f"
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
+        [exe("git"), *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
     )
     return r.stdout
 

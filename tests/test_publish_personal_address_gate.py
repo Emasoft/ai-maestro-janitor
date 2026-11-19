@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -38,7 +39,7 @@ NEW = _gmail("new")
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
+        [exe("git"), *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
     )
     return r.stdout
 

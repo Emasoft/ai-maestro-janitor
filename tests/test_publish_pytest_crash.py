@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -103,7 +104,7 @@ def _pgids_alive() -> set[int]:
     snap = Path(snap_name)
     try:
         with snap.open("w") as f:
-            subprocess.run(["ps", "-eo", "pid,pgid"], stdout=f, check=True)
+            subprocess.run([exe("ps"), "-eo", "pid,pgid"], stdout=f, check=True)
         rows = [ln.split() for ln in snap.read_text().splitlines()[1:]]
     finally:
         snap.unlink(missing_ok=True)

@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
@@ -26,7 +27,7 @@ import git_utils  # noqa: E402
 def _repo(tmp_path: Path) -> Path:
     # cwd INSIDE the tmp tree — the suite's sandbox guard refuses mutating git
     # verbs whose cwd is the real repository, even with a tmp argv target.
-    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=str(tmp_path), check=True)
     return tmp_path
 
 
@@ -46,16 +47,16 @@ def test_lock_born_after_our_spawn_is_removed_and_repo_commits_again(
     wait — and the repo is genuinely writable again (a real commit succeeds)."""
     monkeypatch.setattr(git_utils, "_lock_is_held", lambda _: False)
     repo = _repo(tmp_path)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "config", "user.name", "t"], check=True)
     (repo / "f.txt").write_text("x")
-    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "add", "f.txt"], check=True)
     spawn = time.time() - 5
     lock = _lock(repo)
     assert git_utils.recover_own_index_lock(repo, spawn)
     assert not lock.exists()
     ok = subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", "m"], capture_output=True, text=True,
+        [exe("git"), "-C", str(repo), "commit", "-m", "m"], capture_output=True, text=True,
     )
     assert ok.returncode == 0, ok.stderr
 
@@ -101,17 +102,17 @@ def test_real_producer_a_commit_killed_in_its_hook_leaves_NO_lock(tmp_path: Path
     producer, 2026-08-18 23:32) is `clear_stale_index_lock`'s territory. Pinned so
     the next reader cannot re-derive the wrong mechanism."""
     repo = _repo(tmp_path)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "config", "user.name", "t"], check=True)
     (repo / "f.txt").write_text("x")
-    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run([exe("git"), "-C", str(repo), "add", "f.txt"], check=True)
     hook = repo / ".git" / "hooks" / "pre-commit"
     hook.write_text("#!/bin/sh\nsleep 30\n")
     hook.chmod(0o755)
     spawn = time.time()
     try:
         subprocess.run(
-            ["git", "-C", str(repo), "commit", "-m", "m"],
+            [exe("git"), "-C", str(repo), "commit", "-m", "m"],
             capture_output=True, text=True, timeout=1,
         )
         raise AssertionError("the hooked commit was expected to time out")

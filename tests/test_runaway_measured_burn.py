@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import daemon_runaway as dr  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "system-daemon-runaway.py"
 
@@ -74,7 +75,7 @@ def test_parse_cpu_time_formats() -> None:
 
 def test_parse_cpu_time_reads_real_ps_output() -> None:
     """Real `ps` for this very process parses to a non-negative number of seconds."""
-    out = subprocess.run(["ps", "-p", str(os.getpid()), "-o", "time="],
+    out = subprocess.run([exe("ps"), "-p", str(os.getpid()), "-o", "time="],
                          capture_output=True, text=True, check=True, timeout=10).stdout
     secs = dr.parse_cpu_time(out)
     assert secs is not None and secs >= 0.0

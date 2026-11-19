@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _HOOK_PATH = _PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-publish-lock.py"
@@ -289,7 +290,7 @@ def test_publish_lock_path_is_gitignored(publish_mod) -> None:
     """
     lock_path = publish_mod._publish_lock_path(_PROJECT_ROOT)
     result = subprocess.run(
-        ["git", "check-ignore", "-q", str(lock_path)],
+        [exe("git"), "check-ignore", "-q", str(lock_path)],
         cwd=_PROJECT_ROOT,
         timeout=10,
     )

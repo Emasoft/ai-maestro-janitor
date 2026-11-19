@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -28,7 +29,7 @@ import publish  # noqa: E402
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True,
+        [exe("git"), *args], cwd=str(repo), capture_output=True, text=True,
         check=True, timeout=30,
     )
     return r.stdout.strip()
@@ -59,7 +60,7 @@ def _plan_and_apply(repo: Path, tag: str, message: str) -> list[str]:
     if verdict == "refuse":
         raise SystemExit(1)
     if verdict == "retag":
-        subprocess.run(["git", "tag", "-f", "-a", tag, "-m", message],
+        subprocess.run([exe("git"), "tag", "-f", "-a", tag, "-m", message],
                        cwd=str(repo), capture_output=True, check=True, timeout=30)
     return lines
 
@@ -78,7 +79,7 @@ def repo_with_origin(tmp_path: Path) -> tuple[Path, Path]:
     # `cwd` is inside tmp_path deliberately: tests/sandbox_guard.py refuses any
     # mutating git verb whose cwd resolves to the real repository, and a bare
     # `subprocess.run(["git", "init", ...])` inherits this repo as its cwd.
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)],
+    subprocess.run([exe("git"), "init", "-q", "--bare", str(origin)],
                    cwd=str(tmp_path), check=True, timeout=30)
     repo = tmp_path / "work"
     repo.mkdir()

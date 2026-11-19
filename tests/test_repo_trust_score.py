@@ -13,6 +13,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "repo-trust-score.py"
 
@@ -162,8 +164,8 @@ def test_dropper_still_fires_from_the_git_listing(tmp_path: Path) -> None:
     """TRDD-WOI8GO1S: in a real git repo with the dropper files tracked, the scorer reads the
     `git ls-files` listing (not an rglob) and still reports the dropper shape."""
     _seed_dropper(tmp_path)
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "add", "-A"], cwd=tmp_path, check=True)
     r = _run(tmp_path)
     assert r.returncode == 0
     assert "dropper-shape" in r.stdout
