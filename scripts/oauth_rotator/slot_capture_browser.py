@@ -85,6 +85,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import rotator  # type: ignore[import-not-found]  # noqa: E402
 import rotator_alert  # noqa: E402  -- scripts/lib/rotator_alert.py (refusal marker, TRDD-0SU2C2IM)
+import state  # noqa: E402  -- scripts/lib/state.py (log_line, TRDD-SWQXCIOS)
 import tls_context  # noqa: E402  -- scripts/lib/tls_context.py (TRDD-X6I04SAO)
 
 # Constants VERBATIM from claude-login-automation/src/auth.ts (the working ref).
@@ -189,6 +190,16 @@ def _wait_for_cdp(port: int, timeout: float = 30.0) -> bool:
             pass
         time.sleep(0.3)
     return False
+
+
+def _note_swallowed(where: str, exc: Exception) -> None:
+    """TRDD-SWQXCIOS: record that a best-effort browser step failed — exception TYPE only, never the
+    message (it can carry a token or URL). state.log_line is the library log path; its own failure
+    set is dropped here because a best-effort step must never raise out of its cleanup."""
+    try:
+        state.log_line("slot-capture-browser", f"swallowed {type(exc).__name__} in {where} (best-effort step, continuing)")
+    except (OSError, OverflowError, RuntimeError, ValueError):
+        pass
 
 
 def _looks_like_challenge(text: str) -> bool:
@@ -359,8 +370,8 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                 try:
                     page.screenshot(path=str(consent_shot))
                     print(f"[capture] consent-page screenshot: {consent_shot}")
-                except Exception:
-                    pass
+                except Exception as exc:  # TRDD-SWQXCIOS: the diagnostic screenshot is optional; type logged
+                    _note_swallowed("consent-screenshot", exc)
 
                 # Poll up to 5 min: click any consent/approve button we see, until we
                 # reach the manual callback. This tolerates a one-time interactive
@@ -416,7 +427,8 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                             btn.click()
                             print(f"[capture] clicked approval button ({sel}).")
                             break
-                        except Exception:
+                        except Exception as exc:  # TRDD-SWQXCIOS: transient CDP error on one selector; the poll comes round again, type logged
+                            _note_swallowed("approve-selector", exc)
                             continue
                     if refused:
                         raise _ConsentRefused(refused)
@@ -450,14 +462,15 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                         val = None
                         try:
                             val = el.input_value()
-                        except Exception:
-                            pass
+                        except Exception as exc:  # TRDD-SWQXCIOS: not an input element; fall back to text_content, type logged
+                            _note_swallowed("input_value", exc)
                         txt = el.text_content()
                         cand = (val or txt or "").strip()
                         if len(cand) > 10:
                             raw_code = cand
                             break
-                    except Exception:
+                    except Exception as exc:  # TRDD-SWQXCIOS: element unreadable on this selector; try the next, type logged
+                        _note_swallowed("code-selector", exc)
                         continue
 
                 # 2) Scan the body text for a code#state pattern.
@@ -488,8 +501,8 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                 # user's persistent profile data the way a launched-context close would).
                 try:
                     browser.close()
-                except Exception:
-                    pass
+                except Exception as exc:  # TRDD-SWQXCIOS: CDP detach failure must not mask the capture result; type logged
+                    _note_swallowed("browser.close", exc)
     finally:
         # Terminate the Chrome we launched so no orphan process leaks across the
         # daemon's many unattended capture attempts. terminate → wait → kill escalation.
@@ -499,8 +512,8 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
         except Exception:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as exc:  # TRDD-SWQXCIOS: kill is the last resort on an already-gone child; type logged, cleanup stays best-effort
+                _note_swallowed("chrome-kill", exc)
 
 
 def _exchange(code: str, verifier: str, state: str) -> dict:

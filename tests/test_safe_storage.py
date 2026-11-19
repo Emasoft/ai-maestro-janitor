@@ -208,10 +208,10 @@ def test_macos_roundtrip_multi_kilobyte_secret(isolated_keychain) -> None:  # is
 def test_macos_roundtrip_preserves_special_chars(isolated_keychain) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """A secret with newlines / quotes / unicode round-trips intact (interior whitespace
     is preserved; only the trailing newline `security -w` adds is stripped)."""
-    secret = 'line1\nline2 "quoted" \t café 🦝 end'
+    payload = 'line1\nline2 "quoted" \t café 🦝 end'  # TRDD-SWQXCIOS: not named secret (bandit B105)
     try:
-        assert ss.store(_TEST_SERVICE, "special@x.com", secret) is ss.StoreResult.OK
-        assert ss.retrieve(_TEST_SERVICE, "special@x.com") == secret
+        assert ss.store(_TEST_SERVICE, "special@x.com", payload) is ss.StoreResult.OK
+        assert ss.retrieve(_TEST_SERVICE, "special@x.com") == payload
     finally:
         ss.delete(_TEST_SERVICE, "special@x.com")
 
@@ -536,12 +536,13 @@ def test_latch_age_seconds_none_when_unlatched(monkeypatch: pytest.MonkeyPatch) 
     ss.clear_keychain_denied()
 
 
-def test_keychain_scope_args_confines_to_the_env_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_keychain_scope_args_confines_to_the_env_keychain(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """(P1.iv) The scope lever appends the JANITOR_ROTATOR_KEYCHAIN path so EVERY op is confined
     to that keychain; empty when unset (production → login keychain, argv unchanged)."""
-    monkeypatch.setenv("JANITOR_ROTATOR_KEYCHAIN", "/tmp/janitor/test.keychain-db")
-    assert ss.keychain_scope_args() == ["/tmp/janitor/test.keychain-db"]
-    assert ss.macos_retrieve_argv("svc", "acct")[-1] == "/tmp/janitor/test.keychain-db"
+    kc = str(tmp_path / "test.keychain-db")  # TRDD-SWQXCIOS: pytest tmp_path, not a hard-coded /tmp path (bandit B108)
+    monkeypatch.setenv("JANITOR_ROTATOR_KEYCHAIN", kc)
+    assert ss.keychain_scope_args() == [kc]
+    assert ss.macos_retrieve_argv("svc", "acct")[-1] == kc
     monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
     assert ss.keychain_scope_args() == []
     assert ss.macos_retrieve_argv("svc", "acct")[-1] == "-w"  # base argv, no keychain scope

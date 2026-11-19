@@ -236,8 +236,8 @@ def set_keychain_denied(reason: str, *, quiet: bool = False) -> None:
             % reason,
             file=sys.stderr, flush=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001  -- TRDD-SWQXCIOS: a failed banner must not escape the credential path; type noted
+        _note_log_failure(exc)
 
 
 def clear_keychain_denied() -> bool:
@@ -301,6 +301,22 @@ def _describe_security_argv(argv: list[str]) -> str:
     return f"verb={verb}" + (f" service={service}" if service else "")
 
 
+def _note_log_failure(exc: Exception) -> None:
+    """TRDD-SWQXCIOS: a stderr log line failed inside the credential path. Swallow it (the caller
+    must never raise) but record the exception TYPE only — never the message — through state.log_line.
+    `state` is imported lazily (like global_state above) so this module keeps no hard import of scripts/lib;
+    a failure of the note itself is dropped, because nothing is left to report it to."""
+    try:
+        lib = str(Path(__file__).resolve().parent.parent / "lib")
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        import state  # noqa: PLC0415  -- lazy on purpose (see docstring)
+
+        state.log_line("safe-storage", f"a log line was suppressed ({type(exc).__name__})")
+    except (ImportError, OSError, OverflowError, RuntimeError, ValueError):
+        pass
+
+
 def _log_if_slow(elapsed_ms: float, timeout: float, argv: list[str], *, half_open: bool, timed_out: bool) -> None:
     """TRDD-3VIXO8FA: log any `security` call at or past `_SLOW_SECURITY_LOG_MS` (including a
     timeout) so a slow/blocked call is measurable — mirrors the TS port's SLOW_SECURITY_LOG_MS
@@ -318,8 +334,8 @@ def _log_if_slow(elapsed_ms: float, timeout: float, argv: list[str], *, half_ope
             ),
             file=sys.stderr, flush=True,
         )
-    except Exception:  # noqa: BLE001  -- never let logging escape the credential path
-        pass
+    except Exception as exc:  # noqa: BLE001  -- never let logging escape the credential path (TRDD-SWQXCIOS: type noted)
+        _note_log_failure(exc)
 
 
 def run_security(

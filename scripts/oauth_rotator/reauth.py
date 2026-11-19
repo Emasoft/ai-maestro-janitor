@@ -115,6 +115,16 @@ def die(msg: str, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
+def _note_swallowed(where: str, exc: Exception) -> None:
+    """TRDD-SWQXCIOS: record that a best-effort browser step failed — exception TYPE only, never the
+    message (it can carry a token or URL). A stderr write that itself fails is dropped: nothing is
+    left to report it to."""
+    try:
+        log(f"swallowed {type(exc).__name__} in {where} (best-effort step, continuing)")
+    except (OSError, ValueError):
+        pass
+
+
 # The consent shows — and we `tmux send-keys` — a `<code>#<state>` pair. Once pasted, it is
 # ON THE PANE, so any pane dump we log carries live credential material (audit finding 2).
 # The code is single-use and expires in minutes, so it is inert once claude exchanges it —
@@ -228,8 +238,8 @@ def authorize_and_capture_code(cdp_url: str, authorize_url: str | None,
                 body = ""
                 try:
                     body = (page.inner_text("body", timeout=3000) or "").lower()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001  -- TRDD-SWQXCIOS: page not readable this tick; poll again, type logged
+                    _note_swallowed("inner_text", exc)
                 if any(s in body for s in ("continue with google", "sign in to continue",
                                            "log in to claude")):
                     _safe_close(page)
@@ -248,8 +258,8 @@ def authorize_and_capture_code(cdp_url: str, authorize_url: str | None,
                             loc.first.click(timeout=click_timeout_ms)
                             clicked = sel
                             break
-                    except Exception:  # noqa: BLE001 - button vanished mid-click; poll again
-                        pass
+                    except Exception as exc:  # noqa: BLE001 - button vanished mid-click; poll again (TRDD-SWQXCIOS: type logged)
+                        _note_swallowed("click-approve", exc)
                 if clicked is None:
                     page.wait_for_timeout(1000)
             if clicked is None:
@@ -272,15 +282,15 @@ def authorize_and_capture_code(cdp_url: str, authorize_url: str | None,
         finally:
             try:
                 browser.close()  # disconnects the CDP session; does NOT kill the browser
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001  -- TRDD-SWQXCIOS: a CDP disconnect failure must not mask the capture result; type logged
+                _note_swallowed("browser.close", exc)
 
 
 def _safe_close(page) -> None:
     try:
         page.close()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001  -- TRDD-SWQXCIOS: page.close() may fail on a dead CDP session; type logged, close stays best-effort
+        _note_swallowed("page.close", exc)
 
 
 def _code_from_callback_url(url: str) -> str | None:

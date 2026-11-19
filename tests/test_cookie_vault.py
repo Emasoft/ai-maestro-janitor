@@ -51,6 +51,22 @@ def _row(host, name, enc, *, path="/", persistent=1, expires=13_400_000_000_000_
     return vals
 
 
+# TRDD-SWQXCIOS: a constant statement, not one built by f-string (bandit B608). The test below pins it to
+# cv.COOKIE_COLUMNS so a schema change fails loudly instead of inserting the wrong columns.
+_INSERT_COOKIE_SQL = (
+    "INSERT INTO cookies (creation_utc, host_key, top_frame_site_key, name, value, encrypted_value, "
+    "path, expires_utc, is_secure, is_httponly, last_access_utc, has_expires, is_persistent, priority, "
+    "samesite, source_scheme, source_port, last_update_utc, source_type, has_cross_site_ancestor) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def test_insert_cookie_sql_matches_cookie_columns() -> None:
+    """The fixture INSERT statement lists exactly cv.COOKIE_COLUMNS, in order, with one placeholder each."""
+    assert _INSERT_COOKIE_SQL.split(") VALUES")[0].split("(", 1)[1].split(", ") == list(cv.COOKIE_COLUMNS)
+    assert _INSERT_COOKIE_SQL.count("?") == len(cv.COOKIE_COLUMNS)
+
+
 def _make_db(path: Path, rows: list[dict]) -> None:
     """Create a Chrome-schema Cookies sqlite at `path` with `rows` (uses cookie_vault's
     own DDL so the fixture matches the real schema exactly)."""
@@ -58,11 +74,8 @@ def _make_db(path: Path, rows: list[dict]) -> None:
     con = sqlite3.connect(path)
     try:
         cv._ensure_cookies_table(con)
-        cols = ", ".join(cv.COOKIE_COLUMNS)
-        ph = ", ".join("?" for _ in cv.COOKIE_COLUMNS)
         for r in rows:
-            con.execute(f"INSERT INTO cookies ({cols}) VALUES ({ph})",
-                        tuple(r[c] for c in cv.COOKIE_COLUMNS))
+            con.execute(_INSERT_COOKIE_SQL, tuple(r[c] for c in cv.COOKIE_COLUMNS))
         con.commit()
     finally:
         con.close()
@@ -313,11 +326,8 @@ def test_scrub_refuses_when_the_keychain_copy_is_stale(isolated_keychain,
         # The profile moves on: a second claude.ai cookie appears after the snapshot.
         con = sqlite3.connect(db)
         try:
-            cols = ", ".join(cv.COOKIE_COLUMNS)
-            ph = ", ".join("?" for _ in cv.COOKIE_COLUMNS)
             r = _row(".claude.ai", "cf_clearance", _ENC_CF)
-            con.execute(f"INSERT INTO cookies ({cols}) VALUES ({ph})",
-                        tuple(r[c] for c in cv.COOKIE_COLUMNS))
+            con.execute(_INSERT_COOKIE_SQL, tuple(r[c] for c in cv.COOKIE_COLUMNS))
             con.commit()
         finally:
             con.close()
