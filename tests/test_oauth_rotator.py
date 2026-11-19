@@ -4055,3 +4055,111 @@ def test_claude_running_false_for_rotator_own_argv(tmp_path: Path, monkeypatch: 
     """A ps listing only the rotator's own tick process answers False."""
     _fake_ps(tmp_path, monkeypatch, "echo \"python3 /x/rotator.py tick --only-if-claude-running\"")
     assert rotator.claude_running() is False
+
+
+# ---- TRDD-FSNVU81M: _log_swallowed records the exception TYPE only and never lets a log failure escape ----
+
+_SWALLOW_MARKER = "MSG-MARKER-9c41d7e2"  # distinctive text standing in for a token/path-bearing exception message
+
+
+def test_a_failing_rotation_success_stamp_is_logged_by_type_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A record_rotation_success failure on the changed-identity path leaves a rotator.log line naming
+    the exception TYPE and never the exception message (the message may carry token or path text)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a, live_b = _blob("LIVE-A"), _blob("LIVE-B")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}, "b@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a, "b@x": live_b}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+
+    def _boom(_now: int) -> None:
+        raise RuntimeError(_SWALLOW_MARKER)
+
+    monkeypatch.setattr(rotator.gs, "record_rotation_success", _boom)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_b)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 2000.0)
+
+    assert rotator.refresh_beacon_if_stale(now=2001.0) is True  # the swallowed error did not break the refresh
+
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "rotation-success stamp: swallowed RuntimeError" in log
+    assert _SWALLOW_MARKER not in log, "the exception message must never reach the decision log"
+    captured = capsys.readouterr()
+    assert _SWALLOW_MARKER not in captured.out + captured.err
+
+
+def test_a_failing_tick_step_timing_log_is_swallowed_and_logged_by_type_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tick-step timer's catch records `tick-step timing: swallowed <Type>` (never the message)
+    when the timing line's own _log call raises a non-OSError, and the timed step is not disturbed."""
+    (tmp_path / "opt-in.flag").write_text("")
+    monkeypatch.setattr(rotator, "_TICK_TIMING_VERBOSE", True)
+    real_log = rotator._log
+
+    def _log_failing_on_timing(msg: str) -> None:
+        if msg.startswith("tick-step: "):
+            raise RuntimeError(_SWALLOW_MARKER)
+        real_log(msg)
+
+    monkeypatch.setattr(rotator, "_log", _log_failing_on_timing)
+    ran: list[str] = []
+    with rotator._tick_step_timer("step"):
+        ran.append("body")
+
+    assert ran == ["body"]
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "tick-step timing: swallowed RuntimeError" in log
+    assert _SWALLOW_MARKER not in log
+    captured = capsys.readouterr()
+    assert _SWALLOW_MARKER not in captured.out + captured.err
+
+
+def test_log_swallowed_absorbs_a_non_oserror_from_log(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """_log only absorbs OSError, so a RuntimeError out of _log must still not escape _log_swallowed;
+    it is reported to stderr by type (never message) and never re-enters _log."""
+    calls: list[str] = []
+
+    def _log_raises(msg: str) -> None:
+        calls.append(msg)
+        raise RuntimeError(_SWALLOW_MARKER)
+
+    monkeypatch.setattr(rotator, "_log", _log_raises)
+    rotator._log_swallowed("some site", ValueError(_SWALLOW_MARKER))  # must not raise
+
+    assert len(calls) == 1, "the stderr report must not re-enter _log"
+    err = capsys.readouterr().err
+    assert "some site swallow-log failed" in err and "RuntimeError" in err
+    assert _SWALLOW_MARKER not in err
+
+
+@pytest.mark.parametrize("stderr_error", [OSError, ValueError])
+def test_log_swallowed_absorbs_a_broken_stderr_too(
+    monkeypatch: pytest.MonkeyPatch, stderr_error: type[Exception]
+) -> None:
+    """When _log raises AND the stderr fallback itself fails (OSError, or ValueError as on a closed
+    stream), nothing escapes: the swallow-log is the last line of defence. The fallback write is
+    attempted (a silent swallow would also pass a bare no-raise check)."""
+    writes: list[str] = []
+
+    class _BrokenStderr:
+        def write(self, text: str) -> int:
+            writes.append(text)
+            raise stderr_error("stderr is broken")
+
+        def flush(self) -> None:
+            raise stderr_error("stderr is broken")
+
+    def _log_raises(_msg: str) -> None:
+        raise RuntimeError(_SWALLOW_MARKER)
+
+    monkeypatch.setattr(rotator, "_log", _log_raises)
+    monkeypatch.setattr(sys, "stderr", _BrokenStderr())
+    rotator._log_swallowed("some site", ValueError("x"))  # must not raise
+    assert writes, "the stderr fallback must have been attempted"
