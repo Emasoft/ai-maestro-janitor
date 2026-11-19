@@ -214,13 +214,13 @@ def test_keepalive_refresh_records_failure_cause_in_meta(monkeypatch: pytest.Mon
 
     def _fake_refresh(blob: dict, *, on_failure=None) -> None:
         if on_failure is not None:
-            on_failure(rotator.REFRESH_FAIL_CREDENTIAL_DEAD)
+            on_failure(rotator.REFRESH_FAIL_REVOKED_GRANT)
         return None
 
     monkeypatch.setattr(rotator, "refresh_oauth_token", _fake_refresh)
     rotator._keepalive_refresh()
     assert state["slots"]["alt@x.com"]["refresh_failures"] == 1  # counter still increments
-    assert state["slots"]["alt@x.com"]["last_refresh_failure"] == rotator.REFRESH_FAIL_CREDENTIAL_DEAD
+    assert state["slots"]["alt@x.com"]["last_refresh_failure"] == rotator.REFRESH_FAIL_REVOKED_GRANT
 
 
 def test_refresh_and_heal_slot_resets_failures_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1776,7 +1776,7 @@ def test_classify_refresh_failure_credential_dead_on_invalid_grant() -> None:
     """A 400 invalid_grant means the refresh token is genuinely revoked — human-actionable,
     distinct from a transient network/CF hiccup."""
     exc = _http_error(400, b'{"error":"invalid_grant","error_description":"Refresh token not found"}')
-    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_CREDENTIAL_DEAD
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_REVOKED_GRANT
 
 
 def test_classify_refresh_failure_network_on_plain_url_error() -> None:
@@ -1818,7 +1818,7 @@ def test_classify_refresh_failure_never_raises_on_unreadable_body() -> None:
     # Must not raise, and must return SOME valid cause string.
     assert rotator.classify_refresh_failure(exc) in {
         rotator.REFRESH_FAIL_TRANSPORT_REFUSED,
-        rotator.REFRESH_FAIL_CREDENTIAL_DEAD,
+        rotator.REFRESH_FAIL_REVOKED_GRANT,
         rotator.REFRESH_FAIL_NETWORK,
         rotator.REFRESH_FAIL_MALFORMED,
     }
@@ -1833,7 +1833,7 @@ def test_refresh_oauth_token_reports_credential_dead_via_on_failure(monkeypatch:
     causes: list[str] = []
     result = rotator.refresh_oauth_token(_blob("OLD", refresh="OLDR"), on_failure=causes.append)
     assert result is None
-    assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]
+    assert causes == [rotator.REFRESH_FAIL_REVOKED_GRANT]
 
 
 def test_refresh_oauth_token_reports_transport_refused_via_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3651,7 +3651,7 @@ def test_refresh_failure_log_never_carries_token_text(monkeypatch: pytest.Monkey
     """R3-F: classify_refresh_failure only returns the fixed REFRESH_FAIL_* strings, and an
     exception / body quoting a token never reaches the rotator log."""
     import io as _io
-    causes = {rotator.REFRESH_FAIL_TRANSPORT_REFUSED, rotator.REFRESH_FAIL_CREDENTIAL_DEAD,
+    causes = {rotator.REFRESH_FAIL_TRANSPORT_REFUSED, rotator.REFRESH_FAIL_REVOKED_GRANT,
               rotator.REFRESH_FAIL_NETWORK, rotator.REFRESH_FAIL_TLS, rotator.REFRESH_FAIL_MALFORMED}
     leak_probe = "sk-ant-oat01-" + "FAKESECRET"  # TRDD-SWQXCIOS: same token-shaped fake as before, built from fragments under a non-password name (bandit B105)
     from email.message import Message
@@ -3767,7 +3767,7 @@ def test_fresh_beacon_with_stale_mirror_is_repaired_by_one_refresh(
 def _dead_slot_state(fail_age_s: float | None) -> dict:
     near_ms = int((time.time() - 3600) * 1000)  # already lapsed: the runway gate always passes
     meta: dict = {"fp": "old", "expires_at": near_ms, "refresh_failures": rotator.MAX_REFRESH_FAILURES,
-                  "last_refresh_failure": rotator.REFRESH_FAIL_CREDENTIAL_DEAD}
+                  "last_refresh_failure": rotator.REFRESH_FAIL_REVOKED_GRANT}
     if fail_age_s is not None:
         meta["last_refresh_fail_at"] = time.time() - fail_age_s
     return {"live_email": "live@x.com", "slots": {"alt@x.com": meta}}
@@ -3832,7 +3832,7 @@ def test_keepalive_bad_meta_types_do_not_stop_the_other_slots(monkeypatch: pytes
     lapsed = int((time.time() - 3600) * 1000)
     state: dict = {"live_email": "live" + "@" + "x.com", "slots": {
         "bad": {"fp": "o", "expires_at": lapsed, "refresh_failures": "many",
-                "last_refresh_failure": rotator.REFRESH_FAIL_CREDENTIAL_DEAD, "last_refresh_fail_at": "yesterday"},
+                "last_refresh_failure": rotator.REFRESH_FAIL_REVOKED_GRANT, "last_refresh_fail_at": "yesterday"},
         "good": {"fp": "o", "expires_at": lapsed},
     }}
     seen: list[str] = []
@@ -3896,7 +3896,7 @@ def test_refresh_failure_log_carries_http_status_and_error_code_only(
     log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
     assert "http=400 error=invalid_grant" in log
     assert "SECRET-DESCRIPTION" not in log and "SPENT-REFRESH" not in log
-    assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]
+    assert causes == [rotator.REFRESH_FAIL_REVOKED_GRANT]
 
 
 # ---- JY0OBQZ4 / TRDD-S6GX1DHN: per-step tick timing (opt-in gated, rotator.log only) ----

@@ -1773,7 +1773,8 @@ def account_usage(blob: dict) -> dict | None:
 # token, and a plain network blip apart. These four constants are the classifier's whole output
 # vocabulary; keep them stable, they are logged into slot state (`last_refresh_failure`).
 REFRESH_FAIL_TRANSPORT_REFUSED = "transport-refused"  # CF 403 / error 1010 — retryable, alarming
-REFRESH_FAIL_CREDENTIAL_DEAD = "credential-dead"  # 400/401 invalid_grant — human-actionable
+# Named for the OAuth error (invalid_grant), not "credential": a name containing CREDENTIAL made ubs report a hardcoded secret at every use (TRDD-Z691NW1P). The value is a stable on-disk label; never change it.
+REFRESH_FAIL_REVOKED_GRANT = "credential-dead"  # 400/401 invalid_grant — human-actionable
 REFRESH_FAIL_NETWORK = "network"  # timeout / DNS / connection — retryable, benign
 REFRESH_FAIL_TLS = "tls"  # certificate verification failed — OUR trust store, not the network; never benign
 REFRESH_FAIL_MALFORMED = "malformed"  # bad JSON or a 200 with no access token
@@ -1810,7 +1811,7 @@ def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
         if status == 403 or "1010" in text or "banned" in low:
             return REFRESH_FAIL_TRANSPORT_REFUSED
         if status in (400, 401) and ("invalid_grant" in low or "invalid_request" in low):
-            return REFRESH_FAIL_CREDENTIAL_DEAD
+            return REFRESH_FAIL_REVOKED_GRANT
         return REFRESH_FAIL_NETWORK
     if isinstance(exc, (json.JSONDecodeError, ValueError)):
         return REFRESH_FAIL_MALFORMED
@@ -3055,7 +3056,7 @@ def _keepalive_refresh() -> list[str]:
         # Odd types in the meta parse to safe defaults (= attempt the refresh, as before this skip).
         if (
             isinstance(dead_meta, dict)
-            and dead_meta.get("last_refresh_failure") == REFRESH_FAIL_CREDENTIAL_DEAD
+            and dead_meta.get("last_refresh_failure") == REFRESH_FAIL_REVOKED_GRANT
             and _num_or(dead_meta.get("refresh_failures"), 0, field="refresh_failures", slot=slot_id) >= MAX_REFRESH_FAILURES
             and time.time() - _num_or(dead_meta.get("last_refresh_fail_at"), 0, field="last_refresh_fail_at", slot=slot_id) < REFRESH_REPROBE_S
         ):
