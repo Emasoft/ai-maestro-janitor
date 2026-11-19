@@ -2,7 +2,7 @@
 name: wikimem-retrieval-engine
 description: "recall returned the wrong page / why is a memory search so expensive / what does memgrep rank on / lint fails on everything and I cannot find the real errors / how do I hop from a search result to the full atom / a superseded atom is missing from search results / keywords went missing from a lesson after a write / a bracket in a description broke parsing / link-one-sided reported a pair that plainly links both ways / a wikilink resolved into the wrong scope / recall printed a huge absolute path instead of a short locator / should I add a tie-break to the ranking scorer / does the keyword order matter for recall ranking / lint prints info warn and error but which one gates the exit code / why is a lesson footnote reported as uncited when it exists / recall is expensive because it costs search plus a hop / lint prints all findings but only errors block the gate"
 ocd: 2026-07-26
-lmd: 2026-09-08
+lmd: 2026-11-19
 metadata:
   node_type: memory
   type: project
@@ -79,6 +79,7 @@ Diagnosing it: three plausible causes were tested and DISCARDED first — inline
 - [[feedback_memory_system_is_more_than_memgrep]] — the write-side gates (scope lock, CAS) that produce what this engine retrieves.
 - `[[memory-system]]` — the surrounding system this engine serves: the three scopes, where
   memories live, and the recall-before-acting protocol.
+- [[memgrep-page-layout-and-link-lint]]
 
 ## Notes and lessons learned
 

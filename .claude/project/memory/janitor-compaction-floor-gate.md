@@ -2,7 +2,7 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now / 16 agents hung on the externalized compaction / the fleet froze for 40 minutes after a restart / a resume storm serialized every session behind the llm-ext lane / sessions stuck at startup on a blocking SessionStart hook / the compaction fired below the floor because the installed plugin was a stale rollout"
 ocd: 2026-07-17
-lmd: 2026-10-03
+lmd: 2026-11-19
 metadata:
   node_type: memory
   type: project
@@ -49,6 +49,7 @@ the page-size cap; no fact moved, only relocated). [^1]
   idle context is worth a lossy operation.
 - [[janitor-hooks-two-import-conventions]] — the `from lib import state` vs bare `import state`
   trap; both the Stop hook and its tests live on that fault line.
+- [[clear-chain-own-session-and-late-landing]]
 
 ## Notes and lessons learned
 

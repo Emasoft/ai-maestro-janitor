@@ -2,7 +2,7 @@
 name: plugin-cache-install-integrity
 description: "the installed plugin is missing agents commands or hooks / Agent type not found but skills load fine / agents disappeared after a plugin reload / N agent types no longer available / agents missing but the plugin is installed and enabled / plugin cache incomplete after an update / how to verify an install against its release tag / cache extraction interrupted killed partway / hand-patched cache / every tool blocked machine-wide PreToolUse hook Errno 2 missing hook script / reload reports load errors after parking a quarantined broken copy inside a scanned cache tree / an install was killed by memory pressure not a bad release / how to diff a cache directory against a release tag / is a missing manifest-sha256.json a real finding / never hand-patch the plugin cache / a pid file in the cache dir looks suspicious is it damage / why does the plugin loader try to load a quarantined broken copy / how to root-cause a partially installed plugin / a quarantined broken plugin copy caused fleet-wide load errors / quarantine directory must sit outside every scanned tree"
 ocd: 2026-08-07
-lmd: 2026-08-29
+lmd: 2026-11-19
 metadata:
   node_type: memory
   type: project
@@ -62,6 +62,11 @@ against itself), and do NOT `/reload-plugins` again — that is the cause.
 
 `claude plugin list`'s Status column is NOT a check here: run from outside the project it
 reported all 76 plugins `✘ disabled`, including ones whose hooks had fired that same turn.
+
+
+^ATOM-OJ5W-0VVI [desc: "the update check compares releases with the user-scope install record, not the highest version in the shared cache", keywords: update_check_thought_the_new_version_was_installed latest_installed_equals_the_new_release_but_user_scope_stayed_old publish_smoke_install_puts_release_into_plugin_cache claude_plugin_install_--scope_local_temp_dir_cache registered_user_version_installed_plugins.json update_reference_update_succeeded_version_update_lib.py do_auto_update_if_needed_skipped project-local_install_of_newer_release_hides_update semver_tuple_minus_one_reads_behind_forever version-update_detector_user_scope_only janitor_stayed_on_3.9.4_until_manual_update, type: reference, trdd: TRDD-ADFIO49Q, ocd: 2026-11-19, lmd: 2026-11-19]
+
+30112e57 (TRDD-ADFIO49Q): the update check treated the highest version dir in the shared plugin cache as "installed". On the host that runs publish.py, the post-release smoke install (claude plugin install --scope local from a temp dir) puts the new release into that cache without touching the user-scope install, so for 3.9.5 the session detector logged latest_installed=3.9.5 and requested no update, the daemon's do_auto_update_if_needed would skip by the same rule, and the user scope stayed on 3.9.4 until a manual update (any project-local install of a newer release has the same effect on any host). scripts/lib/version_update_lib.py registered_user_version(records) reads the user-scope record's version from installed_plugins.json ("" when none or not semver, because _semver_tuple maps bad input to (-1,) which would read as behind forever); USER scope only (arm_prepare refuses every other scope, and a min over all scopes would include dead or pinned local entries, 95 of 97 on that host, and keep the check behind forever); update_reference() prefers it and falls back to the cache; update_succeeded() with a user record counts only the user record advancing (scripts/detectors/version-update.py; tests/test_version_update_registry_ref.py). Related caution: the manual `claude plugin update` path does not advance the C3 last-good integrity pin (see janitor-self-update-bootstrap-gap).
 
 ## Notes and lessons learned
 

@@ -2,7 +2,7 @@
 name: janitor-detector-and-hook-roster
 description: "the janitor detector and hook roster split into parts / how many janitor detectors are there / full list of the janitor detectors by group / what are the 16 janitor hooks / where do detector coverage and false-positive measurements live / how good is a security detector really / does agent-context-integrity actually catch poisoning / which detectors cover supply-chain security / which detectors watch for scope drift / the cleanup and observability detector groups / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops"
 ocd: 2026-08-02
-lmd: 2026-11-15
+lmd: 2026-11-19
 metadata:
   node_type: memory
   type: reference
@@ -32,6 +32,13 @@ rate, and specific detector bugs) discovered while auditing that listing.
   rates for `agent-context-integrity`, the recurring regex-matching-mechanics
   failure shapes behind them, the `gitignore-coverage` and `project-map-drift`
   bug write-ups, and the CLAUDE.md poisoning-vector analysis.
+
+
+## See also
+
+- [[env-secret-on-disk-detector]]
+- [[ledger-to-card-detector]]
+- [[detector-and-hook-fixes-2026-11]]
 
 ## Applies to
 

@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline
 description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing / the gate timed out but the test passes on its own / TimeoutExpired on an xdist worker / is this flaky or a real regression — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy / the test gate blocks a publish at random / tests fail only in the full suite and pass alone / a detector exits 0 with empty stdout / assert something in an empty string / which load-flake category is this / should I scale every timeout call site or enumerate them / enumerating call sites keeps missing some / scale timeouts at a seam not per site / my timeout scaling looks applied but does nothing / a module-level constant reads the env before the fixture sets it / timeout_scale frozen at 1.0 / a vacuous fix that looks scaled / gh-reply-watch floor test flaked under load / two projects reported the same reply / the deferred project polled again / a wall-clock floor spanning sequential spawns / I checked the gate would pass but it blocked anyway / hand-wrote a regex to approximate the lint / how do I dry-run the address lint before publishing / phantom hits from a stub known_for / an email-shaped filename blocked the release / dot-invalid is allow-listed but the publish still blocked / the release tag points at an old commit / tag and HEAD disagree after publish / duplicate chore bump version commits on main / publish exited 0 but the tag is wrong / renamed a test file and the address lint exploded / grandfathered addresses stopped being grandfathered / publish exited 4 / NIT blocked by strict / markdownlint MD011 / no-reversed-links / a lint error in a card blocks the release / the exemption is not sufficient / three blockers stopped a release / the gate ran all 11 steps to exit 0 on 2026-10-20 / steps 5-11 ran and reported no blocker / only the board-drain rule still blocks a release"
 ocd: 2026-06-13
-lmd: 2026-10-20
+lmd: 2026-11-19
 metadata:
   node_type: memory
   type: project
@@ -115,6 +115,9 @@ DO NOT CONFLATE THEM. `repo-state` reports unreleased commits, but it sits in `_
 
 - `[[project_janitor_publish_blocked_cpv_fps]]` — the publish-gate history + the
   devitalize-or-remove unblock recipe (RESOLVED; v0.7.x shipped).
+- [[commit-time-secret-scan-hooks]]
+- [[bandit-sweep-and-exe-helper]]
+- [[ubs-partial-scan-pre-commit-gate]]
 
 ## Notes and lessons learned
 

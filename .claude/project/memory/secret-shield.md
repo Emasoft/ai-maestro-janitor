@@ -2,7 +2,7 @@
 name: secret-shield
 description: "a secret token or API key showed up in tool output / where is the janitor secret shield / what is a [JANITOR-REDACTED:...] marker / a JANITOR-REDACTED marker was written into my file / why is secret-shield not active / why does the secret shield do nothing / a mod's tool.call error result does not match its output shape / Bash error refused with does not match its output shape / does a mod read CLAUDE_PLUGIN_OPTION from the settings env block / how do I set secret_shield_enabled / what does secret_shield_block_files do / what does secret_shield_redact_prompts do / what is the janitor-secret-shield command / where did the vendored secret-shield mod come from / which secrets does the shield knowingly miss / why is hooks.json missing a modules key / does the write-back guard exist yet / what is TRDD-337UVA3J error result redaction / how do I edit marker text with a byte-level transform checked by cmp and grep -c / can I edit marker text through a redacting session / which token kinds the secret shield hides and where the rules are / why is jwtWide the last pass / secret shield ReDoS or slow on a long tool result / same secret typed again still visible (hideKnown) / how to run the secret shield tests / ReDoS load harness, timing test flaky under load / test fixture secret literal blocks the release gate / report-sanitizer core copy of the shield / what register.ts and rows.ts do"
 ocd: 2026-11-15
-lmd: 2026-11-17
+lmd: 2026-11-19
 publish-globally: false
 metadata:
   node_type: memory
@@ -83,6 +83,13 @@ Support files of hooks/secret-shield (NOTICE and LICENSE read on 2026-11-16, the
 
 ^ATOM-ASFS-ZVJL [desc: "secret-shield card and email passes are hand-written linear scans in cards.ts and email.ts, exported but not called by redact() or the live mod", keywords: payment_card Luhn issuer email_address findCards redactCards findEmails redactEmails bridge_op_cards linear_scan REGEX_DOS rule_G git_clone_address a_card_number_or_an_email_address_is_not_hidden_by_the_live_secret_shield why_is_there_no_regex_for_cards_or_email_in_the_shield an_email_address_is_visible_in_tool_output report-sanitizer_hides_cards_but_the_mod_does_not, type: reference, trdd: TRDD-L1I0FP5T, ocd: 2026-11-17, lmd: 2026-11-17]
 hooks/secret-shield/cards.ts (janitor b2217fc6, TRDD-L1I0FP5T increment 1) exports findCards and redactCards. It hides a bare run of 13 to 16 digits, a bare run of 17 to 19 digits only when a card word (card, credit, debit, visa, mastercard, amex) comes within 32 characters before it on the same line, and a standard grouping (4-4-4-4, 4-6-5, 4-6-4 or 4-4-4-4-3) with one separator kind throughout. Each candidate must pass an issuer prefix check and the Luhn check. A grouped number is refused only when two further groups of the same separator follow it, the first of them with 4 or more digits. report-sanitizer calls the core card pass on every run (report-sanitizer 1c5d0e5). hooks/secret-shield/email.ts (janitor f5f0e04a, increment 3) exports findEmails and redactEmails, with the same spans as the report-sanitizer EMAIL regex except rule G: a git local part stays visible only as a clone address (an scp-like colon plus a path character after the domain, or directly after ssh://). Nothing in this repo calls email.ts yet; report-sanitizer vendors it (5cd08ff). Neither pass is called by redact() or by the live mod, so whether the live mod hides cards and emails is still open (decisions (e) and (f) of TRDD-L1I0FP5T; decision (e) is resolved for report-sanitizer only). Both passes are scans that read each character a bounded number of times. Their tests pin 256 KB inputs under 100 ms each, and those pins are load-sensitive. [^5] [^6]
+
+## See also
+
+- [[secret-shield-scan-skill]]
+- [[env-secret-on-disk-detector]]
+- [[commit-time-secret-scan-hooks]]
+- [[secret-shield-core-passes-and-redaction-bridge]]
 
 ## Governed by
 
