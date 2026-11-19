@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 import state
+from exe_path import exe  # noqa: E402
 
 # The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The CANONICAL
 # USER memory scope lives under it; see resolve_user_dir for why it is hard-coded rather
@@ -381,7 +382,7 @@ def resolve_project_dir() -> Path | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [exe("git"), "rev-parse", "--show-toplevel"],
             cwd=proj, capture_output=True, text=True, timeout=10, check=False,
             env=git_env,
         )

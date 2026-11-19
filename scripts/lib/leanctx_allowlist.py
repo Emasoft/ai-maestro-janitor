@@ -29,6 +29,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+try:
+    from lib.exe_path import exe  # hook context: scripts/ on sys.path
+except ImportError:
+    from exe_path import exe  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
+
 # The exact tokens the janitor heartbeat needs on the lean-ctx allowlist:
 #   - dispatcher-stub.py — the cron's bare-script invocation (the primary block)
 #   - uv / python3       — the interpreters the stub + dispatch.py run under
@@ -146,7 +151,7 @@ def ensure_janitor_allowed() -> list[str]:
         attempted.append(tok)
         try:
             subprocess.run(
-                ["lean-ctx", "allow", tok],
+                [exe("lean-ctx"), "allow", tok],
                 capture_output=True,
                 text=True,
                 check=False,

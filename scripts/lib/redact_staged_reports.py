@@ -29,6 +29,8 @@ import shutil
 import subprocess
 import sys
 
+from exe_path import exe  # noqa: E402
+
 # `summary: changed N files, M replacements, K skipped, E errors` — the last
 # line sanitize-reports prints.
 _SUMMARY = re.compile(r"^summary: changed (\d+) files, (\d+) replacements", re.MULTILINE)
@@ -46,7 +48,7 @@ def _git(*args: str) -> str:
     # takes the index lock it needs, so the same env is safe for every call.
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
-    r = subprocess.run(["git", *args], capture_output=True, text=True, check=True, env=env)
+    r = subprocess.run([exe("git"), *args], capture_output=True, text=True, check=True, env=env)
     return r.stdout
 
 
@@ -86,7 +88,7 @@ def main() -> int:
 
         # No --project-root: sanitize-reports no longer masks project-root paths, only the home prefix (TRDD-L1I0FP5T).
         r = subprocess.run(
-            ["sanitize-reports", *(f"{toplevel}/{f}" for f in files)],
+            [exe("sanitize-reports"), *(f"{toplevel}/{f}" for f in files)],
             capture_output=True, text=True,
         )
         if r.returncode != 0:

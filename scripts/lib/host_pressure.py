@@ -71,6 +71,8 @@ import os
 import subprocess
 from typing import NamedTuple, Optional
 
+from exe_path import exe  # noqa: E402
+
 # THE MEASURED BAR (TRDD-C8SALZOO, 2026-10-20).
 #
 # SCOPE — this number was measured on ONE host and the scope is recorded here
@@ -198,7 +200,7 @@ def read_runnable_count() -> Optional[int]:
             return None  # a malformed injection is unreadable, not zero
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "-axo", "state="],
+            [exe("ps"), "-axo", "state="],
             capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.SubprocessError):

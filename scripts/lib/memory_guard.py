@@ -31,6 +31,8 @@ import subprocess
 import time
 from typing import NamedTuple, Optional
 
+from exe_path import exe  # noqa: E402
+
 # Free-memory floor (MB). Below this the guard looks for a runaway to kill.
 # Sized so a healthy laptop never trips it, while a true runaway (a leaking
 # subprocess eating tens of GB) does. Env-tunable per host.
@@ -228,12 +230,12 @@ def free_memory_mb() -> Optional[int]:
             with open("/proc/meminfo", encoding="utf-8") as fh:
                 return parse_meminfo(fh.read())
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["vm_stat"], capture_output=True, text=True, timeout=10, check=False,
+            [exe("vm_stat")], capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode != 0:
             return None
         page = subprocess.run(  # noqa: S603
-            ["sysctl", "-n", "hw.pagesize"],
+            [exe("sysctl"), "-n", "hw.pagesize"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         page_size = int(page.stdout.strip()) if page.returncode == 0 else 16384
@@ -252,7 +254,7 @@ def snapshot_processes(snapshot_path: str) -> list[ProcRow]:
     try:
         with open(snapshot_path, "w", encoding="utf-8") as fh:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                ["ps", "-axo", "pid,ppid,rss,etime,command"],
+                [exe("ps"), "-axo", "pid,ppid,rss,etime,command"],
                 stdout=fh, stderr=subprocess.DEVNULL, timeout=20, check=False,
             )
         if proc.returncode != 0:
@@ -297,7 +299,7 @@ def _alive(pid: int) -> bool:
         return False
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "-p", str(pid), "-o", "stat="],
+            [exe("ps"), "-p", str(pid), "-o", "stat="],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError):

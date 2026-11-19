@@ -17,6 +17,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe  # noqa: E402
+
 # The canonical exception triplet, in dependency order. git evaluates
 # .gitignore patterns top-to-bottom and — critically — will NOT re-include a
 # file inside a directory that itself stays excluded. So the parent dirs must
@@ -48,7 +50,7 @@ def _check_ignored(repo_root: Path) -> bool | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "check-ignore", "-q", _PROBE_REL],
+            [exe("git"), "-C", str(repo_root), "check-ignore", "-q", _PROBE_REL],
             capture_output=True,
             text=True,
             check=False,

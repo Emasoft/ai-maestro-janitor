@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
 import state
+from exe_path import exe  # noqa: E402
 
 # Heartbeat staleness window. The daemon writes daemon.heartbeat.ts on every
 # loop tick (≤ 60 s) AND every 10 s while a workload subprocess is running
@@ -1892,7 +1893,7 @@ def _is_adhoc_signed(path: str) -> bool:
     """
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["codesign", "-dv", path],
+            [exe("codesign"), "-dv", path],
             capture_output=True,
             text=True,
             check=False,
@@ -1966,7 +1967,7 @@ def _managed_python_path() -> Optional[str]:
     """
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["uv", "python", "find", "--system", "--managed-python", _MANAGED_PYTHON_PIN],
+            [exe("uv"), "python", "find", "--system", "--managed-python", _MANAGED_PYTHON_PIN],
             capture_output=True,
             text=True,
             check=False,
@@ -2185,7 +2186,7 @@ def _read_process_cmdline(pid: int) -> str:
         return ""
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
-            ["ps", "-p", str(pid), "-o", "args="],
+            [exe("ps"), "-p", str(pid), "-o", "args="],
             capture_output=True,
             text=True,
             check=False,
@@ -2447,7 +2448,7 @@ def _process_alive_not_zombie(pid: int) -> bool:
         return False
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
-            ["ps", "-p", str(pid), "-o", "stat="],
+            [exe("ps"), "-p", str(pid), "-o", "stat="],
             capture_output=True,
             text=True,
             check=False,

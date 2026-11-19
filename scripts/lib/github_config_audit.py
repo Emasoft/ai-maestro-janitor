@@ -41,6 +41,7 @@ FIX_SKILL = "/janitor-github-config-fix"
 # branch_protection_lib lives in the same lib/ dir; import as a sibling. The caller
 # (daemon / detector) puts scripts/lib on sys.path, matching every other lib module.
 import branch_protection_lib as bpl  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # The janitor's OWN ratified ruleset names. A `required_linear_history` rule sitting in
 # one of THESE is fixed automatically by re-applying the (corrected) baseline, which PUTs
@@ -405,7 +406,7 @@ def _gh_json(args: list[str], *, timeout: float = 15.0):
     or it raised (never propagates)."""
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["gh", *args], capture_output=True, text=True, timeout=timeout, check=False
+            [exe("gh"), *args], capture_output=True, text=True, timeout=timeout, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return None, None
