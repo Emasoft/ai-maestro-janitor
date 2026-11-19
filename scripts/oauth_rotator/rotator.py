@@ -381,6 +381,19 @@ def _log(msg: str) -> None:
         print("rotator: decision-log append failed (non-fatal): %r" % (exc,), file=sys.stderr)
 
 
+def _log_swallowed(where: str, exc: Exception) -> None:
+    """Record that a best-effort site swallowed an error: the exception TYPE only, never the
+    message (it may carry token or path text). Guarded so a log failure never escapes (TRDD-SWQXCIOS).
+    Why a wrapper, not a bare `_log`: the tick-step site sits in the same try that already called `_log`,
+    and `_log` only absorbs OSError; this guard catches the rest and reports to stderr, never re-entering `_log`."""
+    try:
+        _log("%s: swallowed %s" % (where, type(exc).__name__))
+    except Exception as log_exc:  # noqa: BLE001 - the swallow-log must never break the caller
+        # A closed or broken stderr must not escape either: the swallow-log is the last line of defence.
+        with contextlib.suppress(OSError, ValueError):
+            print("rotator: %s swallow-log failed (non-fatal): %s" % (where, type(log_exc).__name__), file=sys.stderr)
+
+
 def _decide(msg: str) -> None:
     """Emit one rotation DECISION: print to stdout AND append to the persistent log.
 
@@ -1271,8 +1284,9 @@ def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
         # because the consumer types into the user's pane.
         try:
             gs.record_rotation_success(int(now if now is not None else time.time()))
-        except Exception:  # noqa: BLE001 - fail-OPEN: a lost stamp costs one delayed wake
-            pass
+        except Exception as exc:  # noqa: BLE001 - fail-OPEN: a lost stamp costs one delayed wake
+            # TRDD-SWQXCIOS: a swallowed error leaves a trace (exception TYPE only, never the message).
+            _log_swallowed("rotation-success stamp", exc)
     return True
 
 
@@ -1856,7 +1870,7 @@ def _report_refresh_failure(cause: str, on_failure: Callable[[str], None] | None
     """Surface WHY a token exchange failed. A caller-supplied `on_failure` receives it; otherwise it
     is logged here — a refresh that fails silently is how the 2026-10-03 00:37 "Login expired" went
     undiagnosed: `_refresh_and_heal_slot` (cmd_auto's refresh kernel) passed no callback, so the
-    cause was lost. (`_keepalive_refresh` already passes `on_failure=failure_cause.append`.)"""
+    cause was lost. (`_keepalive_refresh` already passes `on_failure=lambda cause: failure_cause.append(cause)`.)"""
     if on_failure is not None:
         on_failure(cause)
     else:
@@ -3047,7 +3061,10 @@ def _keepalive_refresh() -> list[str]:
         ):
             continue
         failure_cause: list[str] = []
-        fresh = refresh_oauth_token(blob, on_failure=failure_cause.append)
+        # WHY a lambda, not the bound method `failure_cause.append`: ubs 5.5.26 sql_injection gives up
+        # (partial scan) on a bound list method passed as a callback (TRDD-H7884ERZ); the lambda keeps the
+        # whole file scanned. Behaviour is identical — do NOT "simplify" it back.
+        fresh = refresh_oauth_token(blob, on_failure=lambda cause: failure_cause.append(cause))
         if fresh is None:
             # Refresh FAILED — keep the old token (F2a rotates away if it lapses) AND record the
             # failure. A refresh token that keeps failing to exchange is DEAD; N consecutive
@@ -3598,8 +3615,9 @@ def _tick_step_timer(name: str):
                         start_note = " (process-start +%s)" % ("%.1f" % (t0 - _TICK_PROCESS_START))
                     if _TICK_TIMING_VERBOSE or dt >= TICK_STEP_THRESHOLD_S:
                         _log("tick-step: %s %.2fs%s%s" % (name, dt, load1, start_note))
-            except Exception:  # noqa: BLE001 — timing/logging is best-effort only
-                pass
+            except Exception as exc:  # noqa: BLE001 — timing/logging is best-effort only
+                # TRDD-SWQXCIOS: a swallowed error leaves a trace (exception TYPE only, never the message).
+                _log_swallowed("tick-step timing", exc)
 
     return _timer()
 

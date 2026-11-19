@@ -7,4 +7,3 @@
 #   reason   why the entry exists
 # Blank lines and lines starting with # are ignored. Any other malformed line blocks every ubs exit-2 commit.
 # A partial file with no entry, a different detector, or a HEAD blob that is not partial still blocks.
-scripts/oauth_rotator/rotator.py	sql_injection	refresh_oauth_token(blob, on_failure=failure_cause.append)	TRDD-H7884ERZ: ubs 5.5.26 sql_injection ends partial (SQLFlowLimit: SQL list mutation capability escapes) at the bound method failure_cause.append passed as a callback; the one SQL sink, a constant SELECT, lies below it

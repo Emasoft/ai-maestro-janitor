@@ -23,7 +23,6 @@ from exe_path import exe
 REPO = Path(__file__).resolve().parent.parent
 HELPER = REPO / "git-hooks" / "ubs_partial_gate.py"
 ALLOW = REPO / "git-hooks" / "ubs-partial-allow.tsv"
-ROTATOR = REPO / "scripts" / "oauth_rotator" / "rotator.py"
 FILE = "scripts/mod.py"
 ANCHOR = "refresh(blob, on_failure=causes.append)"
 ANCHOR_LINE = 6
@@ -251,12 +250,12 @@ def test_main_blocks_when_overall_report_is_not_partial(tmp_path: Path, capsys: 
     assert "not a partial scan" in capsys.readouterr().out
 
 
-def test_tracked_allow_file_entry_matches_exactly_one_rotator_line() -> None:
-    """The shipped entry parses, and its anchor selects one line of rotator.py (the call, not the docstring mention)."""
-    entries = gate.parse_allow(ALLOW.read_text(encoding="utf-8"))
-    entry = entries["scripts/oauth_rotator/rotator.py"]
-    assert entry.detector == "sql_injection" and "TRDD-H7884ERZ" in entry.reason
-    assert gate.anchor_line(ROTATOR.read_text(encoding="utf-8"), entry.anchor) > 1000
+def test_tracked_allow_file_has_no_stale_entry() -> None:
+    """Every shipped entry names an existing file whose text holds the anchor on exactly one line (zero entries pass)."""
+    for path, entry in gate.parse_allow(ALLOW.read_text(encoding="utf-8")).items():
+        target = REPO / path
+        assert target.is_file(), f"allow entry names a missing file: {path}"
+        assert gate.anchor_line(target.read_text(encoding="utf-8"), entry.anchor) >= 1, path
 
 
 _MINI = [
