@@ -30,6 +30,7 @@ _LIB = Path(__file__).resolve().parent.parent / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 
 import memory_migrate as mm  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 CLI = Path(__file__).resolve().parent.parent / "scripts" / "migrate_memory_scope.py"
 
@@ -231,10 +232,10 @@ class CliTests(unittest.TestCase):
             (memdir / "x.md").write_text(CLEAN_PLAIN, encoding="utf-8")
             target = root / "someone-elses-repo"
             target.mkdir()
-            subprocess.run(["git", "init", "-q"], cwd=target, check=True)
+            subprocess.run([exe("git"), "init", "-q"], cwd=target, check=True)
             here = root / "my-repo"
             here.mkdir()
-            subprocess.run(["git", "init", "-q"], cwd=here, check=True)
+            subprocess.run([exe("git"), "init", "-q"], cwd=here, check=True)
             plan = root / "plan.md"
             plan.write_text("## → PROJECT\n\n- `x.md` — topic\n", encoding="utf-8")
 
@@ -281,7 +282,7 @@ def _corpus(tmp_path: Path, notes: dict[str, str]) -> Path:
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "owning-repo"
     repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=repo, check=True)
     return repo
 
 

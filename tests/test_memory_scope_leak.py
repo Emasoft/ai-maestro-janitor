@@ -27,6 +27,7 @@ from tempfile import TemporaryDirectory
 
 from _fake_secrets import b62 as fake_b62  # noqa: E402  (runtime-generated fixtures — see that module's docstring)
 from _fake_secrets import secret as fake_secret  # noqa: E402
+from exe_path import exe
 
 DETECTOR = (
     Path(__file__).resolve().parent.parent
@@ -41,7 +42,7 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     env.setdefault("GIT_COMMITTER_NAME", "t")
     env.setdefault("GIT_COMMITTER_EMAIL", "t@example.com")
     return subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, env=env, check=False,
+        [exe("git"), *args], cwd=str(cwd), capture_output=True, text=True, env=env, check=False,
     )
 
 

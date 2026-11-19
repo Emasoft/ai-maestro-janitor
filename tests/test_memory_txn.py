@@ -21,8 +21,8 @@ import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
-
 import memory_txn  # noqa: E402
+from exe_path import exe  # noqa: E402
 from memory_txn import MemoryTxn, MemoryTxnError  # noqa: E402
 
 
@@ -452,7 +452,7 @@ def test_resume_reclaims_a_fresh_orphan_whose_owner_process_died(tmp_path):
     scope = _scope(tmp_path)
     txn = MemoryTxn.begin(scope, "repair", ["a.md"])
     txn.stage_write("c.md", "never applied — the agent was stopped")
-    proc = subprocess.Popen(["true"])
+    proc = subprocess.Popen([exe("true")])
     proc.wait()  # the pid is now free of any live process
     txn.owner_pid = proc.pid
     txn._persist()  # journal stays FRESH — mtime is "now"
@@ -471,7 +471,7 @@ def test_begin_owner_pid_kwarg_still_reclaims_a_dead_owner(tmp_path):
     import subprocess
 
     scope = _scope(tmp_path)
-    proc = subprocess.Popen(["true"])
+    proc = subprocess.Popen([exe("true")])
     proc.wait()  # pid is now free of any live process
     txn = MemoryTxn.begin(scope, "repair", ["a.md"], owner_pid=proc.pid)
     txn.stage_write("c.md", "never applied")

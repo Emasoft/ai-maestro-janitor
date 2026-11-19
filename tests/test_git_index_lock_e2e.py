@@ -53,6 +53,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import git_utils  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # This whole file is meaningless without the real machine binaries it drives — skip the
 # module outright (not a per-test xfail, which would hide the gap in a green run summary)
@@ -63,7 +64,7 @@ if not (shutil.which("git") and shutil.which("lsof") and shutil.which("ps")):
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run a real git command, asserting it succeeded — setup must never fail silently."""
-    result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+    result = subprocess.run([exe("git"), *args], cwd=str(cwd), capture_output=True, text=True)
     assert result.returncode == 0, f"git {' '.join(args)} failed: {result.stderr}"
     return result
 
@@ -168,7 +169,7 @@ def test_removal_still_clears_with_a_live_git_process_in_a_different_repo(tmp_pa
     # the SECOND repo — it reads stdin until EOF, so it stays alive exactly as long as we
     # keep stdin open, no sleep involved.
     blocker = subprocess.Popen(
-        ["git", "hash-object", "--stdin"],
+        [exe("git"), "hash-object", "--stdin"],
         cwd=str(second_repo),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -215,13 +216,13 @@ def test_a_zombie_git_process_does_not_block_removal(tmp_path: Path) -> None:
     os.utime(lock_path, (old, old))
 
     # A real git child that exits immediately and is deliberately NOT reaped.
-    zombie = subprocess.Popen(["git", "--version"], cwd=str(worktree),
+    zombie = subprocess.Popen([exe("git"), "--version"], cwd=str(worktree),
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         deadline = time.time() + 5
         state = ""
         while time.time() < deadline:
-            state = subprocess.run(["ps", "-o", "state=", "-p", str(zombie.pid)],
+            state = subprocess.run([exe("ps"), "-o", "state=", "-p", str(zombie.pid)],
                                    capture_output=True, text=True).stdout.strip()
             if state.upper().startswith("Z"):
                 break
@@ -251,7 +252,7 @@ def test_a_reaped_pid_is_not_reported_as_a_zombie(tmp_path: Path) -> None:
     """
     # cwd=tmp_path, not the default: the suite's write sandbox refuses any `git` spawned
     # with the real repo as its cwd, and it is right to — it cannot know the verb is inert.
-    probe = subprocess.Popen(["git", "--version"], cwd=str(tmp_path),
+    probe = subprocess.Popen([exe("git"), "--version"], cwd=str(tmp_path),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     pid = probe.pid
     probe.wait(timeout=5)  # reaped — the slot is released

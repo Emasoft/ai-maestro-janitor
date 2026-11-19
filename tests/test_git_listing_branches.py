@@ -22,6 +22,7 @@ _DETECTORS = _PROJECT_ROOT / "scripts" / "detectors"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import git_utils  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _load(filename: str, modname: str) -> ModuleType:
@@ -35,7 +36,7 @@ def _load(filename: str, modname: str) -> ModuleType:
 
 def _init_repo(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
 
 
 def _ignored_corpus_repo(root: Path) -> None:
@@ -48,7 +49,7 @@ def _ignored_corpus_repo(root: Path) -> None:
     (root / "src" / "main.py").write_text("x = 1\n", encoding="utf-8")
     (root / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
     _init_repo(root)
-    subprocess.run(["git", "add", ".gitignore", "src/main.py"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", ".gitignore", "src/main.py"], cwd=root, check=True)
 
 
 def _no_walk(self: Path, pattern: str):
@@ -152,7 +153,7 @@ def _tracked_then_deleted(root: Path, rel: str, content: bytes) -> Path:
     target = root / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
-    subprocess.run(["git", "add", rel], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", rel], cwd=root, check=True)
     target.unlink()
     return target
 

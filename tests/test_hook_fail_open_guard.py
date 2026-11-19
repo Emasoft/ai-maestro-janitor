@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 pytestmark = pytest.mark.real_subprocess("sh", "bash", "uv", "python3", "git")
 
@@ -34,7 +35,7 @@ _BLOCKING = 2
 
 
 def _run(*args: str) -> int:
-    return subprocess.run(["bash", str(_WRAPPER), *args], capture_output=True,
+    return subprocess.run([exe("bash"), str(_WRAPPER), *args], capture_output=True,
                           text=True, timeout=60).returncode
 
 
@@ -90,7 +91,7 @@ def test_a_missing_WRAPPER_is_also_non_blocking(tmp_path: Path) -> None:
     direct invocation has no operators.
     """
     missing = tmp_path / "gone.sh"
-    rc = subprocess.run(["bash", str(missing), "x"],
+    rc = subprocess.run([exe("bash"), str(missing), "x"],
                         capture_output=True, text=True, timeout=60).returncode
     assert rc != _BLOCKING, "a vanished wrapper must never produce the blocking code"
     assert rc == 127, f"expected POSIX command-not-found, got {rc}"
@@ -116,7 +117,7 @@ def test_the_wrapper_ships_executable() -> None:
     'permission denied' (126), and while 126 is still non-blocking, every hook would silently
     stop running. Checked against git's recorded mode, not the working copy's, because that
     is what a cloner and the published package actually receive."""
-    mode = subprocess.run(["git", "ls-files", "-s", "hooks/hook-run.sh"],
+    mode = subprocess.run([exe("git"), "ls-files", "-s", "hooks/hook-run.sh"],
                           cwd=str(_ROOT), capture_output=True, text=True, timeout=60).stdout
     assert mode.startswith("100755"), f"hooks/hook-run.sh is not tracked as executable: {mode!r}"
 

@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the rule's recipe is POSIX shell")
 
@@ -111,7 +112,7 @@ def _run_recipe(recipe: str, cwd: Path, env: dict[str, str]) -> str:
     script = cwd / "recipe.sh"
     script.write_text(f'{recipe}\necho "$STATE_DIR"\n')
     result = subprocess.run(
-        ["bash", str(script)],
+        [exe("bash"), str(script)],
         cwd=cwd,
         env=env,
         capture_output=True,
@@ -151,7 +152,7 @@ def test_no_git_folder_matches_state_dir(tmp_path: Path) -> None:
     # repo above it — assert that directly instead of silently skipping when it
     # does, which would hide a broken ceiling.
     probe = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], cwd=tmp_path, env=env, capture_output=True, text=True
+        [exe("git"), "rev-parse", "--show-toplevel"], cwd=tmp_path, env=env, capture_output=True, text=True
     )
     assert probe.returncode != 0, (
         f"{tmp_path} is unexpectedly inside a git repo despite the ceiling: {probe.stdout.strip()}"
@@ -190,7 +191,7 @@ def test_git_repo_subfolder_matches_state_dir(tmp_path: Path) -> None:
     # (the default when `env=` is omitted) would let a leaked GIT_DIR make `init` write
     # into the *janitor* repo's own .git instead of `repo/.git`, which then makes the
     # git-repo case silently behave like the no-git case below.
-    subprocess.run(["git", "init", "-q"], cwd=repo, env=env, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=repo, env=env, check=True)
     subfolder = repo / "sub" / "dir"
     subfolder.mkdir(parents=True)
 

@@ -17,6 +17,7 @@ _TRACKED_IGNORED_DETECTOR = _REPO / "scripts" / "detectors" / "tracked-ignored.p
 sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
 import gitignore_coverage as gc  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def test_a_fully_covered_repo_reports_nothing() -> None:
@@ -130,7 +131,7 @@ def _seed(repo: Path) -> Callable[..., None]:
     repo.mkdir()
 
     def git(*args: str) -> None:
-        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
     git("init", "-q")
     git("config", "user.email", "t@t.t")

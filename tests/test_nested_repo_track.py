@@ -16,11 +16,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _git_init(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", str(path)], check=True, cwd=str(path))
+    subprocess.run([exe("git"), "init", "-q", str(path)], check=True, cwd=str(path))
 
 
 def _clear_caches() -> None:

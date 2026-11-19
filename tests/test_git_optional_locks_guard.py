@@ -62,6 +62,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS_ROOT = _PROJECT_ROOT / "scripts"
 
@@ -99,7 +101,7 @@ def _iter_scanned_files() -> list[Path]:
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     out = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "scripts"],
+        [exe("git"), "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "scripts"],
         cwd=_PROJECT_ROOT,
         env=env,
         capture_output=True,

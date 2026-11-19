@@ -46,6 +46,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Suffixes that denote pure DATA. A file with one of these is never meant to be
@@ -90,7 +92,7 @@ def _tracked() -> list[tuple[str, str]]:
     hide.
     """
     out = subprocess.run(
-        ["git", "ls-files", "-s"],
+        [exe("git"), "ls-files", "-s"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,

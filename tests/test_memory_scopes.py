@@ -22,11 +22,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import memory_scopes as msc  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _git_init(d: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=d, check=True)
 
 
 @pytest.fixture(autouse=True)

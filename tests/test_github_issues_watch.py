@@ -18,6 +18,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import issues_watch as iw  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _sanitize(s: str) -> str:
@@ -246,9 +247,9 @@ def _github_project(tmp_path: Path, issues: list[dict]) -> Path:
     is faked — the detector, git, and every state file are real."""
     project = tmp_path / "proj"
     (project / ".janitor" / "state").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, timeout=60)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, timeout=60)
     subprocess.run(
-        ["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
+        [exe("git"), "remote", "add", "origin", "https://github.com/owner/repo.git"],
         cwd=project, check=True, timeout=60,
     )
     _fake_gh_issue_list(project / "bin", issues)

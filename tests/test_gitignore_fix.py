@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from exe_path import exe
+
 _REPO = Path(__file__).resolve().parent.parent
 _SCRIPT = _REPO / "scripts" / "gitignore_fix.py"
 
@@ -13,7 +15,7 @@ def _seed(repo: Path) -> None:
     repo.mkdir()
 
     def git(*args: str) -> None:
-        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
     git("init", "-q")
     git("config", "user.email", "t@t.t")
@@ -55,7 +57,7 @@ def test_a_tracked_dotenv_prints_git_rm_cached_but_never_runs_it(tmp_path: Path)
     _seed(repo)
 
     def git(*args: str) -> None:
-        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
     (repo / ".env").write_text("x=1\n")
     git("add", ".env")
@@ -65,7 +67,7 @@ def test_a_tracked_dotenv_prints_git_rm_cached_but_never_runs_it(tmp_path: Path)
     assert "git rm --cached .env" in proposed.stdout
 
     tracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files"], capture_output=True, text=True, check=True,
+        [exe("git"), "-C", str(repo), "ls-files"], capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     assert ".env" in tracked
 
@@ -94,7 +96,7 @@ def test_protected_prefixes_never_appear_in_either_direction(tmp_path: Path) -> 
     _seed(repo)
 
     def git(*args: str) -> None:
-        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
     (repo / "design" / "tasks").mkdir(parents=True)
     (repo / "design" / "tasks" / "x.md").write_text("x\n")

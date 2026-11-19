@@ -37,6 +37,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from exe_path import exe
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
@@ -563,7 +564,7 @@ def test_project_scope_skipped_by_default():
         # A git repo so the PROJECT scope resolves via `git rev-parse`.
         repo = root / "repo"
         repo.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run([exe("git"), "init", "-q"], cwd=repo, check=True)
         project_mem = repo / ".claude" / "project" / "memory"
         project_mem.mkdir(parents=True, exist_ok=True)
         gstate = root / "gstate"
@@ -582,7 +583,7 @@ def test_project_scope_fires_when_opted_in():
         home = root / "home"
         repo = root / "repo"
         repo.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run([exe("git"), "init", "-q"], cwd=repo, check=True)
         project_mem = repo / ".claude" / "project" / "memory"
         project_mem.mkdir(parents=True, exist_ok=True)
         # split needs a page over the cap to have real work (TRDD-3XS3PDCF).

@@ -28,6 +28,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _HERE = Path(__file__).resolve().parent
 _OAUTH_DIR = _HERE.parent / "scripts" / "oauth_rotator"
@@ -207,7 +208,7 @@ def _run_lifetime_status(tmp_path: Path, health: dict) -> subprocess.CompletedPr
     env["CLAUDE_ROTATOR_HOME"] = str(rot_home)
     env["CLAUDE_ROTATOR_PY"] = str(stub)
     return subprocess.run(
-        ["bash", str(script)], capture_output=True, text=True, env=env,
+        [exe("bash"), str(script)], capture_output=True, text=True, env=env,
     )
 
 
