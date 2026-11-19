@@ -4,7 +4,7 @@ title: A dead memory claim can defer its chore for up to 6 days across scopes, a
 column: todo
 status: tasked
 created: 2026-11-18T01:25:38+0100
-updated: 2026-11-18T16:38:10+0100
+updated: 2026-11-19T23:45:30+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,6 +29,7 @@ Owner order 2026-11-17 (verbatim): "convert those issues into TRDDs to solve all
 ## Symptom
 
 By the issue: in the filing project, consolidate memory passes were deferred from 2026-11-15 to 2026-11-17 by a claim whose pass had died days earlier (log lines show claim in flight at 321463 s and 494034 s old). The claim was a USER-scope one, dispatched 2026-11-11, with a 272-byte header-only report and no completion marker; the orphaned-memory-maint log expired it only on 2026-11-17. The 11-17 deferral was for a LOCAL-scope consolidate dispatch, so a dead USER-scope claim also blocked the other scope.
+- 2026-11-19 live case: claim memory-maint-claimed-1795099996-bdef9a9c (atomize, LOCAL) stamped 15:53:16, report header-only (295 bytes, claim-step skeleton), agent stalled at once. At 23:40 (age 7.85 h, past the 6 h floor) the heartbeat still printed 'deferred atomize: claim still in flight (~466min)'. claim_threshold_s should drop a header-only claim to the 6 h floor, so either _is_dead_header_only_claim does not recognise this report or the deferral path uses another bound. Reproduce with this record.
 
 ## Suspected cause
 
