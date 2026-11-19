@@ -4,7 +4,7 @@ title: scan.ts gives a generic internal error when the plugin manifest is missin
 column: backburner
 status: tasked
 created: 2026-11-18T17:16:05+0100
-updated: 2026-11-18T17:16:09+0100
+updated: 2026-11-19T13:27:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,6 +24,7 @@ approval-datetime: 2026-11-18T17:16:05+0100
 ## Approval log
 
 - 2026-11-18T17:16:05+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-19T13:27:59+0100 — the environment variable SECRETS_SHIELD_SCAN_VERSION was renamed SHIELD_SCAN_VERSION (scan.ts pluginVersion, tests/test_shield_scan_version.py, skills/janitor-secrets-shield-scan/SKILL.md): the CPV skillaudit rule CRED_ENV_READ (critical) matches process.env.[A-Z_]*SECRET and blocked the 3.9.9 publish gate on the old name (scan.ts:177). Any vendoring caller must set SHIELD_SCAN_VERSION, not the old name. By sonnet-worker for main-agent.
 
 ## Symptom
 

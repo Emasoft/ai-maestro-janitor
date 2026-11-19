@@ -10,92 +10,92 @@
 
 # BEGIN_ENVKEY_FUNCTION
 envkey() (
-    # Check failures explicitly; isolate options, variables, and cleanup traps.
-    set +eux;
-    set -o pipefail;
-    LC_ALL=C;
-    export LC_ALL;
-    envkey_file=.env;
-    envkey_force=0;
+  # Check failures explicitly; isolate options, variables, and cleanup traps.
+  set +eux
+  set -o pipefail
+  LC_ALL=C
+  export LC_ALL
+  envkey_file=.env
+  envkey_force=0
 
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            -f|--file)
-                if [ "$#" -lt 2 ] || [ -z "$2" ]; then
-                    printf '%s\n' 'envkey: --file requires a nonempty path' >&2;
-                    exit 2;
-                fi;
-                envkey_file=$2;
-                shift 2;
-                ;;
-            --file=*)
-                envkey_file=${1#*=};
-                if [ -z "$envkey_file" ]; then
-                    printf '%s\n' 'envkey: --file requires a nonempty path' >&2;
-                    exit 2;
-                fi;
-                shift;
-                ;;
-            --force)
-                envkey_force=1;
-                shift;
-                ;;
-            -h|--help)
-                # The $ in the help text is literal on purpose: it names the $API_KEY shell-expansion pitfall as text; it must not expand.
-                # shellcheck disable=SC2016
-                printf '%s\n' 'Usage: envkey [-f FILE | --file FILE] [--force] [--] ENV_VAR_NAME JSS_SOURCE_SECRET_NAME' 'Both positional arguments are names; neither is the secret value.' 'ENV_VAR_NAME: destination variable name in the env file, for example API_KEY.' 'JSS_SOURCE_SECRET_NAME: name of an existing secret in jss, for example MY_SERVICE_API_KEY.' 'Retrieve the value internally with: jss JSS_SOURCE_SECRET_NAME' 'Use the literal name API_KEY, not "$API_KEY" when that variable contains a secret value.' 'A trailing --force after JSS_SOURCE_SECRET_NAME is also accepted.' 'Default file: .env in the current working directory.' 'Existing keys are skipped successfully unless --force is supplied.' 'Values are written literally, without quoting, interpolation, or evaluation.' 'Writing the env file does not export the value into the calling shell.';
-                exit 0;
-                ;;
-            --)
-                shift;
-                break;
-                ;;
-            -*)
-                printf 'envkey: unknown option: %s\n' "$1" >&2;
-                exit 2;
-                ;;
-            *)
-                break;
-                ;;
-        esac;
-    done;
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -f | --file)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        printf '%s\n' 'envkey: --file requires a nonempty path' >&2
+        exit 2
+      fi
+      envkey_file=$2
+      shift 2
+      ;;
+    --file=*)
+      envkey_file=${1#*=}
+      if [ -z "$envkey_file" ]; then
+        printf '%s\n' 'envkey: --file requires a nonempty path' >&2
+        exit 2
+      fi
+      shift
+      ;;
+    --force)
+      envkey_force=1
+      shift
+      ;;
+    -h | --help)
+      # The $ in the help text is literal on purpose: it names the $API_KEY shell-expansion pitfall as text; it must not expand.
+      # shellcheck disable=SC2016
+      printf '%s\n' 'Usage: envkey [-f FILE | --file FILE] [--force] [--] ENV_VAR_NAME JSS_SOURCE_SECRET_NAME' 'Both positional arguments are names; neither is the secret value.' 'ENV_VAR_NAME: destination variable name in the env file, for example API_KEY.' 'JSS_SOURCE_SECRET_NAME: name of an existing secret in jss, for example MY_SERVICE_API_KEY.' 'Retrieve the value internally with: jss JSS_SOURCE_SECRET_NAME' 'Use the literal name API_KEY, not "$API_KEY" when that variable contains a secret value.' 'A trailing --force after JSS_SOURCE_SECRET_NAME is also accepted.' 'Default file: .env in the current working directory.' 'Existing keys are skipped successfully unless --force is supplied.' 'Values are written literally, without quoting, interpolation, or evaluation.' 'Writing the env file does not export the value into the calling shell.'
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf 'envkey: unknown option: %s\n' "$1" >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+    esac
+  done
 
-    # Preserve the convenient "ENV_VAR_NAME JSS_SOURCE_SECRET_NAME --force" form.
-    if [ "$#" -eq 3 ] && [ "$3" = --force ]; then
-        envkey_force=1;
-        set -- "$1" "$2";
-    fi;
-    if [ "$#" -ne 2 ] || [ -z "$2" ]; then
-        printf '%s\n' 'Usage: envkey [-f FILE | --file FILE] [--force] [--] ENV_VAR_NAME JSS_SOURCE_SECRET_NAME' 'Both positional arguments are names; the secret value is retrieved from jss internally.' >&2;
-        exit 2;
-    fi;
-    envkey_key=$1;
-    # The second argument is a jss SOURCE NAME, not a supplied secret value.
-    envkey_name=$2;
-    case "$envkey_key" in
-        ''|[0-9]*|*[^A-Za-z0-9_]*)
-            printf 'envkey: invalid variable name: %s\n' "$envkey_key" >&2;
-            exit 2;
-            ;;
-    esac;
+  # Preserve the convenient "ENV_VAR_NAME JSS_SOURCE_SECRET_NAME --force" form.
+  if [ "$#" -eq 3 ] && [ "$3" = --force ]; then
+    envkey_force=1
+    set -- "$1" "$2"
+  fi
+  if [ "$#" -ne 2 ] || [ -z "$2" ]; then
+    printf '%s\n' 'Usage: envkey [-f FILE | --file FILE] [--force] [--] ENV_VAR_NAME JSS_SOURCE_SECRET_NAME' 'Both positional arguments are names; the secret value is retrieved from jss internally.' >&2
+    exit 2
+  fi
+  envkey_key=$1
+  # The second argument is a jss SOURCE NAME, not a supplied secret value.
+  envkey_name=$2
+  case "$envkey_key" in
+  '' | [0-9]* | *[^A-Za-z0-9_]*)
+    printf 'envkey: invalid variable name: %s\n' "$envkey_key" >&2
+    exit 2
+    ;;
+  esac
 
-    # A ./ prefix prevents leading-dash paths from becoming utility options.
-    case "$envkey_file" in /*) ;; *) envkey_file=./$envkey_file; ;; esac;
-    if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
-        printf 'envkey: target must be a regular file, not a symlink: %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
-    envkey_source=/dev/null;
-    if [ -e "$envkey_file" ]; then
-        if [ ! -r "$envkey_file" ]; then
-            printf 'envkey: cannot read file: %s\n' "$envkey_file" >&2;
-            exit 1;
-        fi;
-        envkey_source=$envkey_file;
-    fi;
+  # A ./ prefix prevents leading-dash paths from becoming utility options.
+  case "$envkey_file" in /*) ;; *) envkey_file=./$envkey_file ;; esac
+  if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
+    printf 'envkey: target must be a regular file, not a symlink: %s\n' "$envkey_file" >&2
+    exit 1
+  fi
+  envkey_source=/dev/null
+  if [ -e "$envkey_file" ]; then
+    if [ ! -r "$envkey_file" ]; then
+      printf 'envkey: cannot read file: %s\n' "$envkey_file" >&2
+      exit 1
+    fi
+    envkey_source=$envkey_file
+  fi
 
-    # Read errors must remain errors; no END block overrides getline's result.
-    if envkey_count=$(command awk -v envkey_key="$envkey_key" '
+  # Read errors must remain errors; no END block overrides getline's result.
+  if envkey_count=$(command awk -v envkey_key="$envkey_key" '
         BEGIN {
             pattern = "^[[:blank:]]*(export[[:blank:]]+)?" envkey_key "[[:blank:]]*=";
             count = 0;
@@ -103,50 +103,50 @@ envkey() (
             if (rc < 0) exit 5;
             printf "%d", count;
         }
-    ' < "$envkey_source"); then
-        :;
-    else
-        printf 'envkey: failed to inspect %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
-    if [ "$envkey_count" != 0 ] && [ "$envkey_force" -eq 0 ]; then
-        printf 'envkey: %s already exists in %s; unchanged (use --force to update)\n' "$envkey_key" "$envkey_file" >&2;
-        exit 0;
-    fi;
+    ' <"$envkey_source"); then
+    :
+  else
+    printf 'envkey: failed to inspect %s\n' "$envkey_file" >&2
+    exit 1
+  fi
+  if [ "$envkey_count" != 0 ] && [ "$envkey_force" -eq 0 ]; then
+    printf 'envkey: %s already exists in %s; unchanged (use --force to update)\n' "$envkey_key" "$envkey_file" >&2
+    exit 0
+  fi
 
-    # This assignment preserves jss's exit status and keeps its output off argv.
-    envkey_value="$(jss "$envkey_name")" || exit;
-    case "$envkey_value" in
-        *$'\n'*|*$'\r'*)
-            printf '%s\n' 'envkey: jss must return a single-line value without CR or embedded LF' >&2;
-            exit 3;
-            ;;
-    esac;
+  # This assignment preserves jss's exit status and keeps its output off argv.
+  envkey_value="$(jss "$envkey_name")" || exit
+  case "$envkey_value" in
+  *$'\n'* | *$'\r'*)
+    printf '%s\n' 'envkey: jss must return a single-line value without CR or embedded LF' >&2
+    exit 3
+    ;;
+  esac
 
-    # Recheck after the lookup in case the path changed while jss was running.
-    if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
-        printf 'envkey: target changed or is not a regular file: %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
-    envkey_source=/dev/null;
-    if [ -e "$envkey_file" ]; then
-        if [ ! -r "$envkey_file" ]; then
-            printf 'envkey: cannot read file: %s\n' "$envkey_file" >&2;
-            exit 1;
-        fi;
-        envkey_source=$envkey_file;
-    fi;
+  # Recheck after the lookup in case the path changed while jss was running.
+  if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
+    printf 'envkey: target changed or is not a regular file: %s\n' "$envkey_file" >&2
+    exit 1
+  fi
+  envkey_source=/dev/null
+  if [ -e "$envkey_file" ]; then
+    if [ ! -r "$envkey_file" ]; then
+      printf 'envkey: cannot read file: %s\n' "$envkey_file" >&2
+      exit 1
+    fi
+    envkey_source=$envkey_file
+  fi
 
-    umask 077;
-    envkey_tmp=$(command mktemp "${envkey_file}.envkey.XXXXXX") || exit 1;
-    trap 'command rm -f "$envkey_tmp"' 0;
-    trap 'exit 129' HUP;
-    trap 'exit 130' INT;
-    trap 'exit 143' TERM;
+  umask 077
+  envkey_tmp=$(command mktemp "${envkey_file}.envkey.XXXXXX") || exit 1
+  trap 'command rm -f "$envkey_tmp"' 0
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
-    # The secret travels through stdin, never through awk -v or a replacement.
-    # fd 3 supplies the original file; filenames never become awk arguments.
-    if builtin printf '%s\n' "$envkey_value" | command awk -v envkey_key="$envkey_key" -v envkey_force="$envkey_force" '
+  # The secret travels through stdin, never through awk -v or a replacement.
+  # fd 3 supplies the original file; filenames never become awk arguments.
+  if builtin printf '%s\n' "$envkey_value" | command awk -v envkey_key="$envkey_key" -v envkey_force="$envkey_force" '
         BEGIN {
             if ((getline secret) != 1) exit 5;
             pattern = "^[[:blank:]]*(export[[:blank:]]+)?" envkey_key "[[:blank:]]*=";
@@ -165,43 +165,43 @@ envkey() (
             if (rc < 0) exit 5;
             if (found == 0) printf "%s=%s%s\n", envkey_key, secret, ending;
         }
-    ' 3< "$envkey_source" > "$envkey_tmp"; then
-        :;
-    else
-        envkey_rc=$?;
-        if [ "$envkey_rc" -eq 10 ]; then
-            printf 'envkey: %s now exists in %s; unchanged (use --force to update)\n' "$envkey_key" "$envkey_file" >&2;
-            exit 0;
-        fi;
-        printf 'envkey: failed to prepare update for %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
+    ' 3<"$envkey_source" >"$envkey_tmp"; then
+    :
+  else
+    envkey_rc=$?
+    if [ "$envkey_rc" -eq 10 ]; then
+      printf 'envkey: %s now exists in %s; unchanged (use --force to update)\n' "$envkey_key" "$envkey_file" >&2
+      exit 0
+    fi
+    printf 'envkey: failed to prepare update for %s\n' "$envkey_file" >&2
+    exit 1
+  fi
 
-    if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
-        printf 'envkey: target changed or is not a regular file: %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
-    if command chmod 600 "$envkey_tmp" && command mv -f "$envkey_tmp" "$envkey_file"; then
-        :;
-    else
-        printf 'envkey: failed to install update for %s\n' "$envkey_file" >&2;
-        exit 1;
-    fi;
+  if [ -L "$envkey_file" ] || { [ -e "$envkey_file" ] && [ ! -f "$envkey_file" ]; }; then
+    printf 'envkey: target changed or is not a regular file: %s\n' "$envkey_file" >&2
+    exit 1
+  fi
+  if command chmod 600 "$envkey_tmp" && command mv -f "$envkey_tmp" "$envkey_file"; then
+    :
+  else
+    printf 'envkey: failed to install update for %s\n' "$envkey_file" >&2
+    exit 1
+  fi
 )
 # END_ENVKEY_FUNCTION
 
 # Sourcing declares the function; executing calls it with the script arguments.
 if [ -n "${ZSH_VERSION-}" ]; then
-    case "${ZSH_EVAL_CONTEXT-}" in
-        toplevel) envkey "$@" ;;
-        *) ;;
-    esac
+  case "${ZSH_EVAL_CONTEXT-}" in
+  toplevel) envkey "$@" ;;
+  *) ;;
+  esac
 elif [ -n "${BASH_VERSION-}" ]; then
-    if [ "${BASH_SOURCE[0]-}" = "$0" ]; then
-        envkey "$@"
-    fi
+  if [ "${BASH_SOURCE[0]-}" = "$0" ]; then
+    envkey "$@"
+  fi
 else
-    printf '%s\n' 'envkey.sh: use Bash or zsh to run or source this file' >&2
-    # shellcheck disable=SC2317
-    return 2 2>/dev/null || exit 2
+  printf '%s\n' 'envkey.sh: use Bash or zsh to run or source this file' >&2
+  # shellcheck disable=SC2317
+  return 2 2>/dev/null || exit 2
 fi

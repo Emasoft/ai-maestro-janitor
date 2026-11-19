@@ -52,9 +52,8 @@ split / consolidate / conflict / repair / harvest.
    (absolute path — your cwd as a spawned agent is not the project root). Capture
    the `CLAIM_ID=<id>` line (it follows the `(intervention, scope, root)` line; the
    CLOSE YOUR CLAIM block after it repeats the two close commands). The
-   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
-   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
-   owns cadence, agent owns content). **Exit 2 (nothing claimable), 3 (no
+   scheduler already gated the cadence: never re-check `memory_settings.is_due`
+   (TRDD-VJ8L465M: scheduler owns cadence, agent owns content). **Exit 2 (nothing claimable), 3 (no
    memory-maintenance state at all — `$STATE_DIR` is wrong), 4 (`$STATE_DIR`
    empty), 5 (dispatch was recorded for a different state dir — claim
    refused), an unreadable result, or a chore
@@ -64,11 +63,10 @@ split / consolidate / conflict / repair / harvest.
    human naming a scope IS the assignment). Process **one scope per pass** (PROJECT
    only if `edit_project_scope` is True — a PROJECT atomize is staged-not-pushed,
    rides the next `publish.py`).
-2. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`.** A `memgrep`-driven
-   marker scan can disagree with the scheduler's own precheck (the same janitor#227 class of bug
-   `memory-repair` hit: a page the scheduler flagged could look "already atomized" to a
-   differently-scoped grep), so scanning independently risks finding nothing to work while the
-   marker keeps re-firing. Get the real list from the same code the scheduler gates on:
+2. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`** (a differently-scoped scan can find
+   nothing while the marker keeps re-firing; why:
+   [atomize-background § Why the candidate set comes from the scheduler predicate](references/atomize-background.md#why-the-candidate-set-comes-from-the-scheduler-predicate)).
+   Get the real list from the same code the scheduler gates on:
 
    ```bash
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
@@ -102,12 +100,9 @@ body):
 - **`desc:` is a REQUIRED ≤200-char PROSE summary of the atom's body, QUOTED**, never a slug.
   Why it's the LISTING surface + legacy-slug handling:
   [atomize-background § Why desc: is the LISTING surface](references/atomize-background.md#why-desc-is-the-listing-surface).
-- **Per-atom notes/lessons/see-also are AUTOMATIC.** An atom OWNS the `[^N]` footnotes its body
-  references inline — those are already in the prose, so you DO NOT move them; marking the fact is
-  enough, memgrep aggregates the rest. memgrep groups each referenced `[^N]` by which bottom
-  section DEFINES it: `# Notes` → notes, `# Lessons Learned` → lessons, `# See also` → see-also
-  (see-also is a `[^N]` footnote whose def links out, NOT a bare `[[wikilink]]` in the body). A
-  footnote can be SHARED by multiple atoms, which is why the defs live POOLED at the page bottom.
+- **Per-atom notes/lessons/see-also are AUTOMATIC.** Marking the fact is enough: the `[^N]` footnotes
+  its body references inline are aggregated by memgrep, so you DO NOT move them. Grouping rules:
+  [atomize-background § Per-atom notes, lessons and see-also are automatic](references/atomize-background.md#per-atom-notes-lessons-and-see-also-are-automatic).
 - **Block-ids are CORPUS-WIDE-UNIQUE 8-char `[A-Z0-9]` UUIDs**, collision-checked across all
   three scope roots before assigning; legacy kebab-slug ids remain valid, never renamed. Full
   rule: [atomize-background § Block-id uniqueness rules](references/atomize-background.md#block-id-uniqueness-rules).
@@ -115,13 +110,9 @@ body):
   the bottom footnote pool, every fact line stay byte-identical.
 - Bump the page frontmatter `lmd:` to today.
 
-**WRITE DOWN EVERY `free-prose-leaf-no-distinct-facts` judgment.** A page can look markable
-(non-empty, non-heading prose) and still be genuinely un-atomizable in your own semantic
-judgment — a boilerplate bootstrap stub ("This is the entry point... replace this stub the
-first time you write real knowledge here") is the measured case. That page re-qualifies as a
-candidate on EVERY precheck otherwise, so an unrecorded call costs a full dispatch to
-re-derive the same "no" next pass. Record it before you emit the `skipped … (free-prose-leaf-
-no-distinct-facts)` output line:
+**WRITE DOWN EVERY `free-prose-leaf-no-distinct-facts` judgment** (a page that looks markable but has
+no distinct atomizable fact, e.g. a bootstrap stub): BEFORE you emit the `skipped … (free-prose-leaf-no-distinct-facts)`
+output line, record it, else the page re-qualifies on every precheck:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
@@ -129,9 +120,8 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
   --page <slug>.md --reason "<why this page has no distinct atomizable fact>"
 ```
 
-The refusal re-arms by itself when the page's bytes change, and after 7 days — so it is a
-verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
-reader has to be able to re-check it.
+The refusal expires after 7 days or when the page bytes change; `--reason` is the deliverable. Rationale:
+[atomize-background § Recording a free-prose-leaf-no-distinct-facts judgment](references/atomize-background.md#recording-a-free-prose-leaf-no-distinct-facts-judgment).
 
 ## EXECUTE through the memgrep whole-page replace
 
@@ -155,17 +145,13 @@ memgrep replace-mem-topic --page "<scope_root>/<page.md>" \
 No path through a memgrep verb for the needed edit → ABSTAIN, report the gap — never
 fall back to Edit/Write or any shell writer on a wikimem page.
 
-**On a refusal:** the gate wrote nothing. Read the named violations (a dropped/reworded
-fact → restore it verbatim in the scratch copy; a smuggled non-marker line → remove it;
-no marker → actually add one) and re-run. On a `--base-sha256` STALE refusal the page
-changed since you read it: re-read, re-mark, recompute. **Bounded retry ≤3**; after the
-3rd refusal surface a finding, mutate nothing.
+**On a refusal** the gate wrote nothing: fix the named violations and re-run; bounded retry ≤3, then surface a
+finding and mutate nothing; a STALE `--base-sha256` means re-read, re-mark, recompute. Detail:
+[atomize-background § What to do on a gate refusal](references/atomize-background.md#what-to-do-on-a-gate-refusal).
 
 After a clean pass: `memgrep reindex "<scope_root>"` (so the new atoms are searchable). Do NOT
-call `memory_settings.mark_ran` here — the SCHEDULER already stamped the cadence at emit
-(`memory-maintenance.py`); a second agent-side stamp is redundant, and re-checking/re-stamping
-the cadence is exactly the double-gate TRDD-VJ8L465M removed (scheduler owns cadence, agent owns
-content work).
+call `memory_settings.mark_ran` here: the SCHEDULER owns the cadence stamp
+([why](references/atomize-background.md#why-the-pass-never-stamps-the-cadence)).
 
 ## EXIT / SUCCESS / idempotency contract
 
@@ -174,9 +160,8 @@ content work).
 - **Retry ≤3 then surface a finding** (a refused gate writes nothing; other pages are independent).
 - **Idempotent + crash-safe:** a fully-atomized page (every fact
   already marked) is a no-op — skip it, never write a no-change replace.
-- **Bounded + disable-able:** one scope/pass, top-K pages; `atomize_per_day=0` or the kill-switch /
-  `WIKIMEM_EDITOR_ENABLED=off` stops it.
-- **Never destructive** — additive markers only; the gate refuses anything else.
+- **Bounded, disable-able, never destructive:** one scope/pass, top-K pages; `atomize_per_day=0`, the kill-switch or
+  `WIKIMEM_EDITOR_ENABLED=off` stops it; additive markers only, the gate refuses anything else.
 
 ## Security — forged-marker defense
 
@@ -193,12 +178,9 @@ detailed report goes to `$MAIN_ROOT/reports_dev/janitor-memory-atomize/<ts>-<slu
 
 ## Scope
 
-ONLY adds atom markers to FREE-PROSE wikimem pages in ONE memory scope per pass, IN PLACE through
-the memgrep whole-page replace verb. Does NOT create pages (`/janitor-memory-write`), merge
-(`/janitor-memory-consolidate`), split (`/janitor-memory-split`), resolve contradictions
-(`/janitor-memory-conflict`), backfill shape/metadata (`/janitor-memory-repair`), or harvest stray
-artifacts (`/janitor-memory-harvest`). Never moves a page across scopes. PROJECT-scope editing is
-opt-in, never pushed standalone.
+ONLY adds atom markers to FREE-PROSE pages, one scope per pass, in place through the memgrep whole-page
+replace verb; creates, merges, splits, repairs or harvests nothing, never moves a page across scopes
+([sibling passes](references/atomize-background.md#scope)).
 
 ## Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
 
@@ -217,14 +199,14 @@ MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.
 
 ## Resources
 
-- [atomize-background](references/atomize-background.md) — the `desc:` listing-surface
-  rationale + block-id uniqueness rules.
+- [atomize-background](references/atomize-background.md) — `desc:` rationale, block-id rules and the
+  operational detail moved out of this body. Its table of contents:
   - [Why desc: is the LISTING surface](references/atomize-background.md#why-desc-is-the-listing-surface)
   - [Block-id uniqueness rules](references/atomize-background.md#block-id-uniqueness-rules)
+  - [Operational detail moved from the SKILL body](references/atomize-background.md#operational-detail-moved-from-the-skill-body)
 - [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the shared data model; its
-  **Atoms — first-class body elements** section defines the block-property syntax, the keyword
-  recall surface, and the per-atom notes/lessons/"also see" the aggregated record returns. Its
-  table of contents:
+  **Atoms — first-class body elements** section defines the block-property syntax and keyword recall
+  surface. Its table of contents:
   - A wiki, not a pile — and collaborative like Wikipedia
   - The editorial decision flow (run this on any change worth remembering)
   - EXPAND and REDUCE — radiating suns vs receiving terminals

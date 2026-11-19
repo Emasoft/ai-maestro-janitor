@@ -20,6 +20,7 @@
     "**/builds_dev/**",
     "**/downloads_dev/**",
     "**/libs_dev/**",
+    "**/_corpus_dev/**",
     "**/reports/**",
     "**/reports_dev/**",
     "**/llm_externalizer_output/**",
@@ -217,6 +218,38 @@
         "yarr",
         "zombied"
       ]
+    },
+    {
+      "filename": ["design/requirements/PRRD.md", "design/specs/TRDD-DSXC9MP9-*.md"],
+      "words": ["jsscli", "shopt", "nocasematch", "harvestig", "sabe", "asigned", "funcion"]
+    },
+    {
+      "filename": "design/tasks/TRDD-20261119_134231+0100-8BLHOXLL-*.md",
+      "words": ["puzf"]
+    },
+    {
+      "filename": "design/tasks/TRDD-20261118_061920+0100-SWQXCIOS-*.md",
+      "words": ["behav"]
+    },
+    {
+      "filename": ["design/tasks/TRDD-20261118_172236+0100-FNPDFZWU-*.md", "tests/test_range_secret_scan.py", "tests/test_staged_secret_scan.py"],
+      "words": ["fnpdfzwu"]
+    },
+    {
+      "filename": "tests/test_range_secret_scan.py",
+      "words": ["nosuchrev", "econd", "irst", "hird", "ourth"]
+    },
+    {
+      "filename": "tests/test_staged_secret_scan.py",
+      "words": ["scantmp"]
+    },
+    {
+      "filename": "tests/test_fleet_scan.py",
+      "words": ["udcff"]
+    },
+    {
+      "filename": "tests/test_post_compact_resume_hook.py",
+      "words": ["humanrev", "olderwrk", "newerwrk"]
     },
     {
       "filename": "design/tasks/TRDD-20261116_191047+0100-QM8YRCZ5-*.md",

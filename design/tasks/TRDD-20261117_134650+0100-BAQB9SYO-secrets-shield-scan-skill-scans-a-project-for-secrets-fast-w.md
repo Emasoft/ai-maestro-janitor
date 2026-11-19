@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: dev
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-18T17:48:40+0100
+updated: 2026-11-19T13:28:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -115,6 +115,7 @@ implementation-commits: [32cc16f5, e3a058a9, 92eb3472, 08a8e8f2, c06cecd4, a221c
 - 2026-11-18T16:24:13+0100 — implementation-commits lists the 35 SHAs of commits that changed code, tests or config (grep-derived: git log --grep=TRDD-BAQB9SYO, minus design/, reports/ and cspell-only commits, and 064caad4, whose subject names only TRDD-L1I0FP5T; every other kept subject names TRDD-BAQB9SYO). The commits named in this STATE (for example bf46375a, 0f370a4e, 170593c6, 8b5fe69f) are in the field.
 - 2026-11-18T16:27:55+0100 — correction, by cheap-worker: this line records that the disclosure line above was edited in place on this date. The field now lists the 35 landed SHAs that changed code, tests or config, of 73 from git log --grep=TRDD-BAQB9SYO, oldest first; 38 dropped (36 with files only under design/ or reports/, 853ece9b cspell word list only, and 064caad4 whose subject names only TRDD-L1I0FP5T). Kept but doc-only or config: bf46375a, 6523e31f, 4c46d82c, 91a27e61 (skill docs) and 1c7e521c (.cspell.json plus word list), for the main agent to decide.
 - 2026-11-18T16:36:44+0100 — field note, by cheap-worker for main-agent: 1c7e521c dropped (only .cspell.json and the word list). bf46375a, 6523e31f, 4c46d82c, 91a27e61 stay: SKILL.md and its references are the skill itself. The list is a grep-derived superset and may hold commits of the child cards QWD53NHM, LJSST2WL, VD8UAXGF, ANTE5721.
+- 2026-11-19T13:27:59+0100 — the environment variable SECRETS_SHIELD_SCAN_VERSION was renamed SHIELD_SCAN_VERSION (scan.ts pluginVersion, tests/test_shield_scan_version.py, skills/janitor-secrets-shield-scan/SKILL.md): the CPV skillaudit rule CRED_ENV_READ (critical) matches process.env.[A-Z_]*SECRET and blocked the 3.9.9 publish gate on the old name (scan.ts:177). Any vendoring caller must set SHIELD_SCAN_VERSION, not the old name. By sonnet-worker for main-agent.
 
 ## Owner request and decisions (verbatim, 2026-11-17)
 - Request: "i need to scan 2 terabytes of projects and i need the secrets-shield scanner to be very very fast (better if rust optimized)"
