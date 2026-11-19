@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _SCAN_DIRS = ("docs_dev", "tests/scenarios/reports", "scripts_dev")
 _MAX_EMIT_PER_FIRE = 5
@@ -105,7 +106,7 @@ def main() -> int:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,

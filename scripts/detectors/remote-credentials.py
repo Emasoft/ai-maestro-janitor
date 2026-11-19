@@ -34,6 +34,7 @@ import issue_catalog  # noqa: E402
 import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 import trdd_common  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Pattern A — explicit basic-auth: `scheme://user:secret@host/...` with a
 # non-empty password component after the `:`. Matches the historical
@@ -79,7 +80,7 @@ def main() -> int:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     if subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
         env=git_env,
@@ -88,7 +89,7 @@ def main() -> int:
         return 0
 
     proc = subprocess.run(
-        ["git", "remote", "-v"],
+        [exe("git"), "remote", "-v"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
         env=git_env,

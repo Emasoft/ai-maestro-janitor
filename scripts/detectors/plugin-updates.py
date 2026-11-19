@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 SELF_PLUGIN_NAME = "ai-maestro-janitor"
 _SEMVER_PREFIX_RE = re.compile(r"^\d+\.\d+\.\d+")
@@ -128,7 +129,7 @@ def _refresh_marketplace(mp: str, log_path: Path) -> None:
         try:
             with log_path.open("a", encoding="utf-8") as logf:
                 subprocess.run(
-                    ["claude", "plugin", "marketplace", "update", mp],
+                    [exe("claude"), "plugin", "marketplace", "update", mp],
                     stdout=logf, stderr=subprocess.STDOUT,
                     timeout=60 * state.timeout_scale(), check=False,  # TRDD-7NSRD8OV; 1.0 in prod
                 )
@@ -222,7 +223,7 @@ def main() -> int:
     #    CLI that hangs on a corrupted plugin index.
     try:
         proc = subprocess.run(
-            ["claude", "plugin", "list", "--json"],
+            [exe("claude"), "plugin", "list", "--json"],
             # Scaled by the shared knob (TRDD-7NSRD8OV); 1.0 in production. On expiry this
             # returns 0 having called `claude` ZERO times, so the test sees `calls=[]` — a
             # timeout that looks exactly like "the detector decided not to act".
@@ -350,7 +351,7 @@ def main() -> int:
         )
         try:
             update_proc = subprocess.run(
-                ["claude", "plugin", "update", plugin_id, "--scope", scope],
+                [exe("claude"), "plugin", "update", plugin_id, "--scope", scope],
                 capture_output=True, text=True, timeout=120, check=False,
             )
         except subprocess.TimeoutExpired:

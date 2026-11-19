@@ -65,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import git_utils  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 PID_FILENAME = "project-plugins-update.pid"
 SENTINEL_FILENAME = "project-plugins-update.commit-pending"
@@ -113,7 +114,7 @@ def _settings_is_dirty(project_root: Path) -> bool:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "-C", str(project_root), "status", "--porcelain",
+            [exe("git"), "-C", str(project_root), "status", "--porcelain",
              "--", SETTINGS_REL_PATH],
             capture_output=True, text=True, timeout=15, check=False,
             env=git_env,
@@ -183,7 +184,7 @@ def _run_worker() -> int:
             with log_path.open("a", encoding="utf-8") as logf:
                 logf.write(f"--- {plugin_id} ---\n")
                 proc = subprocess.run(
-                    ["claude", "plugin", "update", plugin_id, "--scope", "project"],
+                    [exe("claude"), "plugin", "update", plugin_id, "--scope", "project"],
                     stdout=logf, stderr=subprocess.STDOUT,
                     timeout=120, check=False,
                 )
@@ -222,7 +223,7 @@ def _resolve_git_dir(project_root: Path) -> Path | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
+            [exe("git"), "-C", str(project_root), "rev-parse", "--git-dir"],
             capture_output=True, text=True, timeout=15, check=False,
             env=git_env,
         )
@@ -257,7 +258,7 @@ def _commit_blocked_reason(project_root: Path) -> str | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "-C", str(project_root), "symbolic-ref", "-q", "HEAD"],
+            [exe("git"), "-C", str(project_root), "symbolic-ref", "-q", "HEAD"],
             capture_output=True, text=True, timeout=15, check=False,
             env=git_env,
         )

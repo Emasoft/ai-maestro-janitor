@@ -65,6 +65,7 @@ import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402  # per-project mailbox for Check 5's dead-symbol findings
 import state  # noqa: E402
 import trdd_common  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Cap how many flagged TRDDs we name inline in the single drift line — the full
 # list always lives in the report. Keeps the heartbeat line short.
@@ -247,7 +248,7 @@ def _corpus_at_head(root: Path, *, timeout_s: float = 15) -> str | None:
     """
     try:
         proc = subprocess.run(
-            ["git", "-C", str(root), "archive", "HEAD", "--", "scripts"],
+            [exe("git"), "-C", str(root), "archive", "HEAD", "--", "scripts"],
             capture_output=True, timeout=timeout_s, check=False,
         )
     except (subprocess.TimeoutExpired, OSError):

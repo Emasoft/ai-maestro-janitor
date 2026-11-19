@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import git_utils  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Origin-URL → owner/repo slug. Repo segment allows dots (e.g.
 # `Emasoft/dotfiles.config`, `org/site.com`) — the older regex
@@ -47,7 +48,7 @@ def _resolve_repo() -> Optional[str]:
     if repo:
         return repo
     proc = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
+        [exe("git"), "remote", "get-url", "origin"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,
@@ -73,7 +74,7 @@ def main() -> int:
         return 0
 
     main_proc = subprocess.run(
-        ["git", "rev-parse", "origin/main"],
+        [exe("git"), "rev-parse", "origin/main"],
         cwd=str(project_root),
         capture_output=True,
         text=True,
@@ -144,7 +145,7 @@ def main() -> int:
         # forever, producing persistent false-positive drift for any
         # GitHub repo using 'Squash and merge'.
         is_ancestor = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", head, main_sha],
+            [exe("git"), "merge-base", "--is-ancestor", head, main_sha],
             cwd=str(project_root),
             capture_output=True,
             text=True,

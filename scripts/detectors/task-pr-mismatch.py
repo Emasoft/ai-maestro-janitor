@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Match `#NN` PR references. The leading anchor (start-of-string OR
 # whitespace) prevents false matches on hash-prefixed tokens that aren't
@@ -66,7 +67,7 @@ def _resolve_repo() -> Optional[str]:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
+        [exe("git"), "remote", "get-url", "origin"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,

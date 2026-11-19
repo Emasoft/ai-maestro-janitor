@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _parse_iso8601(ts: str) -> Optional[int]:
@@ -65,7 +66,7 @@ def main() -> int:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     if subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(project_root),
         capture_output=True, text=True, check=False,
         env=git_env,
@@ -78,7 +79,7 @@ def main() -> int:
     # subject. `--format` uses %x09 for literal tab so subjects with
     # colons or whitespace parse cleanly downstream.
     proc = subprocess.run(
-        ["git", "stash", "list", "--format=%gd%x09%H%x09%cI%x09%s"],
+        [exe("git"), "stash", "list", "--format=%gd%x09%H%x09%cI%x09%s"],
         cwd=str(project_root),
         capture_output=True, text=True, check=False,
         env=git_env,
