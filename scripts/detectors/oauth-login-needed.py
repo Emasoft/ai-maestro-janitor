@@ -224,8 +224,15 @@ def main() -> int:
             rotator_alert.notify_session_tick_stalled(
                 home, now, server_owns_tick=supervisor._server_owns_chores()
             )
-    except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
-        pass
+    except Exception as exc:  # noqa: BLE001 -- a notify fault must never break the heartbeat
+        # WHY (TRDD-SWQXCIOS): the stalled-tick notice reads state.json and the tick stamp, then sends a
+        # desktop notice. Any fault there is caught so the heartbeat still runs (fail-open). The log line
+        # names the exception TYPE only, never its message, which can carry a path or a token. The log
+        # call has its own typed guard so logging can never raise out of this handler.
+        try:
+            state.log_line("oauth-login-needed", f"stalled-tick notice skipped ({type(exc).__name__})")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
     # Every path named in the messages below is RESOLVED, never hard-coded (janitor#258).
     # These lines used to spell `~/.claude/account-rotator/...` literally while the state read

@@ -5696,8 +5696,16 @@ def main() -> int:
                 "expires",
             )
             return 0
-    except Exception:  # noqa: BLE001 - a broken import must not stop the heartbeat
-        pass
+    except Exception as exc:  # noqa: BLE001 - a broken import must not stop the heartbeat
+        # WHY (TRDD-SWQXCIOS): the import and the summary-hold check are fail-open. The raise set is open (an
+        # import can raise anything the module does at load), so the catch stays broad. dispatch re-emits
+        # stderr into the heartbeat output, so the fault goes to the dispatch log, by exception TYPE only and
+        # never its message. The log call has its own typed guard, and the fire falls through to the next
+        # phase exactly as the bare pass did.
+        try:
+            state.log_line("dispatch", f"summary-hold check skipped ({type(exc).__name__})")
+        except (OSError, RuntimeError, ValueError):
+            pass
 
     # Phase 0.8: user-interrupt cooldown (TRDD-6P0KUSO9, narrowed by its addendum). This
     # used to exit the WHOLE fire; now it only gates the CUE phases below (every phase

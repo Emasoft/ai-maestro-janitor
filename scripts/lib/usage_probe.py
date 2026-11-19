@@ -134,6 +134,21 @@ def _int_option(name: str, default: int) -> int:
     return state.coerce_int(os.environ.get(name), default, var_name=name)
 
 
+def _log_swallowed(site: str, exc: BaseException) -> None:
+    """Leave one fixed-text trace of an exception that a fail-open path swallowed.
+
+    Writes the exception TYPE only, never its message: a message can carry a token or a path.
+    TRDD-SWQXCIOS: every broad catch in this module keeps the probe fail-open (it must never
+    raise into the rotator or the daemon tick), but a swallowed error must still leave a record.
+    The log write is guarded as well: a log that cannot be written (read-only DATA dir, bad
+    JANITOR_LOG_DIR) is dropped, not retried, so logging never raises out of a fail-open path.
+    """
+    try:
+        state.log_line("usage-probe", f"{site}: swallowed {type(exc).__name__}")
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+
 def ttl_seconds() -> int:
     return _int_option(TTL_ENV, _TTL_DEFAULT)
 
@@ -197,8 +212,12 @@ def user_agent() -> str:
         m = re.search(r"(\d+\.\d+\.\d+)", out or "")
         if m:
             ua = "claude-code/" + m.group(1)
-    except Exception:
-        pass
+    except Exception as exc:
+        # TRDD-SWQXCIOS: `claude --version` can raise OSError (no `claude` on PATH, or not
+        # executable), subprocess.TimeoutExpired (a SubprocessError) or ValueError (undecodable
+        # output). The pinned UA is the designed answer, so the result is unchanged; the type is
+        # logged once, because the UA is cached for the process.
+        _log_swallowed("user_agent", exc)
     _UA_CACHE = ua
     return ua
 
@@ -262,6 +281,7 @@ def prune_retired(*, now: float | None = None, max_age_s: int | None = None) -> 
         entries = list(probe_dir().glob("*.json"))
     except Exception:
         return 0
+    swallowed: BaseException | None = None
     for cache in entries:
         try:
             if cache.stat().st_mtime >= cutoff:
@@ -273,8 +293,14 @@ def prune_retired(*, now: float | None = None, max_age_s: int | None = None) -> 
                     removed += 1
                 except FileNotFoundError:
                     pass
-        except Exception:
+        except Exception as exc:
+            # TRDD-SWQXCIOS: an entry that cannot be stat'ed or unlinked (a race with another
+            # pruner, or EACCES) is skipped so the sweep continues with the rest. Only the last
+            # such failure is kept, and it is logged once per sweep, not once per entry.
+            swallowed = exc
             continue
+    if swallowed is not None:
+        _log_swallowed("prune_retired", swallowed)
     return removed
 
 
@@ -290,8 +316,11 @@ def write_cache(key: str, payload: dict) -> bool:
         return False
     try:
         prune_retired()
-    except Exception:
-        pass
+    except Exception as exc:
+        # TRDD-SWQXCIOS: the payload is already on disk and the caller is told True, so a failed
+        # sweep must not change that. prune_retired guards its own I/O, so no exception was found
+        # on read; this is the write path's fail-open boundary, and the type is logged.
+        _log_swallowed("write_cache prune", exc)
     return True
 
 
@@ -344,16 +373,25 @@ def set_cooldown(key: str, retry_after: int | None = None, *, now: float | None 
             _cooldown_path(key),
             json.dumps({"until": at + delay, "consecutive": consecutive}),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # TRDD-SWQXCIOS: a failed write leaves no cooldown on disk, so the next probe of this
+        # account sends a request that the back-off meant to hold off. The delay is still
+        # returned unchanged; the type is logged. Raise set (read in atomic_write and probe_dir):
+        # OSError from mkdir, write and replace; RuntimeError from Path.home().
+        _log_swallowed("set_cooldown", exc)
     return delay
 
 
 def clear_cooldown(key: str) -> None:
     try:
         _cooldown_path(key).unlink()
-    except Exception:
-        pass
+    except FileNotFoundError:
+        pass  # TRDD-SWQXCIOS: no cooldown was armed; the normal case on every successful fetch
+    except Exception as exc:
+        # TRDD-SWQXCIOS: any other failure (EACCES on the directory, or no home directory from
+        # probe_dir) leaves a stale cooldown in place until it expires. It is logged; the
+        # clear has no return value to change.
+        _log_swallowed("clear_cooldown", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -388,8 +426,12 @@ def retry_after_seconds(headers: Mapping[str, str] | None, *, now: float | None 
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 return max(0, int(dt.timestamp() - at))
-        except Exception:
-            pass
+        except Exception as exc:
+            # TRDD-SWQXCIOS: a malformed HTTP-date Retry-After makes parsedate_to_datetime raise
+            # (ValueError, or TypeError for a non-str), and a date outside timestamp() range raises
+            # OverflowError or OSError. None of these is a usable hint, so control falls through to
+            # the reset headers below, exactly as before; the type is logged.
+            _log_swallowed("retry_after_seconds", exc)
     for name in _RESET_HEADERS:
         value = _get(name)
         if not value:
@@ -515,12 +557,18 @@ def _release_lock(handle: Any) -> None:
     try:
         if fcntl:
             fcntl.flock(handle, fcntl.LOCK_UN)
-    except Exception:
-        pass
+    except Exception as exc:
+        # TRDD-SWQXCIOS: LOCK_UN can raise OSError (a bad descriptor, or a filesystem that refuses
+        # the call) or ValueError (a closed handle). Closing the handle on the next line releases
+        # the flock either way, so the failure is logged and the release goes on.
+        _log_swallowed("release_lock unlock", exc)
     try:
         handle.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        # TRDD-SWQXCIOS: close() flushes buffered bytes first, so it can raise OSError (or
+        # ValueError on an already-closed handle). The probe's answer is already decided when
+        # this runs, so the return value does not depend on the close; the type is logged.
+        _log_swallowed("release_lock close", exc)
 
 
 # --------------------------------------------------------------------------- #

@@ -255,8 +255,18 @@ def main() -> int:
                 "stop-failure",
                 "rate limit: fired detached rotator auto (rotate away only; cap learning is off, TRDD-AWIWXJIG)",
             )
-    except Exception:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
-        pass
+    except Exception as exc:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
+        # why (TRDD-SWQXCIOS): the 429 recovery is a fail-open side path after the resume-cue flag write, so
+        # the hook must exit 0 with the cue intact. The catch stays broad because the try body raises an open
+        # set (import, path probes, subprocess spawn, log write). The log line names the exception TYPE only,
+        # never its message. The log call has its own typed guard so logging cannot raise out of this hook.
+        try:
+            state.log_line(
+                "stop-failure",
+                f"rate-limit recovery step failed ({type(exc).__name__}); resume cue already written",
+            )
+        except (OSError, RuntimeError, ValueError):
+            pass
 
     # #J delegation (TRDD-PZLVT2RN Phase D) — best-effort, STRICTLY AFTER the critical
     # flag write. Inside an ai-maestro harness agent the SERVER owns Family-A resume, so
