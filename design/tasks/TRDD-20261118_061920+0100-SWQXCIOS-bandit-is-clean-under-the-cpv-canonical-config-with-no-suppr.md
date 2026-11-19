@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: todo
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-18T16:27:56+0100
+updated: 2026-11-19T13:27:35+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -35,6 +35,8 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 - 2026-11-18T16:21:41+0100 — progress, by cheap-worker for main-agent. Commit cf68bfb9 (scripts/clear_trigger.py, scripts/lib/fleet_scan.py, tests/test_clear_trigger.py, tests/test_fleet_scan.py); per main-agent evidence: two B110 sites fixed; clear_trigger.py logs the broad catch at the fail-open boundary, fleet_scan.py catches a typed tuple. Acceptance boxes 2 to 4 stay open (bandit exit 0; no marker added, with the jev_compaction nosec ruling; ci-preflight on a fresh clone). The card stays todo.
 - 2026-11-18T16:24:13+0100 — implementation-commits lists the 28 SHAs of commits that changed code, tests or config (grep-derived: git log --grep=TRDD-SWQXCIOS, minus design/, reports/ and cspell-only commits; every kept subject names TRDD-SWQXCIOS). The commits named in this STATE (137fd747, 9ca341ca, 71bc2ba7, 767b8511, a12f276a, c38eddcd) are in the field.
 - 2026-11-18T16:27:55+0100 — correction, by cheap-worker: this line records that the disclosure line above was edited in place on this date. The field now lists the 28 landed SHAs that changed code, tests or config: git log --grep=TRDD-SWQXCIOS, oldest first, minus commits whose files are all under design/ or reports/ or the cspell word list (5 of 33 dropped: c4eab769, 10bc7531, f260bd6d, bf6eacaa, 1e155b8e).
+- 2026-11-19T13:25:00+0100 — by main-agent: owner ruling (AskUserQuestion; the option text was written by the agent, the owner chose it): "Allow lint-only edits (Recommended)" to the question whether workers may make lint-only edits to the rotator files (full executable paths in subprocess calls), with no change to what the rotator does. The rotator stays frozen for any other work. This lifts the hold on the rotator and rotator-adjacent bandit sites for lint-only edits.
+- 2026-11-19T13:25:00+0100 — by main-agent: owner ruling (AskUserQuestion; the option text was written by the agent, the owner chose it): "Yes, use the helper (Recommended)" for the B607 helper scripts/lib/exe_path.py exe() across the B607 sites, after being told it satisfies bandit without making the code safer. The 06:25 disclosure is answered. The nosec question (dispatcher-stub B606, test_sandbox_guard_process B605, jev_compaction nosec B108) was asked the same day and not answered: no new marker is added; those sites stay open.
 
 ## Lanes
 

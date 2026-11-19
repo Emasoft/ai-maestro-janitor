@@ -1,10 +1,10 @@
 ---
 trdd-id: 6IFL3OXG
 title: Keep-going nudge quotes a days-old owner record as the owner's last message and steers sessions off their goal
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-11-19T12:23:17+0100
-updated: 2026-11-19T12:57:59+0100
+updated: 2026-11-19T13:38:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ mandated-by: manager
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-19T12:23:17+0100
+implementation-commits: [c4834cb9]
 ---
 
 # Keep-going nudge quotes a days-old owner record as the owner's last message and steers sessions off their goal
@@ -42,6 +43,7 @@ The record is a snapshot of the cleared transcript at clear time. Messages typed
 ## Approval log
 
 - 2026-11-19T12:23:17+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-19T13:38:16+0100 — COMPLETE by main-agent@ai-maestro-janitor. archived as complete (from column dev).
 
 ## STATE
 
@@ -51,3 +53,4 @@ The record is a snapshot of the cleared transcript at clear time. Messages typed
 - Final (2026-11-19): 8 new tests in tests/test_dispatch_phases.py (the 7 above + test_keep_going_nudge_skips_a_newer_bare_resume_and_quotes_the_older_owner_message_with_content: newest row bare resume, older row with content -> older quoted; no code change, external_clear._classify_line already drops bare control words via transcript_roles.is_control_input). Results: test_dispatch_phases 284 passed (-k keep_going 38 passed); test_external_clear 119 passed; test_session_continuity 40 passed; test_jev_compaction 142, test_llm_ext_summary 62, test_on_session_start_post_clear_compact 46, test_precompact_handoff_hook 79, test_summarize_previous_session 71 passed; ruff, mypy, pyright 0 errors.
 - Correction (2026-11-19): the earlier line saying no code change for control words stands for behavior only; a 4-line docstring was added to external_clear.newest_owner_message citing TRDD-6IFL3OXG (no behavior change). Verified by running _classify_line directly: a queued_command attachment with prompt resume, Resume. or continue! returns None (dropped, external_clear.py:605 via transcript_roles.is_control_input, _CONTROL_TOKENS at transcript_roles.py:233); typed Continue. returns None (line 587); go on and resume the pending work are kept. So a queued bare control word is not quoted.
 - Orchestrator check (2026-11-19, final tree): test_dispatch_phases 284 passed; ruff, mypy, pyright 0 on the 4 changed files; all Done-means boxes ticked. mandated-by reads manager but no manager exists in this session (the mandate came from the orchestrator); trddgrep set and edit refuse that field (written only by create/approve paths), so it is left as is and recorded here.
+- Committed in c4834cb9 (2026-11-19); fix reaches the running heartbeat after the 3.9.9 release is installed.
