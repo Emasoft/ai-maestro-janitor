@@ -1,6 +1,6 @@
 ---
-prrd-version: 2.5
-updated: "2026-11-18T23:57:59+0100"
+prrd-version: 2.6
+updated: "2026-11-19T12:32:56+0100"
 project: ai-maestro-janitor
 project-id: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
@@ -68,6 +68,8 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 - **G32.1** — jss example tools — the owner's words of 2026-11-18, verbatim: "for the Janitor Secrets Shield (jss) i added some useful scripts and functions (with tests) for manipulating .env files and guides to use them that should be an example of how to use the jss (or jsscli, in case of existing jss tools) for handling secrets without the agent ever see them. you can distribute as they are with the plugin, so i put them here: `$CLAUDE_PLUGIN_ROOT/scripts/janitor-env-tools/`. add them to the requirements folder too, under `./design/requirements/examples/`, mentioning them in the rules (those you should have had added from my two previous messages)." The tools ship in scripts/janitor-env-tools/ and are copied to design/requirements/examples/janitor-env-tools/; G30.1 and G31.1 are the rules they illustrate.
 
 - **G33.1** — jss example tools, compatibility — the owner's words of 2026-11-18, verbatim, said before G27.1-G32.1 were added: "before adding them to the golden rules make sure that to fix any error in the code (bash code must be 3.2 and 5.2 and zsh compatible, macos and linux both)"
+
+- **G34.1** — Every issue becomes a ticket or a TRDD — the owner's words of 2026-11-19, verbatim: "issues must be solved not just reported. every issue must become either a janitor ticket or a TRDD. the janitor must ensure that, enforce that, nudge that!"
 
 ## 🥈 SILVER — MANAGER-mutable (agents propose via COS)
 

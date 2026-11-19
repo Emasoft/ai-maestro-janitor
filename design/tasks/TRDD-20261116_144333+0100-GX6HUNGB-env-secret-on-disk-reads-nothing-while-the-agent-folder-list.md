@@ -4,7 +4,7 @@ title: env-secret-on-disk reads nothing while the agent-folder listing overruns 
 column: design
 status: tasked
 created: 2026-11-16T14:43:33+0100
-updated: 2026-11-16T15:09:07+0100
+updated: 2026-11-19T12:34:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,6 +28,7 @@ approval-datetime: 2026-11-16T14:43:33+0100
 - Design constraint from TRDD-ZANQ1QW0: an mtime edge may move only over a complete listing, so a cut listing must not move state.
 - Options to weigh: (a) the owner moves or removes the two scratch copies (an owner decision; _dev contents are never deleted by an agent); (b) a listing that resumes across passes from a saved position, which needs a design that keeps the complete-listing rule; (c) a larger listing share inside the 75 s main hard bound; (d) skip known scratch-copy subtrees.
 - Related: TRDD-ZANQ1QW0 (archived), TRDD-G14LKPEC, issue 354.
+- 2026-11-19, by the orchestrator, unverified unless stated: the detector makes no progress at all on this host. The log line reads "the listing of the agent folders took over 30 s and was cut: no agent-folder file was read this pass and the covered range did not move (TRDD-ZANQ1QW0)". Appended under TRDD-IP23RNLY / PRRD G34.1 instead of a new card.
 
 ## Approval log
 
