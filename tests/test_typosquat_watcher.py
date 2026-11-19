@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "typosquat-watcher.py"
@@ -101,8 +102,8 @@ def _git_repo_with_ignored_typosquat(root: Path) -> None:
     _typo_lock(root / "downloads_dev" / "package-lock.json")
     _typo_lock(root / "src" / "package-lock.json")
     (root / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "add", ".gitignore", "src/package-lock.json"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", ".gitignore", "src/package-lock.json"], cwd=root, check=True)
 
 
 def test_tracked_typosquat_lockfile_still_fires_from_the_git_listing(tmp_path: Path) -> None:

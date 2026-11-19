@@ -23,6 +23,7 @@ _LIB = _PROJECT_ROOT / "scripts" / "lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import memory_scopes  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _import_hook():
@@ -177,7 +178,7 @@ def test_leak_guard_refuses_when_git_does_not_ignore_the_new_root(tmp_path, _iso
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
     subprocess.run(
-        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+        [exe("git"), "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
     )
     slug = memory_scopes.project_slug(str(project_dir))
     old = _isolate / ".claude" / "projects" / slug / "design"
@@ -201,7 +202,7 @@ def test_leak_guard_proceeds_when_git_ignores_the_new_root(tmp_path, _isolate):
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
     subprocess.run(
-        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+        [exe("git"), "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
     )
     (project_dir / ".gitignore").write_text(".claude/**\n", encoding="utf-8")
     slug = memory_scopes.project_slug(str(project_dir))
@@ -225,7 +226,7 @@ def test_leak_guard_refuses_when_the_new_root_is_explicitly_unignored(tmp_path, 
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
     subprocess.run(
-        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+        [exe("git"), "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
     )
     # A NAIVE guard that only checked "does a .gitignore exist mentioning .claude" would
     # wrongly call this "ignored" (line 1 alone would match without the negations below).

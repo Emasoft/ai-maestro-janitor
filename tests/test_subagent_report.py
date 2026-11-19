@@ -20,11 +20,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from exe_path import exe
+
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "subagent-report.py"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run([exe("git"), *args], cwd=root, check=True, capture_output=True, text=True)
 
 
 def _init_repo(root: Path) -> None:

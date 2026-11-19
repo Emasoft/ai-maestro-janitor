@@ -33,6 +33,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import terminal_trigger as tt  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _IDLE_FRAME = "synthetic-idle-empty-field.txt"
 _THRESHOLD = 800  # Claude Code 2.1.325's single-chunk paste threshold (R8)
@@ -117,7 +118,7 @@ class _Pane:
         # Production's `tmux send-keys -t %N` has no -L: it finds its server through $TMUX.
         monkeypatch.setenv("TMUX", f"{socket_path},{server_pid},0")
         seen = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", self.pane_id, "#{socket_path}"],
+            [exe("tmux"), "display-message", "-p", "-t", self.pane_id, "#{socket_path}"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
         assert seen == socket_path, f"TMUX env does not select the private server: {seen!r} != {socket_path!r}"
@@ -126,7 +127,7 @@ class _Pane:
 
     def _tmux(self, *args: str) -> str:
         return subprocess.run(
-            ["tmux", "-u", "-L", self._label, "-f", "/dev/null", *args],
+            [exe("tmux"), "-u", "-L", self._label, "-f", "/dev/null", *args],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout
 
@@ -152,7 +153,7 @@ class _Pane:
         return [int(n) for n in self.reads_file.read_text(encoding="utf-8").split()]
 
     def close(self) -> None:
-        subprocess.run(["tmux", "-L", self._label, "kill-server"], check=False, timeout=10, capture_output=True)
+        subprocess.run([exe("tmux"), "-L", self._label, "kill-server"], check=False, timeout=10, capture_output=True)
 
 
 def _make_pane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, chip_clears_needed: int = 1) -> _Pane:
@@ -207,7 +208,7 @@ def test_stranded_paste_placeholder_is_cleared_before_the_next_typing(tmp_path: 
             if not calls:
                 # The OLD behaviour, to strand the placeholder for real: the whole command in ONE write.
                 subprocess.run(
-                    ["tmux", "send-keys", "-t", pane.pane_id, "-l", _GOAL],
+                    [exe("tmux"), "send-keys", "-t", pane.pane_id, "-l", _GOAL],
                     check=True, timeout=10, capture_output=True,
                 )
                 time.sleep(1.0)

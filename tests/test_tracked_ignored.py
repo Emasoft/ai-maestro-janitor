@@ -19,11 +19,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from exe_path import exe
+
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "tracked-ignored.py"
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True,
+    subprocess.run([exe("git"), "-C", str(repo), *args], check=True,
                    capture_output=True, text=True)
 
 

@@ -26,6 +26,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 DETECTOR = (
     Path(__file__).resolve().parent.parent
@@ -43,7 +44,7 @@ def _git(args: list[str], cwd: Path) -> None:
     env["GIT_AUTHOR_EMAIL"] = "t@example.com"
     env["GIT_COMMITTER_NAME"] = "T"
     env["GIT_COMMITTER_EMAIL"] = "t@example.com"
-    subprocess.run(["git", *args], cwd=str(cwd), env=env, check=True,
+    subprocess.run([exe("git"), *args], cwd=str(cwd), env=env, check=True,
                    capture_output=True, text=True)
 
 
@@ -93,7 +94,7 @@ def _commit_all(root: Path, subject: str, *, spec_only: bool = False) -> str:
         (root / "scripts" / "impl.py").write_text(f"# {subject}\n", encoding="utf-8")
     _git(["add", "-A"], root)
     _git(["commit", "-q", "-m", subject], root)
-    res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
+    res = subprocess.run([exe("git"), "rev-parse", "HEAD"], cwd=str(root),
                          capture_output=True, text=True, check=True)
     return res.stdout.strip()
 
@@ -960,7 +961,7 @@ def _git_hermetic(args: list[str], cwd: Path) -> None:
     `commit.gpgsign=true` is set globally: without it, `git commit` would try to invoke a real
     signing key and hang or fail outside this test's control."""
     subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+        [exe("git"), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
          "-c", "commit.gpgsign=false", *args],
         cwd=str(cwd), check=True, capture_output=True, text=True,
     )
@@ -1211,7 +1212,7 @@ def test_failing_git_worktree_list_is_one_stderr_line_and_exit_1(tmp_path: Path,
     """TRDD-56FOY1U1: a failing `git worktree list` is one trdd-state-reconciliation stderr line + exit 1, not a traceback."""
     project = tmp_path / "proj"
     (project / "design" / "tasks").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, capture_output=True)
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = str(project)
     env["CLAUDE_SESSION_ID"] = "gitfail"

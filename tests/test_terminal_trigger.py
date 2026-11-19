@@ -30,6 +30,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import state  # noqa: E402
 import terminal_trigger as tt  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 try:  # conftest is importable by test modules (see its module docstring)
     from conftest import away_home  # type: ignore[import-not-found]
@@ -430,12 +431,12 @@ def test_tmux_real_send_delivers_keystrokes(monkeypatch):
                     "opt in with JANITOR_TEST_REAL_TMUX=1")
     session = f"janitor-tt-pytest-{os.getpid()}"
     subprocess.run(
-        ["tmux", "new-session", "-d", "-s", session, "-x", "80", "-y", "24", "cat"],
+        [exe("tmux"), "new-session", "-d", "-s", session, "-x", "80", "-y", "24", "cat"],
         check=True, timeout=10,
     )
     try:
         panes = subprocess.run(
-            ["tmux", "list-panes", "-t", session, "-F", "#{pane_id}"],
+            [exe("tmux"), "list-panes", "-t", session, "-F", "#{pane_id}"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.split()
         assert panes, "tmux session has no pane"
@@ -452,7 +453,7 @@ def test_tmux_real_send_delivers_keystrokes(monkeypatch):
         deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
             captured = subprocess.run(
-                ["tmux", "capture-pane", "-t", session, "-p"],
+                [exe("tmux"), "capture-pane", "-t", session, "-p"],
                 capture_output=True, text=True, check=True, timeout=10,
             ).stdout
             if marker in captured:
@@ -460,7 +461,7 @@ def test_tmux_real_send_delivers_keystrokes(monkeypatch):
             time.sleep(0.15)
         assert marker in captured, f"typed command never reached the pane; got:\n{captured!r}"
     finally:
-        subprocess.run(["tmux", "kill-session", "-t", session], check=False, timeout=10)
+        subprocess.run([exe("tmux"), "kill-session", "-t", session], check=False, timeout=10)
 
 
 # --- ai-maestro API send (TRDD-db169d9e R4) --------------------------------

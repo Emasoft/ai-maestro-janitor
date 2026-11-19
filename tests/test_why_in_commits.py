@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _DETECTOR = (
     Path(__file__).resolve().parent.parent
@@ -36,7 +37,7 @@ def _git(repo: Path, *args: str, date: str | None = None) -> None:
     if date is not None:
         env["GIT_AUTHOR_DATE"] = date
         env["GIT_COMMITTER_DATE"] = date
-    subprocess.run(["git", *args], cwd=repo, check=True,
+    subprocess.run([exe("git"), *args], cwd=repo, check=True,
                    capture_output=True, text=True, env=env)
 
 

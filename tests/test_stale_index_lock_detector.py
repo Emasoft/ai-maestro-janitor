@@ -13,6 +13,8 @@ import sys
 import time
 from pathlib import Path
 
+from exe_path import exe
+
 ROOT = Path(__file__).resolve().parents[1]
 DETECTOR = ROOT / "scripts" / "detectors" / "stale-index-lock.py"
 
@@ -56,7 +58,7 @@ def _run(project: Path, *, ps_snapshot: str = _PS_NO_GIT) -> subprocess.Complete
 
 
 def _git_init(project: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True)
 
 
 def test_stale_lock_is_removed_and_reported(tmp_path: Path) -> None:
@@ -117,7 +119,7 @@ def test_lock_survives_when_a_live_git_process_is_in_the_snapshot(tmp_path: Path
 
     os.utime(lock, (stale_ts, stale_ts))
 
-    proc = subprocess.Popen(["sleep", "30"], cwd=str(project))
+    proc = subprocess.Popen([exe("sleep"), "30"], cwd=str(project))
     try:
         ps_snapshot = _PS_NO_GIT + f" {proc.pid}  4242       00:01 git commit -m wip\n"
         result = _run(project, ps_snapshot=ps_snapshot)

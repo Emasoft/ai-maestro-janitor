@@ -13,18 +13,20 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from exe_path import exe
+
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "stale-stash.py"
 
 
 def _repo(tmp_path: Path) -> Path:
     """Create a real git repo with one committed file so that later edits can be stashed."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "config", "user.name", "t"], cwd=tmp_path, check=True)
     (tmp_path / "seed.txt").write_text("seed\n", encoding="utf-8")
-    subprocess.run(["git", "add", "seed.txt"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "add", "seed.txt"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "commit", "-qm", "seed"], cwd=tmp_path, check=True)
     return tmp_path
 
 
@@ -33,7 +35,7 @@ def _stash(repo: Path, message: str, days_ago: int) -> None:
     (repo / "seed.txt").write_text(f"{message}\n", encoding="utf-8")
     when = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S+0000")
     env = dict(os.environ, GIT_COMMITTER_DATE=when)
-    subprocess.run(["git", "stash", "push", "-q", "-m", message], cwd=repo, check=True, env=env)
+    subprocess.run([exe("git"), "stash", "push", "-q", "-m", message], cwd=repo, check=True, env=env)
 
 
 def _run(project: Path, home: Path) -> str:
@@ -55,7 +57,7 @@ def test_a_nudged_stash_is_not_re_emitted_after_a_newer_stash_is_pushed(tmp_path
     home = tmp_path / "home"
     _stash(repo, "old work", days_ago=40)
     old_sha = subprocess.run(
-        ["git", "rev-parse", "stash@{0}"], cwd=repo, capture_output=True, text=True, check=True
+        [exe("git"), "rev-parse", "stash@{0}"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout.strip()
 
     first = _run(repo, home)
@@ -75,7 +77,7 @@ def test_the_advisory_names_the_stash_commit_not_a_positional_index(tmp_path: Pa
     repo = _repo(tmp_path / "proj")
     _stash(repo, "old work", days_ago=40)
     sha = subprocess.run(
-        ["git", "rev-parse", "stash@{0}"], cwd=repo, capture_output=True, text=True, check=True
+        [exe("git"), "rev-parse", "stash@{0}"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout.strip()
 
     out = _run(repo, tmp_path / "home")

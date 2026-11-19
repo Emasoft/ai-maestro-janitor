@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 DETECTOR = (
     Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "trdd-reminder.py"
@@ -199,7 +200,7 @@ def test_failing_git_worktree_list_is_one_stderr_line_and_exit_1(tmp_path: Path,
     """TRDD-56FOY1U1: a failing `git worktree list` is one trdd-reminder stderr line + exit 1, not a traceback."""
     project = tmp_path / "proj"
     (project / "design" / "tasks").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, capture_output=True)
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = str(project)
     env["CLAUDE_SESSION_ID"] = "gitfail"

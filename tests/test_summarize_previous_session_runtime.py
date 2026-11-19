@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "summarize_previous_session.py"
@@ -122,7 +123,7 @@ def test_summarize_previous_session_runs_stdlib_only_under_uv_run(tmp_path: Path
     # `cold_cache_compact.newest_transcript` resolves the transcript dir as
     # `HOME/.claude/projects/<slug>/*.jsonl`, slug = every non-alnum char of the RESOLVED
     # project dir dashed (`memory_scopes.project_slug`, mirrored here so this file stays
-    # boundary-only and imports nothing from `scripts/lib`).
+    # boundary-only and its only scripts/lib import is the stdlib-only `exe_path`).
     slug = re.sub(r"[^A-Za-z0-9]", "-", str(project_dir.resolve()))
     transcripts_dir = home_dir / ".claude" / "projects" / slug
     transcripts_dir.mkdir(parents=True)
@@ -143,8 +144,9 @@ def test_summarize_previous_session_runs_stdlib_only_under_uv_run(tmp_path: Path
     if os.environ.get("TMPDIR"):
         env["TMPDIR"] = os.environ["TMPDIR"]
 
+    # WHY env: env puts the uv bin dir first on PATH; exe() must resolve through it.
     proc = subprocess.run(
-        ["uv", "run", "--script", "--quiet", str(_SCRIPT)],
+        [exe("uv", env), "run", "--script", "--quiet", str(_SCRIPT)],
         env=env, capture_output=True, text=True, timeout=180,
     )
 

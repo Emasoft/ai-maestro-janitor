@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 from conftest import MEMGREP_BIN_PATH
+from exe_path import exe
 
 REPO = Path(__file__).resolve().parent.parent
 SPEC = REPO / "design" / "specs" / "wikimem-memgrep-spec.md"
@@ -146,7 +147,7 @@ def _bench_flags() -> set[str]:
     report every legitimate `--corpus` / `--baseline` mention as a phantom.
     """
     proc = subprocess.run(
-        ["uv", "run", str(REPO / "scripts" / "wikimem_bench.py"), "--help"],
+        [exe("uv"), "run", str(REPO / "scripts" / "wikimem_bench.py"), "--help"],
         capture_output=True,
         text=True,
         timeout=180,

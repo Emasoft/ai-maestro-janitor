@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 import transcript_redact as tr
 from _fake_secrets import b62, hexs, secret
+from exe_path import exe
 
 # The suite denies every real binary by default (tests/sandbox_guard.py); this file exists to run the REAL bun and the REAL git, so it opts in.
 pytestmark = pytest.mark.real_subprocess("bun", "git")
@@ -86,7 +87,7 @@ class Box:
 
     def git(self, cwd: Path, *args: str) -> None:
         """Run git in cwd; a failure raises."""
-        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env())
+        subprocess.run([exe("git"), "-C", str(cwd), *args], check=True, capture_output=True, text=True, timeout=TIMEOUT_S, env=self.env())
 
     def put(self, path: Path, text: str | bytes) -> Path:
         """Write a file, creating its folders."""

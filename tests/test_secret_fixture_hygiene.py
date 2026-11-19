@@ -21,6 +21,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Files that legitimately contain these patterns as *documentation / regex
@@ -142,7 +144,7 @@ _BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pyc", ".woff", ".
 
 def _tracked_files() -> list[Path]:
     out = subprocess.run(
-        ["git", "ls-files"],
+        [exe("git"), "ls-files"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,

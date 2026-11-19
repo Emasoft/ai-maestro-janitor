@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import memory_scopes  # type: ignore[import-not-found]  # noqa: E402
 import trdd_common  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 TRDD = "TRDD-20260711_120000+0200-ABCD1234-a-task.md"
 TRDD2 = "TRDD-20260711_130000+0200-EFGH5678-another-task.md"
@@ -65,7 +66,7 @@ def test_local_design_root_resolves_a_worktree_to_its_main_checkout(tmp_path: Pa
     main.mkdir()
 
     def _git(*args: str) -> None:
-        subprocess.run(["git", *args], cwd=main, check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), *args], cwd=main, check=True, capture_output=True, text=True)
 
     _git("init", "-q")
     _git("config", "user.email", "test@example.com")
@@ -92,7 +93,7 @@ def test_local_design_root_raises_on_a_worktree_list_failure_inside_a_repo(
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(
-        ["git", "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
+        [exe("git"), "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
     )
     real_run = subprocess.run
 
@@ -120,7 +121,7 @@ def test_main_checkout_root_is_memoized_per_project_dir(
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(
-        ["git", "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
+        [exe("git"), "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
     )
     real_run = subprocess.run
     calls = []
@@ -152,7 +153,7 @@ def test_local_design_root_of_a_submodule_stays_in_the_submodule(tmp_path: Path)
     which would mix one submodule's machine-private cards into a sibling checkout's board."""
 
     def _git(cwd: Path, *args: str) -> None:
-        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+        subprocess.run([exe("git"), *args], cwd=cwd, check=True, capture_output=True, text=True)
 
     sub_origin = tmp_path / "sub_origin"
     sub_origin.mkdir()

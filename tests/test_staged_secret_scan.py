@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from _fake_secrets import secret
+from exe_path import exe
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import publish  # noqa: E402
@@ -55,7 +56,7 @@ class Box:
         self.git("config", "commit.gpgsign", "false")
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["git", *args], cwd=self.repo, env=_env(self.fakehome, self.tmp), capture_output=True, text=True, check=check)
+        return subprocess.run([exe("git"), *args], cwd=self.repo, env=_env(self.fakehome, self.tmp), capture_output=True, text=True, check=check)
 
     def write(self, rel: str, text: str) -> None:
         p = self.repo / rel

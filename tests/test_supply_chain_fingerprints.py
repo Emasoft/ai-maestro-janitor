@@ -28,6 +28,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "supply-chain-fingerprints.py"
 
@@ -438,8 +440,8 @@ def test_setup_py_exfil_still_fires_from_the_git_listing(tmp_path: Path) -> None
         "setup(name='evil', version='1.0')\n",
         encoding="utf-8",
     )
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "add", "setup.py"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "add", "setup.py"], cwd=tmp_path, check=True)
     r = _run(tmp_path)
     assert r.returncode == 0, r.stderr
     assert "[pypi-setup-py-ast]" in r.stdout
@@ -666,7 +668,7 @@ def test_gitignored_corpus_is_not_scored_as_the_projects_supply_chain(
     tree was scanned. A skip list that silently matches nothing is worse than no skip
     list: it reads as covered.
     """
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
     corpus = tmp_path / "downloads_dev" / "malware-sample"
     corpus.mkdir(parents=True)
@@ -688,7 +690,7 @@ def test_gitignored_corpus_is_not_scored_as_the_projects_supply_chain(
 def test_the_projects_own_setup_py_is_still_scanned(tmp_path: Path) -> None:
     """The guard above must not disable the check. A TRACKED setup.py with the same
     exfil-cluster imports is exactly what this detector exists to catch."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / "setup.py").write_text(
         "import base64, socket, subprocess\n"
         "from setuptools import setup\n"

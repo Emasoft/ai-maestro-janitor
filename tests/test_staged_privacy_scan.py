@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import staged_privacy_scan as sps  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Private values are ASSEMBLED at runtime, never written as literals: this
 # test file is itself tracked in the public repo and the very gate under test
@@ -36,7 +37,7 @@ def _mac_home(user: str) -> str:
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
+        [exe("git"), *args], cwd=str(repo), capture_output=True, text=True, check=True, timeout=30,
     )
     return r.stdout
 
