@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jsonl_walk  # noqa: E402  -- sibling lib; stdlib-only byte-safe JSONL tail reader (TRDD-A8DRRW0I)
 import state  # noqa: E402
 import token_history  # noqa: E402  -- sibling lib; leaf-safe, provides parse_ts
+from exe_path import exe  # noqa: E402
 
 # How long a recorded intent stays valid. The user types `/janitor-disarm`, the skill runs seconds
 # later — this only has to bridge that gap. Generous, but far short of "the rest of the session".
@@ -433,7 +434,7 @@ def hid_idle_seconds(*, timeout_s: float = 3.0) -> float | None:
     try:
         import subprocess
         proc = subprocess.run(
-            ["ioreg", "-c", "IOHIDSystem", "-d", "4"],
+            [exe("ioreg"), "-c", "IOHIDSystem", "-d", "4"],
             capture_output=True, text=True, timeout=timeout_s, check=False,
         )
     except Exception:  # noqa: BLE001 - a presence probe must never raise into an injection gate

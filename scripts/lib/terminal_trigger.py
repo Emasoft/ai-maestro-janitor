@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state  # noqa: E402
 import user_intent  # noqa: E402
+from exe_path import exe  # noqa: E402
 from token_burn import model_family  # noqa: E402  # one definition, shared with the rotator
 
 # Returned when the user is AT the terminal and did not ask for this command. Nothing is
@@ -616,7 +617,7 @@ def _run_osascript(script: str, *, timeout: float) -> subprocess.CompletedProces
     `state.run_subprocess` collapses both to `None`, which is fine for its many fire-and-log
     callers but loses exactly the distinction this function needs to decide "retry once"."""
     return subprocess.run(  # noqa: S603 - fixed argv, no shell; script content is caller-built
-        ["osascript", "-e", script],
+        [exe("osascript"), "-e", script],
         capture_output=True, text=True, check=False, timeout=timeout,
     )
 

@@ -398,7 +398,7 @@ def _stage_global_state_lib(fake_home: Path) -> None:
     """
     lib = fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/lib"
     lib.mkdir(parents=True)
-    for name in ("global_state.py", "state.py"):
+    for name in ("global_state.py", "state.py", "exe_path.py"):
         shutil.copy2(SCRIPTS / "lib" / name, lib / name)
 
 

@@ -96,6 +96,11 @@ import time
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+try:
+    from lib.exe_path import exe  # hook context: scripts/ on sys.path
+except ImportError:
+    from exe_path import exe  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
+
 # ---------- tunables -------------------------------------------------------
 
 DEFAULT_MIN_FREE_MB = 1024
@@ -774,12 +779,12 @@ def free_memory_mb() -> Optional[int]:
     """Free MB on macOS. None = unknown (never guess)."""
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["vm_stat"], capture_output=True, text=True, timeout=10, check=False,
+            [exe("vm_stat")], capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode != 0:
             return None
         page = subprocess.run(  # noqa: S603
-            ["sysctl", "-n", "hw.pagesize"],
+            [exe("sysctl"), "-n", "hw.pagesize"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         page_size = int(page.stdout.strip()) if page.returncode == 0 else 16384
@@ -833,7 +838,7 @@ def read_swap() -> tuple[Optional[int], Optional[int], Optional[int]]:
     files: Optional[int] = None
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["sysctl", "-n", "vm.swapusage"],
+            [exe("sysctl"), "-n", "vm.swapusage"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode == 0:
@@ -842,7 +847,7 @@ def read_swap() -> tuple[Optional[int], Optional[int], Optional[int]]:
         pass
     try:
         out = subprocess.run(  # noqa: S603
-            ["sysctl", "-n", "vm.swapinfo"],
+            [exe("sysctl"), "-n", "vm.swapinfo"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode == 0:
@@ -867,7 +872,7 @@ def _sysctl_int(name: str) -> Optional[int]:
     """One `sysctl -n <name>` reading as an int, or None = unknown."""
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["sysctl", "-n", name],
+            [exe("sysctl"), "-n", name],
             capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -929,19 +934,19 @@ def read_compressor_pct() -> Optional[int]:
     """
     try:
         out = subprocess.run(  # noqa: S603
-            ["vm_stat"], capture_output=True, text=True, timeout=10, check=False,
+            [exe("vm_stat")], capture_output=True, text=True, timeout=10, check=False,
         )
         if out.returncode != 0:
             return None
         total = subprocess.run(  # noqa: S603
-            ["sysctl", "-n", "hw.memsize"],
+            [exe("sysctl"), "-n", "hw.memsize"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         if total.returncode != 0:
             return None
         total_mb = int(total.stdout.strip()) // (1024 * 1024)
         page = subprocess.run(  # noqa: S603
-            ["sysctl", "-n", "hw.pagesize"],
+            [exe("sysctl"), "-n", "hw.pagesize"],
             capture_output=True, text=True, timeout=10, check=False,
         )
         page_size = int(page.stdout.strip()) if page.returncode == 0 else 16384
@@ -1022,7 +1027,7 @@ def snapshot_claude_env() -> dict[int, tuple[bool, Optional[int]]]:
     envs: dict[int, tuple[bool, Optional[int]]] = {}
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "eww", "-axo", "pid=,command="],
+            [exe("ps"), "eww", "-axo", "pid=,command="],
             capture_output=True, text=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1112,7 +1117,7 @@ def read_claude_env_once(pid: int) -> tuple[bool, Optional[int]]:
         return hit
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "eww", "-o", "command=", "-p", str(pid)],
+            [exe("ps"), "eww", "-o", "command=", "-p", str(pid)],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1359,7 +1364,7 @@ def read_owner_comm(pid: int) -> Optional[str]:
         raise OwnerProbeError(f"invalid owner pid {pid}")
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "-p", str(pid), "-o", "comm="],
+            [exe("ps"), "-p", str(pid), "-o", "comm="],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -1544,7 +1549,7 @@ def swapfile_size_bytes() -> Optional[int]:
     """
     try:
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["sysctl", "-n", "vm.compressor.swapper.swapfile_size_max"],
+            [exe("sysctl"), "-n", "vm.compressor.swapper.swapfile_size_max"],
             capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1880,7 +1885,7 @@ def snapshot_processes(snapshot_path: str) -> list[ProcRow]:
     try:
         with open(snapshot_path, "w", encoding="utf-8") as fh:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                ["ps", "-axo", "pid,ppid,rss,etime,command"],
+                [exe("ps"), "-axo", "pid,ppid,rss,etime,command"],
                 stdout=fh, stderr=subprocess.DEVNULL, timeout=20, check=False,
             )
         if proc.returncode != 0:
@@ -1902,7 +1907,7 @@ def snapshot_ancestry(snapshot_path: str) -> dict[int, tuple[int, str]]:
     try:
         with open(snapshot_path, "w", encoding="utf-8") as fh:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                ["ps", "-axo", "pid=,ppid=,command="],
+                [exe("ps"), "-axo", "pid=,ppid=,command="],
                 stdout=fh, stderr=subprocess.DEVNULL, timeout=20, check=False,
             )
         if proc.returncode != 0:

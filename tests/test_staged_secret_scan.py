@@ -306,7 +306,7 @@ def test_scanner_missing_while_active_exits_2(box: Box, tmp_path: Path) -> None:
     """A plugin copy with no scripts/shield_scan: the scan cannot run, exits 2 and blocks."""
     lib = tmp_path / "plugin" / "scripts" / "lib"
     lib.mkdir(parents=True)
-    for name in ("staged_secret_scan.py", "transcript_redact.py"):
+    for name in ("staged_secret_scan.py", "transcript_redact.py", "exe_path.py"):
         shutil.copy2(REPO / "scripts" / "lib" / name, lib / name)
     box.stage("a.md", "clean\n")
     r = box.scan(script=lib / "staged_secret_scan.py")
@@ -316,7 +316,7 @@ def _plugin_with_fake_scanner(tmp_path: Path, scan_ts: str) -> Path:
     """A plugin copy whose scan.ts is a fixture script run by the real bun, so the exit-code handling of the scan is exercised."""
     lib = tmp_path / "plugin" / "scripts" / "lib"
     lib.mkdir(parents=True)
-    for name in ("staged_secret_scan.py", "transcript_redact.py"):
+    for name in ("staged_secret_scan.py", "transcript_redact.py", "exe_path.py"):
         shutil.copy2(REPO / "scripts" / "lib" / name, lib / name)
     shield = tmp_path / "plugin" / "scripts" / "shield_scan"
     shield.mkdir()

@@ -26,6 +26,11 @@ from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 
+try:
+    from lib.exe_path import exe  # hook context: scripts/ on sys.path
+except ImportError:
+    from exe_path import exe  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
+
 # ── The two design SCOPES (the SSOT every TRDD consumer must route through) ──
 #
 # A TRDD's scope IS ITS PATH — exactly like a memory note. There is no `scope:`
@@ -197,7 +202,7 @@ def _main_checkout_root(project_dir: str) -> Path:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         probe = subprocess.run(
-            ["git", "-C", project_dir, "rev-parse", "--is-inside-work-tree"],
+            [exe("git"), "-C", project_dir, "rev-parse", "--is-inside-work-tree"],
             capture_output=True, text=True, timeout=5, env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -206,7 +211,7 @@ def _main_checkout_root(project_dir: str) -> Path:
         return path  # not a git repo at all — nothing to resolve
     try:
         result = subprocess.run(
-            ["git", "-C", project_dir, "worktree", "list", "--porcelain"],
+            [exe("git"), "-C", project_dir, "worktree", "list", "--porcelain"],
             capture_output=True, text=True, timeout=5, env=git_env,
         )
     except subprocess.TimeoutExpired as exc:
@@ -229,7 +234,7 @@ def _main_checkout_root(project_dir: str) -> Path:
             if ".git" in candidate.parts:
                 # The submodule quirk (see docstring): recover the real checkout root.
                 toplevel = subprocess.run(
-                    ["git", "-C", project_dir, "rev-parse", "--show-toplevel"],
+                    [exe("git"), "-C", project_dir, "rev-parse", "--show-toplevel"],
                     capture_output=True, text=True, timeout=5, env=git_env,
                 )
                 if toplevel.returncode == 0 and toplevel.stdout.strip():

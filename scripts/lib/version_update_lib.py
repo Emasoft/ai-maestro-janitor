@@ -49,6 +49,7 @@ from pathlib import Path
 
 import janitor_integrity  # crash-safe DATA-dir read/write (backup_and_write / read_or_restore)
 import janitor_self_integrity  # the DATA-dir HMAC key (load_or_create_key)
+from exe_path import exe  # noqa: E402
 
 PLUGIN_NAME = "ai-maestro-janitor"
 MARKETPLACE_NAME = "ai-maestro-plugins"
@@ -453,13 +454,13 @@ def attempt_auto_update(log_writer: Callable[[str], None],
     if update_log_path is not None:
         with update_log_path.open("a", encoding="utf-8") as logf:
             proc = subprocess.run(
-                ["claude", "plugin", "marketplace", "update", MARKETPLACE_NAME],
+                [exe("claude"), "plugin", "marketplace", "update", MARKETPLACE_NAME],
                 stdout=logf, stderr=subprocess.STDOUT,
                 timeout=30, check=False,
             )
     else:
         proc = subprocess.run(
-            ["claude", "plugin", "marketplace", "update", MARKETPLACE_NAME],
+            [exe("claude"), "plugin", "marketplace", "update", MARKETPLACE_NAME],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=30, check=False,
         )

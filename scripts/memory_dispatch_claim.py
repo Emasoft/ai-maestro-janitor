@@ -53,6 +53,7 @@ import memory_candidates_cli  # noqa: E402
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 PENDING_PREFIX = "memory-maint-pending-"
 CLAIMED_PREFIX = "memory-maint-claimed-"
@@ -253,7 +254,7 @@ def _reports_dir_candidates(state_dir: Path) -> list[Path]:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
     try:
         result = subprocess.run(
-            ["git", "-C", str(project), "worktree", "list", "--porcelain"],
+            [exe("git"), "-C", str(project), "worktree", "list", "--porcelain"],
             capture_output=True, text=True, timeout=5, check=True, env=git_env,
         )
         first_line = result.stdout.splitlines()[0]

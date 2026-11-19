@@ -20,6 +20,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+try:
+    from lib.exe_path import exe  # hook context: scripts/ on sys.path
+except ImportError:
+    from exe_path import exe  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
+
 # --- per-project state filenames (cross-module contract) -------------------
 
 # The POSITIVE opt-out. Written by /janitor-disarm, removed by /janitor-arm, and
@@ -126,7 +131,7 @@ def _resolve_project_root() -> Path:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [exe("git"), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=True,
@@ -181,7 +186,7 @@ def tracked_repo(project_dir: str) -> Optional[Path]:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         proc = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            [exe("git"), "-C", str(root), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, check=False, env=git_env,
         )
         if proc.returncode == 0 and proc.stdout.strip():
@@ -202,7 +207,7 @@ def tracked_repo(project_dir: str) -> Optional[Path]:
         return None
     try:
         proc = subprocess.run(
-            ["git", "-C", str(sub), "rev-parse", "--show-toplevel"],
+            [exe("git"), "-C", str(sub), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, check=False, env=git_env,
         )
         if proc.returncode == 0 and proc.stdout.strip():

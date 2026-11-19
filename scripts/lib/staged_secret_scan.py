@@ -50,6 +50,7 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import transcript_redact  # noqa: E402  (resolve_bun; stdlib-only sibling)
+from exe_path import exe  # noqa: E402
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _SHIELD_DIR = _PLUGIN_ROOT / "scripts" / "shield_scan"
@@ -112,7 +113,7 @@ def _inert_reason() -> str | None:
 def _git(root: Path, args: list[str], *, stdin: bytes | None = None) -> bytes:
     """Run git in `root` with the hook environment (GIT_INDEX_FILE and the like) kept: that is how the index of a `commit -a` is seen."""
     try:
-        r = subprocess.run(["git", *args], cwd=root, input=stdin, capture_output=True, check=False, timeout=60, env=_GIT_ENV)
+        r = subprocess.run([exe("git"), *args], cwd=root, input=stdin, capture_output=True, check=False, timeout=60, env=_GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         raise ScannerError("git could not be run") from None
     if r.returncode != 0:
@@ -122,7 +123,7 @@ def _git(root: Path, args: list[str], *, stdin: bytes | None = None) -> bytes:
 
 def _repo_root() -> Path:
     try:
-        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, check=False, timeout=10, env=_GIT_ENV)
+        r = subprocess.run([exe("git"), "rev-parse", "--show-toplevel"], capture_output=True, check=False, timeout=10, env=_GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         raise ScannerError("git could not be run") from None
     if r.returncode != 0 or not r.stdout.strip():

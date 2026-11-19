@@ -432,7 +432,7 @@ def test_auto_update_skips_when_no_scope_detected(
     marketplace refresh is the only subprocess."""
     vu = _vu()
     calls: list[list[str]] = []
-    monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
+    monkeypatch.setattr(vu.shutil, "which", lambda _x, **_kw: "/usr/bin/claude")
     def _record_run(cmd: list[str], **kw: object) -> _Proc:
         calls.append(cmd)
         return _Proc(0)
@@ -455,7 +455,7 @@ def test_auto_update_passes_exact_scope_per_detected_scope(
     """One `claude plugin update … --scope <s>` per detected scope, never scope-less."""
     vu = _vu()
     calls: list[list[str]] = []
-    monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
+    monkeypatch.setattr(vu.shutil, "which", lambda _x, **_kw: "/usr/bin/claude")
     def _record_run(cmd: list[str], **kw: object) -> _Proc:
         calls.append(cmd)
         return _Proc(0, "updated from 0.1.0 to 0.2.0")
