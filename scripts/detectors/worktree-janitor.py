@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import git_utils  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _git(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
@@ -48,7 +49,7 @@ def _git(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
-        ["git", *args],
+        [exe("git"), *args],
         cwd=str(cwd) if cwd is not None else None,
         capture_output=True, text=True, check=False,
         env=env,

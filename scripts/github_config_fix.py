@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import branch_protection_lib as bpl  # noqa: E402
 import github_config_audit as gca  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # The finding codes this script can actually remedy by changing repo CONFIG (rulesets).
 # NO_CI is deliberately NOT one of them: no ruleset change adds a CI workflow — that needs
@@ -98,7 +99,7 @@ def _fetch_remote_workflows(slug: str) -> dict[str, str]:
     single malformed file skips cleanly."""
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["gh", "api", f"repos/{slug}/contents/.github/workflows"],
+            [exe("gh"), "api", f"repos/{slug}/contents/.github/workflows"],
             capture_output=True, text=True, timeout=30, check=False,
         )
         if proc.returncode != 0:
@@ -117,7 +118,7 @@ def _fetch_remote_workflows(slug: str) -> dict[str, str]:
             continue
         try:
             body = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                ["gh", "api", f"repos/{slug}/contents/.github/workflows/{name}", "--jq", ".content"],
+                [exe("gh"), "api", f"repos/{slug}/contents/.github/workflows/{name}", "--jq", ".content"],
                 capture_output=True, text=True, timeout=30, check=False,
             )
             if body.returncode != 0:
@@ -196,7 +197,7 @@ def _put_ruleset(slug: str, rid: int, payload: dict) -> tuple[bool, str]:
     Used ONLY to strip required_linear_history from a non-baseline user ruleset."""
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["gh", "api", "--method", "PUT", f"repos/{slug}/rulesets/{rid}", "--input", "-"],
+            [exe("gh"), "api", "--method", "PUT", f"repos/{slug}/rulesets/{rid}", "--input", "-"],
             input=json.dumps(payload), capture_output=True, text=True, timeout=15, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:

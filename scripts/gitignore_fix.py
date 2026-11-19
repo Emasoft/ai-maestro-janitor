@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import gitignore_coverage as gc  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _repo_root(explicit: str | None) -> Path:
@@ -39,7 +40,7 @@ def _repo_root(explicit: str | None) -> Path:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
     proc = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
+        [exe("git"), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False, env=git_env,
     )
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -59,7 +60,7 @@ def _check_ignore_verdicts(root: Path, paths: list[str]) -> dict[str, str]:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
     proc = subprocess.run(
-        ["git", "-C", str(root), "check-ignore", "-v", "-n", "-z", "--no-index", "--stdin"],
+        [exe("git"), "-C", str(root), "check-ignore", "-v", "-n", "-z", "--no-index", "--stdin"],
         capture_output=True, text=True, check=False, input="\0".join(paths) + "\0", env=git_env,
     )
     if proc.returncode not in (0, 1):
@@ -82,7 +83,7 @@ def _tracked_files(root: Path) -> list[str]:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
     proc = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z"],
+        [exe("git"), "-C", str(root), "ls-files", "-z"],
         capture_output=True, text=True, check=False, env=git_env,
     )
     if proc.returncode != 0:

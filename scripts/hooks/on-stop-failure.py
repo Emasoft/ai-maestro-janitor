@@ -213,6 +213,7 @@ def main() -> int:
         # swallowed it and this recovery would have been permanently dead while looking
         # shipped, which is the same silent-disable shape this whole card exists to remove.
         sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
+        from exe_path import exe  # noqa: E402
         from lib import global_state as _gs  # noqa: E402  -- local package, not PyPI
 
         rotator = Path(plugin_root) / "scripts" / "oauth_rotator" / "rotator.py"
@@ -244,7 +245,7 @@ def main() -> int:
                     state.log_line("stop-failure", f"recovery marker not written ({marker.name}): {exc!r}")
 
             subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
-                ["uv", "run", "--script", "--quiet", str(rotator), "auto"],
+                [exe("uv"), "run", "--script", "--quiet", str(rotator), "auto"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,

@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import gh_notify_inbox  # noqa: E402  # the fleet-wide inbox SSOT (TRDD-079778RM)
 import state  # noqa: E402  # SSOT for the subprocess-timeout scale (TRDD-7NSRD8OV)
+from exe_path import exe  # noqa: E402
 
 STATE_VERSION = 3
 SEEN_TTL_DAYS = 30
@@ -204,7 +205,7 @@ def gh_api(path: str) -> tuple[object | None, str | None]:
     """Return (parsed_json, error_message). Never raises."""
     try:
         proc = subprocess.run(
-            ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+            [exe("gh"), "api", "-H", "Accept: application/vnd.github+json", path],
             # Scaled by the shared knob (TRDD-7NSRD8OV). 1.0 in production, so the real
             # ceiling is unchanged. Under the test suite's own load this call expired and
             # the poller reported "MONITOR DEGRADED -- gh api timed out" against a stub
