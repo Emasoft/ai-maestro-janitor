@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: dev
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-19T23:25:59+0100
+updated: 2026-11-20T00:25:17+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -74,6 +74,8 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 ## Approval log
 
 - 2026-11-18T06:19:20+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-20 — USER answer (verbatim option chosen): 'Allow the 6 markers (Recommended)'. Scope exactly: a reasoned '# nosec <id>' at scripts/dispatcher-stub.py:251 and :262 (B606, os.execv is the stub's hand-over to dispatch.py), tests/test_sandbox_guard_process.py:326 (B605, the test proves os.system is refused), tests/sandbox_guard.py:693, :726, :734 (B604, the sandbox's own shell=True interception). Every other bandit finding is fixed in code, with no marker. Line numbers as measured 2026-11-19 on a tree under edit; the marker goes on the line bandit reports at fix time.
+- 2026-11-20 — main-agent reading of the ruling: tests/test_sandbox_guard_process.py's os.system line carries B605 and B607 on the same call (the partial path inside the os.system string); its one marker names both ids. No other line gets a marker.
 
 ## Bandit sweep progress
 
@@ -128,3 +130,7 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 
 - 2026-11-19: commit 4b2d5784 says test_oauth_rotator passed (202) with its change. That run used a clean checkout at 153b7b7c that did NOT contain the change, so the claim is unverified. It will be settled by a single test_oauth_rotator run on the next rotator.py commit, which contains 4b2d5784.
 - 2026-11-19 ubs pre-commit criticals on a870464f, 096e22eb and fe16ed55, all on lines outside each commit's hunks (git show -U0 hunk headers), dispositions by main-agent: test_pre_push_python_floor.py:57/:141 command-injection and taint.command on exe("python3", env) — ruled false positive (test-local env, see the ruling bullet above). test_post_compact_resume_hook.py:825/:851 python.lifecycle.file_handle — a monkeypatched open() wrapper that returns real_open(...) to its caller: false positive. test_oauth_rotator.py hardcoded-secrets 1955/1959 are placeholder labels (OLD-LIVE, ro, NEW-ACCT, rn), ctcompare.secret_eq 223/389/1741/1742/1779/1875/3846 compare test fixtures: false positives. rotator.py's own four findings are TRDD-Z691NW1P. The 4b2d5784 claim is settled: test_oauth_rotator 202 passed on the tree committed as 096e22eb (which contains 4b2d5784), 207 after fe16ed55.
+
+## Findings
+
+2026-11-20: pre-existing '# nosec B108' markers found (not added in this sweep): scripts/lib/env_secrets.py:233 (agent_writable_roots), scripts/detectors/runaway-file-growth.py (DEFAULT_ROOTS), scripts/lib/jev_compaction.py. They predate the USER no-marker rule of this sweep; each needs either an in-code fix or the owner's explicit approval, like the 6 approved lines.

@@ -4,7 +4,7 @@ title: Post-compact deferred resume recheck always fails, the child reuses a tem
 column: todo
 status: tasked
 created: 2026-11-18T01:25:43+0100
-updated: 2026-11-18T16:38:09+0100
+updated: 2026-11-20T00:15:57+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -47,3 +47,7 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
 
 - 2026-11-18T01:25:43+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-18T16:38:09+0100 — progress, by cheap-worker for main-agent: implementation-commits set to [486a7367]. Per main-agent evidence: detached children start on realpath(sys.executable) via _stable_python, which raises when that is not an executable file. Files of 486a7367 (git show --stat): scripts/hooks/post-compact-resume.py, scripts/hooks/on-session-start-trdd-state.py, tests/test_post_compact_resume_hook.py, tests/test_trdd_state_hook.py. Card not moved: a GitHub issue answer (issue 368) comes first.
+
+## Findings
+
+2026-11-20 main-agent, measured: the fix is 486a7367 (scripts/hooks/post-compact-resume.py _stable_python at :514-529, used by both spawn sites :544 and :584; read by a worker). Mutation check: the two tests from 486a7367 (test_stable_interpreter_still_runs_after_the_uv_temp_env_is_gone, test_both_spawn_sites_start_the_resolved_interpreter_and_refuse_when_it_is_gone) run against the pre-fix parent 486a7367^ in a throwaway worktree /tmp/wt-368-parent: 2 failed (AttributeError: module hook has no attribute _stable_python); against HEAD: 2 passed. Weakness: they fail on the missing symbol, not on a deleted uv interpreter, and the real 60 s deferred uv run --script launch was not re-run. The worktree was removed after the check (git worktree remove, no force). Remaining: release the fix, then answer and close GitHub issue 368.

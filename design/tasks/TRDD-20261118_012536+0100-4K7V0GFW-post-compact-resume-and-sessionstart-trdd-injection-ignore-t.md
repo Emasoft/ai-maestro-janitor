@@ -4,7 +4,7 @@ title: Post-compact resume and SessionStart TRDD injection ignore the linked wor
 column: todo
 status: tasked
 created: 2026-11-18T01:25:36+0100
-updated: 2026-11-18T16:49:55+0100
+updated: 2026-11-20T00:13:08+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -57,3 +57,7 @@ Related card TRDD-WUIN2IGF (migrate most janitor functionality to Claude Code mo
   - all worktrees of the repo, newest copy wins. Weak: about 40 .claude/worktrees/agent-* worktrees exist (many marked prunable), so abandoned cards would become resume targets.
   Consistency follow-up, not changed by 486a7367: scripts/detectors/trdd-reminder.py:58 (_ACTIVE_COLUMNS) and scripts/hooks/pre-compact-handoff.py:121 still include human_review. The handoff may legitimately list cards waiting for the human; decide per module.
 - 2026-11-18T16:49:55+0100 — correction, by main-agent: the entry of 2026-11-18T16:43:47+0100 states two premises as fact that are not verified for the reporting session: that its hook-input cwd was the main checkout, and that its Bash cwd did not persist (both hold in this harness, not shown for that session). So option A is not shown to help, rather than ruled out; the worktree half stays open. Measured facts in that entry (the two hooks read the hook-input cwd as described, lines 69, 83 and 738-788) stand.
+
+## Findings
+
+2026-11-20 main-agent, from reports_dev/sonnet-worker/20261120_000405+0100-47MHZ2YF-4K7V0GFW.md (code read, not mutation-proven): first half landed at 486a7367 (human_review out of _INFLIGHT_COLUMNS post-compact-resume.py:53-58 and _ACTIVE_COLUMNS on-session-start-trdd-state.py:264; updated compared as an instant via _updated_epoch post-compact-resume.py:209-214). Open: (1) the worktree board choice; (2) the two hooks disagree on root precedence: post-compact-resume.py:763-764 reads payload cwd only when CLAUDE_PROJECT_DIR is unset, on-session-start-trdd-state.py:59-84 reads payload cwd first; (3) _record_resume_directive uses state.project_root() for the board AND state.state_dir() for the flag, so a board-root change must not move the flag; (4) human_review still in trdd-reminder.py:58 and pre-compact-handoff.py:139; (5) SessionStart takes _in_progress(...)[:MAX_TRDDS] in filename order, so with more than 4 active cards the newest can be dropped. DECISION (main-agent, 2026-11-20, open to owner veto): the board root is the worktree the session actually runs in, i.e. the hook payload cwd resolved to its git toplevel, then CLAUDE_PROJECT_DIR, then os.getcwd, in BOTH hooks; the resume flag stays under the main checkout state dir; trdd-reminder drops human_review (a reminder to work on it is wrong), pre-compact-handoff keeps listing it as waiting for the human; SessionStart orders by updated: newest first before the cap.
