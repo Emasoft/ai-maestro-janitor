@@ -4,7 +4,7 @@ title: Pre-commit hook allows a tracked ubs partial scan for one file and one de
 column: todo
 status: tasked
 created: 2026-11-19T15:45:52+0100
-updated: 2026-11-19T15:47:21+0100
+updated: 2026-11-19T22:39:24+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -36,6 +36,7 @@ approval-datetime: 2026-11-19T15:45:52+0100
 ## Requirement
 
 - A tracked allow file (one entry per line: path, detector name, anchor text that locates the limit site, reason). In the hook, an explicit exit-2 case: re-run ubs per staged .py file (HEAD blob and staged blob in two sibling directories with the same relative path); a file whose run is partial passes only when (a) an entry matches its path and every partial detector message names that entry's detector, (b) the HEAD blob is partial with the same detector, and (c) git diff --cached -U0 of the file touches no line at or after the anchor line in HEAD numbering. Every other exit-2 case blocks as now, printing which file and detector were not scanned. A passing case prints that the file is unscanned by that detector after the anchor. Tests: an exempt file partial before and after with a diff above the anchor passes; a diff at or after the anchor blocks; a partial file with no entry blocks; a different detector blocks.
+- 2026-11-19T22:39:23+0100 — condition (b), the HEAD blob being partial with the same detector, is an agent-added safeguard beyond the owner's chosen option text; the owner may veto it. Without it, a file that newly ends partial for the allowed detector would pass.
 
 ## Known consequence
 

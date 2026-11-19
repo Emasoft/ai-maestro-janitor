@@ -1,0 +1,10 @@
+# Tracked allow list for ubs partial scans (TRDD-H7884ERZ). Read by git-hooks/ubs_partial_gate.py from the pre-commit hook.
+# Format: one entry per line, 4 fields separated by a TAB character: path, detector, anchor, reason.
+#   path     repo-relative path of the file whose ubs scan may end partial (one entry per path)
+#   detector the ONE ubs detector allowed to stay unfinished (every partial detector must equal it)
+#   anchor   text that appears on exactly ONE line of the HEAD blob: the limit site. A staged diff that changes
+#            any HEAD line at or after that line blocks the commit (the code below the anchor is the unscanned part)
+#   reason   why the entry exists
+# Blank lines and lines starting with # are ignored. Any other malformed line blocks every ubs exit-2 commit.
+# A partial file with no entry, a different detector, or a HEAD blob that is not partial still blocks.
+scripts/oauth_rotator/rotator.py	sql_injection	refresh_oauth_token(blob, on_failure=failure_cause.append)	TRDD-H7884ERZ: ubs 5.5.26 sql_injection ends partial (SQLFlowLimit: SQL list mutation capability escapes) at the bound method failure_cause.append passed as a callback; the one SQL sink, a constant SELECT, lies below it
