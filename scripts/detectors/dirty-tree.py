@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # `git status --porcelain` line: 2 status chars, a space, then the path (`?? design/proposals/x.md`).
 # A rename prints `old -> new`; we key on the NEW path, which is the one on disk.
@@ -78,7 +79,7 @@ def main() -> int:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     proc = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git", git_env), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,
@@ -108,7 +109,7 @@ def main() -> int:
         # whose first janitor proposal just landed has no tracked `design/` yet. It also makes the
         # "N uncommitted change(s)" count mean what it says. Ignored files are still skipped, so
         # this does not walk node_modules.
-        ["git", "status", "--porcelain", "-uall"],
+        [exe("git", git_env), "status", "--porcelain", "-uall"],
         cwd=str(repo_dir),
         capture_output=True,
         text=True,

@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import handoff_files  # noqa: E402
 import state  # noqa: E402
 import terminal_trigger  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # The slash-commands the phases type into the pane. FIXED module constants (never
 # user/env input) — `terminal_trigger.send_self_command` is the sole sender and it
@@ -287,7 +288,7 @@ def _project_root() -> Path:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [exe("git", git_env), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=True,

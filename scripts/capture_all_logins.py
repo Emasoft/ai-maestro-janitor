@@ -41,6 +41,7 @@ sys.path.insert(0, str(_ROT))
 # auto-bootstrap (rotator._invoke_slot_capture) can never race on the SAME email's
 # Chrome --user-data-dir.
 import rotator  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 KNOWN_EMAILS_TIMEOUT_S = 15.0
 # 400s (F2, TRDD-GZXTSJSR): the capture legitimately polls the consent page up to 300s
@@ -81,7 +82,7 @@ def known_emails(*, env: dict[str, str] | None = None) -> list[str]:
     if not _ROTATOR_PY.is_file():
         raise RuntimeError(f"rotator engine missing: {_ROTATOR_PY}")
     proc = subprocess.run(
-        ["python3", str(_ROTATOR_PY), "known-emails"],
+        [exe("python3", env), str(_ROTATOR_PY), "known-emails"],
         capture_output=True,
         text=True,
         timeout=KNOWN_EMAILS_TIMEOUT_S,

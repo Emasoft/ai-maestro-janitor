@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import git_utils  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Body refs ---------------------------------------------------------------
 
@@ -235,7 +236,7 @@ def main() -> int:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     if subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git", git_env), "rev-parse", "--git-dir"],
         cwd=str(root),
         capture_output=True, text=True, check=False,
         env=git_env,

@@ -187,7 +187,19 @@ class _GitCallVisitor(ast.NodeVisitor):
         if not isinstance(first, (ast.List, ast.Tuple)) or not first.elts:
             return
         head = first.elts[0]
-        if not (isinstance(head, ast.Constant) and head.value == "git"):
+        # WHY (TRDD-SWQXCIOS): the B607 helper exe("git", env) replaces the bare "git" literal
+        # at call sites. Without this branch the guard goes blind to every converted git call and
+        # passes vacuously, so exe("git", ...) must count as git exactly like the bare "git" does.
+        is_bare_git = isinstance(head, ast.Constant) and head.value == "git"
+        is_exe_git = (
+            isinstance(head, ast.Call)
+            and isinstance(head.func, ast.Name)
+            and head.func.id == "exe"
+            and bool(head.args)
+            and isinstance(head.args[0], ast.Constant)
+            and head.args[0].value == "git"
+        )
+        if not (is_bare_git or is_exe_git):
             return  # not a `["git", ...]` argv — a data tuple/table entry, etc.
 
         verb = None

@@ -51,6 +51,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 PID_FILENAME = "local-plugins-update.pid"
 
@@ -139,7 +140,7 @@ def _run_worker() -> int:
             with log_path.open("a", encoding="utf-8") as logf:
                 logf.write(f"--- {plugin_id} ---\n")
                 proc = subprocess.run(
-                    ["claude", "plugin", "update", plugin_id, "--scope", "local"],
+                    [exe("claude"), "plugin", "update", plugin_id, "--scope", "local"],
                     stdout=logf, stderr=subprocess.STDOUT,
                     timeout=120, check=False,
                 )

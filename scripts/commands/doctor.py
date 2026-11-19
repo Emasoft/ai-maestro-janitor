@@ -38,6 +38,7 @@ sys.path.insert(0, str(_PLUGIN_ROOT / "scripts" / "lib"))
 
 import reports_gitignore  # noqa: E402
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 CheckResult = tuple[str, str, str, str]  # (name, status, detail, fix)
 
@@ -148,7 +149,7 @@ def _check_git_available() -> CheckResult:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        ["git", "--version"], capture_output=True, text=True, check=False, env=git_env
+        [exe("git", git_env), "--version"], capture_output=True, text=True, check=False, env=git_env
     )
     version = proc.stdout.splitlines()[0] if proc.stdout else "unknown"
     return ("git-available", "PASS", f"git in PATH ({version})", "")
@@ -160,7 +161,7 @@ def _check_in_git_repo() -> CheckResult:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
+        [exe("git", git_env), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
         env=git_env,
@@ -181,7 +182,7 @@ def _check_gh_authenticated() -> CheckResult:
             "gh-authenticated", "WARN", "gh CLI not in PATH",
             "Install gh + 'gh auth login' — pr-reconciler / task-pr-mismatch silently skip without it",
         )
-    proc = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, check=False)
+    proc = subprocess.run([exe("gh"), "auth", "status"], capture_output=True, text=True, check=False)
     if proc.returncode == 0:
         return ("gh-authenticated", "PASS", "gh CLI is authenticated", "")
     return (
@@ -199,7 +200,7 @@ def _check_jq_available() -> CheckResult:
             "jq-available", "PASS", "jq not in PATH (Python detectors use stdlib json — fine)",
             "",
         )
-    proc = subprocess.run(["jq", "--version"], capture_output=True, text=True, check=False)
+    proc = subprocess.run([exe("jq"), "--version"], capture_output=True, text=True, check=False)
     version = proc.stdout.splitlines()[0] if proc.stdout else "unknown"
     return ("jq-available", "PASS", f"jq in PATH ({version})", "")
 
@@ -211,7 +212,7 @@ def _check_uv_available() -> CheckResult:
             "uv-available", "FAIL", "uv not in PATH",
             "Install uv (https://docs.astral.sh/uv/) — every detector uses uv run --script",
         )
-    proc = subprocess.run(["uv", "--version"], capture_output=True, text=True, check=False)
+    proc = subprocess.run([exe("uv"), "--version"], capture_output=True, text=True, check=False)
     version = proc.stdout.splitlines()[0] if proc.stdout else "unknown"
     return ("uv-available", "PASS", f"uv in PATH ({version})", "")
 

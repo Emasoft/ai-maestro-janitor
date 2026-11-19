@@ -53,6 +53,7 @@ import global_state  # noqa: E402
 import issue_catalog  # noqa: E402
 import state  # noqa: E402
 import trdd_common  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _NAME = "env-secret-on-disk"
 _SALT_FILE = "env-secret-fingerprint.salt"
@@ -86,9 +87,10 @@ def _load_salt() -> bytes:
 
 def _git(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # GIT_OPTIONAL_LOCKS=0: read-only, never takes .git/index.lock (janitor#245).
+    git_env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     return subprocess.run(
-        ["git", *args], cwd=str(project), capture_output=True, text=True, check=False,
-        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        [exe("git", git_env), *args], cwd=str(project), capture_output=True, text=True, check=False,
+        env=git_env,
     )
 
 
