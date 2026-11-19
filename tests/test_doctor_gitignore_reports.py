@@ -14,6 +14,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("doctor_under_test", _ROOT / "scripts" / "commands" / "doctor.py")
 assert _spec and _spec.loader
@@ -30,7 +31,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     root = tmp_path / "repo"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
     monkeypatch.setattr(state, "project_root", lambda: root)
     return root
 

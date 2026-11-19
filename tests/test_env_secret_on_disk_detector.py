@@ -27,6 +27,7 @@ _NAME = "FAKE_API_TOKEN_0000"
 
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 import env_secrets  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _project(tmp_path: Path) -> Path:
@@ -34,7 +35,7 @@ def _project(tmp_path: Path) -> Path:
     for folder in ("reports_dev", "design/proposals", "design/tasks"):
         (project / folder).mkdir(parents=True)
     (project / ".gitignore").write_text("reports_dev/\n.janitor/\n")
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, env={**os.environ, "HOME": str(tmp_path / "home")})
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, env={**os.environ, "HOME": str(tmp_path / "home")})
     return project
 
 
@@ -198,7 +199,7 @@ def test_files_over_the_cap_cost_no_git_calls(tmp_path: Path) -> None:
     shim = tmp_path / "shim"
     shim.mkdir()
     calls = tmp_path / "git-calls.log"
-    real = subprocess.run(["which", "git"], capture_output=True, text=True, check=True).stdout.strip()
+    real = subprocess.run([exe("which"), "git"], capture_output=True, text=True, check=True).stdout.strip()
     (shim / "git").write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexec {real} "$@"\n')
     (shim / "git").chmod(0o755)
     (tmp_path / "home").mkdir(exist_ok=True)

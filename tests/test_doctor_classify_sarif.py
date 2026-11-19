@@ -11,6 +11,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DOCTOR = _PROJECT_ROOT / "scripts" / "doctor_classify.py"
 
@@ -21,7 +23,7 @@ def _run(project_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.pop("CLAUDE_PLUGIN_ALLOW_SELF_SCAN", None)
     return subprocess.run(
-        ["uv", "run", "--quiet", str(_DOCTOR), *args],
+        [exe("uv"), "run", "--quiet", str(_DOCTOR), *args],
         cwd=str(project_dir), env=env,
         capture_output=True, text=True, timeout=120,
     )

@@ -26,6 +26,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import git_utils  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _repo(tmp: Path) -> Path:
@@ -35,8 +36,8 @@ def _repo(tmp: Path) -> Path:
     (root / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
     (root / "downloads_dev" / "nested" / "package-lock.json").write_text("{}", encoding="utf-8")
     (root / "src" / "package-lock.json").write_text("{}", encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "add", ".gitignore", "src/package-lock.json"], cwd=root, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=root, check=True)
+    subprocess.run([exe("git"), "add", ".gitignore", "src/package-lock.json"], cwd=root, check=True)
     return root
 
 

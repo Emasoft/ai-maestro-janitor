@@ -23,6 +23,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import env_secrets  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _DETECTOR = _ROOT / "scripts" / "detectors" / "env-secret-on-disk.py"
 SALT = b"s" * 32
@@ -162,7 +163,7 @@ def _project(tmp_path: Path) -> Path:
     project = tmp_path / "proj"
     project.mkdir()
     (project / ".gitignore").write_text(".trashcan/\n.janitor/\n")
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, timeout=120, env={**os.environ, "HOME": str(tmp_path / "home")})
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True, timeout=120, env={**os.environ, "HOME": str(tmp_path / "home")})
     return project
 
 

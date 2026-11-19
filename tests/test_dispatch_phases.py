@@ -26,6 +26,7 @@ import pytest
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+from exe_path import exe  # noqa: E402
 
 
 @pytest.fixture
@@ -642,7 +643,7 @@ def test_phase_daemon_restart_sends_sigterm_on_mismatch(env_isolation: dict) -> 
     gs.init_global_state()
 
     # Spawn a real, controllable child process.
-    sleeper = _sp.Popen(["sleep", "30"], stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    sleeper = _sp.Popen([exe("sleep"), "30"], stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
     try:
         gs.write_daemon_pid(sleeper.pid)
         # Synthesize a "stale" argv so daemon_needs_restart returns True.
@@ -4759,7 +4760,7 @@ def test_uncommitted_work_bit_counts_dirty_files_in_a_real_repo(env_isolation: d
     """One untracked file in a real git repo gives a clause naming the count 1, with no commit instruction."""
     dispatch = _import_dispatch()
     project = env_isolation["project"]
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True)
     (project / "x.txt").write_text("x", encoding="utf-8")
     bit = dispatch._uncommitted_work_bit()
     assert bit.startswith("1 uncommitted entr(y/ies)")
@@ -4769,7 +4770,7 @@ def test_uncommitted_work_bit_counts_dirty_files_in_a_real_repo(env_isolation: d
 def test_uncommitted_work_bit_is_empty_on_a_clean_repo(env_isolation: dict) -> None:
     """A clean real git repo gives no clause."""
     dispatch = _import_dispatch()
-    subprocess.run(["git", "init", "-q"], cwd=env_isolation["project"], check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=env_isolation["project"], check=True)
     assert dispatch._uncommitted_work_bit() == ""
 
 

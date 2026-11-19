@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "fleet-github-config.py"
 
@@ -189,9 +191,9 @@ def _with_origin(tmp_path: Path, slug: str) -> Path:
     """Give the tmp project a GitHub origin, so the detector can recognise itself in the fleet."""
     proj = tmp_path / "proj"
     proj.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=proj, check=True)
     subprocess.run(
-        ["git", "remote", "add", "origin", f"https://github.com/{slug}.git"], cwd=proj, check=True
+        [exe("git"), "remote", "add", "origin", f"https://github.com/{slug}.git"], cwd=proj, check=True
     )
     return proj
 

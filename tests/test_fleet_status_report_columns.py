@@ -33,6 +33,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import fleet_status as fstat  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 @dataclass
@@ -53,10 +54,10 @@ def _git_init(path: Path, *, remotes: dict[str, str]) -> None:
     commit the fixture would assert against a state no real project is ever in.
     """
     path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=path, check=True)
+    subprocess.run([exe("git"), "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run([exe("git"), "commit", "-q", "--allow-empty", "-m", "init"], cwd=path, check=True)
     for name, url in remotes.items():
-        subprocess.run(["git", "remote", "add", name, url], cwd=path, check=True)
+        subprocess.run([exe("git"), "remote", "add", name, url], cwd=path, check=True)
 
 
 # ── 1. origin is not necessarily yours ────────────────────────────────────────────────
