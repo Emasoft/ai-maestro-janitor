@@ -81,6 +81,10 @@ def known_emails(*, env: dict[str, str] | None = None) -> list[str]:
     Raises RuntimeError on any hard failure: no roster means nothing to walk."""
     if not _ROTATOR_PY.is_file():
         raise RuntimeError(f"rotator engine missing: {_ROTATOR_PY}")
+    # WHY (TRDD-SWQXCIOS): exe(name, env) searches the PATH key of env, or os.defpath when env has no
+    # PATH, the same lookup subprocess does for a bare name under env (see scripts/lib/exe_path.py).
+    # env is the caller parameter, passed through unchanged, so a caller that sets PATH still decides
+    # which python3 runs. exe("python3") with no env would search the process PATH instead.
     proc = subprocess.run(
         [exe("python3", env), str(_ROTATOR_PY), "known-emails"],
         capture_output=True,

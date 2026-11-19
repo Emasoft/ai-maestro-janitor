@@ -288,7 +288,7 @@ def _project_root() -> Path:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         out = subprocess.run(
-            [exe("git", git_env), "rev-parse", "--show-toplevel"],
+            [exe("git"), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=True,

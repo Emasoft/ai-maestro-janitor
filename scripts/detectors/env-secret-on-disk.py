@@ -87,10 +87,9 @@ def _load_salt() -> bytes:
 
 def _git(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # GIT_OPTIONAL_LOCKS=0: read-only, never takes .git/index.lock (janitor#245).
-    git_env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     return subprocess.run(
-        [exe("git", git_env), *args], cwd=str(project), capture_output=True, text=True, check=False,
-        env=git_env,
+        [exe("git"), *args], cwd=str(project), capture_output=True, text=True, check=False,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
     )
 
 

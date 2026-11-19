@@ -149,7 +149,7 @@ def _check_git_available() -> CheckResult:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        [exe("git", git_env), "--version"], capture_output=True, text=True, check=False, env=git_env
+        [exe("git"), "--version"], capture_output=True, text=True, check=False, env=git_env
     )
     version = proc.stdout.splitlines()[0] if proc.stdout else "unknown"
     return ("git-available", "PASS", f"git in PATH ({version})", "")
@@ -161,7 +161,7 @@ def _check_in_git_repo() -> CheckResult:
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
-        [exe("git", git_env), "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
         env=git_env,

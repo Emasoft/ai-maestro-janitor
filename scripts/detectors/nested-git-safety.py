@@ -88,7 +88,7 @@ def main() -> int:
     git_env = _git_env()
 
     if subprocess.run(
-        [exe("git", git_env), "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(root),
         capture_output=True, text=True, check=False,
         env=git_env,
@@ -112,14 +112,14 @@ def main() -> int:
         # `git check-ignore -q` exits 0 when the path IS ignored. We want
         # 'not ignored' → emit nudge.
         if subprocess.run(
-            [exe("git", git_env), "check-ignore", "-q", "--", parent_dir],
+            [exe("git"), "check-ignore", "-q", "--", parent_dir],
             cwd=str(root),
             capture_output=True, text=True, check=False,
             env=git_env,
         ).returncode == 0:
             continue
         if subprocess.run(
-            [exe("git", git_env), "check-ignore", "-q", "--", rel_str],
+            [exe("git"), "check-ignore", "-q", "--", rel_str],
             cwd=str(root),
             capture_output=True, text=True, check=False,
             env=git_env,
@@ -128,7 +128,7 @@ def main() -> int:
 
         # Skip if parent_dir is actually tracked as a submodule.
         if subprocess.run(
-            [exe("git", git_env), "submodule", "status", "--", parent_dir],
+            [exe("git"), "submodule", "status", "--", parent_dir],
             cwd=str(root),
             capture_output=True, text=True, check=False,
             env=git_env,

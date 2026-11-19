@@ -79,7 +79,7 @@ def main() -> int:
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     proc = subprocess.run(
-        [exe("git", git_env), "rev-parse", "--git-dir"],
+        [exe("git"), "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,
@@ -109,7 +109,7 @@ def main() -> int:
         # whose first janitor proposal just landed has no tracked `design/` yet. It also makes the
         # "N uncommitted change(s)" count mean what it says. Ignored files are still skipped, so
         # this does not walk node_modules.
-        [exe("git", git_env), "status", "--porcelain", "-uall"],
+        [exe("git"), "status", "--porcelain", "-uall"],
         cwd=str(repo_dir),
         capture_output=True,
         text=True,
