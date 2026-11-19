@@ -678,6 +678,22 @@ def _version_update_log(msg: str) -> None:
     state.log_line("daemon-version-update", msg)
 
 
+def _log_swallowed(site: str, exc: Exception) -> None:
+    """Log one fail-open skip as a fixed-text daemon.log line naming the exception TYPE only.
+
+    WHY (TRDD-SWQXCIOS): a bare `pass` made every skipped beat invisible. The exception MESSAGE is
+    never logged: it can hold a token or a path. `site` is always a string literal. The log call is
+    guarded by the state.log_line raise set (OSError, OverflowError, RuntimeError, ValueError) and is
+    never retried, so a failed log does not break the beat.
+    """
+    try:
+        state.log_line("daemon", f"{site} skipped: {type(exc).__name__}")
+    except (OSError, OverflowError, RuntimeError, ValueError):
+        # WHY (TRDD-SWQXCIOS): log_line can raise these four (state.py: init_state mkdir, log_dir
+        # expanduser, datetime astimezone, UnicodeEncodeError). A log of a log is never retried.
+        pass
+
+
 def _version_update_terminal(outcome: str, installed: str, published: str, updated: bool) -> str:
     """The one terminal line every task_version_update run writes."""
     return (
@@ -872,8 +888,10 @@ def task_oauth_rotator_supervisor() -> None:
                 hint="/janitor-refresh-cc-logins",
             )
             _log(f"notify[OAUTH-PRIMARY-UNREADABLE]: {outcome}")
-    except Exception:  # noqa: BLE001 -- the probe is best-effort; never break the beat
-        pass
+    # WHY (TRDD-SWQXCIOS): the keychain read (subprocess, file reads), the lazy rotator import,
+    # notify.push and the log line can each raise. The probe is best-effort: log the type, go on.
+    except Exception as exc:  # noqa: BLE001 -- the probe is best-effort; never break the beat
+        _log_swallowed("oauth primary-unreadable probe", exc)
 
 
 def _evaluate_rotator_alert(check_tick: bool = True) -> None:
@@ -955,8 +973,11 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
     except Exception as exc:  # noqa: BLE001 - see docstring
         try:
             state.log_line("daemon", f"rotator tick result not logged: {type(exc).__name__}")
-        except Exception:  # noqa: BLE001, S110 - even the fallback line must not raise
-            pass
+        # WHY (TRDD-SWQXCIOS): this fallback line is a log of a log and can fail the same ways as
+        # the line above. The failure is logged by type through _log_swallowed; the tick and the
+        # rotation-ESC pass after it must go on, so nothing here may propagate.
+        except Exception as log_exc:  # noqa: BLE001 -- a log fault must never break the rotator tick
+            _log_swallowed("rotator tick result", log_exc)
 
 
 def _masked_stderr_tail(err: str) -> str:
@@ -1063,8 +1084,10 @@ def _log_slow_rotator_tick(
             "daemon",
             f"rotator tick slow: subprocess {int(subprocess_s)}s, esc-pass {int(esc_s)}s, rc={rc}, load {load}",
         )
-    except Exception:  # noqa: BLE001, S110 - a logging error must never crash the tick
-        pass
+    # WHY (TRDD-SWQXCIOS): state.log_line raises OSError, RuntimeError or ValueError. This function runs
+    # in a finally block, so the catch stays broad: a narrower one would let another type escape the tick.
+    except Exception as exc:  # noqa: BLE001 -- a logging error must never crash the tick
+        _log_swallowed("rotator slow-tick line", exc)
 
 
 def _rotation_esc_after_tick() -> None:
@@ -1756,8 +1779,10 @@ def task_github_config_audit() -> None:
                 hint="/janitor-github-config-fix",
             )
             state.log_line("daemon", f"  notify[GHCFG-FLEET]: {outcome}")
-        except Exception:  # noqa: BLE001 -- the push must never break the audit beat
-            pass
+        # WHY (TRDD-SWQXCIOS): notify.push can raise (see its body); gca.findings_digest can raise
+        # TypeError on a malformed payload. The push is best-effort: log the type and go on.
+        except Exception as exc:  # noqa: BLE001 -- the push must never break the audit beat
+            _log_swallowed("notify[GHCFG-FLEET]", exc)
         _file_github_config_issues(audit)
 
 
@@ -1846,8 +1871,10 @@ def _log_retry_wedge_countdowns(fleet: list, now: int) -> None:
                     "daemon",
                     f"session-liveness: {os.path.basename(root)} {token} instances={n}",
                 )
-    except Exception:  # noqa: BLE001 -- a log line must NEVER break the recovery beat
-        pass
+    # WHY (TRDD-SWQXCIOS): fleet_scan.retry_wedge_log_token reads the retry-wedge state file and
+    # state.log_line writes the line. A countdown log is a side-channel: it must not break recovery.
+    except Exception as exc:  # noqa: BLE001 -- a log line must NEVER break the recovery beat
+        _log_swallowed("retry-wedge countdown", exc)
 
 
 def task_session_liveness(fleet: list | None = None) -> None:
@@ -1935,8 +1962,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 channel=channel,
                 outcome=outcome,
             )
-        except Exception:  # noqa: BLE001 -- an audit fault must NEVER crash the recovery beat
-            pass
+        # WHY (TRDD-SWQXCIOS): ra.record_recovery never raises (its whole body is one try), so only
+        # the argument reads above (inst fields) can fail. The audit is a side-channel.
+        except Exception as exc:  # noqa: BLE001 -- an audit fault must NEVER crash the recovery beat
+            _log_swallowed("recovery audit", exc)
 
     # THE TYPING GATE (TRDD-6Q0OYYYH, owner directive 2026-07-18: "the user is present if it
     # was typing in the last 20 seconds"): any keyboard/mouse event within the presence
@@ -2061,8 +2090,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
                         f"session-liveness: ESCALATING {os.path.basename(_inst.project_root)} "
                         f"— {outcome} unchanged for {hours:.1f}h; a human must clear it",
                     )
-                except Exception:  # noqa: BLE001 -- escalation is a side-channel, never fatal
-                    pass
+                # WHY (TRDD-SWQXCIOS): findings_ledger.record or state.log_line can raise. The escalation
+                # is a side-channel; the escalated flag is set below whether or not it landed.
+                except Exception as exc:  # noqa: BLE001 -- escalation is a side-channel, never fatal
+                    _log_swallowed("session-liveness escalation", exc)
                 # Set the flag even if the record above threw: a notification path that
                 # retries every beat on a persistent fault is the F9 spam this guards.
                 escalated = True
@@ -2117,16 +2148,20 @@ def task_session_liveness(fleet: list | None = None) -> None:
                             sev="HIGH", code="FLEET-GIVE-UP", src="daemon",
                             msg=_give_up_msg, project_dir=inst.project_root,
                         )
-                    except Exception:  # noqa: BLE001 -- a finding write must never crash the beat
-                        pass
+                    # WHY (TRDD-SWQXCIOS): findings_ledger.record can raise (config reads, the ledger
+                    # file). A finding write is best-effort, so the failure is logged by type.
+                    except Exception as exc:  # noqa: BLE001 -- a finding write must never crash the beat
+                        _log_swallowed("finding FLEET-GIVE-UP", exc)
                     try:
                         notify.push(
                             sev="HIGH", code="FLEET-GIVE-UP",
                             project=os.path.basename(inst.project_root),
                             summary=_give_up_msg, hint="open that project's pane",
                         )
-                    except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
-                        pass
+                    # WHY (TRDD-SWQXCIOS): notify.push can raise (config reads, the sent-ledger and stamp
+                    # files). The push is best-effort, so the failure is logged by type and the beat goes on.
+                    except Exception as exc:  # noqa: BLE001 -- a notify fault must never break the beat
+                        _log_swallowed("notify[FLEET-GIVE-UP]", exc)
                 # F1 derived 1 (TRDD-L32WC0H7): a `frozen` give-up gets a NAMED, human-facing
                 # finding — the budget is spent on esc_nudge alone (fleet_recovery caps
                 # `frozen` there unconditionally) and the stall's cause is UNSETTLED, so the
@@ -2143,8 +2178,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
                             ),
                             project_dir=inst.project_root,
                         )
-                    except Exception:  # noqa: BLE001 -- a finding write must never crash the beat
-                        pass
+                    # WHY (TRDD-SWQXCIOS): findings_ledger.record can raise (config reads, the ledger
+                    # file). A finding write is best-effort, so the failure is logged by type.
+                    except Exception as exc:  # noqa: BLE001 -- a finding write must never crash the beat
+                        _log_swallowed("finding HEARTBEAT-FIRES-STALL", exc)
             continue
         if decision == "cooldown":
             continue
@@ -2206,8 +2243,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
                     summary="session is waiting on YOUR answer — it is not stuck",
                     hint="open that project's pane and answer the prompt",
                 )
-            except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
-                pass
+            # WHY (TRDD-SWQXCIOS): notify.push can raise (config reads, the sent-ledger and stamp
+            # files). The push is best-effort, so the failure is logged by type and the beat goes on.
+            except Exception as exc:  # noqa: BLE001 -- a notify fault must never break the beat
+                _log_swallowed("notify[FLEET-AWAITING-USER]", exc)
             # Owner directive 2026-08-11: "no session may sit blocked — any blocking
             # error or askuser prompt is answered with the default option or escaped".
             # This must NEVER answer for the human — that is exactly the 2026-07-17
@@ -2335,8 +2374,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
                         summary="session wedged mid-turn — typed commands queue but never run",
                         hint="open that project's pane and answer the pending dialog",
                     )
-                except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
-                    pass
+                # WHY (TRDD-SWQXCIOS): notify.push can raise (config reads, the sent-ledger and stamp
+                # files). The push is best-effort, so the failure is logged by type and the beat goes on.
+                except Exception as exc:  # noqa: BLE001 -- a notify fault must never break the beat
+                    _log_swallowed("notify[FLEET-WEDGED]", exc)
             _decline("declined_wedged", action, None)
             continue
         # TRDD-NACCL0CB (owner, 2026-09-02): "the janitor script seems blind and does not
@@ -3135,8 +3176,10 @@ def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
                 channel=str(cmd_plan["channel"]),
                 outcome="fired" if ok else "fire_failed",
             )
-        except Exception:  # noqa: BLE001 -- an audit fault must NEVER crash the beat
-            pass
+        # WHY (TRDD-SWQXCIOS): record_recovery never raises (its whole body is one try), so only the
+        # argument reads above (inst fields, cmd_plan channel) can fail. The audit is a side-channel.
+        except Exception as exc:  # noqa: BLE001 -- an audit fault must NEVER crash the beat
+            _log_swallowed("fleet-stop audit", exc)
 
 
 def task_fleet_stop() -> None:
@@ -3588,8 +3631,11 @@ class Task:
                 hint="/janitor-show-global-status",
             )
             state.log_line("daemon", f"  notify[TASK-QUARANTINE:{name}]: {outcome}")
-        except Exception:  # noqa: BLE001 -- the push must never break task bookkeeping
-            pass
+        # WHY (TRDD-SWQXCIOS): notify.push can raise (config reads, the sent-ledger and stamp files).
+        # The quarantine push is best-effort, so the failure is logged by exception type and the
+        # task bookkeeping goes on.
+        except Exception as exc:  # noqa: BLE001 -- the push must never break task bookkeeping
+            _log_swallowed("notify[TASK-QUARANTINE]", exc)
 
     def poll_background(self) -> None:
         """Reap a finished detached child: stamp last-run + failcount exactly as a

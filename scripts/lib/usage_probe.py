@@ -145,7 +145,12 @@ def _log_swallowed(site: str, exc: BaseException) -> None:
     """
     try:
         state.log_line("usage-probe", f"{site}: swallowed {type(exc).__name__}")
-    except (OSError, RuntimeError, ValueError):
+    # TRDD-SWQXCIOS: the raise set of state.log_line, traced through state.py and exe_path.py:
+    # OSError (mkdir, open, write, stat, os.replace, and the git spawn in _resolve_project_root),
+    # RuntimeError (Path.expanduser in log_dir), ValueError (a NUL byte in a path, or a
+    # UnicodeDecodeError from git output), OverflowError (datetime.astimezone on an out-of-range
+    # local time). A type outside this tuple would escape a fail-open path, so it must be added here.
+    except (OSError, OverflowError, RuntimeError, ValueError):
         pass
 
 
