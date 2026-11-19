@@ -182,6 +182,7 @@ def main() -> int:
         except (OSError, ValueError):
             pass
 
+    from lib.exe_path import exe  # noqa: E402  -- local package, not PyPI
     # ACTIVE 429 RECOVERY (TRDD-G4BCRUP7 R9) — best-effort, STRICTLY AFTER the critical
     # flag write. Until now this hook was PASSIVE: it recorded the rate limit and waited for
     # "when the API is reachable again", i.e. for the window to RESET. On a spent 7-day
@@ -213,7 +214,6 @@ def main() -> int:
         # swallowed it and this recovery would have been permanently dead while looking
         # shipped, which is the same silent-disable shape this whole card exists to remove.
         sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
-        from exe_path import exe  # noqa: E402
         from lib import global_state as _gs  # noqa: E402  -- local package, not PyPI
 
         rotator = Path(plugin_root) / "scripts" / "oauth_rotator" / "rotator.py"

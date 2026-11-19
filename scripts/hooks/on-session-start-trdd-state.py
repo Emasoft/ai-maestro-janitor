@@ -132,12 +132,14 @@ def _new_root_would_leak(project_dir: Path, new: Path) -> bool:
     """
     import subprocess
 
+    from lib.exe_path import exe  # noqa: E402 - local package, not PyPI
+
     git_env = dict(os.environ)
     git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     try:
         probe = subprocess.run(
-            ["git", "-C", str(project_dir), "rev-parse", "--is-inside-work-tree"],
+            [exe("git"), "-C", str(project_dir), "rev-parse", "--is-inside-work-tree"],
             capture_output=True, text=True, timeout=5, env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -146,7 +148,7 @@ def _new_root_would_leak(project_dir: Path, new: Path) -> bool:
         return False  # not a git repo at all — nothing for a `git add -A` to leak into
     try:
         result = subprocess.run(
-            ["git", "-C", str(project_dir), "check-ignore", "-q",
+            [exe("git"), "-C", str(project_dir), "check-ignore", "-q",
              str(new / "tasks" / "probe.md")],
             capture_output=True, text=True, timeout=5, env=git_env,
         )

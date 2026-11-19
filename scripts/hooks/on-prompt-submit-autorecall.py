@@ -169,6 +169,7 @@ def _project_memdir(project_dir: str | None) -> Path | None:
     `.claude/project/memory` path is collision-free). Resolved via
     `git rev-parse --show-toplevel` so a worktree / sub-directory cwd still finds
     the repo root."""
+    from exe_path import exe  # noqa: E402  -- local module, not PyPI
     cwd = (project_dir or os.getcwd()).strip() or None
     try:
         # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
@@ -176,7 +177,7 @@ def _project_memdir(project_dir: str | None) -> Path | None:
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [exe("git"), "rev-parse", "--show-toplevel"],
             cwd=cwd,
             capture_output=True,
             text=True,
