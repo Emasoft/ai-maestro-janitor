@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: dev
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-19T22:56:49+0100
+updated: 2026-11-19T23:25:59+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -127,3 +127,4 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 - 2026-11-19 ruling by main-agent, open to owner veto: tests/test_pre_push_python_floor.py keeps exe("python3", env), because its env puts a fake python3 shim first on PATH and exe() without env would test the real python3. ubs flags python.taint.command there; ruled a false positive (env is a test-local dict built from os.environ). This extends the capture_all_logins ruling (a passed-through env) to a locally built env. tests/test_keepalive_install.py instead uses exe("bash") with no env: its shim dir holds no bash, so both lookups find the same bash.
 
 - 2026-11-19: commit 4b2d5784 says test_oauth_rotator passed (202) with its change. That run used a clean checkout at 153b7b7c that did NOT contain the change, so the claim is unverified. It will be settled by a single test_oauth_rotator run on the next rotator.py commit, which contains 4b2d5784.
+- 2026-11-19 ubs pre-commit criticals on a870464f, 096e22eb and fe16ed55, all on lines outside each commit's hunks (git show -U0 hunk headers), dispositions by main-agent: test_pre_push_python_floor.py:57/:141 command-injection and taint.command on exe("python3", env) — ruled false positive (test-local env, see the ruling bullet above). test_post_compact_resume_hook.py:825/:851 python.lifecycle.file_handle — a monkeypatched open() wrapper that returns real_open(...) to its caller: false positive. test_oauth_rotator.py hardcoded-secrets 1955/1959 are placeholder labels (OLD-LIVE, ro, NEW-ACCT, rn), ctcompare.secret_eq 223/389/1741/1742/1779/1875/3846 compare test fixtures: false positives. rotator.py's own four findings are TRDD-Z691NW1P. The 4b2d5784 claim is settled: test_oauth_rotator 202 passed on the tree committed as 096e22eb (which contains 4b2d5784), 207 after fe16ed55.
