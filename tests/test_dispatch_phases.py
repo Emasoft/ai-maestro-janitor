@@ -5900,6 +5900,164 @@ def test_keep_going_nudge_collapses_a_multiline_owner_message_to_one_line(
     assert "\n" not in note
 
 
+def _owner_nudge_setup(env_isolation: dict, monkeypatch: pytest.MonkeyPatch, rows: list[dict], *, record_ts: str):
+    """TRDD-6IFL3OXG: a stale lineage record + the session's real transcript file made of `rows`; returns the nudge note."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-now")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_idle_and_stale(state)
+    state.atomic_write(
+        state.state_dir() / "owner-messages" / "sess-now.json",
+        json.dumps({
+            "messages": [{"text": "OLD RECORD GOAL", "ts": record_ts}],
+            "own_reply": "ok", "origin_session": "sess-old", "recorded_at": "",
+        }),
+    )
+    transcript = _session_transcript_file(Path.home(), env_isolation["project"], "sess-now")
+    transcript.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return _capture_stdout(dispatch._phase_keep_going_nudge).splitlines()[1]
+
+
+def _typed_row(ts: str, text: str) -> dict:
+    return {"type": "user", "timestamp": ts, "origin": {"kind": "human"}, "message": {"role": "user", "content": text}}
+
+
+def _queued_row(ts: str, text: str) -> dict:
+    """A mid-turn owner message, in the shape Claude Code stores it (verified on a real transcript)."""
+    return {
+        "type": "attachment", "timestamp": ts,
+        "attachment": {
+            "type": "queued_command", "prompt": text, "commandMode": "prompt",
+            "origin": {"kind": "human"}, "humanTurn": True,
+        },
+    }
+
+
+def _heartbeat_row(ts: str) -> dict:
+    return {
+        "type": "user", "timestamp": ts, "isMeta": True,
+        "message": {"role": "user", "content": "[janitor-heartbeat] /some/dir/dispatcher-stub.py"},
+    }
+
+
+def test_keep_going_nudge_quotes_the_transcript_message_newer_than_the_record(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: the owner typed after the clear; the days-old record must not be quoted as the last message."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [_typed_row("2026-11-18T22:46:21.123Z", "what are you waiting for?")],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«what are you waiting for?»" in note
+    assert "OLD RECORD GOAL" not in note
+
+
+def test_keep_going_nudge_quotes_a_mid_turn_queued_owner_message(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: a message typed while the agent worked exists only as a queued_command attachment row."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [_queued_row("2026-11-18T19:30:14.443Z", "before adding them make sure that to fix the bug")],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«before adding them make sure that to fix the bug»" in note
+    assert "OLD RECORD GOAL" not in note
+
+
+def test_keep_going_nudge_keeps_the_record_when_the_transcript_has_no_owner_message(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: a freshly cleared session (nothing typed yet) still carries the lineage record."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [{"type": "assistant", "timestamp": "2026-11-18T22:00:00.000Z",
+          "message": {"role": "assistant", "content": [{"type": "text", "text": "working"}]}}],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«OLD RECORD GOAL»" in note
+
+
+def test_keep_going_nudge_does_not_quote_a_newer_heartbeat_prompt_as_the_owner(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: a janitor heartbeat or a task-notification newer than the record is not the owner."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [
+            _heartbeat_row("2026-11-18T23:02:36.450Z"),
+            {"type": "user", "timestamp": "2026-11-18T23:03:00.000Z", "origin": {"kind": "task-notification"},
+             "message": {"role": "user", "content": "<task-notification><task-id>x</task-id></task-notification>"}},
+        ],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«OLD RECORD GOAL»" in note
+    assert "heartbeat" not in note.split("owner's last message", 1)[1].split("»", 1)[0]
+
+
+def test_keep_going_nudge_does_not_quote_a_bare_resume_or_a_system_reminder_as_the_owner(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: a bare "continue" and a hidden (isMeta) system-reminder row newer than the record are not owner words."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [
+            _typed_row("2026-11-18T23:00:00.000Z", "continue"),
+            {"type": "user", "timestamp": "2026-11-18T23:01:00.000Z", "isMeta": True,
+             "message": {"role": "user", "content": "<system-reminder>\nthe task tools have not been used\n</system-reminder>"}},
+        ],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«OLD RECORD GOAL»" in note
+    assert "system-reminder" not in note
+
+
+def test_keep_going_nudge_skips_a_newer_bare_resume_and_quotes_the_older_owner_message_with_content(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: the newest owner row is a bare "resume"; the nudge quotes the older row that carries the goal."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [
+            _typed_row("2026-11-18T21:00:00.000Z", "finish the secret shield card first"),
+            _typed_row("2026-11-18T23:00:00.000Z", "resume"),
+        ],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«finish the secret shield card first»" in note
+    assert "«resume»" not in note
+    assert "OLD RECORD GOAL" not in note
+
+
+def test_keep_going_nudge_keeps_a_record_newer_than_the_transcript_message(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: the later timestamp wins in both directions, so a fresh record beats an older typed row."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [_typed_row("2026-11-10T08:00:00.000Z", "ancient typed message")],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«OLD RECORD GOAL»" in note
+    assert "ancient typed message" not in note
+
+
+def test_keep_going_nudge_prefers_a_transcript_message_whose_timestamp_is_unusable(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-6IFL3OXG: a live owner row with no parsable timestamp still beats the stale record."""
+    note = _owner_nudge_setup(
+        env_isolation, monkeypatch,
+        [_typed_row("", "the live message with no timestamp")],
+        record_ts="2026-11-15T10:00:00+00:00",
+    )
+    assert "«the live message with no timestamp»" in note
+    assert "OLD RECORD GOAL" not in note
+
+
 def _mandate_setup(env_isolation: dict, monkeypatch: pytest.MonkeyPatch, cards: list[tuple[str, str, str]]):
     """Real owner record + idle/stale fixture + a real design/tasks corpus of (uid, column, extra frontmatter)."""
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-now")

@@ -348,6 +348,17 @@ def owner_record(state_dir: Path, session_id: str) -> dict[str, Any] | None:
     }
 
 
+def ts_epoch(ts: str) -> float | None:
+    """`ts` (ISO 8601, as a transcript or an owner record stores it) as epoch seconds; None when empty or unparsable."""
+    try:
+        then = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        return then.timestamp()
+    except (ValueError, AttributeError, OverflowError):
+        return None
+
+
 def _write_owner_record(state_dir: Path, session_id: str, record: dict[str, Any]) -> None:
     """Atomically store `record` for `session_id`; a failure is logged, never raised (SessionStart path)."""
     path = _record_path(state_dir, session_id)
@@ -370,13 +381,10 @@ def _write_owner_record(state_dir: Path, session_id: str, record: dict[str, Any]
 
 def age_words(ts: str, *, now: float | None = None) -> str:
     """`ts` (ISO 8601, as a transcript stores it) as "12 minutes ago"; "time unknown" when empty or unparsable."""
-    try:
-        then = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
-        if then.tzinfo is None:
-            then = then.replace(tzinfo=timezone.utc)
-        seconds = int((time.time() if now is None else now) - then.timestamp())
-    except (ValueError, AttributeError, OverflowError):
+    then = ts_epoch(ts)
+    if then is None:
         return "time unknown"
+    seconds = int((time.time() if now is None else now) - then)
     for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
         if seconds >= size:
             n = seconds // size

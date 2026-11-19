@@ -41,7 +41,7 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -637,24 +637,35 @@ def _status_run_key(rec: dict[str, Any]) -> str | None:
     return key
 
 
-def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, str | None]]:
-    """`(f"{role}: {text}", run_key)` for every kept record in the last `max_bytes` of `path`,
-    oldest to newest (`run_key` is `_status_run_key`: None unless the record is a capped-run
-    candidate). [] on a missing/unreadable file. This is the one shared parse+classify
-    loop behind both `recent_messages` and `_recent_human_lines`, and it never raises
-    (`recent_messages` is on the SessionStart injection path). The byte-safe tail read and its
-    partial-first-line rule live in `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I): it never
+def _classified_records(path: Path, max_bytes: int) -> list[tuple[dict[str, Any], str, str]]:
+    """`(record, role_label, text)` for every kept record in the last `max_bytes` of `path`,
+    oldest to newest. [] on a missing/unreadable file. The one parse+classify loop behind
+    `_classified_tail` (display lines) and `newest_owner_message` (needs the record's
+    timestamp), so neither can disagree with the other about what is a kept line. It never
+    raises (`recent_messages` is on the SessionStart injection path). The byte-safe tail read and
+    its partial-first-line rule live in `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I): it never
     raises on a non-UTF-8 byte, a non-object line or a half-written last line."""
     try:
         entries = jsonl_walk.read_jsonl_tail(path, max_bytes, malformed_lines=[])
     except OSError:
         return []
-    out: list[tuple[str, str | None]] = []
+    out: list[tuple[dict[str, Any], str, str]] = []
     for rec in entries:
         classified = _classify_line(rec)
         if classified is not None:
-            out.append((f"{classified[0]}: {classified[1]}", _status_run_key(rec)))
+            out.append((rec, classified[0], classified[1]))
     return out
+
+
+def _classified_tail(path: Path, max_bytes: int) -> list[tuple[str, str | None]]:
+    """`(f"{role}: {text}", run_key)` for every kept record in the last `max_bytes` of `path`,
+    oldest to newest (`run_key` is `_status_run_key`: None unless the record is a capped-run
+    candidate). [] on a missing/unreadable file. Shared by `recent_messages` and
+    `_recent_human_lines`."""
+    return [
+        (f"{role}: {text}", _status_run_key(rec))
+        for rec, role, text in _classified_records(path, max_bytes)
+    ]
 
 
 def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
@@ -694,11 +705,7 @@ def _recent_human_lines(path: Path, *, target: int) -> list[str]:
     """The last `target` human/owner lines (oldest to newest), widening the search radius when
     the primary recent window does not hold enough of them.
 
-    TRDD-0UQSAFCW follow-up. Doubles the radius (`_HUMAN_SEARCH_START_BYTES` up) to
-    `_HUMAN_SEARCH_MAX_BYTES` or the whole file, whichever is smaller; each retry re-reads
-    from EOF rather than threading a delta through, which re-scans the primary window every
-    time (ponytail: re-reading up to ~16 MiB once, only on the rare session where the owner
-    has been silent for hours, is cheaper than the code a delta-tracking version would need).
+    TRDD-0UQSAFCW follow-up. Radii come from `_widening_radii`.
     Only HUMAN lines are extracted on these retries -- assistant/system noise in the older
     region is parsed and discarded, never returned (point 1 of the fix: assistant lines stay
     confined to the primary recent window; only owner lines get the extended guarantee).
@@ -709,12 +716,58 @@ def _recent_human_lines(path: Path, *, target: int) -> list[str]:
     except OSError:
         return []
 
+    found: list[str] = []
+    for radius in _widening_radii(size):
+        found = [ln for ln in _classified_tail_lines(path, radius) if ln.startswith("USER: ")]
+        if len(found) >= target:
+            break
+    return found[-target:]
+
+
+def _widening_radii(size: int) -> Iterator[int]:
+    """Tail radii to try, doubling from the primary window to `_HUMAN_SEARCH_MAX_BYTES` or the
+    whole file (`size`), whichever is smaller. The ONE widening schedule behind
+    `_recent_human_lines` and `newest_owner_message` (each retry re-reads from EOF rather than
+    threading a delta through: re-reading up to ~16 MiB once, only on the rare session where the
+    owner has been silent for hours, is cheaper than the code a delta-tracking version needs)."""
     radius = _RECENT_MESSAGES_TAIL_BYTES
     while True:
-        found = [ln for ln in _classified_tail_lines(path, radius) if ln.startswith("USER: ")]
-        if len(found) >= target or radius >= size or radius >= _HUMAN_SEARCH_MAX_BYTES:
-            return found[-target:]
+        yield radius
+        if radius >= size or radius >= _HUMAN_SEARCH_MAX_BYTES:
+            return
         radius = _HUMAN_SEARCH_START_BYTES if radius < _HUMAN_SEARCH_START_BYTES else radius * 2
+
+
+def newest_owner_message(path: Path) -> tuple[str, str] | None:
+    """`(timestamp, text)` of the owner's newest message in the transcript `path`, or `None`.
+
+    TRDD-6IFL3OXG. The keep-going nudge used to quote only the lineage record written at a
+    janitor clear, which never sees what the owner types afterwards, so a days-old message was
+    presented as the owner's last one and steered the session off its real goal. The session's
+    own transcript is the authority: this is the same `_classify_line` decision `recent_messages`
+    uses (idle typed rows, mid-turn `queued_command` attachments with `origin.kind == "human"`;
+    never heartbeats, task-notifications, peer messages or system reminders), over the same
+    widening search, so it reads at most `_HUMAN_SEARCH_MAX_BYTES`. `timestamp` is the record's own
+    ISO string ("" when the record has none); `text` is whitespace-collapsed and unclipped. `None`
+    when no owner message exists within the cap or the file is unreadable (never raises).
+
+    A bare control word ("resume", "continue") is skipped, never returned: `_classify_line`
+    drops it through `transcript_roles.is_control_input`, so the nudge quotes the newest
+    message that carries a goal (TRDD-6IFL3OXG). No second filter here on purpose.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    for radius in _widening_radii(size):
+        humans = [
+            (str(rec.get("timestamp") or ""), text)
+            for rec, role, text in _classified_records(path, radius)
+            if role == "USER"
+        ]
+        if humans:
+            return humans[-1]
+    return None
 
 
 def _keep_newest_by_bytes(lines: list[str], max_bytes: int) -> list[str]:

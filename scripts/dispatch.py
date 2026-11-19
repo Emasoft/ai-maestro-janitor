@@ -4871,6 +4871,47 @@ def _board_nudge_lease_acquire(sd: Path, now: int) -> bool:
         return True
 
 
+def _newest_owner_message(sd: Path) -> dict[str, str] | None:
+    """The owner's newest message as `{"text", "ts"}`: the session's own transcript or the
+    lineage record, whichever is later; `None` when neither holds one.
+
+    TRDD-6IFL3OXG. The record (`session_continuity.owner_record`) is a snapshot taken at a
+    janitor clear and never sees what the owner types afterwards, so quoting it alone presented a
+    days-old message as "the owner's last" and steered the resumed session off its real goal.
+    The live transcript is the authority; the record only carries messages across a clear while
+    the new transcript has none yet (or an older one). Each source fails open on its own: an
+    unreadable transcript still leaves the record, and vice versa.
+    """
+    import external_clear  # noqa: PLC0415 -- sibling lib, lazy like the other phase imports
+    import session_continuity  # noqa: PLC0415
+
+    newest: dict[str, str] | None = None
+    try:
+        rec = session_continuity.owner_record(sd, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip())
+        if rec:
+            newest = rec["messages"][-1]
+    except Exception as exc:  # noqa: BLE001 -- a broken record must never silence the nudge
+        state.log_line("dispatch", f"keep-going: owner record unavailable: {exc!r}")
+    try:
+        transcript = _session_transcript_path()
+        live = external_clear.newest_owner_message(transcript) if transcript else None
+    except Exception as exc:  # noqa: BLE001 -- an unreadable transcript must never silence the nudge
+        state.log_line("dispatch", f"keep-going: transcript owner message unavailable: {exc!r}")
+        live = None
+    if live is None:
+        return newest
+    live_msg = {"ts": live[0], "text": live[1]}
+    if newest is None:
+        return live_msg
+    live_at = session_continuity.ts_epoch(live_msg["ts"])
+    record_at = session_continuity.ts_epoch(newest["ts"])
+    # A live row with no usable timestamp cannot be compared, but the transcript is the authority:
+    # falling back to the record there would quote the days-old message again (TRDD-6IFL3OXG).
+    if live_at is None or record_at is None:
+        return live_msg
+    return live_msg if live_at > record_at else newest
+
+
 def _phase_keep_going_nudge() -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working — but ONLY
     when there is nobody visibly making progress: the USER is idle AND at least one
@@ -4991,16 +5032,14 @@ def _phase_keep_going_nudge() -> None:
     # never silence the nudge — the nudge IS the night-survival pulse).
     bits: list[str] = []
     # Issue 338: FIRST, the owner's newest message, so a session that stood down after a clear
-    # is re-anchored on what the owner actually said. The record exists only for a session
-    # created by a janitor clear; fail-open like the probes below.
+    # is re-anchored on what the owner actually said. TRDD-6IFL3OXG: the newest of the live
+    # transcript and the lineage record (see `_newest_owner_message`); the record alone went
+    # stale the moment the owner typed anything after the clear. Fail-open like the probes below.
     try:
         import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other phase imports
 
-        rec = session_continuity.owner_record(
-            sd, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip(),
-        )
-        if rec:
-            newest = rec["messages"][-1]
+        newest = _newest_owner_message(sd)
+        if newest:
             # TRDD-0TSG80CL: collapse whitespace BEFORE _clean (it keeps newlines, which split the
             # one-line [janitor-resume] payload across stdout lines; the 160 cap then counts collapsed text).
             owner_text = " ".join(newest["text"].split())
@@ -5008,8 +5047,8 @@ def _phase_keep_going_nudge() -> None:
                 f"owner's last message ({session_continuity.age_words(newest['ts'])}): "
                 f"«{session_continuity._clean(owner_text, 160)}»"
             )
-    except Exception as exc:  # noqa: BLE001 -- a broken record must never silence the nudge
-        state.log_line("dispatch", f"keep-going: owner record unavailable: {exc!r}")
+    except Exception as exc:  # noqa: BLE001 -- a broken message must never silence the nudge
+        state.log_line("dispatch", f"keep-going: owner message unavailable: {exc!r}")
     try:
         directive_file = state.state_dir() / "resume-directive.txt"
         if directive_file.is_file() and directive_file.stat().st_size > 0:
