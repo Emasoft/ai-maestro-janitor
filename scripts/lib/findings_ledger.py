@@ -475,6 +475,16 @@ def _read_raw(project_dir: str | os.PathLike[str] | None = None) -> tuple[list[d
     return entries, len(raw)
 
 
+def entries(project_dir: str | os.PathLike[str] | None = None) -> list[dict]:
+    """Every readable ledger entry, in file order — a READ-ONLY view.
+
+    WHY (TRDD-IP23RNLY R2): the ledger-to-card detector must judge recurrence over the whole retained
+    window, but `unread_entries`/`surface_block`/`advance_cursor` all ACK what they return, which would
+    eat the owner's unread state. This wrapper reads the file and touches neither the cursor nor the
+    surfaced-to-human stamps, and exposes `_read_raw` without making callers import a private name."""
+    return _read_raw(project_dir)[0]
+
+
 _SEV_RANK = {
     "CRITICAL": 0,
     "HIGH": 1, "ERROR": 1, "MAJOR": 1,

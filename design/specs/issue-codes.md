@@ -63,6 +63,7 @@ The `emitter` is `memgrep` or `janitor:<scanner or detector>`.
 | HOOK | hook timeouts: harness-reported, near-budget, internal limit | janitor |
 | MGPERF | memgrep performance budgets and index rebuilds | memgrep |
 | HOST | host load and runaway processes | janitor |
+| LEDGER | recurring findings-ledger entries carded by the ledger-to-card detector (TRDD-IP23RNLY) | janitor |
 | AICTX BRPROT CRED DAEMON DEP GHCFG MCPSEC MEMCORP MEMGREP PKGPOL SELFINT STATE WFSEC | pre-existing janitor runtime-fault families | janitor |
 
 A new family prefix must not collide with an existing one; the generator rejects a collision.

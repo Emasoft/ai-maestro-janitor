@@ -1181,6 +1181,62 @@ summary = ".janitor.toml could not be read, so no code is suppressed"
 why = "A syntax or type error in the owner's .janitor.toml; the janitor keeps running and suppresses nothing rather than guess."
 fix_text = "Correct the .janitor.toml syntax or the wrongly typed [lint] value."
 
+# TRDD-IP23RNLY R2: the ledger-to-card detector turns a finding that keeps recurring in the findings ledger into a
+# card, so the janitor stops re-printing what nobody owns. One code per OWNERSHIP GROUP of the emitting detector.
+[[issue]]
+code = "LEDGER-001"
+name = "recurring-ledger-finding-in-janitor-machinery"
+family = "LEDGER"
+severity = "MEDIUM"
+fix = "none"
+gate_floor = false
+emitter = "janitor:ledger-to-card"
+kind = "ledger-finding-harness"
+summary = "{where} keeps recurring in the findings ledger and no ticket tracks it"
+what = "A finding emitted by the janitor's OWN machinery (a hook scanner, the memory pipeline, the daemon, a purge job) has been recorded repeatedly in the findings ledger with no ticket or TRDD behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages."
+why = "A finding that recurs and is only ever printed trains its reader to ignore it, and the janitor owns this machinery, so nobody else will fix it. Recording it as a ticket turns the nag into work."
+fix_text = "Find the producer named by the detector in the title, read its latest ledger messages in `Found:`, and fix the condition at its source so the finding stops recurring. If the finding is a false positive, close the ticket as invalid with the proof."
+
+[[issue]]
+code = "LEDGER-002"
+name = "recurring-ledger-finding-about-the-project"
+family = "LEDGER"
+severity = "MEDIUM"
+fix = "none"
+gate_floor = false
+emitter = "janitor:ledger-to-card"
+kind = "ledger-finding-project"
+summary = "{where} keeps recurring in the findings ledger and no ticket or TRDD tracks it"
+what = "A finding about the USER's repository or board (a dirty tree, a stale stash, TRDD drift, an unanswered GitHub issue) has been recorded repeatedly in the findings ledger with no ticket or TRDD behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages."
+why = "The same advisory printed again and again is ignored; a card makes the owner decide once, either to fix the cause or to refuse the finding so the janitor stops raising it."
+fix_text = "Read the latest ledger messages in `Found:`, identify the repo or board condition behind them and resolve it. Refuse this proposal if the condition is intended, and the janitor will not raise it again."
+
+[[issue]]
+code = "LEDGER-003"
+name = "recurring-ledger-finding-only-the-owner-can-fix"
+family = "LEDGER"
+severity = "MEDIUM"
+fix = "none"
+gate_floor = false
+emitter = "janitor:ledger-to-card"
+kind = "ledger-finding-human"
+summary = "{where} keeps recurring in the findings ledger and only the owner can fix it"
+what = "A finding whose remedy is a human action (a macOS automation permission, a stalled worker session) has been recorded repeatedly in the findings ledger with no ticket behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages."
+why = "No agent can clear this condition, so a dispatched repair would only burn attempts. The ticket goes straight to needs_human and stays on the board, surfaced on every fire, until the owner acts."
+fix_text = "The owner performs the action named in the latest ledger messages, then closes the ticket."
+
+[[issue]]
+code = "LEDGER-004"
+name = "ledger-finding-could-not-be-carded"
+family = "LEDGER"
+severity = "HIGH"
+fix = "none"
+gate_floor = false
+emitter = "janitor:ledger-to-card"
+summary = "the ledger-to-card detector could not file a recurring finding as a ticket or proposal"
+why = "A recurring finding that fails to become a card stays a nag nobody owns, and a silent failure here hides exactly the gap this detector exists to close."
+fix_text = "Read the message: it names the finding and the reason `raise_issue` gave. Fix that cause."
+
 [[retired]]
 code = "AICTX-001"
 reason = "split into AICTX-002 (d89eca8): AICTX-001 claimed a file CONTAINS a payload, but the scanner only proves a dependency CAN WRITE such a file — raising the first for the second reported a documented opt-in CLI feature as a critical compromise (janitor#110)."

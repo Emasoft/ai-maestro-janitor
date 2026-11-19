@@ -73,6 +73,13 @@ KIND_REGISTRY: dict[str, Kind] = {
     "self-integrity": Kind(HARNESS, "janitor-repair-agent", "critical", "the janitor's own files failed attestation"),
     "state-corruption": Kind(HARNESS, "janitor-repair-agent", "high", "a janitor state file is unreadable"),
     "memory-corpus": Kind(HARNESS, "", "medium", "the wikimem corpus needs repair", dispatch=False),
+    # TRDD-IP23RNLY R2: a recurring findings-ledger code from the janitor's OWN machinery is carded here, so
+    # an advisory the janitor keeps printing becomes work the janitor does itself instead of a nag.
+    "ledger-finding-harness": Kind(HARNESS, "janitor-repair-agent", "medium", "a recurring ledger finding in the janitor's own machinery"),
+    # TRDD-IP23RNLY R2: dispatch=False because nothing here can be repaired by an agent (a macOS
+    # automation permission, a stalled worker): the ticket is a RECORD that the detector moves to
+    # needs_human so ticket-dispatch surfaces it on every fire and never schedules it.
+    "ledger-finding-human": Kind(HARNESS, "", "medium", "a recurring ledger finding only the owner can fix", dispatch=False),
     # ---- PROJECT: the USER's repo. PROPOSE ONLY — never dispatched without an approved TRDD. ----
     "security-workflow": Kind(PROJECT, "janitor-security-agent", "high", "a GitHub Actions workflow is vulnerable"),
     "branch-protection": Kind(PROJECT, "janitor-security-agent", "high", "the branch-protection baseline has drifted"),
@@ -80,6 +87,9 @@ KIND_REGISTRY: dict[str, Kind] = {
     "leaked-credential": Kind(PROJECT, "janitor-security-agent", "critical", "a credential may be exposed"),
     "github-config": Kind(PROJECT, "janitor-security-agent", "medium", "the repo's GitHub config is off-baseline"),
     "code-defect": Kind(PROJECT, "janitor-repair-agent", "medium", "a defect in the project's code"),
+    # TRDD-IP23RNLY R2: a recurring ledger finding about the USER's repo or board (dirty tree, stale stash,
+    # TRDD drift...). PROJECT domain, so the janitor may only PROPOSE it; running the printed command approves it.
+    "ledger-finding-project": Kind(PROJECT, "janitor-repair-agent", "medium", "a recurring ledger finding about the project's repo or board"),
 }
 
 SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
@@ -369,6 +379,24 @@ def ledger_path(state_dir: Path | None = None) -> Path:
 def load_all(state_dir: Path | None = None) -> list[Ticket]:
     """Every OPEN (non-archived) ticket. A corrupt file is skipped, never fatal."""
     d = tickets_dir(state_dir)
+    out: list[Ticket] = []
+    if not d.is_dir():
+        return out
+    for p in sorted(d.glob("T-*.json")):
+        try:
+            out.append(from_json(json.loads(p.read_text(encoding="utf-8"))))
+        except (OSError, ValueError, TypeError):
+            continue
+    return out
+
+
+def load_archived(state_dir: Path | None = None) -> list[Ticket]:
+    """Every ARCHIVED ticket (`closed/`). A corrupt file is skipped, never fatal.
+
+    WHY (TRDD-IP23RNLY R2): `load_all` deliberately hides archived tickets, but the ledger-to-card
+    detector needs each one's closing time (`updated_at`, bumped by every status change) as the floor
+    below which old ledger entries must not re-open a card that was already worked and closed."""
+    d = closed_dir(state_dir)
     out: list[Ticket] = []
     if not d.is_dir():
         return out

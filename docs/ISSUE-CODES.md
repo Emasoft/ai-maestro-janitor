@@ -20,11 +20,13 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-19 code(s).
+21 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
 | `DAEMON-001` | daemon-supervisor | critical | the global janitor daemon has died and respawned {count} times in the guard window |
+| `LEDGER-001` | ledger-to-card | medium | {where} keeps recurring in the findings ledger and no ticket tracks it |
+| `LEDGER-003` | ledger-to-card | medium | {where} keeps recurring in the findings ledger and only the owner can fix it |
 | `MEMCORP-001` | memory-librarian | medium | a wikimem page in {scope} fails an ERROR-level lint rule: {detail} |
 | `MEMCORP-002` | wikimem-syntax | medium | an atom is over 2x the size budget: {where} |
 | `MEMGREP-001` | memgrep-validate | high | the FTS index in {scope} does not match its content table |
@@ -50,6 +52,20 @@ unattended access to your repository.
 - **What it is:** The machine-wide singleton keeps exiting shortly after spawn. The crash-loop breaker is tripped, so the janitor has stopped trying to restart it.
 - **Why it matters:** The daemon owns every user-scope mutation — plugin updates, OAuth keepalive, the fleet guardian. With it dead, unattended sessions stop recovering from rate limits.
 - **Fix attempted:** Read the daemon log for the exception, reproduce it, and fix the crash. If the cause is a bad plugin version, the last-good rollback is already available — verify it engaged.
+
+### `LEDGER-001` — {where} keeps recurring in the findings ledger and no ticket tracks it
+
+- **Scanner:** `ledger-to-card` · **Severity:** `medium` · **Kind:** `ledger-finding-harness`
+- **What it is:** A finding emitted by the janitor's OWN machinery (a hook scanner, the memory pipeline, the daemon, a purge job) has been recorded repeatedly in the findings ledger with no ticket or TRDD behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages.
+- **Why it matters:** A finding that recurs and is only ever printed trains its reader to ignore it, and the janitor owns this machinery, so nobody else will fix it. Recording it as a ticket turns the nag into work.
+- **Fix attempted:** Find the producer named by the detector in the title, read its latest ledger messages in `Found:`, and fix the condition at its source so the finding stops recurring. If the finding is a false positive, close the ticket as invalid with the proof.
+
+### `LEDGER-003` — {where} keeps recurring in the findings ledger and only the owner can fix it
+
+- **Scanner:** `ledger-to-card` · **Severity:** `medium` · **Kind:** `ledger-finding-human`
+- **What it is:** A finding whose remedy is a human action (a macOS automation permission, a stalled worker session) has been recorded repeatedly in the findings ledger with no ticket behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages.
+- **Why it matters:** No agent can clear this condition, so a dispatched repair would only burn attempts. The ticket goes straight to needs_human and stays on the board, surfaced on every fire, until the owner acts.
+- **Fix attempted:** The owner performs the action named in the latest ledger messages, then closes the ticket.
 
 ### `MEMCORP-001` — a wikimem page in {scope} fails an ERROR-level lint rule: {detail}
 
@@ -180,7 +196,7 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-19 code(s).
+20 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -195,6 +211,7 @@ unattended access to your repository.
 | `DEP-002` | historical-cache-scan | critical | a KNOWN-MALICIOUS package version is present: {package} {version} |
 | `DEP-003` | typosquat-watcher | high | `{package}` is one edit away from the popular package `{target}` |
 | `GHCFG-001` | fleet-github-config | medium | the GitHub config of {slug} is off-baseline: {detail} |
+| `LEDGER-002` | ledger-to-card | medium | {where} keeps recurring in the findings ledger and no ticket or TRDD tracks it |
 | `MCPSEC-001` | mcp-rugpull | high | an installed MCP server changed its fingerprint: {server} |
 | `PKGPOL-001` | package-manager-policy | medium | a package-manager safety knob is disabled in {path}: {detail} |
 | `WFSEC-001` | workflow-security | high | a workflow lets attacker-controlled input reach an executable position in {where} |
@@ -281,6 +298,13 @@ unattended access to your repository.
 - **Why it matters:** Drift accumulates silently until an incident proves the protection everyone assumed was in place is not.
 - **Fix attempted:** Bring the repo back to the baseline. Applying the baseline AS-IS is pre-approved; any deviation from it needs the user's decision.
 
+### `LEDGER-002` — {where} keeps recurring in the findings ledger and no ticket or TRDD tracks it
+
+- **Scanner:** `ledger-to-card` · **Severity:** `medium` · **Kind:** `ledger-finding-project`
+- **What it is:** A finding about the USER's repository or board (a dirty tree, a stale stash, TRDD drift, an unanswered GitHub issue) has been recorded repeatedly in the findings ledger with no ticket or TRDD behind it. The `Found:` line gives the entry count, the first and last time, and the latest messages.
+- **Why it matters:** The same advisory printed again and again is ignored; a card makes the owner decide once, either to fix the cause or to refuse the finding so the janitor stops raising it.
+- **Fix attempted:** Read the latest ledger messages in `Found:`, identify the repo or board condition behind them and resolve it. Refuse this proposal if the condition is intended, and the janitor will not raise it again.
+
 ### `MCPSEC-001` — an installed MCP server changed its fingerprint: {server}
 
 - **Scanner:** `mcp-rugpull` · **Severity:** `high` · **Kind:** `security-workflow`
@@ -340,7 +364,7 @@ unattended access to your repository.
 
 ## All codes by family
 
-92 code(s) across every emitter.
+96 code(s) across every emitter.
 
 ### AICTX
 
@@ -404,6 +428,15 @@ unattended access to your repository.
 |---|---|---|---|---|
 | `HOST-001` | MEDIUM | none | janitor:host-load | load average is above cores x 4 |
 | `HOST-002` | MEDIUM | none | janitor:system-daemon-runaway | a daemon process is consuming runaway CPU |
+
+### LEDGER
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `LEDGER-001` | MEDIUM | none | janitor:ledger-to-card | {where} keeps recurring in the findings ledger and no ticket tracks it |
+| `LEDGER-002` | MEDIUM | none | janitor:ledger-to-card | {where} keeps recurring in the findings ledger and no ticket or TRDD tracks it |
+| `LEDGER-003` | MEDIUM | none | janitor:ledger-to-card | {where} keeps recurring in the findings ledger and only the owner can fix it |
+| `LEDGER-004` | HIGH | none | janitor:ledger-to-card | the ledger-to-card detector could not file a recurring finding as a ticket or proposal |
 
 ### MCPSEC
 

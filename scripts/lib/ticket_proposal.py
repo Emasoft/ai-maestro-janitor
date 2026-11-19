@@ -30,6 +30,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -127,6 +128,42 @@ def find_proposal(trdd_id: str, project_dir: str | None = None) -> tuple[str, Pa
         if uid and uid.upper() == trdd_id.upper():
             return scope, path
     return None
+
+
+@dataclass(frozen=True)
+class KeyCard:
+    """One proposal card carrying a given dedupe key: what a caller needs to decide "already filed?"."""
+
+    column: str
+    updated: int  # epoch seconds of its frontmatter `updated:`; 0 when unparseable
+    withdrawn: bool  # True iff the JANITOR withdrew it (the finding cleared); False for a human verdict
+
+
+def cards_for_key(dedupe_key: str, project_dir: str | None = None) -> list[KeyCard]:
+    """Every card in `design/proposals/` whose `ticket-dedupe-key` equals `dedupe_key`.
+
+    WHY (TRDD-IP23RNLY R2): the ledger-to-card detector must tell an OPEN proposal (leave it to the
+    standing reminder), a HUMAN refusal (settled — never re-file) and a janitor WITHDRAWAL (the card
+    promised re-proposal, and its `updated:` is the floor for counting new ledger entries) apart.
+    `propose()` embeds the same three judgements inline; this exposes them read-only instead of
+    letting a caller reach into `_frontmatter`. The key is canonicalised here by `_dedupe_key`, the
+    one function every compare site must use, so a raw key matches what `propose()` wrote."""
+    key = _dedupe_key(dedupe_key)
+    out: list[KeyCard] = []
+    for _scope, path in trdd_common.trdd_files("proposals", project_dir):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        fm = _frontmatter(text)
+        if fm.get("ticket-dedupe-key", "") != key:
+            continue
+        try:
+            updated = int(datetime.strptime(fm.get("updated", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp())
+        except ValueError:
+            updated = 0
+        out.append(KeyCard(column=fm.get("column", ""), updated=updated, withdrawn=bool(_WITHDRAWN_LINE_RE.search(text))))
+    return out
 
 
 def _frontmatter(text: str) -> dict[str, str]:

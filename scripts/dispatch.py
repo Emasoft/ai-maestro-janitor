@@ -388,6 +388,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # 300s (every fire): an empty queue is a directory glob that finds nothing, and
     # a critical incident should not wait out a long cadence before it is worked.
     ("ticket-dispatch", 300, "CLAUDE_PLUGIN_OPTION_TICKET_DISPATCH_INTERVAL"),
+    # ledger-to-card (TRDD-IP23RNLY R2, PRRD G34.1): a finding that keeps recurring in the findings ledger
+    # becomes ONE ticket (janitor machinery) or ONE proposal TRDD (the user repo), so no advisory stays a
+    # nag nobody owns. Hourly: the ledger holds only ~3 days and a recurrence is judged over >=1 h, so a
+    # tighter cadence buys nothing. Deliberately NOT in _ADVISORY_DETECTORS: its lines must reach the agent.
+    ("ledger-to-card", 3600, "CLAUDE_PLUGIN_OPTION_LEDGER_TO_CARD_INTERVAL"),
     # memgrep-index-health VALIDATES each memory scope's index and raises the issue
     # code (TRDD-CGYMUKO6) — the ticket system's motivating producer. It uses the
     # NON-HEALING `memgrep validate` path on purpose: `open()` self-heals, which is
