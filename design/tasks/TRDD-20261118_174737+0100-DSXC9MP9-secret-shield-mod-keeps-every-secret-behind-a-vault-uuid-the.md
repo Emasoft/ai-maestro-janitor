@@ -4,7 +4,7 @@ title: Secret-shield mod keeps every secret behind a vault UUID the agent never 
 column: backburner
 status: tasked
 created: 2026-11-18T17:47:37+0100
-updated: 2026-11-18T19:11:04+0100
+updated: 2026-11-18T23:58:11+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,6 +33,7 @@ approval-datetime: 2026-11-18T17:47:37+0100
 2026-11-18 (owner message on the shield): jss CLI, autonomous .env editing and a context field per secret. Verbatim text and derived requirements R1-R4 in design/specs/TRDD-DSXC9MP9-owner-jss-envkey.md.
 2026-11-18, main-agent reading (not the owner's words): the jss name replaces `shield get` in the mods-expert design, and the context field is a new column of the vault row. Derived requirements R1-R4 are in design/specs/TRDD-DSXC9MP9-owner-jss-envkey.md.
 2026-11-18 (owner message on the shield): jss add NAME VALUE "CONTEXT" writes a secret straight into the vault; the owner's envget helper for .env is the example. Verbatim text, derived requirements R5-R7 and four open questions in design/specs/TRDD-DSXC9MP9-owner-jss-add.md.
+2026-11-18 (owner message on the shield): the owner added tested .env helpers for jss in scripts/janitor-env-tools/, copied to design/requirements/examples/janitor-env-tools/; PRRD G27.1-G33.1 now hold the owner's secrets-shield orders verbatim.
 
 ## Owner
 

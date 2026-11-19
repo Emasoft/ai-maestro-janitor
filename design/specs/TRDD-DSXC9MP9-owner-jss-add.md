@@ -58,3 +58,7 @@ Tested under Bash 3.2.0 and 5.2.37, including strict-mode scripts, missing and d
 2. The pasted text notes that the value travels in jss's command-line arguments. While `jss add` runs, other processes and users on the machine can read it from the process list; the shield hides it from the agent (R4) but not from them. Should `jss add` also take the value on stdin (for example `jss add NAME - "<context>"`), with envget piping it?
 3. What does `jss add` do when the name already exists: refuse, overwrite, or overwrite only with a flag?
 4. The ordered form `jss add NAME VALUE "CONTEXT"` has three arguments, but the envget example calls `jss add "$2" "$value"` with two and no context. Is the context optional, or should envget pass the matched .env line with the value redacted as the context?
+
+## Reference implementation (owner, 2026-11-18)
+
+The owner's tested helpers are in scripts/janitor-env-tools/ (envkey.sh, envget.sh, their usage guides, one-liners and tests), copied to design/requirements/examples/janitor-env-tools/. PRRD G30.1, G31.1, G32.1 and G33.1 hold the owner's words.

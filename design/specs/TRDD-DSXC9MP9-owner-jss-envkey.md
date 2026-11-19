@@ -37,3 +37,7 @@ Of course the SECRET_NAME passed to jss or jsscli is simply the UUID of the secr
 - R3. Every vault row stores a context field: the full line of code where the secret was found, with the value already redacted. The agent reads that field to tell whether the secret was assigned to a variable or an env var, exported, or passed to a function, without ever seeing the value.
 - R4. Unchanged from the earlier vault directive: jss output and every command line that holds a resolved value stay redacted for the agent (the known-value index).
 - Open, for the owner: whether jss lookups need a permission prompt or a host or command allow-list (exfiltration through a resolved value).
+
+## Reference implementation (owner, 2026-11-18)
+
+The owner's tested helpers are in scripts/janitor-env-tools/ (envkey.sh, envget.sh, their usage guides, one-liners and tests), copied to design/requirements/examples/janitor-env-tools/. PRRD G30.1, G31.1, G32.1 and G33.1 hold the owner's words.

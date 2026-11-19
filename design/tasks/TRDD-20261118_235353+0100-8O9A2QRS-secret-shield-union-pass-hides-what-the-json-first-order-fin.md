@@ -27,14 +27,14 @@ approval-datetime: 2026-11-18T23:53:53+0100
 
 ## Symptom
 
-By main-agent 2026-11-18, after commit aac5be3c (TRDD-CAZIKQVH): redactText runs the two old walks (redactDeep, redactBlocks), then walk 3 (redactTokens on each line that parses as a JSON object or array), then walk 4 (hide found values where copied, also behind escapes). In 1,732 of 200,000 generated texts the JSON-first order (redactJsonLine first) would have hidden a secret that this additive order leaves visible in part.
+By main-agent 2026-11-18, after commit aac5be3c (TRDD-CAZIKQVH): redactDeep and redactBlocks (and redactText, which is redactDeep on a string) run the two old walks, then walk 3 (redactTokens on each line that parses as a JSON object or array), then walk 4 (hide found values where copied, also behind escapes). In 1,732 of 200,000 generated texts the JSON-first order (redactJsonLine first) would have hidden a secret that this additive order leaves visible in part.
 Union means: also run the redactJsonLine order, take the values it found, and hide them in the additive output with hideKnown. One more pass over the text. Cost of that pass is unmeasured.
 
 ## Timing risk
 
 A 4 MB JSONL Read went from 532 ms to 1659 ms at load 10 (3.1x) with aac5be3c. The hook limit is 10 s, and a timeout after next() leaves the raw result, so a slower pass can leave a secret unredacted. Measure a 4 MB JSONL Read under load on the union build; consider a size cap for walk 3.
 json-text.test.ts adds a wall-clock ratio test ("4,000 JSON lines ... less than 48 times as long as 250") that runs in the mandatory publish gate G3b. publish.py already notes that the patterns.test.ts timing ratio is load-sensitive, and this host runs at load 10 to 50, so measure the ratio's headroom at high load, or make the test robust.
-Timing at heavier load: an earlier run at load 23 to 50 took about 2.5 s per MB, about 10 s for 4 MB, which is at the 10 s hook limit. (Figure as reported by the orchestrator 2026-11-18; not re-measured by the card writer.)
+Timing at heavier load: an earlier run at load 23 to 50 took about 2.5 s per MB, about 10 s for 4 MB, which is at the 10 s hook limit. (Source: the p10 report, J-relative reports_dev/mods-expert-developer-agent/20261118_191313+0100-p10-json-lines.md, section Not covered: a first run at load 23 to 50 gave 1 MB 316 to 2524 ms, an outlier its author did not explain. The "about 10 s for 4 MB" above is an extrapolation of that 1 MB figure, not a measurement; the same report measured 4 MB at 651 to 2588 ms in a second run at load 13 to 25.)
 
 ## Done means
 
