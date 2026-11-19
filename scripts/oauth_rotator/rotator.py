@@ -76,6 +76,7 @@ import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — k
 import tls_context  # noqa: E402  # scripts/lib/tls_context.py — verifying_context() (TRDD-X6I04SAO)
 import token_burn  # noqa: E402  # scripts/lib/token_burn.py — scoped_rotation_veto (TRDD-QE390SJA)
 import usage_probe  # noqa: E402  # scripts/lib/usage_probe.py (throttled /api/oauth/usage, TRDD-WEBA1RMF)
+from exe_path import exe  # noqa: E402  # scripts/lib/exe_path.py (TRDD-SWQXCIOS)
 
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 # Per-account slot tokens are stored in the OS keychain too — ENCRYPTED at rest,
@@ -935,7 +936,7 @@ def _read_live_primary() -> dict | None:
     # 3. GNOME Keyring (Linux desktop)
     try:
         r = subprocess.run(
-            ["secret-tool", "lookup", "service", KEYCHAIN_SERVICE],
+            [exe("secret-tool"), "lookup", "service", KEYCHAIN_SERVICE],
             capture_output=True,
             text=True,
             timeout=5,
@@ -1330,7 +1331,7 @@ def write_live_blob(blob: dict) -> None:
         os.replace(tmp, cf)
         try:
             subprocess.run(
-                ["secret-tool", "store", "--label=Claude Code-credentials", "service", KEYCHAIN_SERVICE],
+                [exe("secret-tool"), "store", "--label=Claude Code-credentials", "service", KEYCHAIN_SERVICE],
                 input=data,
                 capture_output=True,
                 text=True,
@@ -1466,7 +1467,7 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
             pass
     try:
         r = subprocess.run(
-            ["secret-tool", "lookup", "service", service, "account", email],
+            [exe("secret-tool"), "lookup", "service", service, "account", email],
             capture_output=True,
             text=True,
             timeout=5,
@@ -1519,7 +1520,7 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
         return KEYCHAIN_WRITE_FAILED
     try:
         r = subprocess.run(
-            ["secret-tool", "store", "--label", "Claude Code rotator slot", "service", service, "account", email],
+            [exe("secret-tool"), "store", "--label", "Claude Code rotator slot", "service", service, "account", email],
             input=data,
             capture_output=True,
             text=True,
@@ -1542,7 +1543,7 @@ def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> N
     )
     try:
         subprocess.run(
-            ["secret-tool", "clear", "service", service, "account", email],
+            [exe("secret-tool"), "clear", "service", service, "account", email],
             capture_output=True,
             text=True,
             timeout=5,
@@ -1668,7 +1669,7 @@ def claude_running() -> bool:
     # 2026-10-05, TRDD-JOXQQL4J). The timeout itself stays because an unbounded `ps` hung the
     # tick for 100+ s (TRDD-G9Z8PXCM R1).
     try:
-        proc = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True, timeout=_PS_TIMEOUT_S)
+        proc = subprocess.run([exe("ps"), "-eo", "args="], capture_output=True, text=True, timeout=_PS_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         print(f"rotator: ps -eo args= timed out after {_PS_TIMEOUT_S}s - assuming Claude is running", file=sys.stderr)
         return True
