@@ -57,6 +57,7 @@ https://code.claude.com/docs/en/hooks):
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -111,6 +112,23 @@ try:
         import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context: scripts/lib on sys.path
 except Exception as _exc:  # noqa: BLE001 - a sibling module-load fault must degrade, not crash
     _TRANSCRIPT_ROLES_IMPORT_ERROR = str(_exc)
+# WHY (TRDD-SWQXCIOS): exe is scripts/lib/exe_path.exe, loaded from this file's own location and not
+# through sys.path: a sys.path entry would let the bare-name fallbacks above resolve the real sibling
+# modules and skip the degraded path. Loaded like transcript_roles: a broken or missing exe_path.py
+# leaves exe None and records _EXE_PATH_IMPORT_ERROR; _run_git then returns "" and the handoff says so.
+exe: Any = None
+_EXE_PATH_IMPORT_ERROR: str | None = None
+try:
+    _exe_spec = importlib.util.spec_from_file_location(
+        "exe_path", Path(__file__).resolve().parent.parent / "lib" / "exe_path.py"
+    )
+    if _exe_spec is None or _exe_spec.loader is None:
+        raise ImportError("no import spec for exe_path.py")
+    _exe_module = importlib.util.module_from_spec(_exe_spec)
+    _exe_spec.loader.exec_module(_exe_module)
+    exe = _exe_module.exe
+except Exception as _exc:  # noqa: BLE001 - a broken exe_path must degrade, not crash the hook
+    _EXE_PATH_IMPORT_ERROR = str(_exc)
 
 # The stable, in-place handoff file the post-compaction turn must read first.
 HANDOFF_FILENAME = "precompact-handoff.md"
@@ -230,10 +248,14 @@ def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
     collides with a concurrent `publish.py` commit (janitor#245).
     """
     try:
+        # WHY (TRDD-SWQXCIOS): with exe unavailable the git argv cannot be built, so run nothing and
+        # return the failure value this function documents; _build_handoff reports the cause.
+        if exe is None:
+            return ""
         git_env = dict(os.environ)
         git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
-            ["git", *args],
+            [exe("git"), *args],
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -1086,8 +1108,8 @@ def _debounced(sd: Path, session_id: str, now: float) -> bool:
     return isinstance(data, dict) and data.get("session_id") == session_id
 
 
-def _record_transcript_roles_import_finding(project_root: Path) -> None:
-    """Best-effort: tell the owner the recent-turns section is degraded, without `--debug`.
+def _record_import_finding(project_root: Path, code: str, msg: str) -> None:
+    """Best-effort: tell the owner a module-load fault degraded a handoff section, without `--debug`.
 
     Coordinator finding on this card: a PreCompact hook exiting non-2 is a NON-BLOCKING
     error (Claude Code hooks docs, "How hooks work" — compaction proceeds regardless, and
@@ -1102,20 +1124,28 @@ def _record_transcript_roles_import_finding(project_root: Path) -> None:
     """
     try:
         from lib import findings_ledger  # hook context: scripts/ on sys.path
-    except ImportError:
+    except ImportError as exc:
         try:
             import findings_ledger  # type: ignore[no-redef]  # detector/test context
         except ImportError:
+            # why (TRDD-SWQXCIOS): findings_ledger imports state, which imports the converted lib modules,
+            # which import exe_path. With exe_path.py missing the ledger cannot load, so the finding is
+            # dropped here; the stderr line below is the only trace, and the handoff carries the cause too.
+            try:
+                if sys.stderr is not None:
+                    print(
+                        f"[pre-compact-handoff] finding not recorded: {code} (findings_ledger import failed: {exc})",
+                        file=sys.stderr,
+                    )
+            except (OSError, ValueError):
+                pass
             return
     try:
         findings_ledger.record(
             sev="MEDIUM",
-            code="PRECOMPACT-TR-IMPORT",  # findings_ledger caps `code` at 24 chars — verified
+            code=code,  # findings_ledger caps `code` at 24 chars — verified
             src="pre-compact-handoff",
-            msg=(
-                "recent-turns section unavailable: transcript_roles import failed "
-                f"({_TRANSCRIPT_ROLES_IMPORT_ERROR}) — plugin install broken"
-            ),
+            msg=msg,
             ref=str(project_root),
             project_dir=str(project_root),
             now=int(time.time()),
@@ -1127,7 +1157,7 @@ def _record_transcript_roles_import_finding(project_root: Path) -> None:
         # channel; so the write is skipped then. A broken stream raises OSError or ValueError below.
         try:
             if sys.stderr is not None:
-                print("[pre-compact-handoff] transcript_roles finding not recorded", file=sys.stderr)
+                print(f"[pre-compact-handoff] finding not recorded: {code}", file=sys.stderr)
         except (OSError, ValueError):
             pass
 
@@ -1183,6 +1213,15 @@ def _build_handoff(
     out.append(f"- ai-maestro-janitor version: {version}")
     out.append("")
     out.append("## Git HEAD")
+    if _EXE_PATH_IMPORT_ERROR is not None:
+        # WHY (TRDD-SWQXCIOS): the git sections come back "(unavailable)" when exe failed to load, so the
+        # cause is named once here and recorded as a finding, the same way the transcript import is.
+        _record_import_finding(
+            project_root,
+            "PRECOMPACT-EXE-IMPORT",
+            f"git sections unavailable: exe_path import failed ({_EXE_PATH_IMPORT_ERROR}) — plugin install broken",
+        )
+        out.append("(git sections unavailable: exe_path import failed — plugin install broken)")
     out.append(f"- Branch: {branch}")
     out.append(f"- HEAD: {head_sha}")
     out.append("")
@@ -1223,7 +1262,12 @@ def _build_handoff(
     except Exception:  # noqa: BLE001 - a parser bug must never break the handoff
         turns = None
     if _TRANSCRIPT_ROLES_IMPORT_ERROR is not None:
-        _record_transcript_roles_import_finding(project_root)
+        _record_import_finding(
+            project_root,
+            "PRECOMPACT-TR-IMPORT",
+            "recent-turns section unavailable: transcript_roles import failed "
+            f"({_TRANSCRIPT_ROLES_IMPORT_ERROR}) — plugin install broken",
+        )
     out.append("")
     out.append(
         f"## Recent conversation (last {RECENT_TURNS} turns — VERBATIM transcript, not the summary)"

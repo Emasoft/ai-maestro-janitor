@@ -35,6 +35,7 @@ from typing import Any
 
 import global_state as gs
 import state
+from exe_path import exe
 
 _INBOX_NAME = "gh-notify-inbox.json"
 _CURSOR_NAME = "gh-notify-inbox.cursor"
@@ -165,7 +166,7 @@ def _gh_api(path: str) -> tuple[object | None, str | None]:
     """`(parsed_json, error)`. Never raises — mirrors `gh_notify_poll.gh_api`."""
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
-            ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+            [exe("gh"), "api", "-H", "Accept: application/vnd.github+json", path],
             # Scaled by the shared knob (TRDD-7NSRD8OV); 1.0 in production. Same reason as
             # its twin in `gh_notify_poll.gh_api` — under suite load this expired against a
             # stub, and the resulting "did not run" read as a logic bug.

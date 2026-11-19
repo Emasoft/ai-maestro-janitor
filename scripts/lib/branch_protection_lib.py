@@ -64,6 +64,7 @@ from typing import Any
 # `state.run_subprocess`, and an alias hides the protection from it — the call IS protected
 # either way, but a guard that cannot prove it fails the suite (found 2026-09-01).
 import state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
+from exe_path import exe
 
 
 def _t(seconds: float) -> float:
@@ -800,7 +801,7 @@ def fetch_ruleset_detail(slug: str, ruleset_id: int) -> dict | None:
         return None
     try:
         proc = subprocess.run(
-            ["gh", "api", f"repos/{slug}/rulesets/{ruleset_id}"],
+            [exe("gh"), "api", f"repos/{slug}/rulesets/{ruleset_id}"],
             capture_output=True, text=True, timeout=_t(10), check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1051,7 +1052,7 @@ def delete_ruleset_by_name(slug: str, name: str) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             [
-                "gh", "api", "--method", "DELETE",
+                exe("gh"), "api", "--method", "DELETE",
                 f"repos/{slug}/rulesets/{rid}",
             ],
             capture_output=True, text=True, timeout=_t(15), check=False,

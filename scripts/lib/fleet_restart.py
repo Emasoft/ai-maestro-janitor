@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fleet_inject  # noqa: E402  (bare sibling import; lib/ is on sys.path)
+from exe_path import exe  # noqa: E402
 
 # The last-resort relaunch. Deliberately the MINIMUM that resumes a transcript: every other
 # flag is MIRRORED from how the session was actually launched (see `relaunch_command`).
@@ -280,7 +281,7 @@ def live_cmdline(pid: int) -> str:
         return ""
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
-            ["ps", "-p", str(pid), "-o", "args="],
+            [exe("ps"), "-p", str(pid), "-o", "args="],
             capture_output=True, text=True, check=False, timeout=5,
         )
     except (OSError, subprocess.SubprocessError):

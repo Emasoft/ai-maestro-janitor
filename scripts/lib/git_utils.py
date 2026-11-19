@@ -24,6 +24,7 @@ if _LIB_DIR not in sys.path:
     sys.path.insert(0, _LIB_DIR)
 
 import state  # noqa: E402  (after sys.path bootstrap)
+from exe_path import exe  # noqa: E402
 
 
 def _git(
@@ -44,7 +45,7 @@ def _git(
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
-        ["git", *args],
+        [exe("git"), *args],
         cwd=str(cwd) if cwd is not None else None,
         input=_stdin,
         capture_output=True,
@@ -125,7 +126,7 @@ def _lock_is_held(lock_path: Path) -> Optional[bool]:
     """
     try:
         proc = subprocess.run(
-            ["lsof", "-a", "--", str(lock_path)],
+            [exe("lsof"), "-a", "--", str(lock_path)],
             capture_output=True,
             text=True,
             check=False,
@@ -382,7 +383,7 @@ def _gather_ps_snapshot() -> Optional[str]:
     """
     try:
         proc = subprocess.run(
-            ["ps", "-eo", "pid,ppid,etime,command"],
+            [exe("ps"), "-eo", "pid,ppid,etime,command"],
             capture_output=True,
             text=True,
             check=False,
@@ -458,7 +459,7 @@ def _pid_cwd(pid: int) -> Optional[Path]:
     """
     try:
         proc = subprocess.run(
-            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            [exe("lsof"), "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
             capture_output=True,
             text=True,
             check=False,
@@ -536,7 +537,7 @@ def _pid_is_zombie(pid: int) -> bool:
     """
     try:
         proc = subprocess.run(
-            ["ps", "-o", "state=", "-p", str(pid)],
+            [exe("ps"), "-o", "state=", "-p", str(pid)],
             capture_output=True,
             text=True,
             check=False,

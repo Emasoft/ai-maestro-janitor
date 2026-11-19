@@ -29,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # Scopes whose updates are cwd-relative. `user`/`managed` are machine-global and are the
 # HARNESS's own autoUpdate job (the daemon's bulk sweep of them was retired 2026-08-20,
@@ -189,7 +190,7 @@ def update_target(target: Target, *, timeout_s: int = UPDATE_TIMEOUT_S) -> tuple
     """
     try:
         proc = subprocess.run(
-            ["claude", "plugin", "update", target.plugin_id, "--scope", target.scope],
+            [exe("claude"), "plugin", "update", target.plugin_id, "--scope", target.scope],
             cwd=target.project_path,
             capture_output=True,
             text=True,

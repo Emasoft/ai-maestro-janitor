@@ -60,6 +60,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import terminal_trigger  # noqa: E402  (bare sibling import; lib/ is on sys.path)
+from exe_path import exe  # noqa: E402
 
 # Same injection-safety gate as compact_trigger: a stored session id is only ever
 # interpolated into an `osascript -e` string AFTER this hex-UUID check, so a
@@ -596,7 +597,7 @@ def fire(plan: dict | None) -> bool:
     try:
         if plan["channel"] == "iterm":
             subprocess.Popen(  # noqa: S603 - fixed argv, no shell; script is UUID-gated
-                ["osascript", "-e", plan["osascript"]],
+                [exe("osascript"), "-e", plan["osascript"]],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
