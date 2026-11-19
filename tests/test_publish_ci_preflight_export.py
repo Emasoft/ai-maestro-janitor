@@ -13,11 +13,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import publish  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), *args],
+        [exe("git"), "-C", str(repo), *args],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
 

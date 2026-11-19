@@ -20,6 +20,7 @@ sys.path.insert(0, str(_ROOT / "scripts"))
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import memory_dispatch_claim as mdc  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 
 def _dispatch(sd: Path, epoch: int, intervention: str, scope: str = "LOCAL") -> Path:
@@ -1321,7 +1322,7 @@ def test_reports_dir_candidates_resolves_via_git_worktree_list(tmp_path):
     project = tmp_path / "proj"
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    subprocess.run([exe("git"), "-C", str(project), "init", "-q"], check=True)
 
     result = mdc._reports_dir_candidates(state_dir)
     assert result == [project / "reports_dev" / "janitor-memory-subconscious-agent"]
@@ -1353,15 +1354,15 @@ def test_skeleton_lands_at_main_checkout_when_state_dir_is_a_linked_worktree(tmp
     at the MAIN checkout's reports dir, because the worktree (and everything under it)
     is deleted when the branch is done while the main checkout persists."""
     main_repo = tmp_path / "main"
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q", "main"], check=True)
-    subprocess.run(["git", "-C", str(main_repo), "config", "user.email", "t@t.test"], check=True)
-    subprocess.run(["git", "-C", str(main_repo), "config", "user.name", "t"], check=True)
+    subprocess.run([exe("git"), "-C", str(tmp_path), "init", "-q", "main"], check=True)
+    subprocess.run([exe("git"), "-C", str(main_repo), "config", "user.email", "t@t.test"], check=True)
+    subprocess.run([exe("git"), "-C", str(main_repo), "config", "user.name", "t"], check=True)
     (main_repo / "f.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "-C", str(main_repo), "add", "f.txt"], check=True)
-    subprocess.run(["git", "-C", str(main_repo), "commit", "-q", "-m", "init"], check=True)
+    subprocess.run([exe("git"), "-C", str(main_repo), "add", "f.txt"], check=True)
+    subprocess.run([exe("git"), "-C", str(main_repo), "commit", "-q", "-m", "init"], check=True)
     worktree = tmp_path / "wt"
     subprocess.run(
-        ["git", "-C", str(main_repo), "worktree", "add", "-q", str(worktree), "-b", "wtbranch"],
+        [exe("git"), "-C", str(main_repo), "worktree", "add", "-q", str(worktree), "-b", "wtbranch"],
         check=True,
     )
 
@@ -1391,7 +1392,7 @@ def test_find_completion_report_survives_matcher_git_failure_same_root(tmp_path,
     project = tmp_path / "proj"
     state_dir = project / ".janitor" / "state"
     state_dir.mkdir(parents=True)
-    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    subprocess.run([exe("git"), "-C", str(project), "init", "-q"], check=True)
     _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
 
     proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
@@ -1452,14 +1453,14 @@ def test_report_path_stdout_is_exactly_one_line_under_uv_run(tmp_path):
     _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
 
     claim = subprocess.run(
-        ["uv", "run", "--script", "--quiet", str(_SCRIPT),
+        [exe("uv"), "run", "--script", "--quiet", str(_SCRIPT),
          "--chore", "repair", "--state-dir", str(state_dir)],
         capture_output=True, text=True,
     )
     assert claim.returncode == 0, claim.stderr
 
     proc = subprocess.run(
-        ["uv", "run", "--script", "--quiet", str(_SCRIPT),
+        [exe("uv"), "run", "--script", "--quiet", str(_SCRIPT),
          "report-path", "--state-dir", str(state_dir)],
         capture_output=True, text=True,
     )

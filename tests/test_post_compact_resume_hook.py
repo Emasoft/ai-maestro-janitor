@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
@@ -914,7 +915,7 @@ def test_stable_interpreter_still_runs_after_the_uv_temp_env_is_gone(tmp_path: P
     )
     # uv runs the driver in a temporary environment, as it runs the hook, and deletes that environment on exit.
     resolved = subprocess.run(
-        ["uv", "run", "--quiet", "--script", str(driver), str(_HOOK_PATH)],
+        [exe("uv"), "run", "--quiet", "--script", str(driver), str(_HOOK_PATH)],
         capture_output=True,
         text=True,
         timeout=120,
@@ -975,7 +976,7 @@ def test_both_spawn_sites_start_the_resolved_interpreter_and_refuse_when_it_is_g
         time.sleep(0.2)
     assert pid, "the deferred child never started"
     try:
-        listed = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=30).stdout.split()
+        listed = subprocess.run([exe("ps"), "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=30).stdout.split()
     finally:
         os.kill(pid, signal.SIGTERM)
     started_with = listed[0] if listed else ""

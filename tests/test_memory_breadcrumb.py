@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts" / "lib"))
 
 import memory_breadcrumb as mb  # noqa: E402  -- local module, needs the sys.path above
+from exe_path import exe  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # format_breadcrumb — pure
@@ -131,7 +132,7 @@ def test_breadcrumb_composes_all_three_live_scopes(
     home = tmp_path / "home"
     project = tmp_path / "proj"
     project.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run([exe("git"), "init", "-q"], cwd=project, check=True)
 
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))

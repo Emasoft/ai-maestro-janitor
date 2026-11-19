@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
@@ -399,7 +400,7 @@ def test_thread_passes_while_main_is_blocked_survives_a_raise_and_stops(
     t = daemon._ProcessSizeWatchThread(flaky)
     t.start()
     try:
-        subprocess.run(["sleep", "1"], check=True)  # the 'stuck main loop'
+        subprocess.run([exe("sleep"), "1"], check=True)  # the 'stuck main loop'
         assert len(calls) >= 2, "the thread must keep passing after a pass that raised"
         assert t.is_alive()
     finally:

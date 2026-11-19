@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
@@ -88,7 +89,7 @@ def _init_git_repo(root: Path) -> None:
     """Create a real git repo with one commit so HEAD/log/status are populated."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     run = lambda *a: subprocess.run(  # noqa: E731 - terse test helper
-        ["git", *a], cwd=str(root), env=env, capture_output=True, text=True, check=True
+        [exe("git"), *a], cwd=str(root), env=env, capture_output=True, text=True, check=True
     )
     run("init", "-q")
     run("config", "user.email", "test@example.com")

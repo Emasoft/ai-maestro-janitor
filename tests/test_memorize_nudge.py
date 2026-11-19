@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 _DETECTOR = (
     Path(__file__).resolve().parent.parent
@@ -42,7 +43,7 @@ _OPT_VARS = (
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True,
+    subprocess.run([exe("git"), *args], cwd=repo, check=True,
                    capture_output=True, text=True)
 
 

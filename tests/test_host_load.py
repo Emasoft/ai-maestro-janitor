@@ -6,6 +6,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 ROOT = Path(__file__).resolve().parents[1]
 DETECTOR = ROOT / "scripts" / "detectors" / "host-load.py"
 
@@ -19,7 +21,7 @@ def _run(tmp_path: Path, load: str, cores: str, **extra: str) -> subprocess.Comp
         **extra,
     }
     return subprocess.run(
-        ["uv", "run", "--script", "--quiet", str(DETECTOR)],
+        [exe("uv"), "run", "--script", "--quiet", str(DETECTOR)],
         capture_output=True, text=True, env=env, timeout=60, check=False,
     )
 
@@ -68,7 +70,7 @@ def test_real_run_exits_zero(tmp_path: Path) -> None:
     env.pop("JANITOR_LOADAVG", None)
     env.pop("JANITOR_CPU_COUNT", None)
     proc = subprocess.run(
-        ["uv", "run", "--script", "--quiet", str(DETECTOR)],
+        [exe("uv"), "run", "--script", "--quiet", str(DETECTOR)],
         capture_output=True, text=True, env=env, timeout=60, check=False,
     )
     assert proc.returncode == 0

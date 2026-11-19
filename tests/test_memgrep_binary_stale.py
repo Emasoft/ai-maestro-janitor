@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
@@ -189,7 +190,7 @@ def test_real_404_has_its_own_reason(tmp_path: Path) -> None:
     stub.chmod(0o755)
     # Why: CI passes its token under this test-only name so no other gh-calling test sees a login; _run isolates HOME, so locally fall back to the gh credential.
     token = os.environ.get("JANITOR_TEST_GH_TOKEN") or subprocess.run(
-        ["gh", "auth", "token"], capture_output=True, text=True, env={**os.environ, "HOME": pwd.getpwuid(os.getuid()).pw_dir}
+        [exe("gh"), "auth", "token"], capture_output=True, text=True, env={**os.environ, "HOME": pwd.getpwuid(os.getuid()).pw_dir}
     ).stdout.strip()
     # Why: a CI runner has gh installed but not logged in; the unauthenticated compare call errors
     # instead of returning the 404 this test asserts, so without a token there is nothing to test.

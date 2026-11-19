@@ -15,6 +15,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SKIP = {"target", ".git", "node_modules", ".venv", "vendor",
          "dist", "build", "obj", "zig-out", "zig-cache", ".zig-cache"}
@@ -32,7 +34,7 @@ def _git_ignored(paths: list[Path]) -> set[str]:
     if not paths:
         return set()
     proc = subprocess.run(
-        ["git", "check-ignore", "--stdin"],
+        [exe("git"), "check-ignore", "--stdin"],
         cwd=str(_PROJECT_ROOT),
         input="\n".join(str(p) for p in paths),
         capture_output=True,

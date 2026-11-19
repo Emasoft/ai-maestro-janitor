@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 HOOK = Path(__file__).resolve().parent.parent / "git-hooks" / "pre-push"
 
@@ -52,8 +53,9 @@ def _fake_python3(tmp_path: Path, *, version: tuple[int, int]) -> Path:
 def _run_guard(python3_dir: Path) -> int:
     """Run the hook's version predicate with `python3_dir` first on PATH."""
     env = dict(os.environ, PATH=f"{python3_dir}{os.pathsep}{os.environ['PATH']}")
+    # WHY env: env puts the fake python3 shim first on PATH; exe() must resolve through it. ubs taint on env is a false positive: env is a test-local dict.
     return subprocess.run(
-        ["python3", "-c", _PREDICATE],
+        [exe("python3", env), "-c", _PREDICATE],
         env=env, capture_output=True, text=True, timeout=30, check=False,
     ).returncode
 
@@ -135,6 +137,7 @@ def test_the_shim_itself_is_strict(tmp_path: Path, bad_argv: list[str]) -> None:
     """Self-check: the shim must reject argv shapes the guard never uses, so a test bug is loud."""
     d = _fake_python3(tmp_path, version=(3, 10))
     env = dict(os.environ, PATH=f"{d}{os.pathsep}{os.environ['PATH']}")
-    r = subprocess.run(["python3", *bad_argv], env=env, capture_output=True,
+    # WHY env: env puts the fake python3 shim first on PATH; exe() must resolve through it. ubs taint on env is a false positive: env is a test-local dict.
+    r = subprocess.run([exe("python3", env), *bad_argv], env=env, capture_output=True,
                        text=True, timeout=30, check=False)
     assert r.returncode == 99

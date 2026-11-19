@@ -16,6 +16,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from exe_path import exe
+
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "project-plugins-update.py"
 SETTINGS_REL = ".claude/settings.json"
 
@@ -24,7 +26,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
-        ["git", "-C", str(root), *args],
+        [exe("git"), "-C", str(root), *args],
         capture_output=True, text=True, timeout=30, check=False, env=env,
     )
 

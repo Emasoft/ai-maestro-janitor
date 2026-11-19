@@ -25,13 +25,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import project_memory_tracked  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 _PROBE = ".claude/project/memory/MEMORY.md"
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(repo), *args],
+        [exe("git"), "-C", str(repo), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -57,7 +58,7 @@ def _make_memory_dir(repo: Path) -> Path:
 def _is_ignored(repo: Path) -> bool:
     """True iff git reports the probe path as ignored (check-ignore exit 0)."""
     proc = subprocess.run(
-        ["git", "-C", str(repo), "check-ignore", "-q", _PROBE],
+        [exe("git"), "-C", str(repo), "check-ignore", "-q", _PROBE],
         capture_output=True,
         text=True,
         check=False,

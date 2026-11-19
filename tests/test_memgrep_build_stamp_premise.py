@@ -22,6 +22,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from exe_path import exe
+
 _ROOT = Path(__file__).resolve().parent.parent
 _BUILD_RS = _ROOT / "scripts" / "memgrep" / "build.rs"
 
@@ -48,7 +50,7 @@ def _git(repo: Path, *args: str) -> str:
         "GIT_COMMITTER_EMAIL": "t@example.invalid",
     }
     out = subprocess.run(
-        ["git", *args], cwd=repo, env=env, capture_output=True, text=True, check=True
+        [exe("git"), *args], cwd=repo, env=env, capture_output=True, text=True, check=True
     )
     return out.stdout.strip()
 

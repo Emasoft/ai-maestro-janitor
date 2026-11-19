@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from exe_path import exe
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "keepalive_install.sh"
 
@@ -27,14 +28,15 @@ def test_generated_plist_process_type_is_standard(tmp_path: Path) -> None:
     uname.write_text("#!/bin/sh\necho Darwin\n")
     uname.chmod(0o755)
     env = {**os.environ, "HOME": str(tmp_path), "KEEPALIVE_SKIP_ACTIVATION": "1", "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"}
-    subprocess.run(["bash", str(script), "install"], env=env, check=True, capture_output=True)
+    # WHY no env: the shim dir holds no bash, so PATH lookup with or without env finds the same bash.
+    subprocess.run([exe("bash"), str(script), "install"], env=env, check=True, capture_output=True)
     plist = tmp_path / "Library" / "LaunchAgents" / "com.ai-maestro-janitor.daemon.plist"
     # WHY plistlib: plutil exists only on macOS, so shelling out to it failed on the Linux CI runner;
     # plistlib parses the same file on every platform and yields the same ProcessType fact.
     with plist.open("rb") as fh:
         assert plistlib.load(fh)["ProcessType"] == "Standard"
     if shutil.which("plutil"):
-        subprocess.run(["plutil", "-lint", str(plist)], check=True, capture_output=True)
+        subprocess.run([exe("plutil"), "-lint", str(plist)], check=True, capture_output=True)
 
 
 def test_install_over_loaded_job_never_claims_installed_while_unloaded(tmp_path: Path) -> None:
@@ -65,7 +67,8 @@ esac
         shim.chmod(0o755)
     env = {**os.environ, "HOME": str(tmp_path), "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"}
     env.pop("KEEPALIVE_SKIP_ACTIVATION", None)
-    proc = subprocess.run(["bash", str(script), "install"], env=env, capture_output=True, text=True)
+    # WHY no env: the shim dir holds no bash, so PATH lookup with or without env finds the same bash.
+    proc = subprocess.run([exe("bash"), str(script), "install"], env=env, capture_output=True, text=True)
     loaded = (state / "loaded").exists()
     assert loaded or proc.returncode != 0, f"claimed install with the job unloaded: {proc.stdout!r}"
     assert not ("installed" in proc.stdout and not loaded)
@@ -83,7 +86,8 @@ def _run_installer(tmp_path: Path, uname_out: str, shims: dict[str, str]) -> sub
         (shim_dir / name).chmod(0o755)
     env = {**os.environ, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg"), "PATH": f"{shim_dir}:{os.environ.get('PATH', '')}"}
     env.pop("KEEPALIVE_SKIP_ACTIVATION", None)
-    return subprocess.run(["bash", str(script), "install"], env=env, capture_output=True, text=True)
+    # WHY no env: the shim dir holds no bash, so PATH lookup with or without env finds the same bash.
+    return subprocess.run([exe("bash"), str(script), "install"], env=env, capture_output=True, text=True)
 
 
 def test_macos_install_fails_when_old_job_never_unloads(tmp_path: Path) -> None:

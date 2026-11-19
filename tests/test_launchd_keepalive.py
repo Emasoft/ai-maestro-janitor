@@ -37,6 +37,7 @@ INSTALLER = SCRIPTS / "keepalive_install.sh"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import launchd_keepalive  # type: ignore[import-not-found]  # noqa: E402
+from exe_path import exe  # noqa: E402
 
 # The TEST'S OWN ceiling for spawning `keepalive_install.sh`. Scaled for the suite by
 # conftest's `_relax_subprocess_timeouts` seam (TRDD-7NSRD8OV) — NOT here. It used to read
@@ -323,7 +324,7 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
     env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
     env.pop("XDG_CONFIG_HOME", None)  # so linux resolves the unit under fake_home/.config
     proc = subprocess.run(
-        ["bash", str(INSTALLER), "install"],
+        [exe("bash"), str(INSTALLER), "install"],
         env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert proc.returncode == 0, proc.stderr
@@ -383,7 +384,7 @@ def _run_installer(
     if xdg_state_home is not None:
         env["XDG_STATE_HOME"] = str(xdg_state_home)
     proc = subprocess.run(
-        ["bash", str(INSTALLER), "install"],
+        [exe("bash"), str(INSTALLER), "install"],
         env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert proc.returncode == 0, proc.stderr
@@ -502,7 +503,7 @@ def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
     env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
     env.pop("XDG_CONFIG_HOME", None)
     install = subprocess.run(
-        ["bash", str(INSTALLER), "install"], env=env, capture_output=True, text=True, timeout=_T30,
+        [exe("bash"), str(INSTALLER), "install"], env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert install.returncode == 0, install.stderr
     # The definition file IS on disk (install wrote it) ...
