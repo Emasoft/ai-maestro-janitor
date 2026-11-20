@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-11-16T17:43:02+0100
+updated: 2026-11-20T04:14:15+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -73,6 +73,7 @@ Issue to card map, 2026-11-16: - #358 atom-after-footer: F8EIVTSG (umbrella, tod
 - 2026-10-07T03:00:56+0200 — column → dev by main-agent@ai-maestro-janitor. remaining #332 drift classes are agent work
 - 2026-11-16T13:30:02+0100 — stays in dev across release 3.9.8: umbrella card. This release lands TRDD-ZANQ1QW0, TRDD-ZFD3KBM3 and TRDD-XNZFKX0L; the rest of its scope continues after it.
 2026-11-16T17:50+0100 — stays in dev across release 3.9.9: umbrella card. No issue is closed off this release: TRDD-W6DZPXLG repairs the targeting of the late-summary cue that the issue 356 work added, while issue 356 itself is TRDD-C9CO0I7L (todo); issue 342 gets no closing comment from it.
+- 2026-11-20T04:14:10+0100 main-agent: stays in dev across the next patch release (after v3.9.8); its open work spans several releases and is not finished, so no column move is made for the publish.
 
 ## STATE
 

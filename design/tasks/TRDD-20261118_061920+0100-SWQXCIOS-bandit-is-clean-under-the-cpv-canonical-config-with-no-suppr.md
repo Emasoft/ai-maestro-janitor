@@ -4,7 +4,7 @@ title: Bandit is clean under the CPV canonical config with no suppression
 column: dev
 status: tasked
 created: 2026-11-18T06:19:20+0100
-updated: 2026-11-20T02:21:34+0100
+updated: 2026-11-20T04:14:12+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -78,6 +78,7 @@ Parent: TRDD-BAQB9SYO (publish route A: fix every finding in code; no nosec, ski
 - 2026-11-20 — main-agent reading of the ruling: tests/test_sandbox_guard_process.py's os.system line carries B605 and B607 on the same call (the partial path inside the os.system string); its one marker names both ids. No other line gets a marker.
 - 2026-11-20 main-agent ruling, open to owner veto: B105 on a dict entry whose string key is a real env-var or plugin-option name containing TOKEN (tests/test_pre_tool_token_budget.py:350, tests/test_token_report_live.py:450/471/493, tests/test_env_secrets.py:53/54) is fixed by naming the key once as a module constant, the pattern the same file already uses for _CACHE_HARD; the values are not secrets and stay literal. Lane S kept except Exception in tests/sandbox_guard.py (the contract absorbs every observer failure, now counted) and replaced the hardcoded temp-root path literals with gettempdir() plus the macOS user temp dir read through confstr id 65537 (_CS_DARWIN_USER_TEMP_DIR, not exposed by name on CPython 3.12); tested on macOS only.
 - 2026-11-20 main-agent note on the ruling above: hoisting those keys into constants exists only so B105's key-name check stops matching, which the lane B brief listed as not allowed ('moving a value only to dodge the regex'); the ruling overrides that brief line for keys that are real env-var or option names whose values are not secrets. Alternative for the owner: a reasoned nosec B105 on those 6 lines instead. Verified 2026-11-20: tests/sandbox_guard.py _tmp_roots wraps os.confstr in except (ValueError, OSError) with the unistd.h source comment, and tests/test_sandbox_guard_process.py has test_an_invalid_confstr_id_only_drops_the_extra_temp_root; staged_privacy_scan.py is called only from git-hooks/pre-commit (grep of scripts, git-hooks, .github, skills, commands, hooks).
+- 2026-11-20T04:14:10+0100 main-agent: stays in dev across the next patch release (after v3.9.8); its open work spans several releases and is not finished, so no column move is made for the publish.
 
 ## Bandit sweep progress
 

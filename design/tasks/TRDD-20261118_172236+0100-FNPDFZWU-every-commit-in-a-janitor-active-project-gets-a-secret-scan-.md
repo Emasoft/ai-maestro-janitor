@@ -4,7 +4,7 @@ title: Every commit in a janitor-active project gets a secret scan of all staged
 column: dev
 status: tasked
 created: 2026-11-18T17:22:36+0100
-updated: 2026-11-18T18:44:11+0100
+updated: 2026-11-20T04:14:14+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -25,6 +25,7 @@ implementation-commits: [a2628868]
 ## Approval log
 
 - 2026-11-18T17:22:36+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-20T04:14:10+0100 main-agent: stays in dev across the next patch release (after v3.9.8); its open work spans several releases and is not finished, so no column move is made for the publish.
 
 ## Request
 

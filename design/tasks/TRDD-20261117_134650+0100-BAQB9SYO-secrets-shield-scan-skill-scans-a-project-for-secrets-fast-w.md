@@ -4,7 +4,7 @@ title: secrets-shield-scan skill scans a project for secrets fast, with Rust onl
 column: dev
 status: tasked
 created: 2026-11-17T13:46:50+0100
-updated: 2026-11-19T13:28:00+0100
+updated: 2026-11-20T04:14:13+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -160,6 +160,7 @@ implementation-commits: [32cc16f5, e3a058a9, 92eb3472, 08a8e8f2, c06cecd4, a221c
 - 2026-11-18T02:14:26+0100, by main-agent: CPV PR 278 merged with admin rights. Owner text that authorized it (answer to the main agent's question, verbatim): "I merge and release (Recommended)". Command: gh pr merge 278 --repo Emasoft/claude-plugins-validation --squash --admin --match-head-commit e93249cb971b029e5ded27e8665eb191e939c29a. Result: merged as 5af498206332addb9c38f34ffd0318b055c9d8d2 at 2026-11-18T01:14:29Z.
 - 2026-11-18T02:40:03+0100, by main-agent: under the same owner text, CPV v5.23.1 was released with CPV's own scripts/publish.py --patch from the clean clone /tmp/cpv-release. The first run stopped at Gate 1 on a stale self-hash manifest, because PR 278 changed scripts/cpv_validation_common.py, scripts/validate_marketplace.py and tests/test_bare_system_binary_dir.py without regenerating it. The remedy publish.py prints was applied as commit 67b879372507988c0866d311e8846d8c299dd720 "chore: regen self-hash manifest". The second run failed Gate 3c on one timing test (tests/test_issue_248_md_chmod_foreign.py TestLinear test_doubling_the_file_at_most_triples_time[False], small 0.15 s, large 2.50 s, host load about 50); the test and the code it times are identical to v5.23.0. The third run passed every gate. Tag v5.23.1 is on master ff4ec4186fce0490943b19446a4e93ab900ce7cb, published 2026-11-18T01:40:03Z.
 - 2026-11-18T10:30:00+0100 — stays in dev across release 3.9.9 (main-agent): 3.9.9 ships increment 1 without the history option (now TRDD-QWD53NHM) and increment 3 (redact mode with the vault); the last box, released and installed, is ticked after the install, and the card then moves to complete. The rest of its scope lives in TRDD-QWD53NHM, TRDD-LJSST2WL, TRDD-VD8UAXGF, TRDD-ANTE5721 and TRDD-JYZAL6HW.
+- 2026-11-20T04:14:10+0100 main-agent: stays in dev across the next patch release (after v3.9.8); its open work spans several releases and is not finished, so no column move is made for the publish.
 
 ## Owner orders
 
