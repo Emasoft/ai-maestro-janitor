@@ -265,6 +265,74 @@ def test_agent_suffix_with_digit_host_still_blocks(repo: Path) -> None:
     assert len(hits) == 1
 
 
+def test_own_plugin_spec_does_not_block(repo: Path) -> None:
+    """TRDD-ELVVBENI: this repo's own `<plugin>@<marketplace>` spec in an
+    install/update command has the ssh user@host shape but names no machine."""
+    _stage(repo, "install.md", "claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope user\n")
+    assert [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"] == []
+
+
+@pytest.mark.parametrize("spec", [
+    "ai-maestro-janitor@example-host",
+    "deploy@ai-maestro-plugins",
+    "someone@ai-maestro-plugins.local",
+    "ai-maestro-janitor@ai-maestro-plugins-2",
+    "other-plugin@ai-maestro-plugins",
+])
+def test_non_own_plugin_spec_still_blocks(repo: Path, spec: str) -> None:
+    """TRDD-ELVVBENI negative control: only the exact own plugin spec is exempt;
+    a different host, a different user, a `.local` host or another plugin in
+    the same marketplace is still a user@host finding."""
+    _stage(repo, "ssh.md", f"ssh {spec}\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"]
+    assert len(hits) == 1
+
+
+def test_own_plugin_spec_blocks_when_manifest_unreadable(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-ELVVBENI fail-closed path: with plugin.json unreadable the exemption
+    is off and the plugin spec flags like any user@host."""
+    monkeypatch.setattr(sps, "_PLUGIN_MANIFEST", repo / "missing" / "plugin.json")
+    assert sps._own_plugin_spec() is None
+    _stage(repo, "install2.md", "claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope user\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"]
+    assert len(hits) == 1
+
+
+def test_own_plugin_spec_blocks_when_marketplace_import_fails(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """TRDD-ELVVBENI fail-closed path: a failing import of version_update_lib turns
+    the exemption off (spec flags, scan does not crash) and names the cause on stderr."""
+    monkeypatch.setitem(sys.modules, "version_update_lib", None)  # makes `from version_update_lib import ...` raise ImportError
+    _stage(repo, "install3.md", "claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope user\n" + LEAK + "\n")
+    found = sps.scan_staged(repo)
+    assert len([h for h in found if h.rule == "private-path.ssh-user-host"]) == 1
+    # The rest of the scan still completes: an unrelated finding in the same file is still reported.
+    assert [h for h in found if h.rule == "personal-email"]
+    assert "cannot import version_update_lib" in capsys.readouterr().err
+
+
+def test_own_plugin_spec_blocks_when_marketplace_import_raises_non_import_error(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """TRDD-ELVVBENI: version_update_lib runs Path.home() at import time, which can raise
+    RuntimeError (not ImportError) in a bare-HOME CI. The exemption must still just turn
+    off (spec flags, rest of the scan completes), never crash the gate; stderr names only
+    the exception class."""
+    stub_dir = tmp_path / "stub"
+    stub_dir.mkdir()
+    (stub_dir / "version_update_lib.py").write_text("raise RuntimeError(\"simulated import-time failure\")\n", encoding="utf-8")
+    monkeypatch.delitem(sys.modules, "version_update_lib", raising=False)
+    monkeypatch.syspath_prepend(str(stub_dir))
+    _stage(repo, "install4.md", "claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope user\n" + LEAK + "\n")
+    found = sps.scan_staged(repo)
+    assert len([h for h in found if h.rule == "private-path.ssh-user-host"]) == 1
+    assert [h for h in found if h.rule == "personal-email"]
+    err = capsys.readouterr().err
+    assert "(RuntimeError)" in err
+    assert "simulated import-time failure" not in err
+
+
 def test_real_ssn_still_blocks(repo: Path) -> None:
     """Negative control: a real-looking SSN outside a checksum line blocks."""
     _stage(repo, "form.txt", "SSN: 123-45-6789\n")

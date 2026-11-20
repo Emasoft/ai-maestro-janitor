@@ -29,6 +29,7 @@ the repo; resolves the toplevel itself. Wired into git-hooks/pre-commit.
 from __future__ import annotations
 
 import getpass
+import json
 import re
 import socket
 import subprocess
@@ -204,6 +205,45 @@ def _is_governance_author_token(matched: str) -> bool:
     return "." not in host and host != "" and not host_has_digit
 
 
+# TRDD-ELVVBENI: the plugin install/update spec `<plugin>@<marketplace>` (e.g. in
+# `claude plugin install ...` commands in docs and hook messages) has the exact
+# user-at-host shape of an ssh target but names no machine, so every commit that
+# documents the install command was blocked. Exempt ONLY this repo's own spec:
+# the plugin name is read from this repo's plugin.json at scan time and the
+# marketplace name from version_update_lib.MARKETPLACE_NAME (the single constant
+# the self-update path installs by) -- no second hardcoded copy. Exact whole-match
+# equality, so `<plugin>@other-host`, `other@<marketplace>`, `<plugin>@<marketplace>.local`
+# and any other plugin@<marketplace> still flag. An unreadable manifest yields
+# None, i.e. NO exemption: the scan fails toward blocking.
+_PLUGIN_MANIFEST = Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json"
+
+
+def _own_plugin_spec() -> str | None:
+    """`<plugin-name>@<marketplace-name>` of THIS repo, or None when the
+    manifest or the marketplace constant cannot be loaded (then nothing is
+    exempted)."""
+    try:
+        name = json.loads(_PLUGIN_MANIFEST.read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+    # Lazy import (TRDD-ELVVBENI review): ANY failure while importing the
+    # self-update lib (ImportError, or an error raised by its module-level code
+    # such as Path.home() in a bare-HOME CI) must only switch this exemption off,
+    # never crash the whole pre-commit gate (exit 2 would block every commit).
+    # One stderr line names the failure class so the now-flagged spec is explicable.
+    try:
+        from version_update_lib import MARKETPLACE_NAME
+    except Exception as exc:  # noqa: BLE001 - fail closed, see above
+        print(f"staged_privacy_scan: plugin-spec exemption off, cannot import version_update_lib ({type(exc).__name__})", file=sys.stderr)
+        return None
+    return f"{name}@{MARKETPLACE_NAME}" if isinstance(name, str) and name else None
+
+
+def _is_own_plugin_spec(matched: str, own_spec: str | None) -> bool:
+    """True iff an ssh-shape match is exactly this repo's plugin spec."""
+    return own_spec is not None and matched == own_spec
+
+
 def _staged_added_lines(root: Path) -> list[tuple[str, int, str]]:
     """The staged (index vs HEAD) added lines as (path, new_line_no, text).
 
@@ -323,6 +363,7 @@ def scan_staged(root: Path) -> list[StagedHit]:
     for path, lineno, masked in publish._personal_email_hits(lines, lambda p: known_map[p]):
         add(path, lineno, "personal-email", masked)
 
+    own_plugin_spec = _own_plugin_spec()
     host_tokens = _host_identity_tokens()
     token_res = [(t, _token_regex(t)) for t in host_tokens]
 
@@ -354,9 +395,13 @@ def scan_staged(root: Path) -> list[StagedHit]:
                 continue
             add(path, lineno, f"pii-{name}", _mask(m.group(0)))
         # 3. Home paths / machine-identity shapes — governance author tokens
-        # (<role>@<project-id>, issue #314) suppressed per-match.
+        # (<role>@<project-id>, issue #314) and this repo's own plugin spec
+        # (<plugin>@<marketplace>, TRDD-ELVVBENI) suppressed per-match.
         for f in ppp.scan_text(text):
-            if f.rule_id == "private-path.ssh-user-host" and _is_governance_author_token(f.matched_text):
+            if f.rule_id == "private-path.ssh-user-host" and (
+                _is_governance_author_token(f.matched_text)
+                or _is_own_plugin_spec(f.matched_text, own_plugin_spec)
+            ):
                 continue
             add(path, lineno, f.rule_id, _mask(f.matched_text))
         # 4. This host's username / hostname — unless already in the file at HEAD.
