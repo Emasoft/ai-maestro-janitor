@@ -156,7 +156,7 @@ def test_probe_reports_no_token_without_touching_the_network(tmp_path: Path) -> 
     calls: list = []
     out: dict = {}
     assert up.probe(None, outcome=out, getter=_getter(200, _PAYLOAD, calls=calls)) == (0, None)
-    assert out["reason"] == up.NO_TOKEN
+    assert out["reason"] == up.NO_LOGIN
     assert calls == []
 
 
@@ -168,7 +168,7 @@ def test_probe_refuses_a_token_within_30s_of_expiry(tmp_path: Path) -> None:
     now = 1_785_000_000.0
     status, data = up.probe(_TOKEN, expires_at=now + 5, outcome=out, getter=_getter(200, _PAYLOAD, calls=calls), now=now)
     assert (status, data) == (up.EXPIRING_TOKEN_STATUS, None)
-    assert out["reason"] == up.EXPIRING_TOKEN
+    assert out["reason"] == up.EXPIRING_LOGIN
     assert calls == []
 
 
@@ -441,7 +441,7 @@ def test_stale_cause_distinguishes_throttle_from_unreachable(tmp_path: Path) -> 
     now = 1_785_000_000.0
     up.set_cooldown(key, 600, now=now)
     assert "rate-limited" in up.stale_cause(up.COOLDOWN, key, now=now)
-    assert "auth token unavailable" in up.stale_cause(up.EXPIRING_TOKEN, key, now=now)
+    assert "auth token unavailable" in up.stale_cause(up.EXPIRING_LOGIN, key, now=now)
     assert "already in flight" in up.stale_cause(up.LOCK_CONTENDED, key, now=now)
     assert up.stale_cause(up.HTTP_ERROR, key, now=now) == "endpoint unreachable"
     assert up.stale_cause(None, key, now=now) == "endpoint unreachable"

@@ -92,7 +92,7 @@ import tls_context  # noqa: E402  -- scripts/lib/tls_context.py (TRDD-X6I04SAO)
 # CLIENT_ID + TOKEN_URL are sourced from rotator (single source of truth; F2b reuses them).
 CLIENT_ID = rotator.CLIENT_ID
 AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
-TOKEN_URL = rotator.TOKEN_URL
+TOKEN_URL = rotator.OAUTH_EXCHANGE_URL
 REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 SCOPES = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 

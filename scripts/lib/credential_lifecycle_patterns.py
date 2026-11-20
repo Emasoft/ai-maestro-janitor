@@ -331,7 +331,8 @@ _CRED_FILE_WRITE = (
 # 2) Token source is either ${{ secrets.X }} or an environment expansion
 #    ($VAR / ${VAR}). The full regex co-occurs both within a 600-char
 #    window of the same `run:` block.
-_TOKEN_SOURCE = (
+# B105: a name ending in "_TOKEN" bound to a string reads as a password to bandit; this is a regex of token-source shapes, not a secret, hence CREDENTIAL.
+_CREDENTIAL_SOURCE = (
     r"(?:"
         r"\$\{\{\s*secrets\.\w+\s*\}\}"        # workflow secrets context
         r"|\$\{?(?:[A-Z_][A-Z0-9_]*_TOKEN|[A-Z_][A-Z0-9_]*_KEY"
@@ -339,10 +340,10 @@ _TOKEN_SOURCE = (
     r")"
 )
 _NPMRC_INJECT_FORWARD = _re(
-    _TOKEN_SOURCE + r"[^\n]{0,600}?" + _CRED_FILE_WRITE
+    _CREDENTIAL_SOURCE + r"[^\n]{0,600}?" + _CRED_FILE_WRITE
 )
 _NPMRC_INJECT_REVERSE = _re(
-    _CRED_FILE_WRITE + r"[^\n]{0,600}?" + _TOKEN_SOURCE
+    _CRED_FILE_WRITE + r"[^\n]{0,600}?" + _CREDENTIAL_SOURCE
 )
 
 

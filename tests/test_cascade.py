@@ -135,7 +135,7 @@ def test_reauth_grace_boundary_is_inclusive() -> None:
 
 def test_no_refresh_no_session_with_runway_waits() -> None:
     """A setup-token (no refresh, no session) still well within its ~1y life → WAIT, do NOT nudge."""
-    assert _c(_acct(has_refresh=False, session=False, token_h=240.0)) is cascade.CascadeLeg.WAIT_SETUP_TOKEN
+    assert _c(_acct(has_refresh=False, session=False, token_h=240.0)) is cascade.CascadeLeg.WAIT_SETUP
 
 
 # ---------------------------------------------------------------------------

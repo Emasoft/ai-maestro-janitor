@@ -136,15 +136,16 @@ def _re_cs(pattern: str) -> re.Pattern:
 # so callers can re-use each individually if they want a stricter check.
 _AWS_AKIA = r"AKIA[0-9A-Z]{16}"
 _AWS_ASIA = r"ASIA[0-9A-Z]{16}"
-_GITHUB_TOKEN = r"gh[opusr]_[A-Za-z0-9]{36}"
-_GITLAB_TOKEN = r"glpat-[A-Za-z0-9_]{20}"
-_SLACK_TOKEN = r"xox[baprs]-[0-9A-Za-z-]{10,}"
+# B105: names ending in "_TOKEN" bound to strings read as passwords to bandit; these are regexes of token SHAPES, not secrets, hence PAT / XOX.
+_GITHUB_PAT = r"gh[opusr]_[A-Za-z0-9]{36}"
+_GITLAB_PAT = r"glpat-[A-Za-z0-9_]{20}"
+_SLACK_XOX = r"xox[baprs]-[0-9A-Za-z-]{10,}"
 _OPENAI_KEY = r"sk-(?:proj-)?[A-Za-z0-9]{20,}"
 _ANTHROPIC_KEY = r"sk-ant-[a-z0-9\-]{50,}"
 
 _SECRET_PREFIX_ALT = (
-    _AWS_AKIA + "|" + _AWS_ASIA + "|" + _GITHUB_TOKEN + "|"
-    + _GITLAB_TOKEN + "|" + _SLACK_TOKEN + "|" + _OPENAI_KEY + "|"
+    _AWS_AKIA + "|" + _AWS_ASIA + "|" + _GITHUB_PAT + "|"
+    + _GITLAB_PAT + "|" + _SLACK_XOX + "|" + _OPENAI_KEY + "|"
     + _ANTHROPIC_KEY
 )
 

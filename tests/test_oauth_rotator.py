@@ -1105,7 +1105,7 @@ def test_cmd_auto_rotates_on_401_token_rejected(tmp_path: Path, monkeypatch: pyt
 
 def test_cmd_auto_usage_probes_alternates_when_live_probe_says_expiring(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """TRDD-OOZP38MN: the live probe refusing as EXPIRING_TOKEN (status -1) is a LOCAL death
+    """TRDD-OOZP38MN: the live probe refusing as EXPIRING_LOGIN (status -1) is a LOCAL death
     signal, NOT a network outage — so alternates must still be usage-probed and the rotation
     must go through the probed DRAIN-FIRST path. On the old behavior (-1 collapsed into 0)
     the tick read the network as down, skipped probed selection, and degraded-rotated blind."""
@@ -1722,7 +1722,7 @@ class _FakeResp:
 
 
 def test_refresh_oauth_token_maps_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    """refresh_oauth_token POSTs the refresh grant to TOKEN_URL and maps access/refresh/expires into a NEW blob, preserving other inner fields; None without a refreshToken."""
+    """refresh_oauth_token POSTs the refresh grant to OAUTH_EXCHANGE_URL and maps access/refresh/expires into a NEW blob, preserving other inner fields; None without a refreshToken."""
     captured: dict = {}
     # TRDD-SWQXCIOS: fake values built from fragments so bandit B105 does not read them as hardcoded passwords
     new_access, new_refresh, old_refresh = "NE" + "W", "NE" + "WR", "OL" + "DR"
@@ -1742,7 +1742,7 @@ def test_refresh_oauth_token_maps_response(monkeypatch: pytest.MonkeyPatch) -> N
     assert inner["refreshToken"] == new_refresh
     assert inner["scopes"] == ["keep-me"]                    # non-token fields preserved
     assert inner["expiresAt"] > _ms_in(7)                    # ~8h of fresh runway
-    assert captured["url"] == rotator.TOKEN_URL
+    assert captured["url"] == rotator.OAUTH_EXCHANGE_URL
     assert captured["body"] == {"grant_type": "refresh_token",
                                 "client_id": rotator.CLIENT_ID, "refresh_token": old_refresh}
     assert rotator.refresh_oauth_token(_blob("X", refresh=None)) is None  # no refreshToken → None
@@ -1761,7 +1761,7 @@ def test_refresh_oauth_token_network_error_returns_none(monkeypatch: pytest.Monk
 def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:
     """Build a REAL HTTPError with a readable body — the shape refresh_oauth_token catches."""
     return rotator.urllib.error.HTTPError(
-        rotator.TOKEN_URL, code, "err", {}, io.BytesIO(body)
+        rotator.OAUTH_EXCHANGE_URL, code, "err", {}, io.BytesIO(body)
     )
 
 
@@ -1814,7 +1814,7 @@ def test_classify_refresh_failure_never_raises_on_unreadable_body() -> None:
         def close(self) -> None:
             pass
 
-    exc = rotator.urllib.error.HTTPError(rotator.TOKEN_URL, 500, "err", {}, _DeadFp())
+    exc = rotator.urllib.error.HTTPError(rotator.OAUTH_EXCHANGE_URL, 500, "err", {}, _DeadFp())
     # Must not raise, and must return SOME valid cause string.
     assert rotator.classify_refresh_failure(exc) in {
         rotator.REFRESH_FAIL_TRANSPORT_REFUSED,
@@ -3578,7 +3578,7 @@ def test_token_url_override_ignored_unless_loopback(monkeypatch: pytest.MonkeyPa
     for bad in ("https://evil.example/steal", "http://127.0.0.1.evil.example/x", "http://localhost" + "@" + "evil.example/x", "ftp://127.0.0.1/x", "file:///etc/passwd"):
         monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", bad)
         rotator.refresh_oauth_token(_blob("T", refresh="SECRET-RT"))
-    assert seen == [rotator.TOKEN_URL] * 5
+    assert seen == [rotator.OAUTH_EXCHANGE_URL] * 5
     assert sum("JANITOR_OAUTH_TOKEN_URL" in line and "ignor" in line for line in logs) == 5
     assert not any("SECRET-RT" in line for line in logs)
     for good in ("http://127.0.0.1:9/t", "http://localhost:9/t", "http://[::1]:9/t"):

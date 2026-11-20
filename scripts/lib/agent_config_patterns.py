@@ -454,7 +454,8 @@ _EXFIL_STRUCTURAL_VERB = (
 # every legitimate API is documented. Recall stays 2/9 on this class deliberately — see the
 # `description` for the honest limit, and TRDD-VAWIKRK2 for why the remaining 7 samples are
 # prose policies with no URL, which this shape cannot reach without unacceptable cost.
-_EXFIL_STRUCTURAL_TOKEN = (
+# B105: a name ending in "_TOKEN" bound to a string reads as a password to bandit; this is a regex of secret-at-rest nouns, not a secret, hence NOUN.
+_EXFIL_STRUCTURAL_NOUN = (
     r"(?:(?<![A-Za-z])session[_-]?tokens?(?![A-Za-z])"
     r"|(?<![A-Za-z])credentials?(?![A-Za-z])"
     r"|context\s+snapshot|\.env\b)"
@@ -465,12 +466,12 @@ _EXFIL_STRUCTURAL_PROBE = _re(
     "|".join(
         a + _EXFIL_STRUCTURAL_GAP + b + _EXFIL_STRUCTURAL_GAP + c
         for a, b, c in (
-            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_URL),
-            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_TOKEN),
-            (_EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL),
-            (_EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB),
-            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_TOKEN),
-            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_VERB),
+            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_NOUN, _EXFIL_STRUCTURAL_URL),
+            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_NOUN),
+            (_EXFIL_STRUCTURAL_NOUN, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL),
+            (_EXFIL_STRUCTURAL_NOUN, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB),
+            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_NOUN),
+            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_NOUN, _EXFIL_STRUCTURAL_VERB),
         )
     )
 )

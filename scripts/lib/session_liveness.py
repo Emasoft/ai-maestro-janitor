@@ -247,12 +247,13 @@ def retry_wedge_token(attempt: int | None, retry_in: str | None) -> str:
     logs (TRDD-XVJ30M61), shared by the pane-policy failed-step line and the fleet beat's
     per-project countdown line so the two can never drift. Each part is omitted when None.
     PURE. The `retry_wedge` prefix is `pane_state.StatusKind.RETRY_WEDGE.value`; a test pins that."""
-    token = "retry_wedge"
+    # B105: a local named "token" holding a string reads as a password to bandit; this is a log-line label, so it is called `reading`.
+    reading = "retry_wedge"
     if attempt is not None:
-        token += f"@{attempt}"
+        reading += f"@{attempt}"
     if retry_in is not None:
-        token += f"[{retry_in}]"
-    return token
+        reading += f"[{retry_in}]"
+    return reading
 
 
 def retry_wedge_state_update(

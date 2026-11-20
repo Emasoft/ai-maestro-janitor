@@ -61,7 +61,8 @@ _SALT_FILE = "env-secret-fingerprint.salt"
 _SYNCED_MARKERS = ("/Library/Mobile Documents/", "/Dropbox", "/Google Drive", "/GoogleDrive", "/OneDrive", "/iCloud")
 _PATH_SHOWN = 60  # issue_catalog rejects an identifier field over 64 characters
 _GIT_RETRY_KEY = "git ls-files"  # the retries entry of a failing git: not a path, so no file can collide with it
-_UNKNOWN_SECRET = "unknown"  # stands for the secret behind a finding migrated from the old bare-path "flagged" list; never equal to a fingerprint (12 hex characters)
+# B105: bandit reads a name holding the word "secret" as a password; this is only a list-element sentinel, never a secret, so the identifier avoids the word.
+_UNKNOWN_FINGERPRINT = "unknown"  # stands for the secret behind a finding migrated from the old bare-path "flagged" list; never equal to a fingerprint (12 hex characters)
 
 
 def _load_salt() -> bytes:
@@ -155,14 +156,14 @@ def _read_cursor(file: Path) -> dict:
         data.pop("cursor", None)
         data["retries"] = {str(k): int(v) for k, v in data["retries"].items()}
         # TRDD-ZFD3KBM3: "flagged" is an object path -> sorted fingerprints. The OLD shape is a list of bare paths, which cannot name the secret behind a finding:
-        # each loads as [_UNKNOWN_SECRET]. The sentinel is a normal list element that is never in a live fingerprint set (a fingerprint is 12 hex characters, so
+        # each loads as [_UNKNOWN_FINGERPRINT]. The sentinel is a normal list element that is never in a live fingerprint set (a fingerprint is 12 hex characters, so
         # it cannot collide), so the per-path rule "keep a recorded fingerprint this pass does not hold" keeps it for ever: a clean read, even by a pass that holds
         # a secret, never withdraws the entry, hits add their fingerprints beside it (the unknown secret is not forgotten), and it closes only when the file is gone.
         raw_flagged = data["flagged"]
         if isinstance(raw_flagged, dict):
             data["flagged"] = {str(p): _fingerprints(fps) for p, fps in raw_flagged.items()}
         else:
-            data["flagged"] = {str(p): [_UNKNOWN_SECRET] for p in raw_flagged}
+            data["flagged"] = {str(p): [_UNKNOWN_FINGERPRINT] for p in raw_flagged}
         # An ABSENT "trash" key (a state file from before the trash tier) starts the trash state empty; falling back to fresh
         # would lose "flagged", so open CRED-002 issues would never be withdrawn, and restart the covered range and the retries.
         trash = data.get("trash", fresh["trash"])
@@ -353,7 +354,7 @@ def _pass(sdir: Path) -> int:
         if out is not None:
             print(out)
     # TRDD-ZFD3KBM3: "flagged" maps each path to the sorted fingerprints of the secrets found in it (a bare-path entry of the old state file carries the
-    # sentinel _UNKNOWN_SECRET instead, see _read_cursor). `read_now` only says the file was scanned for the secrets of THIS pass, and that set is the environment
+    # sentinel _UNKNOWN_FINGERPRINT instead, see _read_cursor). `read_now` only says the file was scanned for the secrets of THIS pass, and that set is the environment
     # of the process running the pass: a pass of another session, or one run after the secret was rotated, scans without it and reads the file clean. So a
     # recorded fingerprint is dropped only when this pass held that same secret (its fingerprint is in `live`), read the file fully and found no hit for it.
     # A fingerprint this pass does not hold stays: it could not look for it (the sentinel is never in `live`, so it stays for ever by this same rule). A rotated

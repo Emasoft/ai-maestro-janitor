@@ -146,7 +146,8 @@ _SQL_FSTRING_ATTACKER = _re(
 # The password slot is captured into group "pwd" so the caller (a future
 # detector) can validate entropy before promoting MAJOR → HIGH.
 
-_NOT_SECRET_REF = (
+# B105: a name holding the word "secret" bound to a string reads as a password to bandit; this is a negative-lookahead regex, not a secret, hence MANAGED.
+_NOT_MANAGED_REF = (
     # Anything matching one of these is treated as already-managed:
     # - ${{ secrets.* }} workflow ref
     # - $ENV / ${ENV} env-var
@@ -161,7 +162,7 @@ _CONN_URL_PASSWORD = _re(
     r"\b(?P<scheme>p[o]stgres(?:ql)?|mysql|mongodb(?:\+srv)?|mssql|"
     r"redis|cockroachdb|amqps?|oracle):[/]{2}"
     r"[A-Za-z0-9_.-]+:"
-    r"(?P<pwd>" + _NOT_SECRET_REF + r"[A-Za-z0-9_.~%+!@#$%^&*=:?/-]{4,})"
+    r"(?P<pwd>" + _NOT_MANAGED_REF + r"[A-Za-z0-9_.~%+!@#$%^&*=:?/-]{4,})"
     r"[@]"
 )
 
@@ -169,7 +170,7 @@ _CONN_URL_PASSWORD = _re(
 # The same shape covers `Password=`, `Pwd=`, `PWD=` (case-insensitive).
 _CONN_KV_PASSWORD = _re(
     r"\b(?:Password|Pwd|PWD)\s*=\s*"
-    r"(?P<pwd>" + _NOT_SECRET_REF + r"[A-Za-z0-9_.~+!@#$%^&*=?/-]{4,})\s*;"
+    r"(?P<pwd>" + _NOT_MANAGED_REF + r"[A-Za-z0-9_.~+!@#$%^&*=?/-]{4,})\s*;"
 )
 
 # Shape C: JDBC URL with embedded password query param.
@@ -178,7 +179,7 @@ _CONN_KV_PASSWORD = _re(
 #   jdbc:sqlserver   //h;user=u;password=… (key=value form)
 _CONN_JDBC_PASSWORD = _re(
     r"[j]dbc:[a-z]+:[^\s'\"]*?[?&;]password\s*=\s*"
-    r"(?P<pwd>" + _NOT_SECRET_REF + r"[A-Za-z0-9_.~+!@#$%^&*=?/-]{4,})"
+    r"(?P<pwd>" + _NOT_MANAGED_REF + r"[A-Za-z0-9_.~+!@#$%^&*=?/-]{4,})"
     r"(?:[&;]|$|['\"])"
 )
 

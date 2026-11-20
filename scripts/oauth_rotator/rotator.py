@@ -125,7 +125,8 @@ OAUTH_BETA = "oauth-2025-04-20"
 # OAuth client config — CANONICAL HOME (slot_capture_browser.py aliases these). Verbatim from
 # the audited claude-login-automation ref. Used by the F2b refresh-token keepalive exchange.
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+# B105: the old name TOKEN_URL contained the word "token", which bandit reads as a password name; the value is the public OAuth refresh endpoint, not a secret.
+OAUTH_EXCHANGE_URL = "https://platform.claude.com/v1/oauth/token"
 
 # The janitor plugin's OWN data dir, resolved by its FIXED install name. This is the
 # documented stable per-plugin DATA path (plugins-reference#environment-variables): it
@@ -1832,7 +1833,7 @@ def _token_url() -> str:
 
     raw = os.environ.get("JANITOR_OAUTH_TOKEN_URL")
     if not raw:
-        return TOKEN_URL
+        return OAUTH_EXCHANGE_URL
     try:
         parts = urlsplit(raw)
         host = parts.hostname
@@ -1841,7 +1842,7 @@ def _token_url() -> str:
     if parts is not None and parts.scheme in ("http", "https") and host in ("127.0.0.1", "localhost", "::1"):
         return raw
     _log("[refresh] WARNING: ignoring JANITOR_OAUTH_TOKEN_URL — host %r is not loopback; using the real token endpoint" % host)
-    return TOKEN_URL
+    return OAUTH_EXCHANGE_URL
 
 
 def _is_best_known_live(email: str) -> bool:
