@@ -100,6 +100,11 @@ def main() -> int:
             )
             return 0
 
+        # Bounded BEFORE the dry-run print and the write, so both show what would really land
+        # (TRDD-OWH1R0M9, issue 364 part b): the composed handoff grew with the transcript to
+        # 253,536 chars, too big for the resumed model to read whole as the directive tells it to.
+        text = handoff_files.cap_composed(text)
+
         if args.dry_run:
             print("DRY_RUN")
             print(text)

@@ -41,7 +41,7 @@ def test_a_composed_handoff_is_stamped_and_passes_the_size_exemption(
     root = tmp_path / "proj"
     root.mkdir()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(root))
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "deadbeef-0000-0000-0000-000000000000")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "deadbeef-cafe-babe-feed-facefeedface")
 
     transcript = tmp_path / "s.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
@@ -122,3 +122,81 @@ def test_compose_hands_the_project_state_folder_to_the_summarizer(tmp_path, monk
     kwargs = seen["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs.get("state_dir") == root.resolve() / ".janitor" / "state"
+
+
+def test_an_oversized_summary_is_capped_before_it_is_written(tmp_path, monkeypatch, capsys) -> None:
+    """A summary over handoff_files.COMPOSED_MAX_BYTES must land capped, with a truncation trailer,
+    and HANDOFF_READY must report the capped size (TRDD-OWH1R0M9, issue 364 part b)."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(root))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "deadbeef-cafe-babe-feed-facefeedface")
+    transcript = tmp_path / "s.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda _root: transcript)
+
+    # Multi-byte lines on purpose: the cut must never land inside a character.
+    huge = "\n".join(f"line {i} éè" for i in range(30_000))
+    assert len(huge.encode("utf-8")) > 3 * handoff_files.COMPOSED_MAX_BYTES
+
+    class _FakeAttempt:
+        text = huge
+        outcome = "ok"
+        detail = ""
+
+    monkeypatch.setattr(
+        compose_agent_handoff.les, "summarize_with_retry", lambda *a, **k: _FakeAttempt()
+    )
+    monkeypatch.setattr(sys, "argv", ["compose_agent_handoff.py", "--project-root", str(root)])
+
+    assert compose_agent_handoff.main() == 0
+
+    written = handoff_files.newest(root / ".janitor" / "state")
+    assert written is not None
+    raw = written.read_bytes()
+    # The marker line is prepended to the capped text, so allow for it on top of the cap.
+    assert len(raw) <= handoff_files.COMPOSED_MAX_BYTES + len(handoff_files.COMPOSED_MARKER) + 1
+    text = raw.decode("utf-8")  # raises if the cut split a multi-byte character
+    assert "handoff truncated" in text
+    ready = capsys.readouterr().out.split("HANDOFF_READY ")[1].split()[0]
+    assert int(ready) <= handoff_files.COMPOSED_MAX_BYTES
+
+
+def test_cap_composed_leaves_a_fitting_summary_untouched() -> None:
+    """Text at or under the cap is returned byte-identical; only an oversized one is cut."""
+    text = "x" * handoff_files.COMPOSED_MAX_BYTES
+    assert handoff_files.cap_composed(text) == text
+    assert handoff_files.cap_composed(text + "y") != text + "y"
+
+
+def test_cap_composed_keeps_both_the_first_and_the_last_line() -> None:
+    """An oversized summary keeps its unique first AND last line (the current state and next
+    action sit at the end), fits the cap, and names the dropped middle; head-only dropped the last."""
+    body = "\n".join(f"filler line {i}" for i in range(20_000))
+    text = f"FIRST-UNIQUE-LINE\n{body}\nLAST-UNIQUE-LINE: next action is X"
+    cap = handoff_files.COMPOSED_MAX_BYTES
+    assert len(text.encode("utf-8")) > 2 * cap
+    out = handoff_files.cap_composed(text)
+    assert len(out.encode("utf-8")) <= cap
+    assert out.startswith("FIRST-UNIQUE-LINE\n")
+    assert out.endswith("LAST-UNIQUE-LINE: next action is X")
+    assert "bytes dropped from the middle" in out
+    assert "session transcript" in out
+
+
+def test_cap_composed_never_splits_a_multibyte_character_at_either_cut() -> None:
+    """Multi-byte-heavy input with no newlines (so both cuts hit characters) stays valid UTF-8
+    and within the cap, across several offsets of the cut points."""
+    for cap in (1000, 1001, 1002, 1003, 4096):
+        out = handoff_files.cap_composed("é€𝄞" * 5000, max_bytes=cap)
+        out.encode("utf-8").decode("utf-8")  # a lone surrogate or split char would raise
+        assert len(out.encode("utf-8")) <= cap
+        assert "�" not in out
+
+
+def test_cap_composed_holds_the_bound_for_a_cap_smaller_than_the_marker() -> None:
+    """A cap too small for the marker plus content gets a plain hard cut: still <= max_bytes,
+    still valid UTF-8, never an exception (including a zero cap)."""
+    for cap in (0, 1, 3, 50, 100, 150):
+        out = handoff_files.cap_composed("é\n€𝄞" * 400, max_bytes=cap)
+        assert len(out.encode("utf-8")) <= cap

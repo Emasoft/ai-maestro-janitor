@@ -114,6 +114,55 @@ def handoff_name(key: str, *, now: int | None = None, pid: int | None = None) ->
     return f"agent-handoff-{key}-{when.strftime(_TS_FMT)}-{pid or os.getpid()}.md"
 
 
+# Hard bound on a COMPOSED handoff (TRDD-OWH1R0M9, issue 364 part b). The composer wrote whatever
+# llm-ext returned, and that grew with the transcript (118,225 / 196,084 / 253,536 chars measured
+# 2026-11-17/18) while resume-directive.txt tells the resumed model to read the file FIRST: a file
+# past the Read tool's size limit cannot be read whole, so the handoff existed and was unusable.
+# Over the cap, `cap_composed` keeps the head AND the tail (a summary ends with the current state and
+# next action) and drops the middle, so the resumed model still gets both ends.
+# 64 KiB stays above the 24-40 KB the exempt-from-too-large measurement (TRDD-L46IG69Y) found
+# normal for a composed summary, so ordinary output is untouched; the injection path has its own,
+# much smaller cap (`_HANDOFF_BODY_MAX_BYTES` in on-session-start.py).
+COMPOSED_MAX_BYTES = 64 * 1024
+
+
+def cap_composed(text: str, max_bytes: int = COMPOSED_MAX_BYTES) -> str:
+    """`text` unchanged when it fits `max_bytes` UTF-8 bytes, else its first ~3/4 and last ~1/4
+    (each cut on a line boundary, never mid multi-byte character) joined by one marker line saying
+    how many bytes were dropped from the middle.
+
+    The marker is counted INSIDE the budget, so the result never exceeds `max_bytes`. BOTH ends are
+    kept, not just the head: a session summary often ends with the current state and next action,
+    exactly what the resumed model needs, so dropping the tail alone could lose it. The full
+    account stays in the session transcript the marker names. A `max_bytes` too small to hold the
+    marker plus any content gets a plain hard cut (no marker), so the bound holds for every cap.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+
+    def marker(dropped: int) -> str:
+        return f"\n\n<!-- handoff truncated: {dropped} bytes dropped from the middle of a {len(encoded)} byte summary (cap {max_bytes}); the full account is in the session transcript -->\n\n"
+
+    # Reserve for the widest marker (dropped can never exceed the whole text), so the real one,
+    # built after the cuts, always fits and the result never passes max_bytes.
+    budget = max_bytes - len(marker(len(encoded)).encode("utf-8"))
+    if budget <= 0:
+        # No room for the marker plus content: a plain hard cut keeps the "never exceeds max_bytes" bound.
+        return encoded[: max(max_bytes, 0)].decode("utf-8", errors="ignore")
+    head_budget = budget * 3 // 4
+    tail_budget = budget - head_budget
+    head = encoded[:head_budget].decode("utf-8", errors="ignore")
+    cut = head.rfind("\n")
+    head = head[:cut] if cut != -1 else head
+    # errors="ignore" drops the continuation bytes of a character the slice start split.
+    tail = encoded[len(encoded) - tail_budget :].decode("utf-8", errors="ignore")
+    cut = tail.find("\n")
+    tail = tail[cut + 1 :] if cut != -1 else tail
+    dropped = len(encoded) - len(head.encode("utf-8")) - len(tail.encode("utf-8"))
+    return head + marker(dropped) + tail
+
+
 def parse(name: str) -> tuple[str, int, int] | None:
     """(key, epoch, pid) for a per-write handoff filename, else None."""
     m = _NAME_RE.match(name)
