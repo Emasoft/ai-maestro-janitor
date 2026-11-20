@@ -10,6 +10,8 @@ import type { Hits } from '../patterns'
 import { ALL_PASSES, PASS_ORDER, isPass, redactAll } from '../pipeline'
 import type { Pass } from '../pipeline'
 
+import { measureLinear } from './load/timing'
+
 const AT = '@'
 const unix = (...parts: string[]) => parts.join('/')
 const HOMES = ['/opt/people/app']
@@ -49,12 +51,6 @@ const manualChain = (text: string, homes: string[]): { text: string; hits: Hits 
   addHits(hits, home.hits)
   return { text: home.text, hits }
 }
-const ms = (run: () => void): number => {
-  const start = performance.now()
-  run()
-  return performance.now() - start
-}
-const fastest = (values: number[]): number => Math.min(...values)
 
 describe('pass pipeline', () => {
   test('the pass order is secrets, cards, email, home, and isPass accepts exactly those', () => {
@@ -137,16 +133,14 @@ describe('pass pipeline', () => {
     expect(redactAll(first.text, HOMES)).toEqual({ text: first.text, hits: {} })
   })
 
-  test('growth is linear: a 4x larger input takes under 8x the time (linear is about 4, quadratic about 16)', { timeoutMs: 60000 }, () => {
-    // WHY the fastest of 5 runs after a warm-up of each size: on a shared host load only adds time, so the fastest run is the closest to the real cost; the first run of each size pays for the engine compiling the rules.
+  // The title predates the measureLinear migration (TRDD-5J3ITQXY) and its numbers no longer describe the check: it is measureLinear's verdict at an 8x step, 32 KB to 256 KB, and only 'linear' passes.
+  // WHY: the old ratio of two sequential best-of-5 timings at a 4x step had a limit of 8 against a quadratic ratio of 16, and load pushed linear code over it (TRDD-5J3ITQXY). measureLinear samples the two sizes
+  // interleaved, keeps the minimum of each, and calls the scan linear only when the big/small ratio stays under 2.6 times the step (20.8 at 8x; linear is about 8, quadratic about 64) in two rounds.
+  // 'superlinear', 'escaped' (a run too fast to time) and 'out-of-rounds' (undecided) all fail. The ratio and sizes are in the failure message.
+  test('growth is linear: a 4x larger input takes under 8x the time (linear is about 4, quadratic about 16)', { timeoutMs: 120000 }, () => {
     const unit = MIXED + '\nplain filler line without anything to hide, padded to a realistic width\n'
     const input = (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size)
-    const small = input(128 * 1024)
-    const large = input(512 * 1024)
-    redactAll(small, HOMES)
-    redactAll(large, HOMES)
-    const time = (text: string) => fastest(Array.from({ length: 5 }, () => ms(() => redactAll(text, HOMES))))
-    const ratio = time(large) / time(small)
-    expect(ratio).toBeLessThan(8)
+    const t = measureLinear((text) => redactAll(text, HOMES).text.length, input, 32 * 1024, 256 * 1024)
+    expect(t.verdict, `pipeline growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
   })
 })

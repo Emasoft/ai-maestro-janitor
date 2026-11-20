@@ -2,10 +2,12 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { type Hits, mark, redact, URL_PASSWORD_BOUND } from '../patterns'
 
+import { measureLinear } from './load/timing'
+
 // WHY this file (TRDD-AGV84UGC, step 1): it pins what URL-password redaction does TODAY, before the rewrite that replaces the URL_PASSWORD regex, so the rewrite can be
 // checked against the old behaviour and not against itself. Every expectation here was captured by running the real patterns.ts (the pre-change code) with Bun
 // 1.3.14 on 2026-11-15 at git HEAD 218001b7. The case inputs are hand-written; no expected output of the cases was typed by hand (the capture and generator scripts were scratch files and are not tracked).
-// The two scaling tests at the end are the exception: they are not captured, they assert a timing (time at 2N at most 3 x time at N, best of three after a warm-up; unlike over-bound-json.test.ts, which asserts none), and the bound of 3 was chosen by hand.
+// The two scaling tests at the end are the exception: they are not captured, they assert a growth verdict (measureLinear from load/timing.ts: the time at 8 x the size must stay under 2.6 x 8 x the time at the small size; unlike over-bound-json.test.ts, which asserts none), and the limit was chosen by hand (TRDD-5J3ITQXY).
 // Nothing in it was run under the plugin test engine when it was written, so the first run there is the pre-push gate: a failure on the OLD code means the engine differs from Bun
 // for that case, which is a finding to read, not a test to loosen.
 // Each case asserts the whole redacted text (or, over 2 KB, its length and SHA-256), the exact hit counts, and the redaction of the output again (the second pass must give the
@@ -837,24 +839,18 @@ describe('URL passwords: size', () => {
 })
 
 describe('URL password cost grows linearly with the input', () => {
-  // WHY a ratio and no absolute time: the machine and the engine decide how fast one run is, but doubling the input must not much more than double the time. One warm-up run, then the
-  // best of three for each size, so one slow run does not decide. 3x is the bound: a linear cost gives about 2x, a quadratic one about 4x.
-  const timed = (text: string): number => {
-    const started = performance.now()
-    redact(text)
-    return performance.now() - started
-  }
-  const best = (text: string): number => Math.min(timed(text), timed(text), timed(text))
-  const grows = (small: string, large: string): boolean => {
-    timed(small)
-    const smallMs = best(small)
-    const largeMs = best(large)
-    return largeMs <= 3 * smallMs
-  }
+  // WHY measureLinear and no hand-rolled ratio (TRDD-5J3ITQXY): the machine and the engine decide how fast one run is, but eight times the input must not take much more than eight times as long. The old check compared two
+  // sequential best-of-3 timings at a 2x step, where the limit of 3 sat under a quadratic ratio of 4 and load pushed linear code over it (the second test failed at load 22 too). measureLinear interleaves the sizes, keeps the
+  // minimum of each and calls the scan linear only when big/small stays under 2.6 times the step (20.8 at 8x; linear is about 8, quadratic about 64). Only 'linear' passes: 'superlinear', 'escaped' (a run too fast to time)
+  // and 'out-of-rounds' (undecided) fail. The titles predate the migration; the check is now the verdict at an 8x step, and the measured ratio and sizes are in the failure message.
   test('a password of 512 KB, then of 1 MB: the time at most triples', { timeoutMs: 120000 }, () => {
-    expect(grows(U('user', mixed(512 * 1024)), U('user', mixed(1024 * 1024)))).toBe(true)
+    // 32 KB to 256 KB of password: the old regex loop went quadratic from 63.8K iterations (TRDD-HF7GNHNF), so the sizes straddle that point.
+    const t = measureLinear((text) => redact(text).text.length, (size) => U('user', mixed(size)), 32 * 1024, 256 * 1024)
+    expect(t.verdict, `url password growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
   })
   test('b://u:1? repeated N times then text of 8 characters per repeat, then 2N times: the time at most triples', { timeoutMs: 120000 }, () => {
-    expect(grows(j('b://u:1?'.repeat(16000), 'a'.repeat(128000)), j('b://u:1?'.repeat(32000), 'a'.repeat(256000)))).toBe(true)
+    // 2000 to 16000 repeats (32 KB to 256 KB): the old query scans that ran past later :// went quadratic here (old-quadratic.ts urlV2 and urlV3).
+    const t = measureLinear((text) => redact(text).text.length, (repeats) => j('b://u:1?'.repeat(repeats), 'a'.repeat(8 * repeats)), 2000, 16000)
+    expect(t.verdict, `url query growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
   })
 })

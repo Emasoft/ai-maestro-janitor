@@ -5,7 +5,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { findCards, redactCards } from '../cards'
 import { mark } from '../patterns'
 
-import { minMs } from './load/timing'
+import { measureLinear, minMs } from './load/timing'
 
 const M = mark('payment-card')
 const one = { 'payment-card': 1 }
@@ -284,7 +284,6 @@ describe('card pass: timing', () => {
     ['256 KB of "1 " repeated', '1 '.repeat(131072)],
     ['256 KB of "1-" repeated', '1-'.repeat(131072)],
     ['256 KB of a long valid-looking grouped run', grouped.repeat(Math.floor(262144 / grouped.length))],
-    ['256 KB of valid cards, one per line', `${VISA16}\n`.repeat(Math.floor(262144 / (VISA16.length + 1)))],
   ]
   // WHY the minimum of 5 timed runs after a warm-up (minMs): load and a cold JIT only add time, so one slow run must not fail the bound (TRDD-5J3ITQXY); a quadratic scan takes seconds, so the bound keeps its 100 ms.
   for (const [name, text] of inputs) {
@@ -292,6 +291,12 @@ describe('card pass: timing', () => {
       expect(minMs(() => r(text).text.length, 5).ms).toBeLessThan(100)
     })
   }
+  // WHY a growth check for this input only (TRDD-5J3ITQXY): its true cost is about 3 ms, so the 100 ms bound sat at 30 times its cost in an idle run but was measured at 79 ms (min of 5) under load, and a bound this close to the cost fails with load. measureLinear
+  // compares 256 KB with 2 MB of the same line (8x; linear about 8, quadratic about 64, limit 20.8) from interleaved minima, so load cancels. The title predates the migration: the check is now the verdict, and only 'linear' passes.
+  test('256 KB of valid cards, one per line takes under 100 ms', { timeoutMs: 120000 }, () => {
+    const t = measureLinear((text) => r(text).text.length, (size) => `${VISA16}\n`.repeat(Math.floor(size / (VISA16.length + 1))), 262144, 2097152)
+    expect(t.verdict, `cards one per line growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
+  })
   test('the one-card-per-line text hides every card', () => {
     const text = `${VISA16}\n`.repeat(100)
     expect(r(text).hits).toEqual({ 'payment-card': 100 })
