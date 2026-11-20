@@ -120,6 +120,12 @@ def main() -> int:
             # TRDD-1AD5FF36: rescue needs_human tickets the old save() archived into closed/, where
             # load_all() cannot see them. Idempotent; under the lock so two sessions cannot race the move.
             tickets.migrate_needs_human()
+            # TRDD-YRK51PGW: a needs_human ticket whose finding a later same-key twin already resolved is closed
+            # here, with the twin named, instead of being reminded about forever (issue 361). Under the lock for
+            # the same reason as the migration: two sessions must not both rewrite the ticket.
+            for t in tickets.supersede_needs_human(tickets.load_all(), tickets.load_archived(), now=now):
+                tickets.save(t)
+                state.log_line("ticket-dispatch", f"closed {t.id} as {t.status}: {t.resolution}")
         live = tickets.load_all() if held else []
         if live:
             # Reclaim tickets whose agent DIED (the weekly rate cap did exactly this to a background
@@ -127,7 +133,7 @@ def main() -> int:
             # stops working — and nothing says so.
             for t in tickets.reclaim_stale(live, now=now, stale_s=stale_s):
                 tickets.save(t)
-                state.log_line("ticket-dispatch", f"reclaimed {t.id} (agent died); attempt {t.attempts}")
+                state.log_line("ticket-dispatch", f"reclaimed {t.id} ({t.resolution}); attempt {t.attempts}")
 
             live = tickets.load_all()
             inflight = sum(1 for t in live if t.status in tickets.IN_FLIGHT)

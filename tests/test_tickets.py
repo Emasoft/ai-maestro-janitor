@@ -422,3 +422,44 @@ def test_the_refusal_index_is_bounded(sdir: Path) -> None:
     assert len(index) == tickets.REFUSALS_MAX
     assert f"k{tickets.REFUSALS_MAX + 24}" in index  # newest survives
     assert "k0" not in index  # oldest evicted
+
+
+def _stuck_with_twin(sdir: Path, *, twin_opened_at: int, twin_status: str, twin_key: str = "") -> tuple[tickets.Ticket, tickets.Ticket]:
+    """A needs_human ticket opened at NOW, plus a saved same-key twin opened at `twin_opened_at`."""
+    stuck = _open_ok(sdir, dedupe_key="memcorp:page")
+    tickets.mark_needs_human(stuck, now=NOW, why="out of reach here")
+    tickets.save(stuck, sdir)
+    twin = tickets.from_json(stuck.to_json())
+    twin.id = tickets.new_id()
+    twin.status = twin_status
+    twin.opened_at = twin_opened_at
+    twin.dedupe_key = twin_key or stuck.dedupe_key
+    tickets.save(twin, sdir)
+    return stuck, twin
+
+
+def test_a_needs_human_ticket_is_closed_when_a_later_same_key_twin_resolved(sdir: Path) -> None:
+    """Issue 361: the twin was fixed and resolved, and the original kept printing NEEDS A HUMAN for 42 days."""
+    stuck, twin = _stuck_with_twin(sdir, twin_opened_at=NOW + 10, twin_status=tickets.RESOLVED)
+    got = tickets.supersede_needs_human(tickets.load_all(sdir), tickets.load_archived(sdir), now=NOW + 99)
+    assert [t.id for t in got] == [stuck.id]
+    tickets.save(got[0], sdir)
+    closed = _load_ok(stuck.id, sdir)
+    assert closed.status == tickets.CANCELLED and twin.id in closed.resolution
+    assert (tickets.closed_dir(sdir) / f"{stuck.id}.json").exists()
+
+
+def test_a_needs_human_ticket_stays_when_the_resolved_ticket_is_older(sdir: Path) -> None:
+    """An older resolved ticket under the same key is a previous incident; the stuck one is a recurrence."""
+    stuck, _ = _stuck_with_twin(sdir, twin_opened_at=NOW - 10, twin_status=tickets.RESOLVED)
+    assert tickets.supersede_needs_human(tickets.load_all(sdir), tickets.load_archived(sdir), now=NOW + 99) == []
+    assert _load_ok(stuck.id, sdir).status == tickets.NEEDS_HUMAN
+
+
+def test_a_needs_human_ticket_stays_when_the_later_twin_is_unresolved_or_has_another_key(sdir: Path) -> None:
+    """Only a RESOLVED ticket with the SAME key is proof the finding was fixed."""
+    stuck, _ = _stuck_with_twin(sdir, twin_opened_at=NOW + 10, twin_status=tickets.CANCELLED)
+    other = tickets.from_json(stuck.to_json())
+    other.id, other.status, other.opened_at, other.dedupe_key = tickets.new_id(), tickets.RESOLVED, NOW + 10, "another:key"
+    assert tickets.supersede_needs_human([stuck], [other], now=NOW + 99) == []
+    assert tickets.supersede_needs_human([stuck], tickets.load_archived(sdir), now=NOW + 99) == []

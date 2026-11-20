@@ -268,6 +268,33 @@ def reclaim_stale(tickets: list[Ticket], *, now: int, stale_s: int) -> list[Tick
     return out
 
 
+def supersede_needs_human(live: list[Ticket], archived: list[Ticket], *, now: int) -> list[Ticket]:
+    """Close each `needs_human` ticket whose finding a later same-key ticket already RESOLVED (TRDD-YRK51PGW).
+
+    WHY: `needs_human` stays on the live board and is reminded on every fire until a human closes it. Before
+    open_ticket bumped it, a recurrence of the finding opened a TWIN with the same dedupe key; the twin was
+    fixed and resolved, and the original then nagged forever about a defect that was already fixed (issue 361:
+    a 42-day-old reminder for a page whose lint check returned 0 findings).
+
+    The resolved ticket must have been OPENED AFTER the stuck one: an older resolved ticket under the same key
+    is a previous incident, and the stuck ticket is then a genuine recurrence that must keep nagging. The
+    closing status is `cancelled` (archived, never retried) and the resolution names the resolving ticket, so
+    the reader can re-check the proof. An empty dedupe key never matches: it identifies nothing.
+    """
+    out: list[Ticket] = []
+    for t in live:
+        if t.status != NEEDS_HUMAN or not t.dedupe_key:
+            continue
+        for r in archived:
+            if r.status == RESOLVED and r.dedupe_key == t.dedupe_key and r.id != t.id and r.opened_at > t.opened_at:
+                t.status = CANCELLED
+                t.updated_at = now
+                t.resolution = f"superseded by {r.id}, resolved with the same dedupe key"
+                out.append(t)
+                break
+    return out
+
+
 def select_due(tickets: list[Ticket], *, now: int, per_fire: int, budget_left: int, inflight: int) -> list[Ticket]:
     """Pick the tickets to dispatch on THIS fire. PURE.
 

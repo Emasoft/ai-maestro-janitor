@@ -160,6 +160,22 @@ def test_closing_a_needs_human_ticket_ends_its_reminder(project: Path) -> None:
     assert f"{t.id} NEEDS A HUMAN" not in _run(project)
 
 
+def test_a_needs_human_ticket_whose_twin_resolved_is_closed_and_not_reminded(project: Path) -> None:
+    """TRDD-YRK51PGW / issue 361: the twin of a stuck ticket was fixed, and the stuck one kept nagging for weeks."""
+    stuck = _needs_human("a memgrep index fails validation")
+    twin = tickets.from_json(stuck.to_json())
+    twin.id = tickets.new_id()
+    twin.status = tickets.RESOLVED
+    twin.opened_at = stuck.opened_at + 10
+    tickets.save(twin)
+
+    out = _run(project)
+
+    assert stuck.id not in out
+    closed = tickets.load(stuck.id)
+    assert closed is not None and closed.status == tickets.CANCELLED and twin.id in closed.resolution
+
+
 def test_many_needs_human_tickets_collapse_into_ONE_summary_line(project: Path) -> None:
     """Bounded output: four stuck tickets must not put four lines into every session every fire."""
     ids = [_needs_human(f"stuck finding number {i}").id for i in range(4)]
