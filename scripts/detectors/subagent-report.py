@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+import subagent_report_intake  # noqa: E402
 from exe_path import exe  # noqa: E402
 
 _SCAN_DIRS = ("docs_dev", "tests/scenarios/reports", "scripts_dev")
@@ -190,6 +191,12 @@ def main() -> int:
         )
         if summary is not None:
             print(summary)
+
+    # TRDD-V57FEWSK: reports that declare ISSUES: <n> (n > 0) become todo cards; count-only nudge lines.
+    # Separate pass from the legacy scan above (it keeps its own dirs and dedupe keys); both only print.
+    # The intake is a no-op outside a project that has design/tasks/.
+    for intake_line in subagent_report_intake.intake_lines(root, now, seen):
+        print(intake_line)
 
     state.rotate_log_if_big("subagent-report")
     return 0

@@ -887,6 +887,21 @@ _OTHER_ACTOR_DETECTORS = frozenset({
 })
 
 
+# TRDD-V57FEWSK: the ONE line of an advisory detector that must still reach the main agent on a quiet
+# heartbeat. `subagent-report` stays advisory for its old unreferenced-report lines, but its intake
+# count line ("N open card(s) made from subagent reports await a fix or a close") is the only nudge that
+# keeps an open intake card from being forgotten; routed to the ledger it would never be read and the
+# card would sit in todo forever. Keyed on a distinct line PREFIX, not a second detector name: the
+# roster-count guard forbids a new detector, and it is one process. The older lines start
+# `[subagent-report] ` (note the `]`), so they stay advisory. The prefix is honoured only for the
+# detector named here, and the older lines embed filenames defanged by `sanitize_for_drift_line`,
+# so no third-party text can forge it. Duplicated from `subagent_report_intake.INTAKE_NUDGE_PREFIX`
+# because importing that module would load trdd_common into every heartbeat;
+# tests/test_quiet_heartbeat.py pins the two equal.
+_INTAKE_NUDGE_DETECTOR = "subagent-report"
+_INTAKE_NUDGE_PREFIX = "[subagent-report-intake] "
+
+
 def _heartbeat_is_quiet() -> bool:
     """Quiet by default; `CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE` restores the firehose."""
     return not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", False)
@@ -1016,6 +1031,9 @@ def _quiet_filter(detector: str, text: str) -> str:
         if not stripped:
             continue
         if _RESERVED_MARKER_RE.fullmatch(stripped) or (
+            # WHY: the intake count nudge must outlive quiet mode (see _INTAKE_NUDGE_PREFIX, TRDD-V57FEWSK).
+            detector == _INTAKE_NUDGE_DETECTOR and stripped.startswith(_INTAKE_NUDGE_PREFIX)
+        ) or (
             may_claim_urgent
             and _URGENT_LINE_RE.search(stripped)
             and not _NEGATED_SEVERITY_RE.search(stripped)
