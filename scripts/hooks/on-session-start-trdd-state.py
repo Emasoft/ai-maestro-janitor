@@ -35,8 +35,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 MAX_TRDDS = 4              # cap how many in-progress TRDDs we surface
@@ -54,6 +56,32 @@ _HANDOFF_FRESH_S = 900
 
 # Matches the STATE head heading: "## ⏵ STATE …" or "## STATE …" (⏵ = U+23F5).
 _STATE_HEADING = re.compile(r"^##\s+(?:⏵\s*)?STATE\b")
+
+
+def _git_toplevel(cwd: str) -> Path | None:
+    """`git rev-parse --show-toplevel` of cwd; None when cwd is not inside a repo or git cannot answer.
+
+    A linked worktree answers with ITSELF (not the main checkout). Read-only: GIT_OPTIONAL_LOCKS=0
+    so it never takes .git/index.lock (janitor#245). Same helper as post-compact-resume.py (both
+    hooks are standalone scripts, and the board root must resolve identically in both).
+    """
+    # scripts/ is this file's own grandparent; CLAUDE_PLUGIN_ROOT may be unset at this point.
+    scripts = str(Path(__file__).resolve().parent.parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from lib.exe_path import exe  # noqa: PLC0415 - local package, not PyPI
+
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        proc = subprocess.run(
+            [exe("git"), "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, env=git_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = proc.stdout.strip()
+    return Path(out) if proc.returncode == 0 and out else None
 
 
 def _read_input() -> tuple[Path, str]:
@@ -79,7 +107,20 @@ def _read_input() -> tuple[Path, str]:
                 print("[on-session-start-trdd-state] hook input unreadable; using the env project dir", file=sys.stderr)
         except (OSError, ValueError):
             pass
-    if not cwd:
+    if cwd:
+        # WHY (TRDD-4K7V0GFW, issue 365): the board is the worktree the session runs in, so the payload cwd goes to
+        # its git toplevel (a linked worktree stays itself); same order as post-compact-resume.py. Fail open: a
+        # failed probe (e.g. lib.exe_path unimportable) keeps the raw cwd, since main() calls this unguarded.
+        try:
+            cwd = str(_git_toplevel(cwd) or cwd)
+        except Exception:  # noqa: BLE001 - fail open, see the WHY above
+            # why: with fd 2 closed sys.stderr is None and print would write to stdout (the hook protocol channel).
+            try:
+                if sys.stderr is not None:
+                    print("[on-session-start-trdd-state] git toplevel probe failed; using the payload cwd as is", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
+    else:
         cwd = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
     return Path(cwd), source
 
@@ -388,8 +429,31 @@ def _trdd_paths(project_dir: Path) -> list[Path]:
     return sorted(tasks_dir.glob("TRDD-*.md"))
 
 
+# `updated:` carries its UTC offset (`date +%Y-%m-%dT%H:%M:%S%z`); compared as an instant, never as text,
+# because the board mixes +0100 and +0200 (same rule as post-compact-resume._updated_epoch).
+_UPDATED_FMT = "%Y-%m-%dT%H:%M:%S%z"
+
+
+def _updated_epoch(text_head: str) -> float:
+    """Epoch seconds of the card's `updated:`; -inf when absent or unparseable, so it ranks last."""
+    m = re.search(r"^updated:\s*(\S+)\s*$", text_head, re.MULTILINE)
+    if not m:
+        return float("-inf")
+    try:
+        return datetime.strptime(m.group(1), _UPDATED_FMT).timestamp()
+    except ValueError:
+        return float("-inf")
+
+
 def _in_progress(trdds: list[Path]) -> list[Path]:
-    out: list[Path] = []
+    """Active cards, most recently `updated:` first.
+
+    WHY the ordering (TRDD-4K7V0GFW, issue 365): main() keeps only the first MAX_TRDDS cards, and
+    the board comes back in filename order (oldest card first), so with more than MAX_TRDDS active
+    cards the newest, the ones the session is most likely on, were the ones dropped. The sort is
+    stable, also with reverse=True, so cards with equal or missing `updated:` keep their filename order.
+    """
+    found: list[tuple[float, Path]] = []
     for p in trdds:
         try:
             head = p.read_text(encoding="utf-8", errors="replace")[:_FRONT]
@@ -399,8 +463,9 @@ def _in_progress(trdds: list[Path]) -> list[Path]:
         # v1-only gate matched ZERO modern TRDDs, leaving the post-compaction turn
         # without the STATE block this hook exists to inject (review wf_6aee2965).
         if _column(head) in _ACTIVE_COLUMNS or _status(head) == "in-progress":
-            out.append(p)
-    return out
+            found.append((_updated_epoch(head), p))
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [p for _epoch, p in found]
 
 
 def _display(p: Path, project_dir: Path) -> str:

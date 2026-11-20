@@ -17,6 +17,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from exe_path import exe
+
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "on-session-start-trdd-state.py"
 
 
@@ -53,6 +55,28 @@ def _load_module():
     return mod
 
 
+def _card(column: str, updated: str, title: str) -> str:
+    return f"---\ntitle: {title}\ncolumn: {column}\nupdated: {updated}\n---\n\n# {title}\n"
+
+
+def _git(*args: str) -> None:
+    """Run a real git command with a throwaway identity (no global config, no signing, no hooks)."""
+    subprocess.run(
+        [exe("git"), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+
+
+def _main_and_linked_worktree(tmp: str) -> tuple[Path, Path]:
+    """A real repo with one commit and a real linked worktree of it, both inside tmp."""
+    main = Path(tmp) / "main"
+    main.mkdir()
+    _git("-C", str(main), "init", "-q")
+    _git("-C", str(main), "commit", "-q", "--allow-empty", "-m", "init")
+    wt = Path(tmp) / "wt"
+    _git("-C", str(main), "worktree", "add", "-q", str(wt), "-b", "wt-branch")
+    return main, wt
 class TestTrddStateHook(unittest.TestCase):
     def _project(self, tmp: str) -> Path:
         d = Path(tmp) / "design" / "tasks"
@@ -181,6 +205,68 @@ class TestTrddStateHook(unittest.TestCase):
             self.assertIn("iiiiiiii-working.md", out)
             self.assertNotIn("hhhhhhhh-waiting.md", out)
 
+    def test_board_root_is_the_git_toplevel_of_the_payload_cwd_not_the_env_dir(self):
+        """cwd = a subfolder of a linked worktree, CLAUDE_PROJECT_DIR = the main checkout: the hook reads the
+        WORKTREE board (TRDD-4K7V0GFW, issue 365). Without the toplevel resolution the subfolder has no design/."""
+        with TemporaryDirectory() as tmp:
+            main, wt = _main_and_linked_worktree(tmp)
+            (main / "design/tasks").mkdir(parents=True)
+            (wt / "design/tasks").mkdir(parents=True)
+            (wt / "sub").mkdir()
+            (main / "design/tasks/TRDD-20260530_100000+0200-mmmmmmmm-main.md").write_text(
+                _card("dev", "2026-05-30T10:00:00+0200", "Main checkout card"))
+            (wt / "design/tasks/TRDD-20260530_100000+0200-wwwwwwww-wt.md").write_text(
+                _card("dev", "2026-05-30T10:00:00+0200", "Worktree card"))
+            payload = json.dumps({"source": "resume", "cwd": str(wt / "sub"), "hook_event_name": "SessionStart"})
+            env = dict(os.environ, CLAUDE_PROJECT_DIR=str(main))
+            res = subprocess.run([sys.executable, str(HOOK)], input=payload, capture_output=True,
+                                 text=True, timeout=30, env=env)
+            self.assertIn("wwwwwwww-wt.md", res.stdout)
+            self.assertNotIn("mmmmmmmm-main.md", res.stdout)
+
+    def test_more_than_max_active_cards_keeps_the_newest_by_updated_instant(self):
+        """With more active cards than MAX_TRDDS, the newest `updated:` instants are kept, newest first, even when
+        the newest card sorts last by filename and mixed offsets make text order disagree (TRDD-4K7V0GFW, issue 365)."""
+        with TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            stamps = {
+                "aaaaaaaa": "2026-05-01T10:00:00+0200",
+                "bbbbbbbb": "2026-05-02T10:00:00+0200",
+                "cccccccc": "2026-05-03T10:00:00+0200",
+                "dddddddd": "2026-05-30T10:30:00+0100",  # 09:30Z: the later instant, though its text sorts lower
+                "eeeeeeee": "2026-05-30T11:00:00+0200",  # 09:00Z
+                "ffffffff": "2026-06-01T10:00:00+0200",  # newest of all, last by filename
+            }
+            for uid, stamp in stamps.items():
+                (root / f"design/tasks/TRDD-20260530_100000+0200-{uid}-x.md").write_text(
+                    _card("dev", stamp, f"Card {uid}"))
+            out = _run(root, "resume")
+            for kept in ("ffffffff", "dddddddd", "eeeeeeee", "cccccccc"):
+                self.assertIn(f"{kept}-x.md", out)
+            for dropped in ("aaaaaaaa", "bbbbbbbb"):
+                self.assertNotIn(f"{dropped}-x.md", out)
+            order = [out.index(f"{uid}-x.md") for uid in ("ffffffff", "dddddddd", "eeeeeeee", "cccccccc")]
+            self.assertEqual(order, sorted(order), "newest updated first")
+    def test_failing_toplevel_probe_fails_open_to_the_raw_payload_cwd(self):
+        """The hook runs from a copy whose lib/ has no exe_path (a real ImportError inside the toplevel probe): it
+        must still exit 0 and read the board of the raw payload cwd, with a stderr notice (TRDD-4K7V0GFW)."""
+        with TemporaryDirectory() as tmp:
+            hooks = Path(tmp) / "plugin" / "scripts" / "hooks"
+            hooks.mkdir(parents=True)
+            (Path(tmp) / "plugin" / "scripts" / "lib").mkdir()  # namespace package without exe_path
+            hook = hooks / HOOK.name
+            hook.write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+            root = Path(tmp) / "proj"
+            (root / "design/tasks").mkdir(parents=True)
+            (root / "design/tasks/TRDD-20260530_100000+0200-ffffffff-x.md").write_text(
+                _card("dev", "2026-05-30T10:00:00+0200", "Raw cwd card"))
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+            payload = json.dumps({"source": "resume", "cwd": str(root), "hook_event_name": "SessionStart"})
+            res = subprocess.run([sys.executable, str(hook)], input=payload, capture_output=True,
+                                 text=True, timeout=30, env=env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("ffffffff-x.md", res.stdout)
+            self.assertIn("git toplevel probe failed", res.stderr)
     def test_state_block_extraction_unit(self):
         """_state_block returns the section from the STATE heading to the next H2."""
         mod = _load_module()

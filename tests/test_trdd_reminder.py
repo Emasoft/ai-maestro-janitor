@@ -6,7 +6,7 @@ defects this suite guards against forever:
 
   * Defect 1 — `column: backburner` (the parking lot) was reported as "currently
     active". The active set is now ONLY the WORK columns
-    {dev, testing, ai_review, human_review} (plus v1 `status: in-progress`);
+    {dev, testing, ai_review} (plus v1 `status: in-progress`);
     parked / pre-work / terminal columns are excluded.
   * Defect 2 — the bare "(Nd)" was ambiguous (days-since-touch read as age). The
     label now shows BOTH: `(idle Nd, age Md)` — idle = days since last-touched
@@ -128,9 +128,10 @@ def test_backburner_is_not_reported_active(project):
     assert out.strip() == "", out
 
 
-@pytest.mark.parametrize("column", ["complete", "published", "todo", "design", "dispatch", "blocked"])
+@pytest.mark.parametrize("column", ["complete", "published", "todo", "design", "dispatch", "blocked", "human_review"])
 def test_non_work_columns_excluded(project, column):
-    """Terminal (complete/published), pre-work (todo/design/dispatch), and `blocked`
+    """Terminal (complete/published), pre-work (todo/design/dispatch), `blocked`, and `human_review`
+    (a card waiting for the OWNER, not work to resume: TRDD-4K7V0GFW, issue 365)
     are all excluded from 'active' — only the WORK columns nag."""
     ref = _write_trdd(project["tasks"], uid="bbbbbbbb", slug="x",
                       column=column, created_days_ago=30, idle_days=20)
@@ -138,9 +139,9 @@ def test_non_work_columns_excluded(project, column):
     assert ref not in out, out
 
 
-@pytest.mark.parametrize("column", ["dev", "testing", "ai_review", "human_review"])
+@pytest.mark.parametrize("column", ["dev", "testing", "ai_review"])
 def test_work_columns_reported_active(project, column):
-    """Each of the four WORK columns is genuinely active work and IS reported."""
+    """Each of the three WORK columns is genuinely active work and IS reported."""
     ref = _write_trdd(project["tasks"], uid="cccccccc", slug="x",
                       column=column, created_days_ago=45, idle_days=10)
     out = _run(_env(project["home"], project["project"]))

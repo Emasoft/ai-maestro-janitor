@@ -233,6 +233,63 @@ def test_hook_subprocess_writes_flag(tmp_path: Path) -> None:
     assert "TRDD-31095269" in flag.read_text()
 
 
+def _git(*args: str) -> None:
+    """Run a real git command with a throwaway identity (no global config, no signing, no hooks)."""
+    subprocess.run(
+        [exe("git"), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_hook_subprocess_reads_the_worktree_board_but_writes_the_flag_in_the_main_state_dir(tmp_path: Path) -> None:
+    """Session started in the main checkout (CLAUDE_PROJECT_DIR), working in a linked worktree (payload cwd, here a
+    subfolder of it): the resume cue names the WORKTREE card even though a main-checkout card is newer, and the
+    flag stays under the main checkout state dir (TRDD-4K7V0GFW, issue 365). Real repo, real `git worktree add`."""
+    main = tmp_path / "main"
+    main.mkdir()
+    _git("-C", str(main), "init", "-q")
+    _git("-C", str(main), "commit", "-q", "--allow-empty", "-m", "init")
+    wt = tmp_path / "wt"
+    _git("-C", str(main), "worktree", "add", "-q", str(wt), "-b", "wt-branch")
+    (wt / "sub").mkdir()
+    _write_trdd(main / "design" / "tasks", "MAINCARD", "dev", "2026-06-02T09:00:00+0200", "Main card")
+    _write_trdd(wt / "design" / "tasks", "WTCARD01", "dev", "2026-06-01T09:00:00+0200", "Worktree card")
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(main),
+        "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED": "false",
+    }
+    payload = json.dumps({"session_id": "sess-wt", "cwd": str(wt / "sub"),
+                          "trigger": "manual", "hook_event_name": "PostCompact"})
+    proc = subprocess.run([sys.executable, str(_HOOK_PATH)], input=payload, capture_output=True,
+                          text=True, env=env, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    flag = main / ".janitor" / "state" / "resume-after-compact.flag"
+    assert flag.exists(), f"flag must stay in the main checkout state dir; stderr={proc.stderr!r}"
+    text = flag.read_text()
+    assert "TRDD-WTCARD01" in text and "MAINCARD" not in text, text
+    assert not (wt / ".janitor" / "state" / "resume-after-compact.flag").exists()
+
+
+def test_board_root_order_payload_cwd_toplevel_then_env_then_getcwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_board_root: payload cwd (git toplevel, else itself) wins over CLAUDE_PROJECT_DIR, which wins over os.getcwd (TRDD-4K7V0GFW)."""
+    hook = _import_hook()
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    _git("-C", str(repo), "init", "-q")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(other))
+    assert hook._board_root(str(repo / "sub")) == (repo).resolve()
+    assert hook._board_root(str(plain)) == plain  # not a repo: the cwd itself
+    assert hook._board_root("") == other
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR")
+    monkeypatch.chdir(plain)
+    assert hook._board_root("") == Path(os.getcwd())
 def test_hook_subprocess_debounces_a_second_compact_within_the_window(tmp_path: Path) -> None:
     """GUARD 4 (TRDD-4JEBTT2C, issue 306): two real PostCompact fires back-to-back (well under
     `_POST_COMPACT_DEBOUNCE_S`) must write the resume flag only ONCE -- the race the issue

@@ -50,12 +50,15 @@ _norm_state = trdd_common.norm_state
 # TRDD v2 model (~/.claude/rules/trdd-design-tasks.md). Issue #59: this set used
 # to also include the ENTRY/DESIGN columns `backburner`/`todo`/`dispatch`, which
 # made the reminder nag about deliberately-PARKED proto-TRDDs as "currently
-# active" — backburner is the parking lot, the OPPOSITE of active. Only the four
+# active" — backburner is the parking lot, the OPPOSITE of active. Only the three
 # WORK columns are genuinely active work someone could forget mid-flight. (This
 # deliberately DIVERGES from trdd-drift's wider set: drift cares about any TRDD
 # whose git state drifted, including parked ones; the reminder only nags about
 # active work, so the two detectors legitimately scope differently now.)
-_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review", "human_review"})
+# WHY human_review is absent (TRDD-4K7V0GFW, issue 365): a card in human_review waits for the OWNER, so a
+# reminder to work on it is wrong; the agent cannot move it. (pre-compact-handoff.py keeps listing it, as
+# waiting for the human.)
+_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review"})
 
 
 def _created_epoch(raw: str) -> int | None:

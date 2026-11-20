@@ -281,7 +281,46 @@ def _inflight_trdd_directive(project_root: Path) -> str:
     return f"continue TRDD-{uid8} — read its STATE block first, then proceed."
 
 
-def _record_resume_directive(state) -> bool:  # noqa: ANN001 - local module type
+def _git_toplevel(cwd: str) -> Path | None:
+    """`git rev-parse --show-toplevel` of cwd; None when cwd is not inside a repo or git cannot answer.
+
+    A linked worktree answers with ITSELF (not the main checkout), which is the whole point
+    of using it for the board root. Read-only: GIT_OPTIONAL_LOCKS=0 so it never takes
+    .git/index.lock (janitor#245).
+    """
+    from lib.exe_path import exe  # noqa: PLC0415 - local package, not PyPI
+
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        proc = subprocess.run(
+            [exe("git"), "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, env=git_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = proc.stdout.strip()
+    return Path(out) if proc.returncode == 0 and out else None
+
+
+def _board_root(payload_cwd: str) -> Path:
+    """The root whose design/ board the resume directive reads.
+
+    WHY (TRDD-4K7V0GFW, issue 365): a session launched in the main checkout that works in a
+    linked worktree has its current cards only in that worktree's design/. The board is
+    therefore the hook payload cwd resolved to its git toplevel (a linked worktree stays
+    itself), then CLAUDE_PROJECT_DIR, then os.getcwd. Same order as
+    on-session-start-trdd-state.py, so the two hooks never disagree on which board is current.
+    The resume FLAG stays under state.state_dir() (the main checkout): the heartbeat and the
+    push read it there, so the board root must not move it.
+    """
+    if payload_cwd:
+        return _git_toplevel(payload_cwd) or Path(payload_cwd)
+    env_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    return Path(env_dir) if env_dir else Path(os.getcwd())
+
+
+def _record_resume_directive(state, board_root: Path | None = None) -> bool:  # noqa: ANN001 - local module type
     """Determine + persist the post-compact resume directive (or nothing).
 
     Returns True iff a resume flag was written THIS call — the gate the caller uses
@@ -294,7 +333,9 @@ def _record_resume_directive(state) -> bool:  # noqa: ANN001 - local module type
     # auto-compact (with no fresh directive) falls back to the live board instead
     # of replaying a stale "resume at step X".
     _consume_directive_file(sd)
-    directive = explicit or _inflight_trdd_directive(state.project_root())
+    # WHY board_root (TRDD-4K7V0GFW): the board is the worktree the session runs in, while the flag above and
+    # below stays in state.state_dir() (main checkout). None = no payload (direct callers): the state-lib root.
+    directive = explicit or _inflight_trdd_directive(board_root if board_root is not None else state.project_root())
     # If the PreCompact hook wrote a ground-truth handoff, the next turn MUST
     # re-ground there first. Prepend a pointer to whatever directive we have; and
     # if there's no in-flight directive at all, the handoff itself IS the resume
@@ -752,6 +793,7 @@ def main() -> int:
     except (OSError, ValueError):
         raw = ""
     cwd_fallback = ""
+    payload_cwd = ""
     transcript_path = ""
     if raw.strip():
         try:
@@ -760,8 +802,11 @@ def main() -> int:
             payload = None
         if isinstance(payload, dict):
             transcript_path = str(payload.get("transcript_path", "") or "")
+            # WHY payload_cwd is read UNCONDITIONALLY (TRDD-4K7V0GFW): it picks the board root (_board_root),
+            # which no longer yields to CLAUDE_PROJECT_DIR; cwd_fallback stays env-gated (state-lib override).
+            payload_cwd = str(payload.get("cwd", "") or "")
             if not os.environ.get("CLAUDE_PROJECT_DIR", "").strip():
-                cwd_fallback = str(payload.get("cwd", "") or "")
+                cwd_fallback = payload_cwd
 
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if not plugin_root:
@@ -834,7 +879,7 @@ def main() -> int:
         return 0
 
     try:
-        wrote_flag = _record_resume_directive(state)
+        wrote_flag = _record_resume_directive(state, _board_root(payload_cwd))
     except Exception as exc:  # noqa: BLE001 - a hook fault must never break compaction
         try:
             state.log_line("post-compact-resume", f"failed: {exc}")
