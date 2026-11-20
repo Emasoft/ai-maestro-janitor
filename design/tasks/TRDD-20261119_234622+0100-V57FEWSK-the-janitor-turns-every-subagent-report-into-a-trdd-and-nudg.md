@@ -4,7 +4,7 @@ title: The janitor turns every subagent report into a TRDD and nudges the main a
 column: design
 status: tasked
 created: 2026-11-19T23:46:22+0100
-updated: 2026-11-20T00:11:45+0100
+updated: 2026-11-20T00:40:00+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -31,3 +31,5 @@ Owner directive 2026-11-19 (verbatim): 'the janitor itself should convert subage
 
 2026-11-19 (main-agent, after fable-advisor): the worker reporting rules gain a mandatory last line ISSUES: <n>|none so the detector never parses prose. Run inside scripts/detectors/subagent-report.py on the heartbeat, under the existing one-session lease, creating cards through trddgrep new; no SubagentStop hook and no new detector (the roster-count guard). Flood control: record a watermark (newest report mtime) when the feature is first enabled and only consider reports newer than it; cap new cards per fire at 3. Card scope is PROJECT, not LOCAL: measured 2026-11-19, trddgrep --design-dir design --porcelain lists 0 of the 16 LOCAL cards, so a LOCAL intake card would be invisible on the board. Nudge: first check whether the existing board or keep-going nudge already names open todo cards; if not, add one count-only line (no paths, no ids, per the heartbeat output contract). Only in a project that has design/tasks/.
 2026-11-20: the ISSUES line is matched loosely, ^ISSUES:\s*(\d+|none) at the start of a line, because worker reports already add text after the count. The PROJECT-scope measurement above used --design-dir, which pins one corpus; the board without the flag may list LOCAL cards, which the implementer re-measures. PROJECT scope stays the choice.
+2026-11-20 amendments after implementation (main-agent): (1) author and assignee of an intake card are janitor#<uuid5 of the repo URL> (constant JANITOR_IDENTITY in scripts/lib/subagent_report_intake.py), because trddgrep new refuses a bare janitor and janitor@...; (2) DECISION: subagent-report stays an advisory detector (scripts/dispatch.py:799-803) for its old unreferenced-report lines, but the intake count line gets its own non-advisory path so it reaches the main agent even on a quiet heartbeat; this is what makes the nudge persist until the cards close. Implementation: reports_dev/sonnet-worker/20261120_002542+0100-V57FEWSK.md, then 20261120_002945+0100-V57FEWSK-taskAB.md and 20261120_003635+0100-V57FEWSK-followup.md.
+2026-11-20 nudge cadence (main-agent, open to owner veto): the intake line passes _quiet_filter, then the day-scoped drift dedupe (_dedupe_drift_text in scripts/dispatch.py). Counts stay distinct in its key, so the line re-shows whenever the open intake-card count changes, and otherwise once a day. Accepted as is, so an unchanged backlog does not repeat on every 5-minute fire.

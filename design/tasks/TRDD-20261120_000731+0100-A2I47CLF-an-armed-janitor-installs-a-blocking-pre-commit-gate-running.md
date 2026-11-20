@@ -4,7 +4,7 @@ title: An armed janitor installs a blocking pre-commit gate running the shield s
 column: todo
 status: tasked
 created: 2026-11-20T00:07:31+0100
-updated: 2026-11-20T00:07:31+0100
+updated: 2026-11-20T00:40:01+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: security
@@ -27,3 +27,4 @@ USER, 2026-11-20 (verbatim): 'have you ensured that when the janitor is armed, t
 ## Approval log
 
 - 2026-11-20T00:07:31+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-20 OPEN QUESTION, pending the owner's ruling (main-agent): NYKNE7MY's installer refuses to write into a git-tracked hooks folder (core.hooksPath pointing at a tracked dir, such as this repo's git-hooks/ or a husky .husky/). Under that rule such repos never get the gate, which conflicts with 'all git repos' above. Options put to the owner: (a) chain through the tracked hook file, so every contributor sees and runs the gate; (b) keep refusing and print the line to add by hand. Until the owner rules, the installer refuses. Also decided: a missing tool refuses the commit with the tool's name and its install command.

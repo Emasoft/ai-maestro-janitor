@@ -4,7 +4,7 @@ title: A background agent that stops making progress sends no notification and t
 column: todo
 status: tasked
 created: 2026-11-19T23:45:17+0100
-updated: 2026-11-19T23:45:17+0100
+updated: 2026-11-20T00:25:16+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,7 @@ approval-datetime: 2026-11-19T23:45:17+0100
 ## Approval log
 
 - 2026-11-19T23:45:17+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Symptom
+
+2026-11-20 data point: a heartbeat fire printed '2 background workers running; newest activity under 1 min ago' while the main agent had at least five background agents in flight (at that fire: lane P, V57FEWSK, 4K7V0GFW, the B105 scripts worker and the B108 tests worker; the handoff follow-up and the relocate chore were spawned after it). The worker count the heartbeat reports undercounts; cause not measured.

@@ -4,7 +4,7 @@ title: Secrets shield scan installs itself as a chained git pre-commit hook in o
 column: todo
 status: tasked
 created: 2026-11-20T00:04:43+0100
-updated: 2026-11-20T00:04:43+0100
+updated: 2026-11-20T00:57:03+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -26,3 +26,9 @@ USER quote relayed 2026-11-20 by the 3-pillars-tasks-management session (cross-s
 ## Approval log
 
 - 2026-11-20T00:04:43+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-11-20 additions (main-agent, open to owner veto): install writes the DATA-dir dispatcher-stub.py only when it is absent, because /janitor-arm owns it and an older plugin_root would downgrade the live heartbeat. Known residuals, accepted for now: (a) the trust root is the DATA dir; loading dispatcher-stub.py from it matches C3's threat model (a cache writer cannot write DATA), but a DATA-dir writer defeats the gate; (b) a version with a manifest but no pin and no key passes on its self-consistent manifest alone.
+- 2026-11-20 residual R3 (main-agent): shield_hook.py --plugin-root runs the given tree without integrity verification; it is a developer and test entry point, never what the installed hook calls. Also: a DATA-dir dispatcher-stub.py too old to have the verification routines makes the stub refuse the commit and ask for a re-arm.
+
+## Design notes
+
+2026-11-20 decisions (main-agent, open to owner veto): (1) the install target is the EFFECTIVE hooks dir (git rev-parse --git-path hooks, which honours core.hooksPath); if that dir is tracked by git (a husky-style or this repo's git-hooks/), refuse and print the exact lines the owner should add, because writing there edits another project's tracked tree; (2) the installed hook calls a stable stub in the janitor DATA dir (~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/), never a versioned cache path, so a plugin update needs no reinstall; (3) chaining: an existing pre-commit is renamed to pre-commit.pre-janitor (byte for byte) and the new pre-commit runs it first, honouring its exit code, then the shield scan of the STAGED blobs (git diff --cached, index content, not working files); re-install is idempotent (a marker line), uninstall restores pre-commit.pre-janitor byte for byte; (4) fail closed: if bun or the shield scanner is missing the commit is refused with a message naming the missing tool, its exact install command and how to retry; (4b) integrity: the stub runs only a cached version that passes dispatcher-stub.py's C2 manifest check and C3 pin, loading those functions from dispatcher-stub.py itself; a version with no or an unreadable manifest is REJECTED for the gate (every cached version on this host ships one, 3.9.1 to 3.9.8 checked 2026-11-20), unlike dispatcher-stub which accepts it; no key, or a pin naming another version (this host's stale C3 anchor), stays accepted; limit: this detects a corrupted or tampered manifest-carrying version and a missing manifest, not a cache writer who rewrites both a file and its manifest when no pin names that version; if no version is acceptable the commit is refused, with no fallback to an unverified version; (5) a finding prints rule, path and line, never the value; (6) linked worktrees share .git/hooks, so the hook must work from a worktree and never write to the shared ubs cache from one; (7) tests only in tmp_path repos, including an existing UBS-style pre-commit that must still run. ubs joins this hook in TRDD-A2I47CLF, not here.
