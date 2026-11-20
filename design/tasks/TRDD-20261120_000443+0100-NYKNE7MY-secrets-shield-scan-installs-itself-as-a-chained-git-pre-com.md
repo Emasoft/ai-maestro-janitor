@@ -1,10 +1,10 @@
 ---
 trdd-id: NYKNE7MY
 title: Secrets shield scan installs itself as a chained git pre-commit hook in one step
-column: todo
+column: testing
 status: tasked
 created: 2026-11-20T00:04:43+0100
-updated: 2026-11-20T03:25:57+0100
+updated: 2026-11-20T04:07:43+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-11-20T00:04:43+0100
+implementation-commits: [e95ae53b, 8928379e, ba94b7a9]
 ---
 
 # Secrets shield scan installs itself as a chained git pre-commit hook in one step
@@ -29,6 +30,7 @@ USER quote relayed 2026-11-20 by the 3-pillars-tasks-management session (cross-s
 - 2026-11-20 additions (main-agent, open to owner veto): install writes the DATA-dir dispatcher-stub.py only when it is absent, because /janitor-arm owns it and an older plugin_root would downgrade the live heartbeat. Known residuals, accepted for now: (a) the trust root is the DATA dir; loading dispatcher-stub.py from it matches C3's threat model (a cache writer cannot write DATA), but a DATA-dir writer defeats the gate; (b) a version with a manifest but no pin and no key passes on its self-consistent manifest alone.
 - 2026-11-20 residual R3 (main-agent): shield_hook.py --plugin-root runs the given tree without integrity verification; it is a developer and test entry point, never what the installed hook calls. Also: a DATA-dir dispatcher-stub.py too old to have the verification routines makes the stub refuse the commit and ask for a re-arm.
 - 2026-11-20T03:25:56+0100 main-agent: pinned CPV v5.23.1 plugin --strict on ba94b7a9: rc=0, SUMMARY CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=75 (local reports_dev/opus-main/cpv-strict-20261120_030958+0100.txt), so the ba94b7a9 subject holds. Commit 8928379e also carries the memory-page devitalization of detector-and-hook-fixes-2026-11.md, which belongs to the CPV cleanup, not to this card. The shortened skill description dropped the trigger wording audit for credentials, mask or remove, block secrets at commit time; the body Trigger line keeps the command. The clear-chain memory page lost recall by the word injector (reworded to keystroke sender); add it back through memgrep in a phrase the A2A rule does not match. The envget byte-for-byte help comparison noted on DSXC9MP9 is the worker's, not rerun by main-agent.
+- 2026-11-20T04:07:42+0100 main-agent: built in e95ae53b (shield_hook.py, shield-hook-stub.py, 29 tests in test_shield_hook.py passed on the single-file run), CPV fixes in 8928379e and ba94b7a9. Moved to testing; it ships in the next patch release. The full suite runs inside publish.py.
 
 ## Design notes
 
