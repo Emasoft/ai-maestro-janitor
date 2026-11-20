@@ -4,7 +4,7 @@ title: Session start prints the git-root error when trdd_common is absent, faili
 column: todo
 status: tasked
 created: 2026-11-20T06:07:20+0100
-updated: 2026-11-20T06:07:36+0100
+updated: 2026-11-20T06:15:23+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,3 +30,4 @@ Observed 2026-11-20 06:03 in the fourth publish.py --patch run (local log report
 ## Notes
 
 - 2026-11-20T06:07:35+0100 main-agent lead: the test file was last touched by a12f276a (SWQXCIOS bandit lane: guard stderr notices and narrow log handlers in hooks) after ad6adb5e added the message; check whether a12f276a changed the trdd_common-absent path first.
+- 2026-11-20T06:15:22+0100 main-agent: the publish log path in the body is local and gitignored. Cause (worker, shown by an import spy and a bisect: the test file passes 7 of 7 at a5b7027e^, fails 3 of 3 at HEAD): a5b7027e made the SessionStart hook call _git_toplevel first, which imports lib.exe_path from the hook's own tree, so a hook run from the real tree finds the real trdd_common whatever CLAUDE_PLUGIN_ROOT says; the test, not the hook, was wrong. In production the hook and its lib sit in the same plugin root, so nothing changes there. Fix: the test runs hook copies from inside the stripped root; the file passes 3 of 3; ruff, mypy, pyright clean. The lead on a12f276a was wrong (it only last touched the test).

@@ -68,12 +68,24 @@ def _run(hook: Path, project: Path, env: dict[str, str], payload: dict[str, str]
 
 
 def _plugin_root_without_trdd_common(tmp_path: Path) -> Path:
-    """A plugin root whose scripts/lib has everything except trdd_common.py."""
+    """A plugin root whose scripts/lib has everything except trdd_common.py, with both hooks copied in.
+
+    WHY the hooks are copied (TRDD-3MUWV3PJ): the SessionStart hook resolves the git toplevel of the
+    payload cwd first (_git_toplevel, added by a5b7027e), which puts ITS OWN scripts/ on sys.path and
+    imports `lib.exe_path`; that caches the `lib` package of the tree the hook lives in. A hook run
+    from the real tree therefore finds the real trdd_common whatever CLAUDE_PLUGIN_ROOT says (observed
+    with an import spy: the first lib import is lib.exe_path at the _git_toplevel call; the test file
+    passes at a5b7027e^ and failed from a5b7027e on). Running the copy from inside this stripped root
+    is what makes trdd_common truly unimportable. The PostCompact hook gets the same copy for symmetry.
+    """
     root = tmp_path / "plugin-no-trdd-common"
     shutil.copytree(
         _ROOT / "scripts" / "lib", root / "scripts" / "lib", ignore=shutil.ignore_patterns("__pycache__"),
     )
     (root / "scripts" / "lib" / "trdd_common.py").unlink()
+    (root / "scripts" / "hooks").mkdir()
+    for hook in (_SESSION_HOOK, _COMPACT_HOOK):
+        shutil.copy2(hook, root / "scripts" / "hooks" / hook.name)
     return root
 
 
@@ -140,8 +152,10 @@ def test_session_start_without_trdd_common_falls_back_to_project_glob_silently(
 ) -> None:
     """SessionStart when only trdd_common is missing: no NameError, no git line, PROJECT card injected."""
     project = _project(tmp_path)
-    env = _env(tmp_path, project, failing_worktree_list_git_path, _plugin_root_without_trdd_common(tmp_path))
-    proc = _run(_SESSION_HOOK, project, env, {"source": "startup", "hook_event_name": "SessionStart"})
+    plugin_root = _plugin_root_without_trdd_common(tmp_path)
+    env = _env(tmp_path, project, failing_worktree_list_git_path, plugin_root)
+    hook = plugin_root / "scripts" / "hooks" / _SESSION_HOOK.name
+    proc = _run(hook, project, env, {"source": "startup", "hook_event_name": "SessionStart"})
     assert proc.returncode == 0, proc.stderr
     assert "Traceback" not in proc.stdout + proc.stderr
     assert "git failed resolving" not in proc.stdout + proc.stderr
@@ -153,8 +167,10 @@ def test_post_compact_resume_without_trdd_common_falls_back_to_project_glob_sile
 ) -> None:
     """PostCompact when only trdd_common is missing: no NameError, no git line, PROJECT card drives the flag."""
     project = _project(tmp_path)
-    env = _env(tmp_path, project, failing_worktree_list_git_path, _plugin_root_without_trdd_common(tmp_path))
-    proc = _run(_COMPACT_HOOK, project, env, {"trigger": "manual", "hook_event_name": "PostCompact"})
+    plugin_root = _plugin_root_without_trdd_common(tmp_path)
+    env = _env(tmp_path, project, failing_worktree_list_git_path, plugin_root)
+    hook = plugin_root / "scripts" / "hooks" / _COMPACT_HOOK.name
+    proc = _run(hook, project, env, {"trigger": "manual", "hook_event_name": "PostCompact"})
     assert proc.returncode == 0, proc.stderr
     assert "Traceback" not in proc.stdout + proc.stderr
     assert "git failed resolving" not in proc.stdout + proc.stderr
