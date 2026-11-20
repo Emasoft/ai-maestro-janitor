@@ -248,7 +248,7 @@ def main() -> int:
             continue
         ok, reason = _verify_version(version_dir)
         if ok and not _pin_rejects(version_dir, version_dir.name, PLUGIN_DATA_ROOT):
-            os.execv(str(target), [str(target), *sys.argv[1:]])
+            os.execv(str(target), [str(target), *sys.argv[1:]])  # nosec B606 - the stub replaces itself with the verified cached dispatch.py (absolute path chosen by the integrity walk); no shell, no user input
         why = reason if not ok else "pin-mismatch"
         sys.stderr.write(
             f"ai-maestro-janitor: cached version {version_dir.name} failed integrity "
@@ -259,7 +259,7 @@ def main() -> int:
             "ai-maestro-janitor: NO cached version verified clean — running the newest "
             "runnable version anyway (fail-open: a dead heartbeat is worse)\n"
         )
-        os.execv(str(newest_runnable), [str(newest_runnable), *sys.argv[1:]])
+        os.execv(str(newest_runnable), [str(newest_runnable), *sys.argv[1:]])  # nosec B606 - the stub replaces itself with the integrity-walk-chosen cached dispatch.py (absolute path); no shell, no user input
     sys.exit("no runnable ai-maestro-janitor dispatch.py in any cached version")
 
 

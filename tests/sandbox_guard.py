@@ -32,6 +32,7 @@ import os
 import re
 import shlex
 import shutil
+import sys
 from pathlib import Path
 from typing import NamedTuple
 
@@ -62,6 +63,23 @@ ENV_DENYLOG = "JANITOR_TEST_SANDBOX_DENYLOG"
 _REAL_OS_OPEN = os.open
 _REAL_OS_WRITE = os.write
 _REAL_OS_CLOSE = os.close
+
+#: How many audit/denial-log writes failed in THIS process, and the last failure. The
+#: observers (`record_spawn`, `record_denial`) must never raise into the code they watch, yet a
+#: silent `pass` made a broken log indistinguishable from an empty one; this keeps the failure
+#: observable (a test or a debugger can read it) without any path that can raise.
+_OBSERVATION_FAILURES = 0
+_LAST_OBSERVATION_ERROR = ""
+
+
+def _note_observation_failure(exc: BaseException) -> None:
+    """Count and remember a failed audit write. Only assigns ints/str: cannot raise."""
+    global _OBSERVATION_FAILURES, _LAST_OBSERVATION_ERROR
+    _OBSERVATION_FAILURES += 1
+    # Type name only, never str(exc): formatting an exception can raise, and its text can carry
+    # argv or paths.
+    _LAST_OBSERVATION_ERROR = type(exc).__name__
+
 
 #: Python writes import bytecode into the source tree on every run; that is the interpreter,
 #: not a test escaping its boundary.
@@ -179,8 +197,11 @@ def record_spawn(argv: list[str], *, cwd: str, shell: bool) -> None:
             _REAL_OS_WRITE(fd, line.encode("utf-8", "replace"))
         finally:
             _REAL_OS_CLOSE(fd)
-    except Exception:  # noqa: BLE001 — observation must never break the observed
-        pass
+    except Exception as exc:  # noqa: BLE001 — observation must never break the observed
+        # WHY: the contract is that an audit/denial-log failure never changes the outcome of the
+        # code it observes, so EVERY exception is absorbed. A bare pass hid the failure (bandit
+        # B110); the handler now records it in a counter that cannot itself raise.
+        _note_observation_failure(exc)
 
 
 # ══════════════ THE PROCESS + SIGNAL SURFACE — an ALLOW-LIST, deny by default ══════════════
@@ -260,7 +281,22 @@ _PYTHON_EXE = re.compile(r"^python(\d+(\.\d+)*)?$")
 def _tmp_roots() -> tuple[str, ...]:
     import tempfile
 
-    raw = (tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
+    # WHY (TRDD-SWQXCIOS, bandit B108): temp roots come from real system sources, not literals:
+    # the interpreter's temp dir plus, on macOS, the per-user temp dir the OS reports (it covers
+    # a host with TMPDIR unset or tools that resolve the confstr dir themselves). The NAME
+    # CS_DARWIN_USER_TEMP_DIR is absent from os.confstr_names on CPython 3.12/macOS (measured), so
+    # the id _CS_DARWIN_USER_TEMP_DIR (65537) from macOS <unistd.h> is the fallback key.
+    raw = [tempfile.gettempdir()]
+    key = os.confstr_names.get("CS_DARWIN_USER_TEMP_DIR", 65537 if sys.platform == "darwin" else None)
+    if key is not None:
+        try:
+            user_tmp = os.confstr(key)
+        except (ValueError, OSError):
+            # WHY: this module is imported by every test; a Python/OS build where the id is
+            # invalid must not fail at import, it only loses this one extra root.
+            user_tmp = None
+        if user_tmp:
+            raw.append(user_tmp)
     return tuple({os.path.realpath(r) for r in raw} | set(raw))
 
 
@@ -711,8 +747,11 @@ def record_denial(argv: list[str], reason: str) -> None:
             _REAL_OS_WRITE(fd, line.encode("utf-8", "replace"))
         finally:
             _REAL_OS_CLOSE(fd)
-    except Exception:  # noqa: BLE001 — observation must never break the observed
-        pass
+    except Exception as exc:  # noqa: BLE001 — observation must never break the observed
+        # WHY: the contract is that an audit/denial-log failure never changes the outcome of the
+        # code it observes, so EVERY exception is absorbed. A bare pass hid the failure (bandit
+        # B110); the handler now records it in a counter that cannot itself raise.
+        _note_observation_failure(exc)
 
 
 def _enforce_spawn(argv: list[str], *, cwd: str, env: dict, shell: bool) -> None:

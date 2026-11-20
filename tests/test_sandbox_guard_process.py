@@ -375,3 +375,90 @@ def test_a_test_may_kill_its_own_grandchild() -> None:
     finally:
         parent.kill()
         parent.wait(timeout=10)
+
+
+def test_a_failed_denial_log_write_is_counted_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unwritable denial log never raises into the observed code, but the failure is counted.
+
+    Replaces a bare `except: pass` (bandit B110) that made a broken log look like an empty one."""
+    monkeypatch.setenv(sandbox_guard.ENV_DENYLOG, str(tmp_path / "no-such-dir" / "deny.log"))
+    before = sandbox_guard._OBSERVATION_FAILURES
+    sandbox_guard.record_denial(["gh", "--version"], "denied")  # must not raise
+    assert sandbox_guard._OBSERVATION_FAILURES == before + 1
+    assert sandbox_guard._LAST_OBSERVATION_ERROR.startswith("FileNotFoundError")
+
+
+def _raiser(exc: BaseException):
+    def _raise(*_args, **_kwargs):
+        raise exc
+
+    return _raise
+
+
+def _real_then_raise(real, exc: BaseException):
+    def _call(*args, **kwargs):
+        real(*args, **kwargs)  # let the real fd be closed/written first: no leak in the test
+        raise exc
+
+    return _call
+
+
+def _observe(which: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run one observer against a log that is writable, so only the injected fault can fail it."""
+    if which == "spawn":
+        monkeypatch.setenv(sandbox_guard.ENV_AUDIT, str(tmp_path / "audit.log"))
+        sandbox_guard.record_spawn(["gh", "--version"], cwd=str(tmp_path), shell=False)
+    else:
+        monkeypatch.setenv(sandbox_guard.ENV_DENYLOG, str(tmp_path / "deny.log"))
+        sandbox_guard.record_denial(["gh", "--version"], "denied")
+
+
+@pytest.mark.parametrize("which", ["spawn", "denial"])
+@pytest.mark.parametrize("point", ["json_dumps", "os_open", "os_write", "os_close"])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        PermissionError(13, "injected"), OSError(5, "injected"), TypeError("injected"),
+        ValueError("injected"), RuntimeError("injected"), KeyError("injected"),
+    ],
+    ids=["PermissionError", "OSError", "TypeError", "ValueError", "RuntimeError", "KeyError"],
+)
+def test_every_exception_in_an_observed_call_is_absorbed_and_recorded(
+    which: str, point: str, exc: BaseException, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Observation never breaks the observed: ANY exception from any observed call (including
+    types no real call raises, RuntimeError and KeyError) is absorbed and counted, never raised."""
+    before = sandbox_guard._OBSERVATION_FAILURES
+    with monkeypatch.context() as m:
+        if point == "json_dumps":
+            m.setattr(sandbox_guard.json, "dumps", _raiser(exc))
+        elif point == "os_open":
+            m.setattr(sandbox_guard, "_REAL_OS_OPEN", _raiser(exc))
+        elif point == "os_write":
+            m.setattr(sandbox_guard, "_REAL_OS_WRITE", _real_then_raise(sandbox_guard._REAL_OS_WRITE, exc))
+        else:
+            m.setattr(sandbox_guard, "_REAL_OS_CLOSE", _real_then_raise(sandbox_guard._REAL_OS_CLOSE, exc))
+        _observe(which, tmp_path, m)  # must not raise
+    assert sandbox_guard._OBSERVATION_FAILURES == before + 1
+    assert sandbox_guard._LAST_OBSERVATION_ERROR.startswith(type(exc).__name__)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only temp dir")
+def test_the_macos_user_temp_dir_counts_as_tmp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OS-reported per-user temp dir is a temp root even when TMPDIR points elsewhere."""
+    user_tmp = os.confstr(65537)  # _CS_DARWIN_USER_TEMP_DIR; the name is absent from os.confstr_names
+    assert user_tmp
+    monkeypatch.setattr("tempfile.gettempdir", lambda: "/nonexistent-temp-root")
+    assert sandbox_guard.is_tmp_path(os.path.join(user_tmp, "x"))
+
+
+def test_an_invalid_confstr_id_only_drops_the_extra_temp_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build where os.confstr rejects the temp-dir id must not break the guard (this module is
+    imported by every test): _tmp_roots() still returns the interpreter's temp root."""
+    import tempfile
+
+    monkeypatch.setitem(os.confstr_names, "CS_DARWIN_USER_TEMP_DIR", 65537)
+    monkeypatch.setattr(os, "confstr", _raiser(ValueError("unrecognized configuration name")))
+    assert os.path.realpath(tempfile.gettempdir()) in sandbox_guard._tmp_roots()
