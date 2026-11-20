@@ -180,7 +180,8 @@ describe('the copy pass with many values', () => {
   // file, over the 10 s a hook may take, and a hook that times out after next() leaves the raw result. With the index the time grows with the text. A wall-clock bound failed on this host at
   // load 100 (11 s for 4,000 lines that took 1.2 s at load 8), and the test runtime has no CPU clock, so the test compares two sizes in the same run: 16 times the lines takes about 16 times as
   // long with the index (14 to 17 times, measured in bun) and 215 to 368 times without it.
-  test('4,000 JSON lines that each carry two distinct secrets take less than 48 times as long as 250', () => {
+  // WHY timeoutMs 120000 (TRDD-5J3ITQXY): the ratio check is sound (16x step, limit 48; linear 14 to 17, the unindexed regression 215 to 368), but under load the five timed runs took 15.8 s, over Bun's 5000 ms default; an 8x measureLinear verdict was tried and dropped because it reads that regression as linear at small sizes.
+  test('4,000 JSON lines that each carry two distinct secrets take less than 48 times as long as 250', { timeoutMs: 120000 }, () => {
     const line = (i: number) => JSON.stringify({ type: 'row', content: j('header ', 'gh', 'p_', i.toString(36).padStart(6, '0'), 'Qm8Zr4Tx', 'Wn6Kd2Vp', 'Hs9Lc3Yb', 'Rt5Bk', ' and\n', 'DB_PASSWORD=', 'Pw', i.toString(36).padStart(6, '0'), 'Xq7Lm', '\ntail') })
     const text = (n: number) => Array.from({ length: n }, (_, i) => line(i)).join('\n')
     const timed = (t: string) => {
