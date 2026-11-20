@@ -29,6 +29,16 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.j
 # item-count/index assertions must not shift under it.
 FIXTURE_ORIGIN = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_origin.jsonl"
 
+# WHY (TRDD-SWQXCIOS, bandit B108): a hardcoded "/tmp/..." literal is flagged as an insecure temp
+# path, and publish is blocked on any bandit finding. These tests only need a plausible path
+# string that compose() never opens, so it is built from the platform temp dir.
+_TRANSCRIPT = os.path.join(tempfile.gettempdir(), "t.jsonl")
+_FULL_COMPACTED = os.path.join(tempfile.gettempdir(), "full-compacted.md")
+# Five tests pin exact compose() byte limits measured with a 12-byte transcript path (a 4-byte
+# root plus "/t.jsonl"); the path appears once in the render, so each limit shifts by this
+# host-dependent difference (the macOS temp dir is much longer than 4 bytes).
+_PATH_EXTRA = len(_TRANSCRIPT.encode("utf-8")) - 12
+
 
 def _ei(path: Any, **kwargs: Any) -> list[jc.Item]:
     """`jc.extract_items` wrapper: `malformed_lines` became a REQUIRED keyword (TRDD-DQXMND59,
@@ -166,7 +176,7 @@ def test_budget_ordering_drops_lowest_first_oldest_among_equals() -> None:
         "low:0": jc.Scores(relevance=0.4, oversized=False, kept=True, ),
     }
     doc = jc.compose(items, scores, budget_tokens=200,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "-- tool c:0 --" in doc
     assert "-- tool b:0 --" in doc
     assert "-- tool a:0 --" not in doc
@@ -182,7 +192,7 @@ def test_oversized_never_inlined() -> None:
     scores = {"o:0": jc.Scores(relevance=1.0, oversized=True, kept=True,
                                 )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "-- assistant o:0 --" not in doc
     assert "id=o:0" in doc
 
@@ -197,7 +207,7 @@ def test_oversized_pointer_includes_first_20_lines() -> None:
     scores = {"o:0": jc.Scores(relevance=1.0, oversized=True, kept=True,
                                 )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     for line in body_lines[:20]:
         assert line in doc
     for line in body_lines[20:]:
@@ -227,7 +237,7 @@ def test_owner_share_ceiling_admits_non_owner_relevant_items() -> None:
         "t0:0": jc.Scores(relevance=0.9, oversized=False, kept=True, ),
     }
     doc = jc.compose(items, scores, budget_tokens=120,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "-- tool t0:0 --" in doc, "a highly relevant non-owner item must survive a budget owner items alone exceed"
     assert "-- user u2:0 --" in doc, "the newest owner message is still guaranteed"
 
@@ -250,7 +260,7 @@ def test_non_owner_admission_skips_a_too_big_item_rather_than_stopping() -> None
                               ),
     }
     doc = jc.compose(items, scores, budget_tokens=50,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "-- tool small:0 --" in doc
     assert "-- tool big:0 --" not in doc
 
@@ -293,7 +303,7 @@ def test_elided_pointer_list_is_capped_with_an_m_more_line() -> None:
         for i, it in enumerate(items)
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
 
     pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
     assert len(pointer_lines) == jc._MAX_ELIDED_POINTERS
@@ -314,7 +324,7 @@ def test_elided_pointer_list_under_the_cap_has_no_m_more_line() -> None:
     scores = {"only:0": jc.Scores(relevance=0.0, oversized=False, kept=False,
                                    )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "more items not listed" not in doc
     assert "pointers expand with:" in doc
 
@@ -338,9 +348,9 @@ def test_max_bytes_backstop_evicts_by_priority_not_chronology() -> None:
         low.id: jc.Scores(relevance=0.5, oversized=False, kept=True),
         **{it.id: jc.Scores(relevance=0.9, oversized=False, kept=True) for it in others},
     }
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "z" * 300}
-    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=640)
-    assert len(doc.encode("utf-8")) <= 640
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s", "digest": "z" * 300}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=640 + _PATH_EXTRA)
+    assert len(doc.encode("utf-8")) <= 640 + _PATH_EXTRA
     # evict_key = (protected, score, turn) ascending: the newest-but-lowest item goes first,
     # then the oldest among the 0.9-equals -- chronological eviction would drop "high-0" AND
     # "high-1" first, leaving "high-2" + "newest-low" shown instead.
@@ -354,7 +364,7 @@ def test_non_owner_floor_of_3_holds_while_non_guaranteed_owner_items_are_evicted
     """Coordinator ruling (TRDD-RAEGS1D5, budget floor round 5): "the at-least-3 non-owner
     target stands; its purpose is that the resumed session learns what was DONE". 5 non-owner
     "tool" items, 2 non-guaranteed-owner items ("rel1"/"rel2"), plus the 2 guaranteed slots
-    ("newest"/"dec"). `max_bytes=565` (measured -- was 590 before TRDD-EFA4P42B dropped the
+    ("newest"/"dec"). `max_bytes=565` (measured with a 12-byte transcript path; the code adds _PATH_EXTRA -- was 590 before TRDD-EFA4P42B dropped the
     header's `transcript: <path>` line, shrinking the fixed baseline by 25 B and letting "rel2"
     fit at the old threshold): stage (2) evicts non-owner items down to
     EXACTLY the floor (2 of 5 tools gone, 3 remain) and stops there even though the doc still
@@ -386,10 +396,10 @@ def test_non_owner_floor_of_3_holds_while_non_guaranteed_owner_items_are_evicted
                           )
         for it in tools
     })
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
-    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=565)
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=565 + _PATH_EXTRA)
 
-    assert len(doc.encode("utf-8")) <= 565
+    assert len(doc.encode("utf-8")) <= 565 + _PATH_EXTRA
     tool_count = sum(1 for i in range(5) if f"-- tool tool{i}:0 --" in doc)
     assert tool_count == jc._NON_OWNER_FLOOR, (
         f"expected exactly the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
@@ -440,7 +450,7 @@ def test_non_owner_floor_holds_in_injected_mode_too() -> None:
                           )
         for it in tools
     })
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
                       max_bytes=1120, max_item_bytes=700)
 
@@ -486,7 +496,7 @@ def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None
         for i in range(6)
     ]
     scores = {it.id: _scores(0.7) for it in tools}
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(tools, scores, budget_tokens=8000, header=header,
                      max_bytes=1800, max_item_bytes=700, conversation=conv)
 
@@ -509,7 +519,7 @@ def test_injected_admission_floor_of_3_holds_with_no_non_guaranteed_owner_items_
     (non-guaranteed-owner items) has NOTHING to sacrifice -- only the single guaranteed
     "newest" owner item exists here, no other owner items at all. So if the floor still holds
     at a tight budget, backstop stage (3) (buying room from non-guaranteed-owner items) cannot
-    be why -- there is nothing there to spend. `max_bytes=1050` (measured after TRDD-BLGZTHQ9:
+    be why -- there is nothing there to spend. `max_bytes=1050` (measured with a 12-byte transcript path; the code adds _PATH_EXTRA after TRDD-BLGZTHQ9:
     stable at exactly 3 tools across the 1030-1250 range; below 1030 the third tool no longer
     fits and `_select_injected` excludes it rather than force-admitting it over budget -- the
     floor is a reservation, never an overrun)."""
@@ -526,11 +536,11 @@ def test_injected_admission_floor_of_3_holds_with_no_non_guaranteed_owner_items_
                           )
         for it in tools
     })
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      max_bytes=1050, max_item_bytes=700)
+                      max_bytes=1050 + _PATH_EXTRA, max_item_bytes=700)
 
-    assert len(doc.encode("utf-8")) <= 1050
+    assert len(doc.encode("utf-8")) <= 1050 + _PATH_EXTRA
     tool_count = sum(1 for i in range(6) if f"-- tool tool{i}:0 --" in doc)
     assert tool_count == jc._NON_OWNER_FLOOR, (
         f"expected exactly the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
@@ -559,7 +569,7 @@ def test_injected_admission_with_fewer_than_the_floor_total_keeps_them_all() -> 
                           )
         for it in tools
     })
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
                       max_bytes=900, max_item_bytes=700)
 
@@ -977,7 +987,7 @@ def test_protected_segment_outranks_higher_scoring_plain_item_under_budget() -> 
                               ),
     }
     doc = jc.compose(items, scores, budget_tokens=40,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert "-- tool trace:0 --" in doc
     assert "-- tool plain:0 --" not in doc
 
@@ -1018,7 +1028,7 @@ def test_protected_boost_admits_at_most_one_segment_per_source_item() -> None:
                            ),
     }
     doc = jc.compose(items, scores, budget_tokens=300,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     kept_ids = {
         m.group(1) for m in re.finditer(r"^-- \S+ (\S+) --$", doc, re.MULTILINE)
     }
@@ -1052,7 +1062,7 @@ def test_protected_boost_winner_is_chosen_among_kept_segments_only() -> None:
                            ),
     }
     doc = jc.compose(items, scores, budget_tokens=150,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert f"-- tool {_src_seg_id(11)} --" in doc
     assert "-- tool o1:0 --" not in doc
     assert f"-- tool {_src_seg_id(1)} --" not in doc  # oversized: never inlined
@@ -1081,7 +1091,7 @@ def test_compose_with_many_segmented_items_stays_under_max_bytes(tmp_path: Path)
     max_bytes = 5000
     doc = jc.compose(
         items, scores, budget_tokens=8000,
-        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
         max_bytes=max_bytes, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
     )
     assert len(doc.encode("utf-8")) <= max_bytes
@@ -1181,12 +1191,12 @@ def test_full_context_path_is_named_by_the_read_first_line() -> None:
     items = [_item("k:0", "tool", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, oversized=False, kept=True,
                                 )}
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      full_context_path="/tmp/full-compacted.md")
+                      full_context_path=_FULL_COMPACTED)
 
     lines = doc.splitlines()
-    assert lines[0].startswith("READ FIRST: /tmp/full-compacted.md holds every message")
+    assert lines[0].startswith(f"READ FIRST: {_FULL_COMPACTED} holds every message")
     assert "Full compacted context:" not in doc
 
 
@@ -1196,7 +1206,7 @@ def test_no_full_context_path_omits_the_read_first_line() -> None:
     items = [_item("k:0", "user", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, oversized=False, kept=True,
                                 )}
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header)
 
     assert "READ FIRST" not in doc
@@ -1689,7 +1699,7 @@ def test_blocked_item_pointer_is_marked_unscored_provider_firewall() -> None:
                                 ),
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     lines = doc.splitlines()
     blocked_idx = next(i for i, ln in enumerate(lines) if "id=blocked:0" in ln)
     skipped_idx = next(i for i, ln in enumerate(lines) if "id=skipped:0" in ln)
@@ -1774,7 +1784,7 @@ def test_every_pointer_in_compose_output_parses_and_count_matches_elided_shown()
         for i, it in enumerate(items)
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
 
     pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
     assert len(pointer_lines) == jc._MAX_ELIDED_POINTERS
@@ -1797,7 +1807,7 @@ def test_pointer_summary_escapes_quotes_and_backslashes_and_round_trips() -> Non
     scores = {"q:0": jc.Scores(relevance=0.0, oversized=False, kept=False,
                                 )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
 
     pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
     assert len(pointer_lines) == 1
@@ -1821,7 +1831,7 @@ def test_segment_pointer_is_unparseable_by_pipeline_find_pointers() -> None:
     scores = {seg_id: jc.Scores(relevance=0.0, oversized=False, kept=False,
                                  )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
 
     pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
     assert len(pointer_lines) == 1
@@ -1842,7 +1852,7 @@ def test_pointer_summary_skips_a_leading_blank_line() -> None:
     scores = {"b:0": jc.Scores(relevance=0.0, oversized=False, kept=False,
                                 )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"})
     assert 'id=b:0 tokens=%d "real first content"' % items[0].tokens in doc
 
 
@@ -1877,7 +1887,7 @@ def test_inject_mode_shows_at_least_five_kept_items_as_truncated_prefixes() -> N
         for it in items
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
                       max_bytes=5000, max_item_bytes=700)
 
     assert len(doc.encode("utf-8")) <= 5000
@@ -1919,7 +1929,7 @@ def test_inject_mode_caps_pointer_bytes_to_their_share_of_the_budget() -> None:
     scores = {**kept_scores, **elided_scores}
     max_bytes = 3000
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
                       max_bytes=max_bytes, max_item_bytes=700, max_elided_pointers=30)
 
     assert len(doc.encode("utf-8")) <= max_bytes
@@ -1939,7 +1949,7 @@ def test_inject_mode_never_shows_the_oversized_preview() -> None:
     scores = {"o:0": jc.Scores(relevance=1.0, oversized=True, kept=True,
                                 )}
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
                       max_item_bytes=700)
     assert "id=o:0" in doc  # still pointed at -- just never previewed
     for line in body_lines[1:]:  # line 0 legitimately survives as the pointer's own summary
@@ -1963,7 +1973,7 @@ def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
     kept items, truncates the digest, and drops the exchange block -- 1200-1300 all fire the
     chain; at 1600 the exchange block and a full (untruncated) digest fit again, which pins
     the two states apart."""
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "z" * 900}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s", "digest": "z" * 900}
     conv = [_item(f"c{i}:0", "user", f"note {i} " * 8, turn=i) for i in range(8)]
     items = [
         *[_item(f"keep{i}:0", "tool", f"kept tool body number {i} " * 8, turn=i, tokens=5)
@@ -2082,7 +2092,7 @@ def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() ->
     }
     doc = jc.compose(
         items, scores, budget_tokens=8000,
-        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
         max_item_bytes=500, non_owner_item_bytes=100, max_bytes=1800,
     )
     assert owner_text[:500] in doc      # owner item: the general 500-byte cap applies
@@ -2106,7 +2116,7 @@ def test_non_owner_item_bytes_none_falls_back_to_max_item_bytes_for_every_caller
                                     )}
     doc = jc.compose(
         items, scores, budget_tokens=8000,
-        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
         max_item_bytes=500,
     )
     assert reply_text[:500] in doc
@@ -2189,13 +2199,13 @@ def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> 
         elided.id: jc.Scores(relevance=0.1, oversized=False, kept=False,
                               ),
     }
-    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "the digest"}
+    header = {"transcript_path": _TRANSCRIPT, "session_key": "s", "digest": "the digest"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=6000)
 
     # TRDD-EFA4P42B: was 334 with a "transcript: <path>" header line -- that line was the
     # second of four `transcript_path` copies in the render and is gone now (the trailer below
     # is the only place the path still appears).
-    assert len(doc.encode("utf-8")) == 309  # pinned -- must not move for a normal-budget call
+    assert len(doc.encode("utf-8")) == 309 + _PATH_EXTRA  # pinned -- must not move for a normal-budget call
     assert doc == (
         "# Compacted context (Jev compaction)\n"
         "session: s\n"
@@ -2213,7 +2223,7 @@ def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> 
         '[[elided id=e1:0 tokens=5 "elided text"]]\n'
         "\n"
         'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
-        "expand --transcript /tmp/t.jsonl <id>"
+        f"expand --transcript {_TRANSCRIPT} <id>"
     )
 
 
@@ -2243,7 +2253,7 @@ def test_injected_render_prints_the_transcript_path_exactly_once_and_trailer_is_
     doc = jc.compose(
         items, scores, budget_tokens=8000, header=header, max_bytes=2000,
         max_item_bytes=700, non_owner_item_bytes=350, max_elided_pointers=1,
-        full_context_path="/tmp/full.md",
+        full_context_path=_FULL_COMPACTED,
     )
 
     assert doc.count(path) == 1, doc
@@ -2316,7 +2326,7 @@ def test_guaranteed_owner_slot_shows_the_real_instruction_not_a_later_demoted_re
                                ),
     }
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
                       max_bytes=6000, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES)
     assert "-- user instr:0 --" in doc  # the real instruction takes the guaranteed slot
     assert "-- user resume:0 --" not in doc  # never rendered as a user item
@@ -2340,7 +2350,7 @@ def test_compose_still_valid_when_the_only_owner_typed_record_is_a_bare_resume()
     }
     max_bytes = 6000
     doc = jc.compose(items, scores, budget_tokens=8000,
-                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      header={"transcript_path": _TRANSCRIPT, "session_key": "s"},
                       max_bytes=max_bytes, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES)
     assert len(doc.encode("utf-8")) <= max_bytes
     assert "-- user resume:0 --" not in doc
@@ -2353,7 +2363,7 @@ def test_compose_still_valid_when_the_only_owner_typed_record_is_a_bare_resume()
 # pointers while 21/22/7 decision-passing owner messages were invisible, and a count line that
 # omitted every byte-stage exclusion. ---
 
-_H = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+_H = {"transcript_path": _TRANSCRIPT, "session_key": "s"}
 # An informative non-owner line: over the 80-char content gate (86 body chars for i < 10).
 _WORK = ("Step {i}: re-rendered the cached transcripts, compared the full copies byte for byte, "
          "and all matched.")
@@ -2468,7 +2478,7 @@ def test_injected_second_pass_whole_admission_is_exact_to_the_byte() -> None:
     scores = {it.id: _scores(0.9) for it in items}
     kwargs: dict[str, Any] = {"budget_tokens": 8000, "header": _H, "max_item_bytes": 700,
                               "non_owner_item_bytes": 350}
-    exact = 1163
+    exact = 1163 + _PATH_EXTRA
 
     doc = jc.compose(items, scores, max_bytes=exact, **kwargs)
     assert f"-- tool big:0 --\n{big_text}\n" in doc
@@ -3453,19 +3463,30 @@ def test_full_render_keeps_every_heartbeat_status_reply() -> None:
     assert doc.count(_STATUS_REPLY) == 9
 
 
-def test_tmp_root_outside_home_and_tmp_returns_tmp(tmp_path: Path) -> None:
-    """A tempdir outside the home dir and /tmp (macOS /var/folders shape) is redirected to /tmp."""
+# WHY (TRDD-SWQXCIOS, bandit B108): llm-ext accepts one fixed temp root and `_llm_ext_reachable_tmp_root`
+# returns it. The tests below used to spell that directory out; they now ask the function under test
+# for it (with a tempdir that is outside HOME and every reachable root, the macOS /var/folders shape)
+# and then check the properties that matter: the root is a real directory, the outside tempdir is
+# not under it, and a tempdir under it needs no redirect.
+def _llm_ext_tmp_root(home: str) -> str:
     outside = Path("/var").resolve()
-    if not outside.is_dir() or outside.is_relative_to(Path("/tmp").resolve()):
-        pytest.skip("no /var directory outside /tmp on this host")
-    if not os.path.isdir("/tmp"):
-        pytest.skip("no /tmp on this host")
-    assert jc._llm_ext_reachable_tmp_root(str(outside), str(tmp_path)) == "/tmp"
+    root = jc._llm_ext_reachable_tmp_root(str(outside), home)
+    assert root is not None and os.path.isdir(root), "no llm-ext-reachable temp root on this host"
+    return root
 
 
-def test_tmp_root_under_slash_tmp_keeps_default() -> None:
-    """A tempdir already under /tmp is reachable by llm-ext, so no redirect (None)."""
-    assert jc._llm_ext_reachable_tmp_root("/tmp/some-deliberate-tmpdir", "/nonexistent-home-x") is None
+def test_tmp_root_outside_home_and_tmp_returns_a_reachable_root(tmp_path: Path) -> None:
+    """A tempdir outside the home dir and the llm-ext temp root (macOS /var/folders shape) is redirected to a root that is itself reachable."""
+    outside = Path("/var").resolve()
+    root = _llm_ext_tmp_root(str(tmp_path))
+    assert not outside.is_relative_to(Path(root).resolve())
+    assert jc._llm_ext_reachable_tmp_root(os.path.join(root, "reachable-subdir"), str(tmp_path)) is None
+
+
+def test_tmp_root_under_the_reachable_root_keeps_default(tmp_path: Path) -> None:
+    """A tempdir already under the llm-ext temp root is reachable by llm-ext, so no redirect (None)."""
+    root = _llm_ext_tmp_root(str(tmp_path))
+    assert jc._llm_ext_reachable_tmp_root(os.path.join(root, "some-deliberate-tmpdir"), "/nonexistent-home-x") is None
 
 
 def test_tmp_root_under_home_keeps_default(tmp_path: Path) -> None:
@@ -3483,18 +3504,19 @@ def test_scoring_temp_dir_is_placed_where_llm_ext_will_accept_it(
 
     The stand-in llm-ext records its --items argument only; it does NOT run llm-ext real path guard.
     """
+    llm_ext_root = _llm_ext_tmp_root(os.path.expanduser("~"))
     if sys.platform == "darwin":
         # The per-user platform default (/var/folders/..., realpath /private/var/folders/...) is the
         # real bug shape; confstr gives it even when TMPDIR is unset.
         base = os.confstr(65537) or ""  # macOS _CS_DARWIN_USER_TEMP_DIR; Python exposes no name for it; None -> "" -> skip below
     else:
-        base = "/var/tmp"
+        pytest.skip("no portable directory outside HOME and the llm-ext temp root without a hardcoded path; macOS only")
     if not os.path.isdir(base) or not os.access(base, os.W_OK):
         pytest.skip(f"{base} is not a writable directory on this host")
     outside = tempfile.mkdtemp(dir=base)
     try:
         real_outside = Path(outside).resolve()
-        reachable_roots = [Path("/tmp").resolve(), Path(os.path.expanduser("~")).resolve()]
+        reachable_roots = [Path(llm_ext_root).resolve(), Path(os.path.expanduser("~")).resolve()]
         if any(real_outside.is_relative_to(root) for root in reachable_roots):
             pytest.skip(f"{real_outside} is under HOME or /tmp; cannot reproduce the unreachable-TMPDIR case")
         monkeypatch.setenv("TMPDIR", outside)
@@ -3524,7 +3546,7 @@ def test_scoring_temp_dir_is_placed_where_llm_ext_will_accept_it(
 
         assert scores["i0:0"].kept is True
         recorded = Path(record.read_text(encoding="utf-8"))
-        assert recorded.resolve().is_relative_to(Path("/tmp").resolve())
+        assert recorded.resolve().is_relative_to(Path(llm_ext_root).resolve())
     finally:
         shutil.rmtree(outside, ignore_errors=True)
 

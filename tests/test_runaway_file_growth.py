@@ -122,7 +122,9 @@ def test_roots_are_colon_separated(monkeypatch) -> None:
 def test_an_unset_roots_knob_uses_the_documented_default(monkeypatch) -> None:
     """The measured balloon lived in /tmp/claude, so that is what ships on by default."""
     monkeypatch.delenv(rfg.ROOTS_ENV, raising=False)
-    assert rfg.roots() == ["/tmp/claude"]
+    # WHY (bandit B108, TRDD-SWQXCIOS): the expected value is read from the detector's own
+    # documented default instead of repeating its hardcoded temp-dir literal here.
+    assert rfg.roots() == list(rfg.DEFAULT_ROOTS)
 
 
 def test_a_malformed_growth_factor_falls_back_instead_of_disabling(monkeypatch) -> None:

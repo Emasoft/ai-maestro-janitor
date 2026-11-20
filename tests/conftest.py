@@ -240,15 +240,24 @@ def _other_janitor_actor_live() -> bool:
     # on no ambient state at all.
     real_home = _REAL_ENV.get("HOME") or str(Path.home())
     liveness = Path(real_home) / ".aimaestro" / "server-liveness.json"
+    # WHY (bandit B110, TRDD-SWQXCIOS): this used to be `except Exception: pass`, which made an
+    # unreadable or malformed liveness file indistinguishable from "no server" -- the same
+    # silent fail-open the comment block above describes. The fall-through to the daemon witness
+    # is unchanged (any failure still answers "no server", as before, so a hostile file such as
+    # {"ts": 1e999} cannot crash the session-finish guard), but a missing file (the ordinary
+    # no-server state) stays quiet and every other failure is reported with its type first.
     try:
-        payload = json.loads(liveness.read_text(encoding="utf-8"))
-        # Same 90s staleness window the janitor itself applies (ARCHITECTURE §6.1): a
-        # crashed server leaves its last file on disk forever, and a stale file must not
-        # excuse anything.
-        if int(time.time()) - int(payload.get("ts", 0)) <= 90:
-            return True
-    except Exception:
-        pass
+        liveness_ts = int(json.loads(liveness.read_text(encoding="utf-8")).get("ts", 0))
+    except FileNotFoundError:
+        liveness_ts = 0
+    except Exception as exc:
+        liveness_ts = 0
+        print(f"conftest: server liveness file unusable ({exc!r}); treating as no server", file=sys.stderr)
+    # Same 90s staleness window the janitor itself applies (ARCHITECTURE §6.1): a
+    # crashed server leaves its last file on disk forever, and a stale file must not
+    # excuse anything.
+    if int(time.time()) - liveness_ts <= 90:
+        return True
     roots = [root for _label, (root, _b, _s) in _GUARDED.items()]
     return _daemon_witness(*roots) is not None
 
