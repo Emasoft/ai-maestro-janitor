@@ -3,6 +3,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { redactHome } from '../home'
 
+import { minMs } from './load/timing'
+
 const raw = String.raw
 const BS = '\\'
 const h = (text: string, homes: string[] = []) => redactHome(text, homes)
@@ -324,7 +326,8 @@ describe('home rewrite: known misses, pinned as they are today', () => {
 })
 
 describe('home rewrite: timing', () => {
-  test('200,000 characters of adversarial input run in under 1000 ms', () => {
+  // WHY timeoutMs 30000: 7 inputs x (1 warm-up + 3 timed runs) at the 1000 ms bound is 28 s worst case, over Bun's default 5000 ms (TRDD-5J3ITQXY).
+  test('200,000 characters of adversarial input run in under 1000 ms', { timeoutMs: 30000 }, () => {
     const fragments = (raw`C:\Users\a a a a ` + '/Users/').repeat(Math.ceil(200000 / 24)).slice(0, 200000)
     const longRun = raw`C:\Users` + BS + 'a '.repeat(100000)
     const wordy = (raw`C:\Users` + BS + 'abcdefgh '.repeat(25000)).slice(0, 200000)
@@ -334,11 +337,10 @@ describe('home rewrite: timing', () => {
     const bsRun = BS.repeat(200000)
     const bsRunDrive = BS.repeat(200000) + raw`C:\Users\runner\x`
     const bsRunPrefix = (BS.repeat(50) + '?' + BS + 'C:').repeat(Math.ceil(200000 / 53)).slice(0, 200000)
+    // WHY the minimum of 3 timed runs per input after a warm-up (minMs): load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY).
     for (const input of [fragments, longRun, wordy, mixed, bsRun, bsRunDrive, bsRunPrefix]) {
       expect(input.length).toBeGreaterThanOrEqual(200000)
-      const start = performance.now()
-      h(input, ['/opt/people/app'])
-      expect(performance.now() - start).toBeLessThan(1000)
+      expect(minMs(() => h(input, ['/opt/people/app']).text.length, 3).ms).toBeLessThan(1000)
     }
   })
 })

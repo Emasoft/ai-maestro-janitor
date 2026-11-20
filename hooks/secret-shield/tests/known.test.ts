@@ -4,6 +4,8 @@ import { buildKnownIndex, KnownIndexError, MIN_KNOWN_LENGTH, redactKnown, redact
 import { SHIELD_MARKER, shieldMarker } from '../marker'
 import { mark, redact } from '../patterns'
 
+import { minMs } from './load/timing'
+
 // Known-value redaction (TRDD-DSXC9MP9 increment 1). Every value here is built from fragments at run time, so no line of this file holds a whole value.
 const j = (...parts: string[]) => parts.join('')
 const U1 = j('0b1e2c3d-4e5f-', '4a6b-8c7d-9e0f1a2b3c4d')
@@ -128,24 +130,21 @@ test('an empty index changes nothing', () => {
   expect(redactKnownDeep({ a: text }, known()).hits).toEqual({})
 })
 
-test('the time is linear in the text: 2000 values over 1 MB, and a 512 KB run of one character against values made of it', { timeoutMs: 20000 }, () => {
+// WHY minMs N=3 and timeoutMs 60000: the single-shot timings (Date.now) flaked under host load (TRDD-5J3ITQXY); 2 phases x (1 warm-up + 3 timed runs + 1 untimed correctness call) at the 5000 ms bound is 50 s worst case, over the old 20000. The bounds stay 5000 ms; the hit and text assertions run on separate untimed calls.
+test('the time is linear in the text: 2000 values over 1 MB, and a 512 KB run of one character against values made of it', { timeoutMs: 60000 }, () => {
   const hex = (n: number) => n.toString(16).padStart(8, '0')
   const rows: KnownSecret[] = []
   for (let n = 0; n < 2000; n++) rows.push({ uuid: U1, kind: 'k', value: j('v', hex(n * 7919), hex(n * 104729), hex(n)) })
-  let started = Date.now()
-  const index = known(...rows)
   const filler = 'lorem ipsum dolor sit amet, '.repeat(37450)
   const text = j(filler.slice(0, 500000), rows[17]!.value, filler.slice(0, 500000), rows[1999]!.value)
-  const done = redactKnown(text, index)
-  const wide = Date.now() - started
-  expect(done.hits).toEqual({ k: 2 })
+  const wide = minMs(() => redactKnown(text, known(...rows)).text.length, 3).ms
+  expect(redactKnown(text, known(...rows)).hits).toEqual({ k: 2 })
 
-  started = Date.now()
   const runs: KnownSecret[] = []
   for (let n = MIN_KNOWN_LENGTH; n < MIN_KNOWN_LENGTH + 40; n++) runs.push({ uuid: U2, kind: 'k', value: 'a'.repeat(n) })
-  const flat = redactKnown('a'.repeat(512 * 1024), known(...runs))
-  const deep = Date.now() - started
-  expect(flat.text).toBe(shieldMarker('k', U2))
+  const flatText = 'a'.repeat(512 * 1024)
+  const deep = minMs(() => redactKnown(flatText, known(...runs)).text.length, 3).ms
+  expect(redactKnown(flatText, known(...runs)).text).toBe(shieldMarker('k', U2))
 
   // WHY the bound is generous: it is far under the 10 s hook limit, so a machine under load does not turn it red; a quadratic walk takes minutes here, not seconds.
   expect(wide).toBeLessThan(5000)

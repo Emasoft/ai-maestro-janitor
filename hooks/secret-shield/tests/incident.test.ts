@@ -5,6 +5,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { mark, redact } from '../patterns'
 
+import { minMs } from './load/timing'
+
 const j = (...parts: string[]) => parts.join('')
 
 const PYPI_API = j('pypi-', 'AgE', 'A'.repeat(170))
@@ -77,21 +79,20 @@ describe('an unterminated secret value does not make redact backtrack', () => {
     ['assignment', j('password=', 'a'.repeat(MB))],
   ]
   for (const [shape, input] of cases) {
-    test(`1 MB after the ${shape} opener finishes well under the 10 s hook limit, and is hidden`, { timeoutMs: 2000 }, () => {
-      const start = performance.now()
-      const { hits } = redact(input)
-      expect(performance.now() - start).toBeLessThan(2000)
-      // A regex engine that gives up on a long match returns no match: fast, and a silent miss. Count the hit.
-      expect(hits).toEqual({ assignment: 1 })
+    // WHY minMs N=3 and timeoutMs 30000: the single-shot timing flaked under host load (TRDD-5J3ITQXY); 1 warm-up + 3 timed runs + 1 untimed correctness call at the 2000 ms bound is 10 s worst case, so the runner limit (was 2000, equal to the bound) is raised; the bound stays 2000 ms.
+    test(`1 MB after the ${shape} opener finishes well under the 10 s hook limit, and is hidden`, { timeoutMs: 30000 }, () => {
+      expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(2000)
+      // A regex engine that gives up on a long match returns no match: fast, and a silent miss. Count the hit, on a separate untimed call.
+      expect(redact(input).hits).toEqual({ assignment: 1 })
     })
   }
   // A closed plain value of 1 MB. The pattern before TRDD-Q6LPJTPO missed it (no match, about 60 ms): JavaScriptCore
   // gave up on its once-per-character group. Fix proof, measured 2026-11-04.
-  test('1 MB inside a closed plain JSON value is hidden well under the 10 s hook limit', { timeoutMs: 2000 }, () => {
-    const start = performance.now()
-    const { hits } = redact(j('{"password":"', 'a'.repeat(MB), '"}'))
-    expect(performance.now() - start).toBeLessThan(2000)
-    expect(hits).toEqual({ assignment: 1 })
+  // WHY minMs N=3 and timeoutMs 30000: the single-shot timing flaked under host load (TRDD-5J3ITQXY); 1 warm-up + 3 timed runs + 1 untimed correctness call at the 2000 ms bound is 10 s worst case, so the runner limit (was 2000, equal to the bound) is raised; the bound stays 2000 ms. The hit count is asserted on that separate untimed call.
+  test('1 MB inside a closed plain JSON value is hidden well under the 10 s hook limit', { timeoutMs: 30000 }, () => {
+    const input = j('{"password":"', 'a'.repeat(MB), '"}')
+    expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(2000)
+    expect(redact(input).hits).toEqual({ assignment: 1 })
   })
 })
 

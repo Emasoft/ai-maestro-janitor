@@ -7,6 +7,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import { findEmails, redactEmails } from '../email'
 import { mark } from '../patterns'
 
+import { minMs } from './load/timing'
+
 const M = mark('email')
 const one = { email: 1 }
 
@@ -14,11 +16,6 @@ const e = (local: string, host: string): string => local + '@' + host
 const r = (text: string) => redactEmails(text)
 const unchanged = (text: string) => expect(r(text)).toEqual({ text, hits: {} })
 const hides = (text: string, out: string, n: number) => expect(r(text)).toEqual({ text: out, hits: { email: n } })
-const ms = (run: () => void): number => {
-  const start = performance.now()
-  run()
-  return performance.now() - start
-}
 
 describe('email pass: what is hidden', () => {
   test('a plain address is hidden with the email marker and the text around it stays', () => {
@@ -190,9 +187,9 @@ describe('email pass: cloneAddresses hidden (rule G off)', () => {
     const line = e('git', 'host.net') + ':owner/repo\n'
     const lines = Math.floor(n / line.length)
     const text = line.repeat(lines)
-    let hits = 0
-    expect(ms(() => { hits = hid(text).hits.email ?? 0 })).toBeLessThan(100)
-    expect(hits).toBe(lines)
+    // WHY the minimum of 5 timed runs after a warm-up (minMs): a single timing, cold JIT included, took 105 ms under host load (TRDD-5J3ITQXY); the bound stays 100 ms. The hit count is asserted on a separate untimed call.
+    expect(minMs(() => hid(text).text.length, 5).ms).toBeLessThan(100)
+    expect(hid(text).hits.email ?? 0).toBe(lines)
   })
 })
 
@@ -250,9 +247,10 @@ describe('email pass: timing', () => {
     ['256 KB of one address per line', (e('user', 'host.net') + '\n').repeat(Math.floor(n / 14))],
     ['256 KB of a local part then one address', 'a'.repeat(n) + '@host.net'],
   ]
+  // WHY the minimum of 5 timed runs after a warm-up (minMs): load and a cold JIT only add time, so one slow run must not fail the bound (TRDD-5J3ITQXY); a quadratic scan is over a minute, so the bound keeps its 100 ms.
   for (const [name, text] of inputs) {
     test(name + ' takes under 100 ms', () => {
-      expect(ms(() => r(text))).toBeLessThan(100)
+      expect(minMs(() => r(text).text.length, 5).ms).toBeLessThan(100)
     })
   }
   test('the one-address-per-line text hides every address', () => {

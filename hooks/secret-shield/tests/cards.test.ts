@@ -5,6 +5,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import { findCards, redactCards } from '../cards'
 import { mark } from '../patterns'
 
+import { minMs } from './load/timing'
+
 const M = mark('payment-card')
 const one = { 'payment-card': 1 }
 
@@ -44,11 +46,6 @@ const group = (d: string, sizes: number[], sep: string): string => {
 }
 const r = (text: string) => redactCards(text)
 const unchanged = (text: string) => expect(r(text)).toEqual({ text, hits: {} })
-const ms = (run: () => void): number => {
-  const start = performance.now()
-  run()
-  return performance.now() - start
-}
 
 describe('card pass: the fixtures', () => {
   test('every fixture is Luhn-valid by a second, independent check and has its length', () => {
@@ -289,9 +286,10 @@ describe('card pass: timing', () => {
     ['256 KB of a long valid-looking grouped run', grouped.repeat(Math.floor(262144 / grouped.length))],
     ['256 KB of valid cards, one per line', `${VISA16}\n`.repeat(Math.floor(262144 / (VISA16.length + 1)))],
   ]
+  // WHY the minimum of 5 timed runs after a warm-up (minMs): load and a cold JIT only add time, so one slow run must not fail the bound (TRDD-5J3ITQXY); a quadratic scan takes seconds, so the bound keeps its 100 ms.
   for (const [name, text] of inputs) {
     test(`${name} takes under 100 ms`, () => {
-      expect(ms(() => r(text))).toBeLessThan(100)
+      expect(minMs(() => r(text).text.length, 5).ms).toBeLessThan(100)
     })
   }
   test('the one-card-per-line text hides every card', () => {

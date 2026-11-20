@@ -208,7 +208,8 @@ describe('the detector of this file can see a leak', () => {
 })
 
 describe('redactJsonLine is stable', () => {
-  test('running the output through it again changes nothing and finds nothing, in every case', () => {
+  // WHY timeoutMs 60000: the loop (3 seeds x kinds x 12 forms, 2 calls each) took 5367 ms under host load and failed on Bun's default 5000 ms (TRDD-5J3ITQXY); it has no timing bound, only correctness.
+  test('running the output through it again changes nothing and finds nothing, in every case', { timeoutMs: 60000 }, () => {
     let n = 0
     for (const seed of SEEDS) {
       for (const k of kinds(seed)) {

@@ -105,3 +105,15 @@ export const measureLinear = (
   }
   return { verdict: verdict ?? exhausted(trajectory, step, factor), small, big, ratio: big / small, rounds: trajectory.length, smallSize, bigSize, trajectory, sink }
 }
+
+// The minimum duration of `n` timed calls of `run`, after one untimed warm-up call, for an ABSOLUTE bound ("under 100 ms"). WHY the minimum: noise (host load, a garbage collection, a cold JIT) only ever ADDS time to a run, so the minimum of n runs converges down to the true cost; a single-shot timing flaked the release gate under load (TRDD-5J3ITQXY). `run` returns a number (a length, a count) so the work cannot be discarded as unused; the sum of the results is returned as `sink`.
+export const minMs = (run: () => number, n: number): { ms: number; sink: number } => {
+  let sink = run() % 1e15
+  let ms = Infinity
+  for (let i = 0; i < n; i++) {
+    const started = performance.now()
+    sink = (sink + run()) % 1e15
+    ms = Math.min(ms, performance.now() - started)
+  }
+  return { ms, sink }
+}
