@@ -1,5 +1,11 @@
 # Scan options (janitor-secrets-shield-scan)
 
+## Table of contents
+
+- [Scan options](#scan-options)
+
+## Scan options
+
 - `--all` scans every file, hidden and gitignored ones too, plus each
   repository's `.git/config` (it can hold a token in a remote URL), never
   other `.git` content. Default: off, the scope follows the ignore rules.

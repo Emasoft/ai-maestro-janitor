@@ -5,7 +5,8 @@
 # ENV_VAR_NAME is the variable NAME inside the env file, never its value.
 # The optional second argument is the destination secret NAME in jss.
 # The value is read internally, then printed or passed to jss add.
-# Example: envget API_KEY MY_SERVICE_API_KEY reads API_KEY from .env and
+# Example: envget API_KEY MY_SERVICE_API_KEY reads API_KEY
+# from .env and
 # calls jss add with destination name MY_SERVICE_API_KEY and that read value.
 
 # BEGIN_ENVGET_FUNCTION
@@ -35,9 +36,20 @@ envget() (
       shift
       ;;
     -h | --help)
+      printf '%s\n' 'Usage: envget [-f FILE | --file FILE] [--] ENV_VAR_NAME [JSS_DESTINATION_SECRET_NAME]'
+      printf '%s\n' 'ENV_VAR_NAME: variable NAME inside the env file, not its current shell value.'
+      printf '%s\n' 'JSS_DESTINATION_SECRET_NAME: optional destination secret NAME to add in jss.'
+      printf '%s\n' 'Both positional arguments are names; do not pass a secret value.'
+      printf '%s\n' 'The value is read internally from the env file.'
+      printf '%s\n' 'With ENV_VAR_NAME only, print the value read from that file.'
+      printf '%s\n' 'With a destination name, call: jss add JSS_DESTINATION_SECRET_NAME VALUE_READ_FROM_FILE'
+      printf '%s\n' 'Default file: .env in the current working directory.'
+      printf '%s\n' 'Example: envget API_KEY MY_SERVICE_API_KEY'
+      printf '%s\n' 'Here API_KEY is the name in .env; MY_SERVICE_API_KEY is the destination name in jss.'
       # The $ in the help text is literal on purpose: it names the $API_KEY shell-expansion pitfall as text; it must not expand.
       # shellcheck disable=SC2016
-      printf '%s\n' 'Usage: envget [-f FILE | --file FILE] [--] ENV_VAR_NAME [JSS_DESTINATION_SECRET_NAME]' 'ENV_VAR_NAME: variable NAME inside the env file, not its current shell value.' 'JSS_DESTINATION_SECRET_NAME: optional destination secret NAME to add in jss.' 'Both positional arguments are names; do not pass a secret value.' 'The value is read internally from the env file.' 'With ENV_VAR_NAME only, print the value read from that file.' 'With a destination name, call: jss add JSS_DESTINATION_SECRET_NAME VALUE_READ_FROM_FILE' 'Default file: .env in the current working directory.' 'Example: envget API_KEY MY_SERVICE_API_KEY' 'Here API_KEY is the name in .env; MY_SERVICE_API_KEY is the destination name in jss.' 'Use API_KEY literally; $API_KEY expands to its current shell value.' 'Missing or duplicate keys are errors. Values are not evaluated or unquoted.'
+      printf '%s\n' 'Use API_KEY literally; $API_KEY expands to its current shell value.'
+      printf '%s\n' 'Missing or duplicate keys are errors. Values are not evaluated or unquoted.'
       exit 0
       ;;
     --)

@@ -4,7 +4,7 @@ title: Secret-shield mod keeps every secret behind a vault UUID the agent never 
 column: backburner
 status: tasked
 created: 2026-11-18T17:47:37+0100
-updated: 2026-11-19T13:55:03+0100
+updated: 2026-11-20T03:09:04+0100
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -26,6 +26,7 @@ approval-datetime: 2026-11-18T17:47:37+0100
 - 2026-11-18T17:47:37+0100 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-11-18 — main-agent@ai-maestro-janitor confirms it ordered this card and is its author of record; the cheap-worker that minted it used that author on the main agent's instruction.
 - 2026-11-19T13:55:02+0100 — owner ruling 2026-11-19 via AskUserQuestion; option text written by the orchestrator, chosen by the owner, verbatim: "Reformat both copies (Recommended)". Meaning: shfmt on the shipped env tools and on the owner's design copy so they stay byte-identical; the text was reformatted, not changed. Done by sonnet-worker: shfmt -w on scripts/janitor-env-tools/{envget,envkey}.sh and design/requirements/examples/janitor-env-tools/{envget,envkey}.sh; cmp: each pair byte-identical; shfmt -d on all four exits 0; test_envget.py 534 checks and test_envkey.py 807 checks, 0 failures, on bash 3.2.57, bash 5.3.20 and zsh 5.9, for both copies. The usage .md files embed the function block between BEGIN and END markers and equal the .sh function body only after normalising whitespace, semicolons and comments; the one-liner .md files carry the same body on one line, followed by an extra invocation example. None of these .md files was edited, and they are no longer byte-identical to the .sh text: flagged for the owner. Ruling source: owner answer to the orchestrator AskUserQuestion, tool-result record uuid dfcf96d5-e67e-4219-8c89-667d2581146c, timestamp 2026-11-19T12:44:42Z, session 5d861615; the question named both copies ("the shipped one in scripts/janitor-env-tools/ and your verbatim one in design/requirements/examples/"), the answer was "Reformat both copies (Recommended)". The card has no STATE section, so this line is under Approval log.
+- 2026-11-20T03:09:02+0100 main-agent ruling, open to owner veto: CPV v5.23.1 skillaudit flagged envget.sh lines 8 and 40 (CRED_ENV_READ, CRED_ENV_SAFE; NIT, which blocks --strict) in both the scripts/ copy and the design/requirements/examples copy, because those rules match per source line (the word read, or add ... to, followed by .env on one line). The printed text and the comment wording are unchanged from HEAD (help output compared byte for byte); only the source layout changed: the line-8 comment is split in two and the line-40 usage printf became one printf per argument. Alternative: keep the original layout and ask CPV for a rule fix.
 
 ## Owner orders
 

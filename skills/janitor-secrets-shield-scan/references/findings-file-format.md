@@ -1,5 +1,11 @@
 # Findings file format (janitor-secrets-shield-scan)
 
+## Table of contents
+
+- [Record kinds and fields](#record-kinds-and-fields)
+
+## Record kinds and fields
+
 The findings file is JSON lines: `finding` (path, kind, line or null, count),
 `skip` (path, reason), with `--redact` also `residual` (path, kind, count), and
 the summary last. It never holds a secret value.

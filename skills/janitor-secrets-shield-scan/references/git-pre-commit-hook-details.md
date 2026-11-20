@@ -1,5 +1,11 @@
 # Git pre-commit hook details (janitor-secrets-shield-scan)
 
+## Table of contents
+
+- [Hook behaviour](#hook-behaviour)
+
+## Hook behaviour
+
 - Target: the effective hooks folder (`git rev-parse --git-path hooks`, so `core.hooksPath` is honoured, and a linked worktree uses the shared one). If git tracks files in that folder (husky style), install writes nothing, exits 1 and prints the line to add to that hook by hand. Tell the user that outcome; it is not an error to retry.
 - Chaining: an existing `pre-commit` is renamed to `pre-commit.pre-janitor` (byte for byte, same mode). The new hook runs it first and stops on its exit code, then scans. A `pre-commit` that is a symlink, or one next to an existing `pre-commit.pre-janitor`, is refused and left alone.
 - Idempotent: a second install changes nothing. Uninstall renames the saved original back byte for byte; it refuses a `pre-commit` without the janitor marker line.

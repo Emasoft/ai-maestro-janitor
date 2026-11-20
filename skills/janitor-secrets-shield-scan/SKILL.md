@@ -189,8 +189,11 @@ User: audit the folder ~/work for credentials and list the files
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts`: the scanner.
 - [scan-options](references/scan-options.md) — every option and the `SHIELD_SCAN_VERSION` variable.
+  - Scan options
 - [git-pre-commit-hook-details](references/git-pre-commit-hook-details.md) — hook target, chaining, stub, fail-closed text, integrity gate.
+  - Hook behaviour
 - [findings-file-format](references/findings-file-format.md) — record kinds and fields of the findings file.
+  - Record kinds and fields
 - `${CLAUDE_PLUGIN_ROOT}/hooks/secret-shield/`: the shield rules it applies.
 - [redact-and-restore](references/redact-and-restore.md) — the full text of the redact
   and restore behaviour.
