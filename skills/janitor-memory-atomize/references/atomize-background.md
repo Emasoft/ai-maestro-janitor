@@ -38,11 +38,7 @@ candidate on EVERY precheck otherwise, so an unrecorded call costs a full dispat
 re-derive the same "no" next pass. Record it before you emit the `skipped … (free-prose-leaf-
 no-distinct-facts)` output line:
 
-```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention atomize --scope "$SCOPE" --root "$SCOPE_ROOT" \
-  --page <slug>.md --reason "<why this page has no distinct atomizable fact>"
-```
+Run the `memory_refusal_cli.py record` command exactly as SKILL.md shows it (section "WRITE DOWN EVERY `free-prose-leaf-no-distinct-facts` judgment"); it is not repeated here because this file is read from disk, where `${CLAUDE_PLUGIN_ROOT}` is never substituted.
 
 The refusal re-arms by itself when the page's bytes change, and after 7 days — so it is a
 verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
