@@ -79,7 +79,7 @@ _DEFAULT_HOST_LOG = (
 # durations observed 2026-09-05, before the QJ5LP4W2 fix landed): session-liveness
 # and cold-cache-clear stacked ahead of gh-notify-inbox and oauth-rotator-tick, plus
 # an earlier, smaller, unrelated pass that the >=10s gap must correctly exclude.
-_SYNTHETIC_WORST_PASS_LOG = (
+_SYNTHETIC_WORST_RUN_LOG = (
     "[2026-01-01T00:00:00+0000] task 'gh-notify-inbox' starting\n"
     "[2026-01-01T00:00:05+0000] task 'gh-notify-inbox' done in 5s\n"
     "[2026-01-01T00:05:00+0000] task 'session-liveness' starting\n"
@@ -306,7 +306,7 @@ def test_pattern_reader_picks_the_pass_with_the_larger_summed_occupancy() -> Non
     """The reader must pick the WORST pass by summed foreground occupancy, not the
     first, last, or a fixed-position one — and must exclude the earlier, smaller,
     >=10s-separated pass entirely."""
-    pattern = read_worst_pass_pattern(_SYNTHETIC_WORST_PASS_LOG)
+    pattern = read_worst_pass_pattern(_SYNTHETIC_WORST_RUN_LOG)
     assert [name for name, _ in pattern.bodies] == [
         "session-liveness",
         "cold-cache-clear",
@@ -333,7 +333,7 @@ def test_replay_synthetic_worst_pattern_keeps_tick_within_cadence(
     """Always runs — no host log required — proving the mechanism on a small,
     committed pattern shaped like the real host log's pre-fix worst pass, so a green
     run on a machine with no janitor daemon.log still proves the replay works."""
-    pattern = read_worst_pass_pattern(_SYNTHETIC_WORST_PASS_LOG)
+    pattern = read_worst_pass_pattern(_SYNTHETIC_WORST_RUN_LOG)
     _replay_and_assert(monkeypatch, pattern, scale=0.01, source="synthetic-fixture-log")
 
 

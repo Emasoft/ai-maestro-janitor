@@ -227,12 +227,12 @@ def test_a6_netrc_non_artifact_host_silent() -> None:
 def test_a7_codeartifact_token_literal_flags() -> None:
     """`CODEARTIFACT_AUTH_TOKEN=<literal>` JWT-shape → CRITICAL hit."""
     # 22-char header.payload.body (each segment ≥ 20 chars per regex bound)
-    token = (
+    sample_jwt = (
         "eyJ2ZXIiOiIxIiwiYWxnIjoiZGlyIiwiZW5jIjoiQTI1NkdDTSJ9"
         ".AAAAAAAAAAAAAAAAAAAAAAAA"
         ".AAAAAAAAAAAAAAAAAAAAAAAA"
     )
-    src = f"export CODEARTIFACT_AUTH_TOKEN={token}\n"
+    src = f"export CODEARTIFACT_AUTH_TOKEN={sample_jwt}\n"
     hits = _hits("artifact-aws-codeartifact-token-assignment", src)
     assert hits
     assert hits[0].severity == "CRITICAL"

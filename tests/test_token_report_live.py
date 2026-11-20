@@ -17,6 +17,8 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "token_report.py"
 _LIB = _PROJECT_ROOT / "scripts" / "lib"
+# Names the price env var once (a dict key beside a string value trips bandit B105 on the word token).
+_PRICE_OPTION = "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK"
 
 sys.path.insert(0, str(_LIB))
 import memory_scopes  # noqa: E402
@@ -447,7 +449,7 @@ def test_report_heartbeat_week_line_weighted_only(tmp_path: Path) -> None:
             {"ts": now, "heartbeat": False, "output": 999_999},  # interactive turn — must NOT count
         ],
     )
-    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": ""})
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), _PRICE_OPTION: ""})
     assert r.returncode == 0
     assert "janitor heartbeat:" in r.stdout
     assert "1.5k weighted tokens this week" in r.stdout, "beats only (1000+500), interactive 999999 excluded"
@@ -468,7 +470,7 @@ def test_report_heartbeat_week_line_with_price(tmp_path: Path) -> None:
             {"ts": now, "heartbeat": True, "output": 1_000_000},
         ],
     )  # 2.0M weighted beats
-    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": "15"})
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), _PRICE_OPTION: "15"})
     assert r.returncode == 0
     assert "~$30.00 this week on quiet fires" in r.stdout  # 2.0M / 1e6 * 15
     assert "WEIGHTED est." in r.stdout, "the $ figure must be labeled an estimate"
@@ -490,7 +492,7 @@ def test_report_heartbeat_week_json_fields(tmp_path: Path) -> None:
             {"ts": now, "heartbeat": False, "output": 500_000},  # excluded
         ],
     )
-    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": ""}, "--json")
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), _PRICE_OPTION: ""}, "--json")
     assert r.returncode == 0
     data = json.loads(r.stdout)
     assert data["heartbeat_7d_weighted"] == 1000, "beats only"

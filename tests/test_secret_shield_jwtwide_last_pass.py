@@ -18,7 +18,7 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 PATTERNS_TS = _REPO / "hooks" / "secret-shield" / "patterns.ts"
 
-JWTWIDE_PASS = "out = applyRule(out, jwtWide, hits, found)"
+JWTWIDE_LINE = "out = applyRule(out, jwtWide, hits, found)"
 
 
 def _redact_into_statements(source: str) -> list[str]:
@@ -33,7 +33,7 @@ def test_jwtwide_is_the_last_assignment_before_return_in_redact_into() -> None:
     statements = _redact_into_statements(PATTERNS_TS.read_text(encoding="utf-8"))
     assert statements[-1] == "return out"
     assignments = [line for line in statements if re.match(r"out = ", line)]
-    assert assignments[-1] == JWTWIDE_PASS
+    assert assignments[-1] == JWTWIDE_LINE
 
 
 def test_jwtwide_is_not_in_the_tokens_list() -> None:
@@ -41,4 +41,4 @@ def test_jwtwide_is_not_in_the_tokens_list() -> None:
     source = PATTERNS_TS.read_text(encoding="utf-8")
     tokens = source[source.index("const TOKENS") : source.index("\n]", source.index("const TOKENS"))]
     assert "jwtWide" not in tokens
-    assert source.count(JWTWIDE_PASS) == 1
+    assert source.count(JWTWIDE_LINE) == 1

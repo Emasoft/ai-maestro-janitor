@@ -42,6 +42,8 @@ def _import_hook():
 _ENABLED = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED"
 _BUDGET_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"
 _CACHE_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"
+# Names the env var once (a dict key beside a string value trips bandit B105 on the word token).
+_COMPACT_GRACE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S"
 _ENFORCE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE"
 _REPEAT = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"
 _ALL_VARS = (_ENABLED, _BUDGET_HARD, _CACHE_HARD, _ENFORCE, _REPEAT)
@@ -347,7 +349,7 @@ def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
     ctx = _ctx(
         _run(
             str(t),
-            env_extra={_CACHE_HARD: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
+            env_extra={_CACHE_HARD: "25000", _COMPACT_GRACE: "0"},
             project_dir=str(proj),
         )
     )

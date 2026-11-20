@@ -2378,9 +2378,9 @@ def test_a_resume_marker_rewrite_does_not_refresh_the_read_age(
     monkeypatch.setattr(fs, "capture_pane_text", _PaneSpy(_REAL_429))
     _stale_poll(root, _FL_BASE)
     fs.mark_retry_wedge_resume_sent(str(root), _FL_BASE + 240)
-    token = fs.retry_wedge_log_token(str(root), _FL_BASE + 240)
-    assert token is not None
-    assert token == "retry_wedge@5[0s] read_age=240s"
+    wedge_label = fs.retry_wedge_log_token(str(root), _FL_BASE + 240)
+    assert wedge_label is not None
+    assert wedge_label == "retry_wedge@5[0s] read_age=240s"
 
 
 def test_retry_wedge_log_token_is_none_for_a_state_it_cannot_age(

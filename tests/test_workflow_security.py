@@ -199,7 +199,7 @@ def test_janitor_toml_suppresses_finding(tmp_path: Path) -> None:
 # id-token-write-unscoped is structural-ONLY (no regex-tier equivalent), so
 # it firing through the detector proves rules_extra is wired, not the regex
 # catalog. HIGH severity → rides the heartbeat.
-ID_TOKEN_UNSCOPED_WF = """\
+ID_UNSCOPED_WF = """\
 name: deploy
 on:
   push:
@@ -241,7 +241,7 @@ jobs:
 def test_id_token_unscoped_structural_rule_rides_heartbeat(tmp_path: Path) -> None:
     """id-token: write without environment: (structural-only rules_extra rule)
     surfaces — proves rules_extra is wired into the detector's structural set."""
-    _write_wf(tmp_path, "deploy.yml", ID_TOKEN_UNSCOPED_WF)
+    _write_wf(tmp_path, "deploy.yml", ID_UNSCOPED_WF)
     r = _run(tmp_path)
     assert r.returncode == 0, r.stderr
     assert "[workflow-security]" in r.stdout

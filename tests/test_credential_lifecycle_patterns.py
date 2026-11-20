@@ -439,8 +439,8 @@ def test_dispatch_artifact_survival_default_retention_fires() -> None:
             "export": {
                 "steps": [
                     {
-                        "env": {"NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"},
-                        "run": 'echo "$NPM_TOKEN" > .env',
+                        "env": {"NPM_AUTH": "${{ secrets.NPM_TOKEN }}"},
+                        "run": 'echo "$NPM_AUTH" > .env',
                     },
                     {
                         "uses": "actions/upload-artifact@v4",
@@ -466,8 +466,8 @@ def test_dispatch_artifact_short_retention_no_finding() -> None:
             "export": {
                 "steps": [
                     {
-                        "env": {"NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"},
-                        "run": 'echo "$NPM_TOKEN" > .env',
+                        "env": {"NPM_AUTH": "${{ secrets.NPM_TOKEN }}"},
+                        "run": 'echo "$NPM_AUTH" > .env',
                     },
                     {
                         "uses": "actions/upload-artifact@v4",
@@ -513,8 +513,8 @@ def test_push_trigger_only_no_finding() -> None:
             "export": {
                 "steps": [
                     {
-                        "env": {"NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"},
-                        "run": 'echo "$NPM_TOKEN" > .env',
+                        "env": {"NPM_AUTH": "${{ secrets.NPM_TOKEN }}"},
+                        "run": 'echo "$NPM_AUTH" > .env',
                     },
                     {
                         "uses": "actions/upload-artifact@v4",

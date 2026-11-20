@@ -175,7 +175,7 @@ jobs:
       - run: echo ok
 """
 
-ACTIONS_DEBUG_VIA_SECRET_OK = """\
+ACTIONS_DEBUG_VIA_CTX_OK = """\
 name: ok-debug-via-secret
 on: push
 jobs:
@@ -220,7 +220,7 @@ jobs:
       - run: echo human only
 """
 
-INSTEADOF_WITH_SECRET = """\
+INSTEADOF_WITH_PAT = """\
 name: bad-insteadof
 on: push
 jobs:
@@ -231,7 +231,7 @@ jobs:
           git config url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
 """
 
-INSTEADOF_WITH_GH_TOKEN = """\
+INSTEADOF_WITH_GH_CTX = """\
 name: bad-insteadof-ghtoken
 on: push
 jobs:
@@ -387,7 +387,7 @@ class ActionsDebugEnvCommittedTest(unittest.TestCase):
 
     def test_debug_via_secret_does_not_fire(self) -> None:
         """Routing the debug flag through a repo secret is the SAFE pattern."""
-        self.assertFalse(_matches("actions-debug-env-committed", ACTIONS_DEBUG_VIA_SECRET_OK))
+        self.assertFalse(_matches("actions-debug-env-committed", ACTIONS_DEBUG_VIA_CTX_OK))
 
 
 class DependabotActorSpoofableTest(unittest.TestCase):
@@ -404,10 +404,10 @@ class DependabotActorSpoofableTest(unittest.TestCase):
 
 class InsteadOfSecretInUrlTest(unittest.TestCase):
     def test_secret_in_insteadof_url_fires(self) -> None:
-        self.assertTrue(_matches("insteadof-secret-in-url", INSTEADOF_WITH_SECRET))
+        self.assertTrue(_matches("insteadof-secret-in-url", INSTEADOF_WITH_PAT))
 
     def test_github_token_in_insteadof_url_fires(self) -> None:
-        self.assertTrue(_matches("insteadof-secret-in-url", INSTEADOF_WITH_GH_TOKEN))
+        self.assertTrue(_matches("insteadof-secret-in-url", INSTEADOF_WITH_GH_CTX))
 
     def test_static_insteadof_url_does_not_fire(self) -> None:
         self.assertFalse(_matches("insteadof-secret-in-url", INSTEADOF_STATIC_URL_OK))

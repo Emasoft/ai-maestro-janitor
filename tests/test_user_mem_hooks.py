@@ -132,9 +132,9 @@ def test_lookalike_command_is_not_intercepted(tmp_path):
 
 def test_to_user_mem_with_text_saves_and_blocks(tmp_path):
     """`/janitor-memory-user-add <text>` blocks the prompt and writes the text to the user-mem store."""
-    secret = "my api key rotation cadence is every 30 days"
+    planted_value = "my api key rotation cadence is every 30 days"
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {secret}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {planted_value}"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
@@ -144,31 +144,31 @@ def test_to_user_mem_with_text_saves_and_blocks(tmp_path):
     assert obj.get("decision") == "block"  # prompt erased from agent context
     # The memory landed on disk.
     store = user_mem_lib.UserMemStore(_resolve(tmp_path / "home", tmp_path / "proj"))
-    assert store.read(1) == secret
+    assert store.read(1) == planted_value
 
 
 def test_to_user_mem_text_is_not_in_any_agent_context_field(tmp_path):
     """PRIVACY: the saved text appears in NO agent-context field of the hook output."""
-    secret = "PRIVATE-TOKEN-abc123-do-not-leak"
+    planted_value = "PRIVATE-TOKEN-abc123-do-not-leak"
     _rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {secret}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {planted_value}"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
     )
     obj = json.loads(out)
-    # decision:block erases the prompt; the secret must not be smuggled back in
+    # decision:block erases the prompt; the planted value must not be smuggled back in
     # via additionalContext (which the docs DO route to the model).
     for field in _AGENT_CONTEXT_FIELDS:
-        assert secret not in json.dumps(obj.get("hookSpecificOutput", {}))
-        assert secret not in str(obj.get(field, ""))
-    # Belt-and-braces: the secret must not be anywhere the model reads. The ONLY
+        assert planted_value not in json.dumps(obj.get("hookSpecificOutput", {}))
+        assert planted_value not in str(obj.get(field, ""))
+    # Belt-and-braces: the planted value must not be anywhere the model reads. The ONLY
     # permitted echo is a user-facing confirmation, which by design says
     # "content withheld" and never the text itself.
     reason = str(obj.get("reason", ""))
     sysmsg = str(obj.get("systemMessage", ""))
-    assert secret not in reason
-    assert secret not in sysmsg
+    assert planted_value not in reason
+    assert planted_value not in sysmsg
 
 
 def test_to_user_mem_confirmation_reports_number_and_withholding(tmp_path):
@@ -383,9 +383,9 @@ def test_share_non_numeric_argument_blocks(tmp_path):
 
 def test_legacy_to_user_mem_still_saves_and_blocks(tmp_path):
     """LEGACY `/to-user-mem <text>` must still BLOCK and save (privacy preserved)."""
-    secret = "legacy-private-token-do-not-leak"
+    planted_value = "legacy-private-token-do-not-leak"
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/to-user-mem {secret}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/to-user-mem {planted_value}"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
@@ -393,13 +393,13 @@ def test_legacy_to_user_mem_still_saves_and_blocks(tmp_path):
     assert rc == 0
     obj = json.loads(out)
     assert obj.get("decision") == "block"  # erased from agent context
-    # The secret never appears in any agent-context field.
-    assert secret not in json.dumps(obj.get("hookSpecificOutput", {}))
-    assert secret not in str(obj.get("reason", ""))
-    assert secret not in str(obj.get("systemMessage", ""))
+    # The planted value never appears in any agent-context field.
+    assert planted_value not in json.dumps(obj.get("hookSpecificOutput", {}))
+    assert planted_value not in str(obj.get("reason", ""))
+    assert planted_value not in str(obj.get("systemMessage", ""))
     # And it landed on disk.
     store = user_mem_lib.UserMemStore(_resolve(tmp_path / "home", tmp_path / "proj"))
-    assert store.read(1) == secret
+    assert store.read(1) == planted_value
 
 
 def test_legacy_search_user_mem_still_blocks_and_returns_via_systemMessage(tmp_path):

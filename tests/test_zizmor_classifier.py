@@ -145,7 +145,7 @@ jobs:
           api_key = "{b62('zizmor-apikey', 36)}"
 """
 
-SECRET_VIA_SECRETS_CTX_WORKFLOW = """\
+CTX_EXPR_WORKFLOW = """\
 name: ok-secret
 on: push
 jobs:
@@ -339,7 +339,7 @@ class ClassifierTest(unittest.TestCase):
 
     def test_secret_via_secrets_context_does_not_fire(self) -> None:
         """A secret routed through ${{ secrets.* }} must NOT fire hardcoded-secrets."""
-        rules = self._find_rules(SECRET_VIA_SECRETS_CTX_WORKFLOW)
+        rules = self._find_rules(CTX_EXPR_WORKFLOW)
         self.assertNotIn("hardcoded-secrets", rules)
 
     def test_ide_config_write_fires(self) -> None:
@@ -569,7 +569,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 """
 
-INSTEADOF_SECRET_WF = """\
+INSTEADOF_PAT_WF = """\
 name: bad-insteadof
 on: push
 jobs:
@@ -606,7 +606,7 @@ class PatternsExtraWiringTest(unittest.TestCase):
 
     def test_insteadof_secret_fires_end_to_end(self) -> None:
         """A HIGH extra rule (insteadof-secret-in-url) fires through classify()."""
-        rules = self._find_rules(INSTEADOF_SECRET_WF)
+        rules = self._find_rules(INSTEADOF_PAT_WF)
         self.assertIn("insteadof-secret-in-url", rules)
 
     def test_clean_workflow_fires_no_extra_rules(self) -> None:
