@@ -159,6 +159,12 @@ except ImportError:
         kwargs.setdefault("capture_output", False)
         return subprocess.run(cmd, **kwargs)
 
+
+# WHY (TRDD-SWQXCIOS): exe() keeps a bare tool name out of every subprocess argv (bandit B607) while
+# resolving PATH the way subprocess would; it is called at each site, never frozen in a constant.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from exe_path import exe  # noqa: E402
+
 # -- ANSI colors ---------------------------------------------------------------
 
 
@@ -533,7 +539,7 @@ def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
     lock = root / ".git" / "index.lock"
     if result.returncode == 128 and lock.is_file():
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-        import git_utils  # noqa: PLC0415 -- local import; publish.py has no lib deps at top
+        import git_utils  # noqa: PLC0415 -- local import; only exe_path is imported at module top
         # min_age_s=0.0 disables ONLY the age guard (see above); every other guard holds.
         verdict = git_utils.clear_stale_index_lock(root, min_age_s=0.0)
         if verdict == "removed":
@@ -572,9 +578,9 @@ def _readonly_git_env() -> dict[str, str]:
     measurement). GIT_OPTIONAL_LOCKS=0 is git's own documented escape hatch
     for that write-back and is a no-op for the WRITE invocations
     (add/commit/tag/push) elsewhere in this file, which is why only the
-    READ-ONLY call sites pass this. publish.py is a standalone script (no
-    scripts/lib import), so this mirrors `git_utils.run_git_readonly` inline
-    rather than adding a new import to the release pipeline.
+    READ-ONLY call sites pass this. publish.py keeps its own copy of this env (only exe_path is
+    imported from scripts/lib at module top, for B607), so this mirrors `git_utils.run_git_readonly`
+    inline rather than importing git_utils at module scope.
     """
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -582,7 +588,7 @@ def _readonly_git_env() -> dict[str, str]:
 
 
 def get_repo_root() -> Path:
-    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+    r = subprocess.run([exe("git"), "rev-parse", "--show-toplevel"],
                        capture_output=True, text=True, check=True, env=_readonly_git_env())
     return Path(r.stdout.strip())
 
@@ -608,7 +614,7 @@ def _parse_owner_repo_from_remote(remote_url: str) -> tuple[str, str] | None:
 def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
     """Read remote.origin.url, parse (owner, repo). Exit 1 on failure."""
     result = subprocess.run(
-        ["git", "config", "--get", "remote.origin.url"],
+        [exe("git"), "config", "--get", "remote.origin.url"],
         cwd=str(plugin_root), capture_output=True, text=True, timeout=10, check=False,
         env=_readonly_git_env(),
     )
@@ -977,7 +983,7 @@ def install_hook(root: Path) -> int:
         dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         cprint(f"  {GREEN}Installed: git-hooks/{hook_name} -> .git/hooks/{hook_name}{NC}")
     # Also set core.hooksPath so git finds hooks in git-hooks/ directly
-    subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
+    subprocess.run([exe("git"), "config", "core.hooksPath", "git-hooks"],
                    cwd=str(root), check=False)
     cprint(f"  {GREEN}Set git config core.hooksPath = git-hooks{NC}")
     return 0
@@ -987,7 +993,7 @@ def _get_origin_slug(root: Path) -> str | None:
     """Return OWNER/REPO parsed from the current repo's origin remote, or None."""
     try:
         r = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+            [exe("git"), "config", "--get", "remote.origin.url"],
             capture_output=True, text=True, cwd=str(root), check=False,
             env=_readonly_git_env(),
         )
@@ -1033,7 +1039,7 @@ def install_branch_rules(root: Path) -> int:
     try:
         r = subprocess.run(
             [
-                "uvx",
+                exe("uvx"),
                 "--from",
                 _cpv_spec(),
                 "--with",
@@ -1073,7 +1079,7 @@ def _get_process_ancestry(max_depth: int = 30) -> list[tuple[int, str]]:
         seen.add(pid)
         try:
             r = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "ppid=,args="],
+                [exe("ps"), "-p", str(pid), "-o", "ppid=,args="],
                 capture_output=True, text=True, timeout=5,
             )
         except (OSError, subprocess.SubprocessError):
@@ -1146,7 +1152,7 @@ def _added_lines_since(root: Path, base_ref: str) -> list[tuple[str, int, str]]:
     """
     try:
         r = subprocess.run(
-            ["git", "diff", "--unified=0", "--no-color", f"{base_ref}...HEAD"],
+            [exe("git"), "diff", "--unified=0", "--no-color", f"{base_ref}...HEAD"],
             capture_output=True, text=True, cwd=str(root), timeout=60,
             env=_readonly_git_env(),
         )
@@ -1193,7 +1199,7 @@ def _base_ref_email_addresses(root: Path, base_ref: str, path: str) -> set[str]:
     """
     try:
         r = subprocess.run(
-            ["git", "show", f"{base_ref}:{path}"],
+            [exe("git"), "show", f"{base_ref}:{path}"],
             capture_output=True, text=True, cwd=str(root), timeout=30,
             env=_readonly_git_env(),
         )
@@ -1302,7 +1308,7 @@ def run_gate(root: Path) -> int:
         candidates: list[str] = []
         try:
             sym = subprocess.run(
-                ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                [exe("git"), "symbolic-ref", "refs/remotes/origin/HEAD"],
                 capture_output=True, text=True, cwd=str(root), timeout=10,
                 env=_readonly_git_env(),
             )
@@ -1318,7 +1324,7 @@ def run_gate(root: Path) -> int:
         for ref in candidates:
             try:
                 r = subprocess.run(
-                    ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                    [exe("git"), "show", f"{ref}:.claude-plugin/plugin.json"],
                     capture_output=True, text=True, cwd=str(root), timeout=10,
                     env=_readonly_git_env(),
                 )
@@ -1352,7 +1358,7 @@ def run_gate(root: Path) -> int:
         for fallback in ("origin/main", "origin/master"):
             try:
                 rv = subprocess.run(
-                    ["git", "rev-parse", "--verify", fallback],
+                    [exe("git"), "rev-parse", "--verify", fallback],
                     capture_output=True, text=True, cwd=str(root), timeout=10,
                     env=_readonly_git_env(),
                 )
@@ -1389,7 +1395,7 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
         return 1
     lint_result = subprocess.run(
-        ["uv", "run", "ruff", "check", "scripts/"],
+        [exe("uv"), "run", "ruff", "check", "scripts/"],
         cwd=str(root), timeout=120)
     if lint_result.returncode != 0:
         cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
@@ -1509,7 +1515,7 @@ def run_gate(root: Path) -> int:
             return set()
         try:
             proc = subprocess.run(
-                ["git", "check-ignore", "--stdin"],
+                [exe("git"), "check-ignore", "--stdin"],
                 cwd=str(root),
                 input="\n".join(str(p) for p in paths),
                 capture_output=True,
@@ -1631,7 +1637,7 @@ def run_gate(root: Path) -> int:
         cprint(f"  {YELLOW}CI only shellchecks two named files, so most shell goes UNCHECKED.{NC}")
     else:
         sc = subprocess.run(
-            ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
+            [exe("shellcheck"), *[str(s) for s in sorted(_shell_scripts)]],
             cwd=str(root), timeout=180).returncode
         if sc != 0:
             cprint(f"  {RED}BLOCKED: shellcheck found issues (CI runs a plain shellcheck step).{NC}")
@@ -1799,7 +1805,7 @@ def stage_lint(root: Path) -> None:
         # Do NOT tune this down toward the 13-14s a WARM run takes here: no
         # cold-cache measurement exists, and the attempt to get one cheaply
         # failed (see TRDD-MYQGMAQZ for what `--refresh` did not do, and why).
-        pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
+        pr = subprocess.run([exe("uvx"), "--with", "pyright", "pyright"],
                             cwd=str(root), timeout=900).returncode
     except (OSError, subprocess.SubprocessError) as exc:
         cprint(f"  {RED}BLOCKED: pyright could not be run ({exc}).{NC}")
@@ -1838,7 +1844,7 @@ def _snapshot_browser_pids() -> set:
     """Snapshot-then-grep — never live-grep — for browser-signature PIDs."""
     try:
         snap = subprocess.run(
-            ["ps", "-eo", "pid,command"],
+            [exe("ps"), "-eo", "pid,command"],
             capture_output=True, text=True, check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -2001,14 +2007,14 @@ def _export_head(root: Path, dest: Path) -> None:
     # WHY env=_readonly_git_env(): these calls only READ the source repo; without
     # GIT_OPTIONAL_LOCKS=0 they can take .git/index.lock and kill a concurrent write (janitor#245).
     subprocess.run(
-        ["git", "-c", "core.hooksPath=/dev/null", "clone", "--quiet", "--no-local",
+        [exe("git"), "-c", "core.hooksPath=/dev/null", "clone", "--quiet", "--no-local",
          "--depth", "1", "--template=", str(root.resolve()), str(dest)],
         timeout=120, capture_output=True, text=True, check=True,
         cwd=str(dest.parent), env=_readonly_git_env(),
     )
     heads = [
         subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            [exe("git"), "-C", str(repo), "rev-parse", "HEAD"],
             timeout=120, capture_output=True, text=True, check=True,
             env=_readonly_git_env(),
         ).stdout.strip()
@@ -2076,7 +2082,7 @@ def stage_ci_preflight(root: Path) -> None:
             sys.exit(1)
         try:
             rc = subprocess.run([
-                "uvx", "--from",
+                exe("uvx"), "--from",
                 _cpv_spec(),
                 "--with", "pyyaml",
                 "cpv-remote-validate", "ci-preflight", ".",
@@ -2152,7 +2158,7 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool:
 
 def _current_repo_slug(plugin_root: Path) -> str | None:
     """Return owner/repo slug for current git origin, or None."""
-    r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(plugin_root),
+    r = subprocess.run([exe("git"), "remote", "get-url", "origin"], cwd=str(plugin_root),
                        capture_output=True, text=True, timeout=30, env=_readonly_git_env())
     if r.returncode != 0:
         return None
@@ -2370,7 +2376,7 @@ def _read_remote_version(plugin_root: Path) -> str | None:
     for ref in ("origin/master", "origin/main", "origin/HEAD"):
         try:
             r = subprocess.run(
-                ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                [exe("git"), "show", f"{ref}:.claude-plugin/plugin.json"],
                 capture_output=True, text=True, cwd=str(plugin_root),
                 check=False, timeout=15,
                 env=_readonly_git_env(),
@@ -2394,7 +2400,7 @@ def _git_porcelain_clean(root: Path) -> bool:
     """True iff `git status --porcelain` is empty (working tree clean)."""
     try:
         r = subprocess.run(
-            ["git", "status", "--porcelain"],
+            [exe("git"), "status", "--porcelain"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10, env=_readonly_git_env(),
         )
@@ -2432,7 +2438,7 @@ def _is_version_only_change(root: Path, rel: str) -> bool:
         return False
     try:
         r = subprocess.run(
-            ["git", "diff", "--unified=0", "--", rel],
+            [exe("git"), "diff", "--unified=0", "--", rel],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
             env=_readonly_git_env(),
         )
@@ -2461,7 +2467,7 @@ def _release_paths(root: Path) -> tuple[list[str], list[str]]:
             # written on a first release would be classified as a stray directory and
             # refuse the publish. Expanding to real paths also makes the refusal message
             # name the offending files rather than a folder.
-            ["git", "status", "--porcelain", "--untracked-files=all"],
+            [exe("git"), "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
             env=_readonly_git_env(),
         )
@@ -2489,7 +2495,7 @@ def _head_commit_message(root: Path) -> str:
     """Return the subject line of HEAD, or '' on failure."""
     try:
         r = subprocess.run(
-            ["git", "log", "-1", "--pretty=%s"],
+            [exe("git"), "log", "-1", "--pretty=%s"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10, env=_readonly_git_env(),
         )
@@ -2502,7 +2508,7 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
     """True iff `tag` already exists in the local git repo."""
     try:
         r = subprocess.run(
-            ["git", "rev-parse", "--verify", f"refs/tags/{tag}"],
+            [exe("git"), "rev-parse", "--verify", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10, env=_readonly_git_env(),
         )
@@ -2703,7 +2709,7 @@ def _last_release_tag(root: Path, new_ver: str) -> str | None:
     """
     try:
         r = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", f"v{new_ver}", "HEAD"],
+            [exe("git"), "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", f"v{new_ver}", "HEAD"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=30, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
@@ -2722,7 +2728,7 @@ def _preview_release_notes(root: Path, new_ver: str) -> str | None:
         return None
     try:
         r = subprocess.run(
-            ["git-cliff", "--tag", f"v{new_ver}", "--unreleased", "--strip", "header"],
+            [exe("git-cliff"), "--tag", f"v{new_ver}", "--unreleased", "--strip", "header"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=120, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
@@ -2833,7 +2839,7 @@ def _rev_parse_commit(root: Path, rev: str) -> str | None:
     """
     try:
         r = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{rev}^{{commit}}"],
+            [exe("git"), "rev-parse", "--verify", f"{rev}^{{commit}}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10, env=_readonly_git_env(),
         )
@@ -2883,7 +2889,7 @@ def _remote_tag_commit(root: Path, tag: str) -> str | None:
     """
     try:
         r = subprocess.run(
-            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
+            [exe("git"), "ls-remote", "--tags", "origin", f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=30, env=_readonly_git_env(),
         )
@@ -2916,7 +2922,7 @@ def _remote_tag_state(root: Path, tag: str) -> bool | None:
     """
     try:
         r = subprocess.run(
-            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            [exe("git"), "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=30, env=_readonly_git_env(),
         )
@@ -3168,7 +3174,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         # or ambiguous lock is left alone and the commit fails loudly as before.
         # Measured live on this repo 2026-08-18 23:32.
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-        import git_utils  # noqa: PLC0415 -- local import; publish.py has no lib deps at top
+        import git_utils  # noqa: PLC0415 -- local import; only exe_path is imported at module top
         if git_utils.clear_stale_index_lock(root) == "removed":
             cprint(f"  {YELLOW}Recovered a stale orphaned .git/index.lock "
                    f"(janitor#245 guards all clear) before committing.{NC}")

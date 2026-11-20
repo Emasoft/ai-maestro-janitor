@@ -23,6 +23,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from exe_path import exe
+
 _GIB = 1024**3
 
 
@@ -68,7 +70,7 @@ def disk_pressure(path: str | Path = "/") -> DiskPressure:
     if sys.platform == "darwin":
         try:
             out = subprocess.run(
-                ["diskutil", "info", "-plist", str(path)],
+                [exe("diskutil"), "info", "-plist", str(path)],
                 capture_output=True, timeout=10,
             )
             if out.returncode == 0:

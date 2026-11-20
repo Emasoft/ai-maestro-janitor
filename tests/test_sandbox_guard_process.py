@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 import sandbox_guard
+from exe_path import exe
 from sandbox_guard import SandboxViolation, classify_argv
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -307,7 +308,7 @@ def test_a_real_spawn_of_a_denied_binary_raises() -> None:
     if shutil.which("launchctl") is None:
         pytest.skip("launchctl is macOS-only; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
-        subprocess.run(["launchctl", "list"], capture_output=True)
+        subprocess.run([exe("launchctl"), "list"], capture_output=True)
 
 
 def test_a_real_spawn_through_check_output_raises() -> None:
@@ -315,7 +316,7 @@ def test_a_real_spawn_through_check_output_raises() -> None:
     if shutil.which("gh") is None:
         pytest.skip("gh not installed here; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
-        subprocess.check_output(["gh", "--version"])
+        subprocess.check_output([exe("gh"), "--version"])
 
 
 def test_os_system_raises() -> None:
@@ -323,7 +324,7 @@ def test_os_system_raises() -> None:
     if shutil.which("gh") is None:
         pytest.skip("gh not installed here; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
-        os.system("gh --version")  # noqa: S605 - the point of the test is that it is refused
+        os.system("gh --version")  # noqa: S605  # nosec B605 B607 - the test proves the sandbox refuses a bare-name os.system
 
 
 # ─── signals: kill your own children, never the user's processes ──────────────────────────

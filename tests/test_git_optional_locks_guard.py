@@ -178,6 +178,23 @@ class _GitCallVisitor(ast.NodeVisitor):
         seg = ast.get_source_segment(self.source, self.func_stack[-1])
         return seg or self.source
 
+    def _which_git_names(self) -> set[str]:
+        """Names assigned `shutil.which("git")` (or `which("git")`) in the enclosing function, else module scope."""
+# Statement order is deliberately ignored: a name ever bound to the git lookup counts as git.
+        # Limits: innermost enclosing function only, any `.which("git")` receiver, plain `Assign` only
+        # (no outer-scope closure binding, no `or "git"` fallback, no annotated or walrus binding).
+        scope = self.func_stack[-1] if self.func_stack else ast.parse(self.source)
+        names: set[str] = set()
+        for stmt in ast.walk(scope):
+            if not (isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call)):
+                continue
+            call = stmt.value
+            func = call.func
+            func_name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            if func_name == "which" and call.args and isinstance(call.args[0], ast.Constant) and call.args[0].value == "git":
+                names.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
+        return names
+
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         self._check_git_call(node)
         self.generic_visit(node)
@@ -201,7 +218,11 @@ class _GitCallVisitor(ast.NodeVisitor):
             and isinstance(head.args[0], ast.Constant)
             and head.args[0].value == "git"
         )
-        if not (is_bare_git or is_exe_git):
+        # WHY (TRDD-SWQXCIOS): a hook that must not import scripts/lib (on-session-start._early_log) resolves
+        # git with the stdlib `git_bin = shutil.which("git")` and runs `[git_bin, ...]`. A Name head assigned
+        # from that call earlier in the same function is git exactly like the literal head.
+        is_which_git = isinstance(head, ast.Name) and head.id in self._which_git_names()
+        if not (is_bare_git or is_exe_git or is_which_git):
             return  # not a `["git", ...]` argv — a data tuple/table entry, etc.
 
         verb = None
@@ -313,6 +334,27 @@ def test_the_scanner_actually_detects_an_unprotected_call():
     visitor = _GitCallVisitor(source, "fake.py", wrapper_names)
     visitor.visit(tree)
     assert visitor.findings, "the scanner must flag an unprotected git status call"
+
+
+def test_the_scanner_follows_a_git_path_resolved_by_shutil_which():
+    """A `[git_bin, ...]` argv, with `git_bin = shutil.which("git")` in the same function, is checked like a literal git head."""
+    bare = (
+        "import shutil, subprocess\n\n"
+        "def f(root):\n"
+        "    git_bin = shutil.which(\"git\")\n"
+        "    return subprocess.run([git_bin, \"status\", \"--porcelain\"], cwd=root)\n"
+    )
+    protected = (
+        "import shutil, subprocess\n\n"
+        "def f(root):\n"
+        "    git_bin = shutil.which(\"git\")\n"
+        "    return subprocess.run([git_bin, \"status\", \"--porcelain\"], cwd=root, env={\"GIT_OPTIONAL_LOCKS\": \"0\"})\n"
+    )
+    for source, expect_finding in ((bare, True), (protected, False)):
+        tree = ast.parse(source)
+        visitor = _GitCallVisitor(source, "fake.py", _compute_wrapper_names(tree, source))
+        visitor.visit(tree)
+        assert bool(visitor.findings) is expect_finding, (expect_finding, visitor.findings)
 
 
 def test_the_scanner_accepts_every_sanctioned_protection_pattern():

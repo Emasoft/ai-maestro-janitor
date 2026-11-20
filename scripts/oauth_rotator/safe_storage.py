@@ -693,6 +693,21 @@ def _dpapi_path(service: str, account: str) -> str:
     return os.path.join(_dpapi_dir(), safe + ".dpapi")
 
 
+def _exe(name: str) -> str:
+    """exe() from scripts/lib/exe_path.py, imported on first use (TRDD-SWQXCIOS, bandit B607).
+
+    Lazy like global_state and state above: this module keeps no hard import of scripts/lib, so
+    only the Windows DPAPI path needs exe_path.py. Same PATH lookup subprocess does; a missing
+    tool returns the bare name and the call fails as before.
+    """
+    lib = str(Path(__file__).resolve().parent.parent / "lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    from exe_path import exe  # noqa: PLC0415  -- lazy on purpose (see docstring)
+
+    return exe(name)
+
+
 def _dpapi_store(service: str, account: str, secret: str) -> StoreResult:
     path = _dpapi_path(service, account)
     # Read the secret from stdin ($input), DPAPI-encrypt it (ConvertTo-SecureString
@@ -707,7 +722,7 @@ def _dpapi_store(service: str, account: str, secret: str) -> StoreResult:
     )
     try:
         proc = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            [_exe("powershell"), "-NoProfile", "-NonInteractive", "-Command", ps],
             input=secret, capture_output=True, text=True, timeout=_CLI_TIMEOUT_S,
             env={**os.environ, "SS_PATH": path},
         )
@@ -731,7 +746,7 @@ def _dpapi_retrieve(service: str, account: str) -> str | None:
     )
     try:
         proc = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            [_exe("powershell"), "-NoProfile", "-NonInteractive", "-Command", ps],
             capture_output=True, text=True, timeout=_CLI_TIMEOUT_S,
             env={**os.environ, "SS_PATH": path},
         )

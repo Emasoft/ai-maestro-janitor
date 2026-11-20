@@ -582,6 +582,32 @@ def classify_argv(argv: list[str], *, cwd: str, env: dict) -> Verdict:
 _PPID_CACHE: dict = {"at": 0.0, "table": {}}
 
 
+_EXE_PATH_MODULE: dict = {}
+
+
+def _exe_path_module():  # noqa: ANN202 - the loaded module
+    """scripts/lib/exe_path.py, loaded once by FILE LOCATION (TRDD-SWQXCIOS, bandit B607).
+
+    Never through sys.path: this module runs inside every child interpreter (sitecustomize), and a
+    sys.path entry there would let scripts/lib modules shadow the code under test. A missing or
+    broken file raises ImportError to the caller; nothing here swallows it.
+    """
+    cached = _EXE_PATH_MODULE.get("module")
+    if cached is not None:
+        return cached
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "exe_path", Path(__file__).resolve().parent.parent / "scripts" / "lib" / "exe_path.py"
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError("no import spec for scripts/lib/exe_path.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _EXE_PATH_MODULE["module"] = module
+    return module
+
+
 def _ppid_table(*, refresh: bool) -> dict[int, int]:
     """`{pid: ppid}` for every process, from a `ps` SNAPSHOT.
 
@@ -595,10 +621,11 @@ def _ppid_table(*, refresh: bool) -> dict[int, int]:
         return _PPID_CACHE["table"]
     import subprocess
 
+    exe = _exe_path_module().exe  # outside the try: a missing exe_path.py must fail loudly (TRDD-SWQXCIOS)
     table: dict[int, int] = {}
     try:
         out = subprocess.run(
-            ["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10
+            [exe("ps"), "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10
         ).stdout
     except Exception:  # noqa: BLE001 — a guard that crashes is worse than one that denies
         return _PPID_CACHE["table"]
@@ -690,7 +717,7 @@ def record_denial(argv: list[str], reason: str) -> None:
 
 def _enforce_spawn(argv: list[str], *, cwd: str, env: dict, shell: bool) -> None:
     """Record, then (unless auditing) enforce. Raises SandboxViolation on a denied spawn."""
-    record_spawn(argv, cwd=cwd, shell=shell)
+    record_spawn(argv, cwd=cwd, shell=shell)  # nosec B604 - the sandbox itself intercepts spawns; shell only labels the spawn it records
     if _audit_target():
         return  # Phase-0 audit: observe everything, deny nothing
     if not deny_roots_from_env():
@@ -723,7 +750,7 @@ def _install_process_guard() -> None:
         if kw.get("env") is not None and not kw.get("shell"):
             kw["env"] = _harden_child_env(argv, dict(kw["env"]))
         env = dict(kw["env"]) if kw.get("env") is not None else dict(os.environ)
-        _enforce_spawn(argv, cwd=cwd, env=env, shell=bool(kw.get("shell")))
+        _enforce_spawn(argv, cwd=cwd, env=env, shell=bool(kw.get("shell")))  # nosec B604 - the sandbox itself intercepts Popen; shell only labels the spawn it is about to deny or record
         original_init(self, args, *a, **kw)
         pid = getattr(self, "pid", None)
         if isinstance(pid, int):
@@ -731,7 +758,7 @@ def _install_process_guard() -> None:
 
     def guarded_system(original):
         def guarded(command):  # type: ignore[no-untyped-def]
-            _enforce_spawn(_argv_of(command), cwd=os.getcwd(), env=dict(os.environ), shell=True)
+            _enforce_spawn(_argv_of(command), cwd=os.getcwd(), env=dict(os.environ), shell=True)  # nosec B604 - the sandbox itself intercepts os.system; shell=True only labels the spawn it is about to deny or record
             return original(command)
 
         return guarded

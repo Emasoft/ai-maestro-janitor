@@ -40,6 +40,7 @@ def _early_log(message: str) -> None:
     matches `state.log_line` so both writers interleave cleanly in one file.
     """
     try:
+        import shutil  # stdlib
         import subprocess  # stdlib -- local keeps module scope import-clean
         from datetime import datetime  # stdlib
 
@@ -57,8 +58,14 @@ def _early_log(message: str) -> None:
                     # `publish.py` commit (janitor#245).
                     git_env = dict(os.environ)
                     git_env["GIT_OPTIONAL_LOCKS"] = "0"
+                    # WHY (TRDD-SWQXCIOS, bandit B607): the stdlib lookup keeps a bare "git" out of argv without
+                    # importing scripts/lib, which this logger must not depend on; no git on PATH takes the same
+                    # cwd fallback as a failed git run below.
+                    git_bin = shutil.which("git")
+                    if git_bin is None:
+                        raise FileNotFoundError("git not on PATH")
                     out = subprocess.run(
-                        ["git", "rev-parse", "--show-toplevel"],
+                        [git_bin, "rev-parse", "--show-toplevel"],
                         capture_output=True, text=True, check=True, timeout=5,
                         env=git_env,
                     ).stdout.strip()

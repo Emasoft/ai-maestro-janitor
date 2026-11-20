@@ -77,6 +77,22 @@ def _ci_ruff_paths() -> set[str]:
     return paths
 
 
+def _literal_word(node: ast.expr) -> str | None:
+    """The string an argv element names: a string literal, or `exe("<tool>")` (TRDD-SWQXCIOS, the B607 helper), else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "exe"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    return None
+
+
 def _stage_lint_argv_calls() -> list[list[str]]:
     """Every string-literal argv list passed to a `run(...)`/`subprocess.run(...)` call inside stage_lint."""
     tree = ast.parse(PUBLISH_PY.read_text())
@@ -91,8 +107,9 @@ def _stage_lint_argv_calls() -> list[list[str]]:
         if name != "run" or not node.args or not isinstance(node.args[0], ast.List):
             continue
         elts = node.args[0].elts
-        if all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in elts):
-            argv_lists.append([e.value for e in elts])  # type: ignore[union-attr]
+        words = [_literal_word(e) for e in elts]
+        if all(w is not None for w in words):
+            argv_lists.append(words)  # type: ignore[arg-type]
     return argv_lists
 
 

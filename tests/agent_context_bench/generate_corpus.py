@@ -13,6 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "lib"))
+from exe_path import exe  # noqa: E402
+
 SP = Path(__file__).resolve().parent
 OUT = SP / "out"
 OUT.mkdir(exist_ok=True)
@@ -60,7 +63,7 @@ def run(job: tuple[str, str, str, int]) -> str:
         return f"skip {tag} (already done)"
     try:
         p = subprocess.run(
-            ["llm-ext", "chat", "--instructions", PROMPT.format(cls=cls, intent=intent, n=n)],
+            [exe("llm-ext"), "chat", "--instructions", PROMPT.format(cls=cls, intent=intent, n=n)],
             capture_output=True, text=True, timeout=_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
