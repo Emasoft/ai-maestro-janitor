@@ -1,6 +1,6 @@
 ---
 name: janitor-secrets-shield-scan
-description: Scans a project or a folder tree for secrets (API keys, tokens, private keys, card numbers) with the rules of the janitor secret shield (hooks/secret-shield), and writes the findings file outside any repo. With --redact it replaces each secret with a marker and keeps the value in a local vault. It never prints a secret value. Use when asked to scan for secrets, find leaked API keys or tokens, audit a project or folder tree for credentials, or redact, mask or remove secrets from files. Trigger with /janitor-secrets-shield-scan [path] [--all] [--redact].
+description: Scans a project or a folder tree for secrets (API keys, tokens, private keys, card numbers) with the rules of the janitor secret shield (hooks/secret-shield), and writes the findings file outside any repo. With --redact it replaces each secret with a marker and keeps the value in a local vault. It never prints a secret value. With --install-hook it installs a chained git pre-commit hook that scans staged content. Use when asked to scan for secrets, find leaked API keys or tokens, audit a project or folder tree for credentials, redact, mask or remove secrets from files, or block secrets at commit time. Trigger with /janitor-secrets-shield-scan [path] [--all] [--redact] [--install-hook] [--uninstall-hook].
 ---
 
 # Janitor secrets-shield scan
@@ -117,6 +117,24 @@ A `.jsonl` or `.ndjson` file is redacted JSON-aware: a secret behind a JSON esca
 ## Restore
 
 `restore.ts` puts the value kept in the vault back in place of each marker. It is for a person at a terminal only: agents never run it. Home paths rewritten to `~` are not restored. Detail (command line, which files it reads and leaves, skip reasons, output and exit codes): [redact-and-restore § Restore](references/redact-and-restore.md#restore).
+
+## Git pre-commit hook
+
+`--install-hook` adds the shield to the repository as a chained git pre-commit hook that scans the STAGED content (the index blobs, not the working files) and blocks the commit on a finding. `--uninstall-hook` removes it. They are not options of `scan.ts`: they run `scripts/shield_hook.py`, which does not scan the tree. Findings print as `rule path:line`, never the value.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/shield_hook.py" install   --repo "<absolute repo root>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/shield_hook.py" uninstall --repo "<absolute repo root>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/shield_hook.py" status    --repo "<absolute repo root>"
+```
+
+- Target: the effective hooks folder (`git rev-parse --git-path hooks`, so `core.hooksPath` is honoured, and a linked worktree uses the shared one). If git tracks files in that folder (husky style), install writes nothing, exits 1 and prints the line to add to that hook by hand. Tell the user that outcome; it is not an error to retry.
+- Chaining: an existing `pre-commit` is renamed to `pre-commit.pre-janitor` (byte for byte, same mode). The new hook runs it first and stops on its exit code, then scans. A `pre-commit` that is a symlink, or one next to an existing `pre-commit.pre-janitor`, is refused and left alone.
+- Idempotent: a second install changes nothing. Uninstall renames the saved original back byte for byte; it refuses a `pre-commit` without the janitor marker line.
+- The hook calls `shield-hook-stub.py` in the janitor DATA dir (`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`), which picks the newest cached janitor on every commit, so a plugin update needs no reinstall. `--data-dir <dir>` overrides the DATA dir; `--plugin-root <dir>` on install pins the hook to that plugin folder.
+- Fail closed: when bun, python3, the stub or the scanner is missing, the commit is refused. The message names the missing tool, the exact install command (`brew install oven-sh/bun/bun` for bun; `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope user` for the scanner) and the way on: run the same `git commit` again. Report that text to the user verbatim; never advise `--no-verify`.
+- Integrity gate: an install without `--plugin-root` makes the hook run the newest cached janitor version that the checks of `dispatcher-stub.py` accept (quarantine list, integrity manifest, C3 anchor; loaded from the DATA dir, not copied). A version whose manifest is missing or unreadable, or that fails the manifest or the anchor, is skipped for an older one. If none is acceptable the commit is refused with the failure named (`no usable integrity manifest`, `integrity manifest check failed`, `pin-mismatch`) and the repair command `/janitor-repin-integrity` (or `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope user`). A missing key, a missing anchor or an anchor naming another version is accepted, so a stale anchor does not block every commit. Install copies `dispatcher-stub.py` into the DATA dir only when it is absent; it never overwrites the one the armed heartbeat fires.
+- Run install only when the user asks, and tell them which repo and hooks folder it changes.
 
 ## Exit codes
 

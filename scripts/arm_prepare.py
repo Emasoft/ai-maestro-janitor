@@ -165,17 +165,18 @@ def take_prior_cron_id(state_dir: Path) -> str:
     return cron_id
 
 
-def install_stub(plugin_root: Path, data_dir: Path) -> Path:
-    """Copy the dispatcher stub into the persistent DATA dir, atomically (tmp + rename).
+def install_stub(plugin_root: Path, data_dir: Path, name: str = "dispatcher-stub.py") -> Path:
+    """Copy `scripts/<name>` into the persistent DATA dir, atomically (tmp + rename).
 
-    The stub is what the cron actually fires; a torn stub file would break every heartbeat, so it
-    is never written in place.
+    The default is the dispatcher stub the cron fires; a torn stub file would break every heartbeat, so
+    it is never written in place. `name` lets scripts/shield_hook.py install its own stub through this
+    same routine (TRDD-NYKNE7MY) instead of keeping a twin of it.
     """
-    src = plugin_root / "scripts" / "dispatcher-stub.py"
+    src = plugin_root / "scripts" / name
     if not src.is_file():
         raise SystemExit(f"stub source missing: {src}")
     data_dir.mkdir(parents=True, exist_ok=True)
-    dest = data_dir / "dispatcher-stub.py"
+    dest = data_dir / name
     tmp = dest.with_suffix(f".py.tmp.{os.getpid()}")
     shutil.copyfile(src, tmp)
     tmp.chmod(0o755)
