@@ -7,6 +7,8 @@ import { pypiToken } from '../rules/dev-services'
 import { jwt, jwtWide, privateKey } from '../rules/key-material'
 import { stripeApiKey, stripeWebhookSecret } from '../rules/messaging-payments'
 
+import { measureLinear, minMs } from './load/timing'
+
 // Fake secrets are assembled at run time so no scanner mistakes this file for a leak.
 const j = (...parts: string[]) => parts.join('')
 const A36 = 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5'
@@ -433,17 +435,8 @@ describe('ssh public keys are hidden, the algorithm name and the comment are kep
   ]
   for (const line of stayVisible) test(`stays visible: ${line}`, () => expect(redact(line).text).toBe(line))
 
-  // Linear: the best of 5 runs after one warm-up run, as in the other timing tests of this file; 8 times the text must take under 12 times as long (or under 2 ms).
+  // WHY measureLinear (TRDD-5J3ITQXY): the old ratio of two sequential best-of-5 timings (limit 12 at the 8x step) failed these tests under load (4 of 6 in a loaded gate run); measureLinear samples both sizes interleaved, keeps the minimum of each, and calls the scan linear only when big/small stays under 20.8 (linear is about 8, quadratic about 64) in two rounds.
   const SMALL = 32 * 1024
-  const bestOf = (text: string) => {
-    redact(text)
-    return Math.min(...[0, 1, 2, 3, 4].map(() => {
-      const started = performance.now()
-      redact(text)
-      return performance.now() - started
-    }))
-  }
-  const linear = (small: number, big: number) => big < 2 || big / small < 12
   const grow = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size)
   const shapes: Array<[string, (size: number) => string]> = [
     ['algorithm names with no blob', grow('ssh-rsa ')],
@@ -453,9 +446,11 @@ describe('ssh public keys are hidden, the algorithm name and the comment are kep
     ['one key then a very long blob', (size: number) => `ssh-rsa AAAA${'B3Nz'.repeat(Math.ceil(size / 4))}`.slice(0, size)],
     ['many whole keys', grow(`ssh-rsa ${blob} ci-key\n`)],
   ]
+  // The title predates the measureLinear migration (TRDD-5J3ITQXY) and its numbers no longer describe the check: it is measureLinear's verdict at an 8x step, 32 KB to 256 KB, and only 'linear' passes ('escaped', a run too fast to time even after the sizes grew, fails too).
   for (const [description, build] of shapes) {
-    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 60000 }, () => {
-      expect(linear(bestOf(build(SMALL)), bestOf(build(8 * SMALL)))).toBe(true)
+    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 120000 }, () => {
+      const t = measureLinear((text) => redact(text).text.length, build, SMALL, 8 * SMALL)
+      expect(t.verdict, `ssh key ${description} growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
     })
   }
 })
@@ -699,21 +694,20 @@ describe('URL passwords are hidden whatever comes before the scheme', () => {
 // because of time, and assert a count or a duration, never toContain on a big string.
 describe('a long run of scheme characters is redacted in linear time', () => {
   const rep = (unit: string, length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length)
-  const timed = (text: string): number => {
-    const started = performance.now()
-    redact(text)
-    return performance.now() - started
-  }
+  // WHY the minimum of N timed runs after a warm-up (minMs) in the three timing tests: load and a cold JIT only add time, so one slow run must not fail the bound, which stays (TRDD-5J3ITQXY). N = 5 for the 200 ms bound, the tightest, 3 elsewhere. timeoutMs 30000 where N runs at the 1 s bound reach the 5 s runner default.
   test('32 KB of A1- finishes in under 200 ms', () => {
-    expect(timed(rep('A1-', 32 * 1024))).toBeLessThan(200)
+    const input = rep('A1-', 32 * 1024)
+    expect(minMs(() => redact(input).text.length, 5).ms).toBeLessThan(200)
   })
-  test('https:// at the start, then 256 KB of A1- with no at-sign, finishes in under 1 s', () => {
-    expect(timed('https://' + rep('A1-', 256 * 1024))).toBeLessThan(1000)
+  test('https:// at the start, then 256 KB of A1- with no at-sign, finishes in under 1 s', { timeoutMs: 30000 }, () => {
+    const input = 'https://' + rep('A1-', 256 * 1024)
+    expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
   })
-  test('256 KB of A1- and of base64-like text, each with one :// in the middle, finishes in under 1 s', () => {
+  test('256 KB of A1- and of base64-like text, each with one :// in the middle, finishes in under 1 s', { timeoutMs: 30000 }, () => {
     for (const unit of ['A1-', 'aB3dE5fG7hJ9kL1mN3pQ+r/S7tU9vW1xY3z=']) {
       const half = rep(unit, 128 * 1024)
-      expect(timed(half + 'https://u:' + j('s3cret', 'Pw1') + '@h ' + half)).toBeLessThan(1000)
+      const input = half + 'https://u:' + j('s3cret', 'Pw1') + '@h ' + half
+      expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
     }
   })
   test('the password in that one URL is still hidden', () => {
@@ -737,42 +731,28 @@ describe('a long run of scheme characters is redacted in linear time', () => {
 // class has neither ceiling. The password is no longer read by a regex at all: redactUrlPasswords walks it by character class (see the first WHY block in patterns.ts) and counts markers and colons
 // only for the port skip and the propagation. A size pair that straddles 63.8K iterations (32 KB to 256 KB does:
 // grown() holds size/2 characters in one run) fails the ratio rule on the old regex and passes it now. The 2 ms escape is applied at the larger size
-// of 256 KB, which is TRDD-Q6LPJTPO's. Each time is the best of 5 runs after one warm-up run, because under load a 64 KB time came within 0.4 ms of
-// the 2 ms escape (1.6 ms).
+// of 256 KB, which is TRDD-Q6LPJTPO's; measureLinear grows both sizes 8x when a big run is under that 2 ms and fails the verdict 'escaped' if it never reaches it.
 describe('a port-skip query scan is linear up to 256 KB and still tells a port from a password', () => {
   const marker = '[JANITOR-' + 'REDACTED:url-password]'
   const SMALL = 32 * 1024
   const tail = '\n' + 'https://admin:' + 'Zq8' + 'vR2m' + '@db.example'
   const grown = (size: number) => 'b://u:1?'.repeat(size / 16) + 'x'.repeat(size / 2)
-  const bestOf = (text: string) => {
-    redact(text)
-    const runs = [0, 1, 2, 3, 4].map(() => {
-      const started = performance.now()
-      const done = redact(text)
-      return { ms: performance.now() - started, done }
-    })
-    return { ms: Math.min(...runs.map((r) => r.ms)), done: runs[0].done }
-  }
-  const linear = (small: number, big: number) => big < 2 || big / small < 12
-  const timedRedact = (text: string) => {
-    const started = performance.now()
-    redact(text)
-    return { ms: performance.now() - started }
-  }
-  test('8 times the text takes under 12 times as long, with a URL count that grows with the text', () => {
-    const small = bestOf(grown(SMALL))
-    const big = bestOf(grown(8 * SMALL))
-    expect(linear(small.ms, big.ms)).toBe(true)
-    expect(big.done.text === grown(8 * SMALL)).toBe(true)
-    expect(big.done.hits['url-password']).toBeUndefined()
+  // WHY measureLinear in the next two tests (TRDD-5J3ITQXY): the best of 5 sequential timings at each size failed in a loaded publish run (the first test took 598 ms there, ratio over 12); measureLinear samples both sizes interleaved, keeps the minimum of each, and calls the scan linear only when big/small stays under 20.8 (linear is about 8, quadratic about 64) in two rounds. It is shown red on the old quadratic URL_PASSWORD (urlV3 in tests/load/old-quadratic.ts), as probe rows L3b and L3 of tests/load/probe.load.ts do (design/specs/redos-load-harness-d8.md). The hit and text asserts run on a separate untimed call.
+  // The describe and the two titles are matched by exact name by tests/harness/redos_load_harness.py (Z41_DESCRIBE, Z41_TESTS), so they stay byte-identical although the numbers in them predate the migration: only the verdict 'linear' passes.
+  test('8 times the text takes under 12 times as long, with a URL count that grows with the text', { timeoutMs: 120000 }, () => {
+    const t = measureLinear((text) => redact(text).text.length, grown, SMALL, 8 * SMALL)
+    expect(t.verdict, `port-skip growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
+    const done = redact(grown(8 * SMALL))
+    expect(done.text === grown(8 * SMALL)).toBe(true)
+    expect(done.hits['url-password']).toBeUndefined()
   })
-  test('the same growth followed by a short, self-contained URL password still hides exactly that password at both sizes', () => {
-    const small = bestOf(grown(SMALL) + tail)
-    const big = bestOf(grown(8 * SMALL) + tail)
-    expect(linear(small.ms, big.ms)).toBe(true)
-    for (const r of [small, big]) {
-      expect(r.done.hits['url-password']).toBe(1)
-      expect(r.done.text.endsWith('https://admin:' + marker + '@db.example')).toBe(true)
+  test('the same growth followed by a short, self-contained URL password still hides exactly that password at both sizes', { timeoutMs: 120000 }, () => {
+    const t = measureLinear((text) => redact(text).text.length, (n) => grown(n) + tail, SMALL, 8 * SMALL)
+    expect(t.verdict, `port-skip growth with a password: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
+    for (const size of [SMALL, 8 * SMALL]) {
+      const done = redact(grown(size) + tail)
+      expect(done.hits['url-password']).toBe(1)
+      expect(done.text.endsWith('https://admin:' + marker + '@db.example')).toBe(true)
     }
   })
   test('on grown() shape b, 256 KB of URLs followed by a short password still hides that password (no timing)', () => {
@@ -780,8 +760,10 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
     expect(hits['url-password']).toBe(1)
     expect(text.endsWith('https://admin:' + marker + '@db.example')).toBe(true)
   })
-  test('100 KB of x followed by :// 10000 times finishes in under 1 s (pinned: linear today)', () => {
-    expect(timedRedact('x'.repeat(100 * 1024) + '://'.repeat(10000)).ms).toBeLessThan(1000)
+  // WHY the minimum of 3 timed runs after a warm-up (minMs): load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY). timeoutMs 30000: 1 warm-up + 3 timed runs at the bound is 4 s, close to the 5 s runner default.
+  test('100 KB of x followed by :// 10000 times finishes in under 1 s (pinned: linear today)', { timeoutMs: 30000 }, () => {
+    const input = 'x'.repeat(100 * 1024) + '://'.repeat(10000)
+    expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
   })
   test('the last of 100 such URLs is still read: its password is hidden when no = comes first', () => {
     const { text, hits } = redact('b://u:1?'.repeat(100) + 'x'.repeat(1000) + '@h')
@@ -902,16 +884,15 @@ describe('a port-skip query scan is linear up to 256 KB and still tells a port f
       expect(r.text === head + 'u:' + marker + '@h').toBe(true)
     }
   })
-  // WHY the best of 5 and not the median of 5: measured under claude plugin test at load 125, the median of 5 broke the ratio rule in 3 of 6 repeats
-  // on this shape (for example 0.90 -> 13.06 ms, ratio 14.6) while the best of 5 stayed between 6.9 and 10.5 on all 6 (a ratio near 8 is linear);
-  // a loaded machine inflates single runs, and the minimum is the run it inflated least. The previous regex fails this test (a run took 3.4 s).
-  test('a colon-dense tail with no at-sign takes under 12 times as long at 8 times the size (or under 2 ms)', { timeoutMs: 60000 }, () => {
+  // WHY measureLinear (TRDD-5J3ITQXY): the best of 5 sequential single-size timings still flaked under load; measureLinear samples both sizes interleaved, keeps the minimum of each, and calls the scan linear only when big/small stays under 20.8 (linear is about 8, quadratic about 64) in two rounds. The previous regex fails this test (a run took 3.4 s).
+  // The title predates the migration and its numbers no longer describe the check: only the verdict 'linear' passes. Both sizes (32 KB and 256 KB: 16384 and 131072 repeats) hold far more than URL_PASSWORD_BOUND colons, the path under test. The hit/text asserts run on a separate untimed call.
+  test('a colon-dense tail with no at-sign takes under 12 times as long at 8 times the size (or under 2 ms)', { timeoutMs: 120000 }, () => {
     const dense = (reps: number) => 'b://u:1?' + 'a:'.repeat(reps) + ' '
-    const small = bestOf(dense(16384))
-    const big = bestOf(dense(131072))
-    expect(linear(small.ms, big.ms)).toBe(true)
-    expect(big.done.text === dense(131072)).toBe(true)
-    expect(big.done.hits['url-password']).toBeUndefined()
+    const t = measureLinear((text) => redact(text).text.length, (n) => dense(n / 2), 32 * 1024, 256 * 1024)
+    expect(t.verdict, `colon-dense tail growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
+    const done = redact(dense(131072))
+    expect(done.text === dense(131072)).toBe(true)
+    expect(done.hits['url-password']).toBeUndefined()
   })
 })
 // WHY these tests exist (TRDD-AGOEWF2E): under claude plugin test the escape loop of a plain JSON value returned no match from 589,823 iterations, so a secret-named
@@ -1763,17 +1744,8 @@ describe('the GitLab session cookie value is found by its shape in a window arou
   }
 
   // WHY five texts: dense names, dense names with a value between (windows merge), snake_case runs near the name (the name search), 32-hex runs with no name (the prefilter), and a mix of names, prefixes and runs.
-  // Each time is the best of 5 runs after one warm-up run (see the port-skip tests above); linear means the ratio stays near 8.
+  // WHY measureLinear (TRDD-5J3ITQXY): the old ratio of two sequential best-of-5 timings (limit 12 at the 8x step) is a flake source under load; measureLinear samples both sizes interleaved, keeps the minimum of each, and calls the scan linear only when big/small stays under 20.8 (linear is about 8, quadratic about 64) in two rounds.
   const SMALL = 32 * 1024
-  const bestOf = (text: string) => {
-    redact(text)
-    return Math.min(...[0, 1, 2, 3, 4].map(() => {
-      const started = performance.now()
-      redact(text)
-      return performance.now() - started
-    }))
-  }
-  const linear = (small: number, big: number) => big < 2 || big / small < 12
   const grow = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size)
   const shapes: Array<[string, (size: number) => string]> = [
     ['dense names', grow(`${NAME} `)],
@@ -1782,9 +1754,11 @@ describe('the GitLab session cookie value is found by its shape in a window arou
     ['32-hex runs with no name', grow(`${hex32}-${hex32b} `)],
     ['a mix of names, prefixes and hex runs', grow(`${NAME} cell-3-${hex32}-${hex32b} a_b_c \n${NAME}: x ${sha40} `)],
   ]
+  // The title predates the measureLinear migration (TRDD-5J3ITQXY) and its numbers no longer describe the check: it is measureLinear's verdict at an 8x step, 32 KB to 256 KB, and only 'linear' passes ('escaped', a run too fast to time even after the sizes grew, fails too).
   for (const [description, build] of shapes) {
-    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 60000 }, () => {
-      expect(linear(bestOf(build(SMALL)), bestOf(build(8 * SMALL)))).toBe(true)
+    test(`8 times the text takes under 12 times as long (or under 2 ms): ${description}`, { timeoutMs: 120000 }, () => {
+      const t = measureLinear((text) => redact(text).text.length, build, SMALL, 8 * SMALL)
+      expect(t.verdict, `${description} growth: ratio ${t.ratio.toFixed(2)}, sizes ${t.smallSize}-${t.bigSize}, ${t.rounds} rounds`).toBe('linear')
     })
   }
 })
@@ -1858,11 +1832,11 @@ describe('bare Bearer rule: escapes, final period, worst cases (TRDD-L1I0FP5T)',
     expect(redact('Bearer ' + secret + '.').text).toBe(`Bearer ${mark('bearer-token')}`)
   })
   // Worst cases of the lookahead plus whitespace run; the bound is a fixed ceiling, in the style of the other timing pins.
-  test('2000 Bearer words then a long digit-free run, and one Bearer then a 1 MB digit-free run, each finish in under 1 second', { timeoutMs: 15000 }, () => {
-    const timed = (text: string) => { const start = performance.now(); redact(text); return performance.now() - start }
-    expect(timed('Bearer '.repeat(2000) + 'a'.repeat(100000))).toBeLessThan(1000)
-    expect(timed('Bearer ' + 'a'.repeat(1048576))).toBeLessThan(1000)
-    expect(timed('Bearer' + ' '.repeat(1048576) + 'x')).toBeLessThan(1000)
+  // WHY the minimum of 3 timed runs per input after a warm-up (minMs): load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY). timeoutMs 60000 (was 15000): 3 inputs x (1 warm-up + 3 timed runs) at the bound is 12 s worst case.
+  test('2000 Bearer words then a long digit-free run, and one Bearer then a 1 MB digit-free run, each finish in under 1 second', { timeoutMs: 60000 }, () => {
+    for (const input of ['Bearer '.repeat(2000) + 'a'.repeat(100000), 'Bearer ' + 'a'.repeat(1048576), 'Bearer' + ' '.repeat(1048576) + 'x']) {
+      expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
+    }
   })
 })
 describe('token rule order', () => {
@@ -2175,16 +2149,17 @@ describe('a secret found once is hidden wherever it repeats', () => {
     expect(text.split(mark('assignment')).length - 1).toBe(2)
   })
 
-  test('1 MB with 50 secrets, each copied twice, finishes well under the hook limit and hides every copy', () => {
+  // timeoutMs 60000: 1 warm-up + 3 timed + 1 correctness call at the 5000 ms bound is 25 s worst case; the runner limit used to equal the bound (the 5 s default).
+  test('1 MB with 50 secrets, each copied twice, finishes well under the hook limit and hides every copy', { timeoutMs: 60000 }, () => {
     const values = Array.from({ length: 50 }, (_, i) => j('Vq', String(i).padStart(2, '0'), 'Lm8Rt', String((i * 7919) % 100000).padStart(5, '0')))
     const filler = 'lorem ipsum dolor sit amet '.repeat(400)
     const text = values.map((val, i) => `DB_PASSWORD_${i}=${val}\n${filler}${val}\n${filler}${val}\n`).join('')
     expect(text.length).toBeGreaterThanOrEqual(1_000_000)
-    const started = performance.now()
-    const done = redact(text)
-    const ms = performance.now() - started
-    console.log(`propagation over ${text.length} characters and ${values.length} secrets took ${ms.toFixed(0)} ms`)
+    // WHY the minimum of 3 timed runs after a warm-up (minMs): load only adds time, so one slow run must not fail the 5000 ms bound, which stays (TRDD-5J3ITQXY); a quadratic copy propagation is far over it. The correctness asserts below run on a separate untimed call.
+    const { ms } = minMs(() => redact(text).text.length, 3)
+    console.log(`propagation over ${text.length} characters and ${values.length} secrets took ${ms.toFixed(0)} ms (best of 3)`)
     expect(ms).toBeLessThan(5000)
+    const done = redact(text)
     // Counts, not toContain on the whole text: a failure is reported by name instead of printing a megabyte.
     const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
     expect(values.reduce((sum, val) => sum + count(done.text, val), 0)).toBe(0)
@@ -2469,22 +2444,21 @@ describe('jwt rule runs in linear time with the same matches (TRDD-A7RII4DN)', (
     ['eyJ- repeated, then .eyJ- repeated', `${run(KB256 / 2)}.${run(KB256 / 2)}`],
     ['eyJ- repeated, then a second segment and a starved third', `${run(KB256)}.eyJabcdefghij.abc`],
   ]
+  // WHY the minimum of 3 timed runs after a warm-up (minMs) in the 256 KB and the 1 MB tests: load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY); the hit count is asserted on a separate untimed call. timeoutMs 30000: 1 warm-up + 3 timed + 1 correctness call at the bound is 5 s, the runner default.
   for (const [name, text] of slowCases) {
-    test(`256 KB of ${name} is redacted in under a second`, () => {
-      const start = performance.now()
+    test(`256 KB of ${name} is redacted in under a second`, { timeoutMs: 30000 }, () => {
+      expect(minMs(() => redact(text).text.length, 3).ms).toBeLessThan(1000)
       const { hits } = redact(text)
-      expect(performance.now() - start).toBeLessThan(1000)
       expect(hits.jwt).toBeUndefined()
     })
   }
 
   // A quadratic rule takes about 16x its 256 KB time at 1 MB, so on any hardware this case separates the old rule from the linear one;
   // the 256 KB cases above would pass the old rule on a machine about 3x faster than the one that measured 2.6 s there.
-  test('1 MB of eyJ- repeated and ending in .x is redacted in under a second', () => {
+  test('1 MB of eyJ- repeated and ending in .x is redacted in under a second', { timeoutMs: 30000 }, () => {
     const text = run(4 * KB256).slice(0, 4 * KB256 - 2) + '.x'
-    const start = performance.now()
+    expect(minMs(() => redact(text).text.length, 3).ms).toBeLessThan(1000)
     const { hits } = redact(text)
-    expect(performance.now() - start).toBeLessThan(1000)
     expect(hits.jwt).toBeUndefined()
   })
 
@@ -2698,11 +2672,11 @@ describe('jwt tokens with shorter segments or a non-eyJ payload segment are hidd
   ]
   for (const [name, build] of slowShapes) {
     for (const [size, label] of [[KB256, '256 KB'], [MB, '1 MB']] as const) {
-      test(`${label} of ${name} is redacted in under a second`, () => {
+      // WHY the minimum of 3 timed runs after a warm-up (minMs): load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY); the hit count is asserted on a separate untimed call. timeoutMs 30000: 1 warm-up + 3 timed + 1 correctness call at the bound is 5 s, the runner default.
+      test(`${label} of ${name} is redacted in under a second`, { timeoutMs: 30000 }, () => {
         const text = build(size)
-        const start = performance.now()
+        expect(minMs(() => redact(text).text.length, 3).ms).toBeLessThan(1000)
         const { hits } = redact(text)
-        expect(performance.now() - start).toBeLessThan(1000)
         expect(hits.jwt).toBeUndefined()
       })
     }
@@ -2770,20 +2744,19 @@ describe('jwt tokens with shorter segments or a non-eyJ payload segment are hidd
   // 'a' repeated then a dotted tail the lookahead accepts: the lazy loop walks the run once and finds no eyJ, so no match; with eyJ- it finds one.
   const noMatchShape = (n: number): string => repeated('a', n) + '.abcdefgh.abcdefgh'
   const oneMatchShape = (n: number): string => repeated('eyJ-', n) + '.abcdefgh.abcdefgh'
+  // WHY the minimum of 3 timed runs after a warm-up (minMs) in both tests: load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY); correctness is asserted on a separate untimed call. timeoutMs 30000: 1 warm-up + 3 timed + 1 correctness call at the bound is 5 s, the runner default.
   for (const [size, label] of [[KB256, '256 KB'], [MB, '1 MB']] as const) {
-    test(`${label} of a then .abcdefgh.abcdefgh is redacted in under a second, nothing hidden`, () => {
+    test(`${label} of a then .abcdefgh.abcdefgh is redacted in under a second, nothing hidden`, { timeoutMs: 30000 }, () => {
       const text = noMatchShape(size)
-      const start = performance.now()
+      expect(minMs(() => redact(text).text.length, 3).ms).toBeLessThan(1000)
       const { text: out, hits } = redact(text)
-      expect(performance.now() - start).toBeLessThan(1000)
       expect(hits.jwt).toBeUndefined()
       expect(out).toBe(text)
     })
-    test(`${label} of eyJ- then .abcdefgh.abcdefgh is redacted in under a second, one hit`, () => {
+    test(`${label} of eyJ- then .abcdefgh.abcdefgh is redacted in under a second, one hit`, { timeoutMs: 30000 }, () => {
       const text = oneMatchShape(size)
-      const start = performance.now()
+      expect(minMs(() => redact(text).text.length, 3).ms).toBeLessThan(1000)
       const { text: out, hits } = redact(text)
-      expect(performance.now() - start).toBeLessThan(1000)
       expect(hits.jwt).toBe(1)
       expect(out).toBe(jwtMark)
     })
@@ -2885,22 +2858,23 @@ describe('the escaped JSON pair pass runs in linear time with the same matches (
   ]
   for (const [name, shape] of shapes) {
     test(`256 KB of ${name} is redacted in under a second`, { timeoutMs: 120000 }, () => {
-      const start = performance.now()
-      const { text, hits } = redact(shape(KB256))
-      expect(performance.now() - start).toBeLessThan(1000)
+      // WHY the minimum of 3 timed runs after a warm-up (minMs): load only adds time, so one slow run must not fail the 1000 ms bound, which stays (TRDD-5J3ITQXY); a quadratic pattern is 25 s at 256 KB. Correctness is asserted on a separate untimed call.
+      const input = shape(KB256)
+      expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
+      const { text, hits } = redact(input)
       expect(hits).toEqual({})
-      expect(text).toBe(shape(KB256))
+      expect(text).toBe(input)
     })
   }
 
   // A quadratic pattern takes about 16x its 256 KB time at 1 MB, so on any hardware this case separates the old pattern from the linear one.
   for (const [name, shape] of shapes) {
     test(`1 MB of ${name} is redacted in under a second`, { timeoutMs: 120000 }, () => {
-      const start = performance.now()
-      const { text, hits } = redact(shape(MB))
-      expect(performance.now() - start).toBeLessThan(1000)
+      const input = shape(MB)
+      expect(minMs(() => redact(input).text.length, 3).ms).toBeLessThan(1000)
+      const { text, hits } = redact(input)
       expect(hits).toEqual({})
-      expect(text).toBe(shape(MB))
+      expect(text).toBe(input)
     })
   }
 
