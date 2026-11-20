@@ -1,6 +1,6 @@
 ---
 name: janitor-secrets-shield-scan
-description: Scans a project or a folder tree for secrets (API keys, tokens, private keys, card numbers) with the rules of the janitor secret shield (hooks/secret-shield), and writes the findings file outside any repo. With --redact it replaces each secret with a marker and keeps the value in a local vault. It never prints a secret value. With --install-hook it installs a chained git pre-commit hook that scans staged content. Use when asked to scan for secrets, find leaked API keys or tokens, audit a project or folder tree for credentials, redact, mask or remove secrets from files, or block secrets at commit time. Trigger with /janitor-secrets-shield-scan [path] [--all] [--redact] [--install-hook] [--uninstall-hook].
+description: Scans a project or folder tree for secrets (API keys, tokens, private keys, card numbers) with the janitor secret shield rules and writes the findings file outside any repo; never prints a secret value. With --redact replaces secrets with markers kept in a local vault; with --install-hook adds a chained git pre-commit hook. Use to scan for secrets, find leaked keys, redact secrets, or install the pre-commit hook.
 ---
 
 # Janitor secrets-shield scan
@@ -14,6 +14,8 @@ the summary line and the findings file path. By default nothing in the scanned
 tree is changed. With `--redact` the files in the working tree are rewritten:
 each secret is replaced by a marker and its value is kept in a local vault (see
 Redact). Git history is not scanned yet (a later version).
+
+Trigger with `/janitor-secrets-shield-scan [path] [--all] [--redact] [--install-hook] [--uninstall-hook]`; also when asked to find leaked API keys or tokens, audit a folder tree for credentials, mask or remove secrets from files, or block secrets at commit time.
 
 ## Prerequisites
 
@@ -50,31 +52,7 @@ Redact). Git history is not scanned yet (a later version).
 
 ## Options
 
-- `--all` scans every file, hidden and gitignored ones too, plus each
-  repository's `.git/config` (it can hold a token in a remote URL), never
-  other `.git` content. Default: off, the scope follows the ignore rules.
-- `--passes` comma list of passes to run, from `secrets`, `cards`, `email`,
-  `home`; an unknown name exits 2. Default: `secrets,cards`.
-- `--jobs` number of worker processes. Default: the smaller of 8 and the CPU
-  count minus 1, at least 1.
-- `--out` path of the findings file. Default:
-  `~/.secrets_shield/scans/<root name>-<timestamp>.jsonl`.
-- `--max-file-mb` files larger than this many MB are skipped as over-size
-  (with `--redact`, text files over it go to the large lane, see
-  `--max-large-mb`). Default: 64.
-- `--max-large-mb` with `--redact`, text files over `--max-file-mb` and up to
-  this many MB are redacted one at a time in a large lane; a text file over it
-  is neither scanned nor redacted, is reported as `not-scanned-too-large`, and
-  makes the run incomplete (exit 3). A binary file over `--max-file-mb` is an
-  ordinary binary skip. Must be at least `--max-file-mb`. Default: 1024.
-- `--file-timeout-base` fixed seconds of the per-file time limit. Default: 30.
-  The limit is base plus per-MB times the file size in MB; a file that runs
-  past it is skipped as a timeout, unless its whole-file pass had finished:
-  then its findings are kept with line null (never for a JSONL file: its walk is one pass, so past the limit it is a timeout skip).
-- `--file-timeout-per-mb` extra seconds allowed per MB of file size. Default: 5.
-- `--redact` replaces each secret found with a marker and keeps its value in the vault (plain-file redact; marker passes are those of `--passes`, default `secrets`, `cards`; `email` only when named). The `home` pass is opt-in with `--redact`: it runs last, rewrites home paths to `~`, and those rewrites are not restorable. To put the values back, see Restore below. Default: off, scan only.
-- `--min-age-minutes` with `--redact`, a file modified within this many minutes is not written and is reported as skipped. Default: 10.
-- `SHIELD_SCAN_VERSION` (environment): when set, replaces the version from `.claude-plugin/plugin.json` as the summary field `plugin_version`, and the scan does not read the manifest. It is checked before any file is read: a value that is empty, longer than 64 characters, or contains whitespace or a control character exits 2 with `SHIELD_SCAN_VERSION is set but empty or malformed`, with no fallback to the manifest. The value goes verbatim into the summary, which is why it is capped at 64 characters. Unset, the manifest version is reported. It exists for a byte-identical vendored copy of `scan.ts` that has no plugin manifest; a shell that exports it changes the `plugin_version` that the summary of the janitor scan reports, so export it only for such a copy.
+Options: `--all`, `--passes`, `--jobs`, `--out`, `--max-file-mb`, `--max-large-mb`, `--file-timeout-base`, `--file-timeout-per-mb`, `--redact`, `--min-age-minutes`, and the `SHIELD_SCAN_VERSION` environment variable. Full list with defaults and meaning: [scan-options](references/scan-options.md). Facts that stay here: `--all` also scans hidden and gitignored files plus each repository's `.git/config`; `--redact` rewrites files and is off by default.
 
 ## Redact
 
@@ -128,12 +106,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/shield_hook.py" uninstall --repo "<absolu
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/shield_hook.py" status    --repo "<absolute repo root>"
 ```
 
-- Target: the effective hooks folder (`git rev-parse --git-path hooks`, so `core.hooksPath` is honoured, and a linked worktree uses the shared one). If git tracks files in that folder (husky style), install writes nothing, exits 1 and prints the line to add to that hook by hand. Tell the user that outcome; it is not an error to retry.
-- Chaining: an existing `pre-commit` is renamed to `pre-commit.pre-janitor` (byte for byte, same mode). The new hook runs it first and stops on its exit code, then scans. A `pre-commit` that is a symlink, or one next to an existing `pre-commit.pre-janitor`, is refused and left alone.
-- Idempotent: a second install changes nothing. Uninstall renames the saved original back byte for byte; it refuses a `pre-commit` without the janitor marker line.
-- The hook calls `shield-hook-stub.py` in the janitor DATA dir (`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`), which picks the newest cached janitor on every commit, so a plugin update needs no reinstall. `--data-dir <dir>` overrides the DATA dir; `--plugin-root <dir>` on install pins the hook to that plugin folder.
-- Fail closed: when bun, python3, the stub or the scanner is missing, the commit is refused. The message names the missing tool, the exact install command (`brew install oven-sh/bun/bun` for bun; `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope user` for the scanner) and the way on: run the same `git commit` again. Report that text to the user verbatim; never advise `--no-verify`.
-- Integrity gate: an install without `--plugin-root` makes the hook run the newest cached janitor version that the checks of `dispatcher-stub.py` accept (quarantine list, integrity manifest, C3 anchor; loaded from the DATA dir, not copied). A version whose manifest is missing or unreadable, or that fails the manifest or the anchor, is skipped for an older one. If none is acceptable the commit is refused with the failure named (`no usable integrity manifest`, `integrity manifest check failed`, `pin-mismatch`) and the repair command `/janitor-repin-integrity` (or `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope user`). A missing key, a missing anchor or an anchor naming another version is accepted, so a stale anchor does not block every commit. Install copies `dispatcher-stub.py` into the DATA dir only when it is absent; it never overwrites the one the armed heartbeat fires.
+- Detail (target hooks folder, chaining of an existing pre-commit, idempotence, the DATA dir stub, fail-closed refusal text, the integrity gate): [git-pre-commit-hook-details](references/git-pre-commit-hook-details.md). Facts that stay here: never advise `--no-verify`; report a refusal text to the user verbatim; a husky-style tracked hooks folder makes install write nothing and exit 1, which is not an error to retry.
 - Run install only when the user asks, and tell them which repo and hooks folder it changes.
 
 ## Exit codes
@@ -161,19 +134,7 @@ example "140 gitignored entries and 40 repositories inside ignored folders were
 not scanned") and name `--all`. Never call a run clean when `complete` is false
 or when any of those three is set.
 
-The findings file is JSON lines: `finding` (path, kind, line or null, count),
-`skip` (path, reason), with `--redact` also `residual` (path, kind, count), and
-the summary last. It never holds a secret value.
-Text inside a shield marker (`[REDACTED-BY-SECRET-SHIELD. …]` or `[JANITOR-REDACTED:…]`) is never read, so a re-scan of a redacted tree does not count its markers, and a secret hidden inside text shaped like a marker is not found.
-A finding with line null was found in the whole file but not on one line (a
-secret split over lines, or, in a plain file, the per-line pass was killed by the time limit).
-A finding of kind `json-unredactable` is a JSON line (in a `.jsonl` or `.ndjson`
-file) that holds a finding the shield could not hide without breaking the line:
-it is counted in both modes, one per such line, and with `--redact` the file is
-not written (skip `json-broken`). `jsonl_lines_not_json` in the summary counts
-the non-blank lines of those files that are not JSON; they are read as text.
-The file is private to the owner (mode 0600). A path inside any git work tree
-is refused (exit 2), because the file says where the secrets are.
+The findings file is JSON lines (`finding`, `skip`, with `--redact` also `residual`, the summary last) and never holds a secret value. Record fields, shield-marker text, line null, `json-unredactable` and `jsonl_lines_not_json`: [findings-file-format](references/findings-file-format.md). It is private to the owner (mode 0600); a path inside any git work tree is refused (exit 2).
 
 On request, list files and kinds from the findings file (for example with
 `jq`). Never open or print the flagged lines of the scanned files: they hold
@@ -227,6 +188,9 @@ User: audit the folder ~/work for credentials and list the files
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/shield_scan/scan.ts`: the scanner.
+- [scan-options](references/scan-options.md) — every option and the `SHIELD_SCAN_VERSION` variable.
+- [git-pre-commit-hook-details](references/git-pre-commit-hook-details.md) — hook target, chaining, stub, fail-closed text, integrity gate.
+- [findings-file-format](references/findings-file-format.md) — record kinds and fields of the findings file.
 - `${CLAUDE_PLUGIN_ROOT}/hooks/secret-shield/`: the shield rules it applies.
 - [redact-and-restore](references/redact-and-restore.md) — the full text of the redact
   and restore behaviour.
