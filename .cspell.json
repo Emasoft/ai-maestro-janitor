@@ -229,7 +229,7 @@
     },
     {
       "filename": "design/tasks/TRDD-20261118_061920+0100-SWQXCIOS-*.md",
-      "words": ["behav"]
+      "words": ["behav", "nonb", "unistd"]
     },
     {
       "filename": ["design/tasks/TRDD-20261118_172236+0100-FNPDFZWU-*.md", "tests/test_range_secret_scan.py", "tests/test_staged_secret_scan.py"],
@@ -249,7 +249,27 @@
     },
     {
       "filename": "tests/test_post_compact_resume_hook.py",
-      "words": ["humanrev", "olderwrk", "newerwrk"]
+      "words": ["humanrev", "olderwrk", "newerwrk", "maincard"]
+    },
+    {
+      "filename": "design/tasks/TRDD-20261120_011554+0100-ELVVBENI-*.md",
+      "words": ["elvvbeni"]
+    },
+    {
+      "filename": "scripts/shield-hook-stub.py",
+      "words": ["unloadable"]
+    },
+    {
+      "filename": "tests/sandbox_guard.py",
+      "words": ["unistd"]
+    },
+    {
+      "filename": "tests/test_shield_hook.py",
+      "words": ["myhooks", "fakeplugin", "pytools"]
+    },
+    {
+      "filename": "tests/test_staged_privacy_scan.py",
+      "words": ["syspath"]
     },
     {
       "filename": "design/tasks/TRDD-20261116_191047+0100-QM8YRCZ5-*.md",

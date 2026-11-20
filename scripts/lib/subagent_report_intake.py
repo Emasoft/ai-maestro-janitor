@@ -200,11 +200,11 @@ def _mint(root: Path, design: Path, rep: Report, sha: str) -> bool:
     if m is None:
         state.log_line(NAME, f"intake: trddgrep new printed no card id for {rep.rel}")
         return True  # the card exists and carries the key in its body
-    setp = state.run_subprocess(
+    set_proc = state.run_subprocess(
         [exe("trddgrep"), "--design-dir", str(design), "set", m.group(1), "source-report", key, "--no-bump"],
         timeout=30, cwd=root, detector_name=NAME,
     )
-    if setp is None or setp.returncode != 0:
+    if set_proc is None or set_proc.returncode != 0:
         state.log_line(NAME, f"intake: trddgrep set source-report failed on {m.group(1)}; the body key still dedupes")
     return True
 
